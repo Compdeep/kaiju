@@ -1,0 +1,1357 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
+
+	"github.com/user/kaiju/internal/agent/gates"
+	"github.com/user/kaiju/internal/agent/llm"
+	"github.com/user/kaiju/internal/agent/tools"
+)
+
+/*
+ * compileToolIndex builds a compact function-signature-style tool listing.
+ * desc: Produces a string like:
+ *   web_search(query*, max_results) — Search the web, returns titles/URLs/snippets
+ *   bash(command*) — Run any shell command or script
+ * Only includes callable tools from the registry (not guidance-only skills).
+ * Called once at prompt build time.
+ * param: registry - the tool registry
+ * param: names - tool names to include
+ * return: compiled tool index string
+ */
+func compileToolIndex(registry *tools.Registry, names []string) string {
+	var sb strings.Builder
+	sb.WriteString("## Tools (* = required param)\n")
+	for _, name := range names {
+		skill, ok := registry.Get(name)
+		if !ok {
+			continue
+		}
+		sig := compactParamSignature(skill.Parameters())
+		sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, skill.Description()))
+	}
+	return sb.String()
+}
+
+/*
+ * compactParamExample produces a minimal JSON example from a schema.
+ * desc: Generates {"query": "...", "max_results": N} style examples showing
+ *       required params with type placeholders.
+ * param: schema - raw JSON parameter schema
+ * return: compact JSON example string
+ */
+func compactParamExample(schema json.RawMessage) string {
+	var s struct {
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	if json.Unmarshal(schema, &s) != nil || len(s.Properties) == 0 {
+		return ""
+	}
+
+	reqSet := make(map[string]bool)
+	for _, r := range s.Required {
+		reqSet[r] = true
+	}
+
+	var parts []string
+	// Required first
+	for _, r := range s.Required {
+		prop, ok := s.Properties[r]
+		if !ok {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%q: %s", r, typePlaceholder(prop.Type)))
+	}
+	// Optional
+	for name, prop := range s.Properties {
+		if reqSet[name] {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%q: %s", name, typePlaceholder(prop.Type)))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+func typePlaceholder(t string) string {
+	switch t {
+	case "string":
+		return `"..."`
+	case "integer":
+		return "N"
+	case "boolean":
+		return "true"
+	default:
+		return `"..."`
+	}
+}
+
+/*
+ * compactParamSignature extracts param names from a JSON schema into a function signature.
+ * desc: Parses the tool's parameter JSON schema and produces "query*, max_results"
+ *       where * marks required params.
+ * param: schema - raw JSON parameter schema
+ * return: comma-separated parameter signature string
+ */
+func compactParamSignature(schema json.RawMessage) string {
+	var s struct {
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	if json.Unmarshal(schema, &s) != nil || len(s.Properties) == 0 {
+		return ""
+	}
+
+	reqSet := make(map[string]bool)
+	for _, r := range s.Required {
+		reqSet[r] = true
+	}
+
+	var parts []string
+	for name := range s.Properties {
+		if reqSet[name] {
+			parts = append(parts, name+"*")
+		} else {
+			parts = append(parts, name)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+/*
+ * ParamInjection declares that a parameter value should be resolved from
+ * a dependency's JSON output at execution time (dependency injection).
+ * desc: The planner outputs these as part of plan steps; the scheduler resolves
+ *       them before firing the node.
+ */
+type ParamInjection struct {
+	Step     int    `json:"step"`               // index of dependency step (0-based)
+	Field    string `json:"field"`              // dot-path into dependency's JSON result (e.g. "user", "host.name")
+	Template string `json:"template,omitempty"` // optional: "C:\\Users\\{{value}}\\Downloads" — {{value}} replaced with extracted field
+}
+
+/*
+ * ResolvedInjection is a ParamInjection with the step index replaced by a
+ * concrete node ID.
+ * desc: Created by planStepsToNodes during DAG construction. Contains the
+ *       graph node ID, field path, and optional template.
+ */
+type ResolvedInjection struct {
+	NodeID   string // graph node ID resolved from ParamInjection.Step
+	Field    string
+	Template string
+}
+
+/*
+ * FlexInts is a JSON type that accepts both []int and []string.
+ * desc: LLMs frequently return depends_on as ["0","1"] instead of [0,1].
+ *       This type handles both formats by attempting int parse first, then
+ *       string conversion. Non-numeric strings are silently skipped.
+ */
+type FlexInts []int
+
+/*
+ * UnmarshalJSON implements custom JSON unmarshaling for FlexInts.
+ * desc: Tries parsing as []int first, then []string with numeric conversion.
+ *       Non-numeric strings are skipped. Defaults to nil on complete failure.
+ * param: data - the raw JSON bytes.
+ * return: error (always nil — gracefully handles all inputs).
+ */
+func (f *FlexInts) UnmarshalJSON(data []byte) error {
+	// Try []int first
+	var ints []int
+	if err := json.Unmarshal(data, &ints); err == nil {
+		*f = ints
+		return nil
+	}
+	// Try []string and convert
+	var strs []string
+	if err := json.Unmarshal(data, &strs); err == nil {
+		result := make([]int, 0, len(strs))
+		for _, s := range strs {
+			// Try parsing as int
+			n, err := strconv.Atoi(strings.TrimSpace(s))
+			if err != nil {
+				// Skip non-numeric strings like "n1" — treat as no deps
+				continue
+			}
+			result = append(result, n)
+		}
+		*f = result
+		return nil
+	}
+	// Default to empty
+	*f = nil
+	return nil
+}
+
+/*
+ * PlanStep is one entry in the planner's JSON output.
+ * desc: Contains the tool name, parameters, optional param_refs for
+ *       dependency injection, index-based depends_on references, a
+ *       human-readable tag, and an optional capability gap declaration.
+ */
+type PlanStep struct {
+	Tool      string                      `json:"tool"`
+	Params    map[string]any              `json:"params"`
+	ParamRefs map[string]ParamInjection   `json:"param_refs,omitempty"` // dependency injection: param values from upstream outputs
+	DependsOn FlexInts                    `json:"depends_on"`          // index-based references
+	Tag       string                      `json:"tag"`
+	Gap       string                      `json:"gap,omitempty"`       // capability gap: what's needed but unavailable
+}
+
+/*
+ * plannerOutput wraps the planner's JSON when intent is auto-inferred.
+ * desc: When intent is explicit, the planner returns just []PlanStep.
+ *       When auto, it may wrap them in {"intent":"...", "steps":[...]}.
+ */
+type plannerOutput struct {
+	Intent string     `json:"intent"`
+	Steps  []PlanStep `json:"steps"`
+}
+
+/*
+ * plannerSystemPrompt returns the system prompt for the initial planner LLM call.
+ * desc: Builds the complete planner system prompt including role description,
+ *       planning guidance from capability cards and skills, tool definitions
+ *       with parameter and output schemas, IBE section, budget limits, and
+ *       expanded planner rules. Only the provided tool names are included.
+ * param: relevant - slice of tool names visible to the planner.
+ * param: dagMode - the DAG execution mode string.
+ * param: intent - the intent level string ("auto" or a specific level).
+ * return: the fully composed planner system prompt.
+ */
+func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) string {
+	var sb strings.Builder
+	sb.WriteString("You are the execution layer planner for an agentic framework. ")
+	sb.WriteString("Decompose user requests into discrete operations utilizing your tools and local OS capabilities such as bash or powershell. ")
+	sb.WriteString("Make good use of tools to gather real data and help the user. For trivial questions where the answer is obvious, call plan() with an empty steps array and put your direct answer in the answer field. ")
+	sb.WriteString("Do not interpret, judge, or refuse requests — all tool calls pass through an intent and authorization protocol at execution time that blocks unauthorized operations automatically. ")
+	sb.WriteString("If the available tools can accomplish the request, produce the plan. If no suitable tool exists, declare a gap.\n")
+	sb.WriteString(roleDescription(a.cfg.NodeRole))
+	sb.WriteString("\n\n")
+
+	isNative := a.cfg.PlannerMode == "native"
+
+	if isNative {
+		// Native mode: compact skill summaries (name + description one-liner).
+		// Full guidance is too expensive (~9K tokens). The reflector injects
+		// detailed guidance during replanning when needed.
+		// Skills are NOT listed in native mode. The compact tool index
+		// is sufficient for tool selection. Skill guidance is injected
+		// into the reflector during replanning when needed.
+	} else {
+		// Structured mode: full guidance for skills
+		var guidance []string
+		if len(a.activeCards) > 0 {
+			for _, key := range a.activeCards {
+				card, ok := a.capabilities[key]
+				if !ok {
+					continue
+				}
+				if section := Text.ExtractSection(card.Body, "## Planning Guidance"); section != "" {
+					guidance = append(guidance, section)
+				}
+			}
+		}
+		plannerSections := []string{"## Planning Guidance", "## When to Use", "## Approach Selection"}
+		for _, name := range relevant {
+			var body string
+			if skill, ok := a.registry.Get(name); ok {
+				if sm, ok := skill.(interface{ Body() string }); ok {
+					body = sm.Body()
+				}
+			}
+			if body == "" {
+				if gs, ok := a.skillGuidance[name]; ok {
+					body = gs.Body()
+				}
+			}
+			if body == "" {
+				continue
+			}
+			var parts []string
+			for _, heading := range plannerSections {
+				if section := Text.ExtractSection(body, heading); section != "" {
+					parts = append(parts, section)
+				}
+			}
+			if len(parts) > 0 {
+				guidance = append(guidance, fmt.Sprintf("### %s\n%s", name, strings.Join(parts, "\n\n")))
+			}
+		}
+		if len(guidance) > 0 {
+			sb.WriteString("## Domain & Skill Guidance\n\n")
+			for _, g := range guidance {
+				sb.WriteString(strings.TrimSpace(g))
+				sb.WriteString("\n\n")
+			}
+		}
+	}
+
+	if isNative {
+		sb.WriteString(compileToolIndex(a.registry, relevant))
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString("## Available Tools\nTools available for your plan. Use bash/powershell for any task that can be done from the command line.\n\n")
+		for _, name := range relevant {
+			skill, ok := a.registry.Get(name)
+			if !ok {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("### %s\n%s\n", name, skill.Description()))
+			sb.WriteString(fmt.Sprintf("Parameters: %s\n", string(skill.Parameters())))
+			if outSchema := tools.GetOutputSchema(skill); outSchema != nil {
+				sb.WriteString(fmt.Sprintf("Output (JSON): %s\n", string(outSchema)))
+				var schemaMeta struct{ Description string `json:"description"` }
+				if json.Unmarshal(outSchema, &schemaMeta) == nil && schemaMeta.Description != "" {
+					sb.WriteString(fmt.Sprintf("Chaining: %s\n\n", schemaMeta.Description))
+				} else {
+					sb.WriteString("Chainable: use param_refs to extract fields from this tool's output.\n\n")
+				}
+			} else {
+				sb.WriteString("Output: unstructured text. Not chainable via param_refs.\n\n")
+			}
+		}
+	}
+
+	// IBE section
+	var ibeSection string
+	if intent == "auto" {
+		ibeSection = `Intent is auto-determined. Tools exceeding intent are blocked at execution time.`
+	} else {
+		ibeSection = fmt.Sprintf(`Intent: **%s**. Tools exceeding intent are blocked at execution time.`, intent)
+	}
+
+	if isNative {
+		// Native mode: minimal rules. The plan() function schema defines the structure.
+		sb.WriteString(fmt.Sprintf("## Execution\n%s\n", ibeSection))
+		sb.WriteString("Plan in phases: Phase 0 gathers data in parallel (no depends_on), Phase 1 follows up (depends_on Phase 0, use param_refs to inject discovered values).\n")
+		sb.WriteString("Use param_refs to chain values between steps — never guess URLs, IDs, or paths.\n")
+		sb.WriteString(fmt.Sprintf("Budget: max %d steps, %d LLM calls.\n", a.cfg.MaxNodes, a.cfg.MaxLLMCalls))
+	} else {
+		// Structured mode: full planner.md with format rules, examples, etc.
+		ibeFullSection := ""
+		if intent == "auto" {
+			ibeFullSection = `## Intent-Based Execution (IBE)
+
+Intent is auto-determined from your plan. Choose tools matching the query's needs:
+- **observe** (impact 0): information, explanation, status — read-only tools
+- **operate** (impact 1): active work, analysis, side-effects — read + write tools
+- **override** (impact 2): remediation (kill, block, isolate, revoke) — all tools
+
+The system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED.`
+		} else {
+			ibeFullSection = fmt.Sprintf(`## Intent-Based Execution (IBE)
+
+This investigation runs at **%s** intent (operator-enforced, do not override).
+The system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED.`, intent)
+		}
+
+		rules := expandPlannerTemplate(a.plannerPrompt, map[string]string{
+			"node_id":       a.cfg.NodeID,
+			"max_nodes":     fmt.Sprintf("%d", a.cfg.MaxNodes),
+			"max_per_skill": fmt.Sprintf("%d", a.cfg.MaxPerSkill),
+			"max_llm_calls": fmt.Sprintf("%d", a.cfg.MaxLLMCalls),
+			"dag_mode":      dagMode,
+			"batch_size":    fmt.Sprintf("%d", a.cfg.BatchSize),
+			"intent":        intent,
+			"ibe_section":   ibeFullSection,
+		})
+		sb.WriteString(rules)
+	}
+
+	rolePrompt := sb.String() + a.fleetSection()
+	return ComposeSystemPrompt(a.soulPrompt, rolePrompt)
+}
+
+/*
+ * PlanResult contains the planner output: steps and optionally an inferred intent.
+ * desc: Wraps the parsed plan steps, declared capability gaps, inferred intent
+ *       level, and whether intent was auto-inferred.
+ */
+type PlanResult struct {
+	Steps          []PlanStep
+	Gaps           []string     // capability gaps declared by the planner
+	InferredIntent gates.Intent // only set when intent was auto-inferred
+	WasAuto        bool         // true if the planner inferred intent
+}
+
+/*
+ * PlannerConversationalError is returned when the planner responds with
+ * conversational text instead of a JSON plan.
+ * desc: The Text field contains the planner's response which can be returned
+ *       directly to the user as a chat response.
+ */
+type PlannerConversationalError struct {
+	Text string
+}
+
+/*
+ * Error returns the error message for PlannerConversationalError.
+ * desc: Implements the error interface.
+ * return: fixed error string.
+ */
+func (e *PlannerConversationalError) Error() string {
+	return "planner returned conversational text instead of JSON plan"
+}
+
+/*
+ * runPlanner makes a single LLM call to produce the initial investigation plan.
+ * desc: When the trigger intent is Auto, the planner also infers the appropriate
+ *       intent. Filters relevant skills, builds the planner prompt, sends the
+ *       LLM call (with optional retry on prose output), then validates, filters,
+ *       and deduplicates the resulting steps.
+ * param: ctx - context for the LLM call.
+ * param: trigger - the investigation trigger.
+ * return: PlanResult pointer with steps and intent, or error.
+ */
+/*
+ * runPlanner dispatches to the appropriate planner mode.
+ * desc: Routes to structured (text JSON) or native (function calling) planner
+ *       based on agent config. Both return the same PlanResult.
+ * param: ctx - context for the LLM call.
+ * param: trigger - the investigation trigger.
+ * return: PlanResult pointer with steps and intent, or error.
+ */
+func (a *Agent) runPlanner(ctx context.Context, trigger Trigger) (*PlanResult, error) {
+	if a.cfg.PlannerMode == "native" {
+		return a.runPlannerNative(ctx, trigger)
+	}
+	return a.runPlannerStructured(ctx, trigger)
+}
+
+/*
+ * runPlannerStructured makes a single LLM call to produce a plan via text JSON output.
+ * desc: The original planner mode. Sends a prompt asking the LLM to respond with a JSON
+ *       array. Parses the text output, handles markdown fences, retries on prose.
+ * param: ctx - context for the LLM call.
+ * param: trigger - the investigation trigger.
+ * return: PlanResult pointer with steps and intent, or error.
+ */
+func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*PlanResult, error) {
+	relevant := a.relevantSkills(ctx, formatTrigger(trigger), trigger.Scope)
+	log.Printf("[dag] planner sees %d tools: %v", len(relevant), relevant)
+
+	// Resolve DAG mode and intent for planner prompt
+	dagMode := a.cfg.DAGMode
+	if trigger.DAGMode != "" {
+		dagMode = trigger.DAGMode
+	}
+	intent := trigger.Intent().String()
+
+	// Planner gets conversation history filtered to user messages only.
+	// This gives multi-turn context ("do that again for X") without
+	// contamination from assistant verdicts (which cause the planner
+	// to output prose instead of a JSON plan).
+	var plannerHistory []llm.Message
+	for _, m := range trigger.History {
+		if m.Role == "user" {
+			plannerHistory = append(plannerHistory, m)
+		}
+	}
+	messages := BuildMessagesWithHistory(
+		a.plannerSystemPrompt(relevant, dagMode, intent),
+		formatTrigger(trigger),
+		plannerHistory,
+	)
+
+	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
+		Messages:    messages,
+		Temperature: a.cfg.Temperature,
+		MaxTokens:   a.cfg.MaxTokens,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("planner LLM call: %w", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("planner LLM returned no choices")
+	}
+
+	raw := resp.Choices[0].Message.Content
+	log.Printf("[dag] planner output: %s", Text.TruncateLog(raw, 300))
+	log.Printf("[dag] planner full output length: %d bytes", len(raw))
+
+	isAuto := trigger.Intent() == gates.IntentAuto
+	steps, inferredIntent, err := parsePlannerOutput(raw, isAuto)
+	if err != nil {
+		// If planner returned prose, retry once with a forceful nudge
+		cleaned := strings.TrimSpace(raw)
+		if len(cleaned) > 0 && cleaned[0] != '[' && cleaned[0] != '{' {
+			log.Printf("[dag] planner returned prose, retrying with JSON nudge")
+
+			// Append the prose response + a nudge as follow-up messages
+			retryMessages := append(messages,
+				llm.Message{Role: "assistant", Content: raw},
+				llm.Message{Role: "user", Content: "That was not valid JSON. You MUST respond with ONLY a JSON array of steps. Start with [ and end with ]. No prose, no explanation. Just the JSON plan."},
+			)
+
+			retryResp, retryErr := a.llm.Complete(ctx, &llm.ChatRequest{
+				Messages:    retryMessages,
+				Temperature: 0.1, // lower temp for more deterministic output
+				MaxTokens:   a.cfg.MaxTokens,
+			})
+			if retryErr == nil && len(retryResp.Choices) > 0 {
+				retryRaw := retryResp.Choices[0].Message.Content
+				log.Printf("[dag] planner retry output: %s", Text.TruncateLog(retryRaw, 300))
+				retrySteps, retryIntent, retryParseErr := parsePlannerOutput(retryRaw, isAuto)
+				if retryParseErr == nil {
+					steps = retrySteps
+					inferredIntent = retryIntent
+					err = nil
+				}
+			}
+
+			// If retry also failed, surface as conversational
+			if err != nil {
+				log.Printf("[dag] planner retry also failed, surfacing as reply")
+				return nil, &PlannerConversationalError{Text: cleaned}
+			}
+		} else {
+			return nil, fmt.Errorf("parse planner output: %w", err)
+		}
+	}
+
+	// Shared validation: filter gaps, drop unknown tools, infer intent
+	return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger)
+}
+
+// ── Plan tool schema for native function calling mode ──────────────────────
+
+var planToolSchema = json.RawMessage(`{
+	"type": "object",
+	"properties": {
+		"answer": {
+			"type": "string",
+			"description": "Direct answer for trivial questions that need no tools. Only set when steps is empty."
+		},
+		"intent": {
+			"type": "string",
+			"enum": ["observe", "operate", "override"],
+			"description": "Inferred intent level for this plan"
+		},
+		"steps": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": ["tool", "params", "depends_on", "tag"],
+				"properties": {
+					"tool":       {"type": "string", "description": "Tool name from the Tools list"},
+					"params":     {"type": "object", "description": "Tool input params as key-value pairs. ALWAYS populate for tools with required params marked *. Example: for web_search use {\"query\": \"search terms\"}, for bash use {\"command\": \"ls -la\"}. NEVER leave empty."},
+					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Step indices that must complete first"},
+					"tag":        {"type": "string", "description": "Short human-readable label"},
+					"param_refs": {
+						"type": "object",
+						"additionalProperties": {
+							"type": "object",
+							"properties": {
+								"step":     {"type": "integer"},
+								"field":    {"type": "string"},
+								"template": {"type": "string"}
+							},
+							"required": ["step", "field"]
+						},
+						"description": "Dependency injection from upstream step outputs"
+					},
+					"gap": {"type": "string", "description": "For tool=gap only: describes a missing capability"}
+				}
+			}
+		}
+	},
+	"required": ["steps"]
+}`)
+
+/*
+ * planToolDef returns the meta-tool definition for native function calling mode.
+ * desc: Defines a single "plan" tool whose input schema matches the PlanStep array format.
+ *       The model "calls" this tool with the entire DAG as its argument.
+ * return: llm.ToolDef for the plan meta-tool.
+ */
+func planToolDef() llm.ToolDef {
+	return llm.ToolDef{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name:        "plan",
+			Description: `Submit an execution plan. Example: {"steps":[{"tool":"web_search","params":{"query":"bitcoin price"},"depends_on":[],"tag":"search"},{"tool":"web_fetch","params":{"url":"https://..."},"depends_on":[0],"tag":"fetch"}]}. For trivial questions: {"steps":[],"answer":"The capital of France is Paris."}`,
+			Parameters:  planToolSchema,
+		},
+	}
+}
+
+/*
+ * planCallPayload is the parsed argument from a native plan() tool call.
+ * desc: Matches the planToolSchema — contains optional intent and the steps array.
+ */
+type planCallPayload struct {
+	Intent string     `json:"intent"`
+	Answer string     `json:"answer"`
+	Steps  []PlanStep `json:"steps"`
+}
+
+/*
+ * runPlannerNative makes a single LLM call using native function calling.
+ * desc: Sends the plan meta-tool to the LLM. The model calls plan() with the
+ *       entire DAG as the argument. No text parsing, no markdown fences.
+ *       Falls back to text parsing if the model responds with text instead of a tool call.
+ * param: ctx - context for the LLM call.
+ * param: trigger - the investigation trigger.
+ * return: PlanResult pointer with steps and intent, or error.
+ */
+func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanResult, error) {
+	relevant := a.relevantSkills(ctx, formatTrigger(trigger), trigger.Scope)
+	log.Printf("[dag] planner (native) sees %d tools: %v", len(relevant), relevant)
+
+	dagMode := a.cfg.DAGMode
+	if trigger.DAGMode != "" {
+		dagMode = trigger.DAGMode
+	}
+	intent := trigger.Intent().String()
+
+	var plannerHistory []llm.Message
+	for _, m := range trigger.History {
+		if m.Role == "user" {
+			plannerHistory = append(plannerHistory, m)
+		}
+	}
+
+	messages := BuildMessagesWithHistory(
+		a.plannerSystemPrompt(relevant, dagMode, intent),
+		formatTrigger(trigger),
+		plannerHistory,
+	)
+
+	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
+		Messages:    messages,
+		Tools:       []llm.ToolDef{planToolDef()},
+		ToolChoice:  "required",
+		Temperature: a.cfg.Temperature,
+		MaxTokens:   a.cfg.MaxTokens,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("planner LLM call (native): %w", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("planner LLM returned no choices")
+	}
+
+	choice := resp.Choices[0]
+
+	// Check if the model called the plan tool
+	if choice.FinishReason == "tool_calls" && len(choice.Message.ToolCalls) > 0 {
+		tc := choice.Message.ToolCalls[0]
+		if tc.Function.Name != "plan" {
+			return nil, fmt.Errorf("planner called unexpected tool %q (expected plan)", tc.Function.Name)
+		}
+
+		log.Printf("[dag] planner (native) received plan() call, %d bytes: %s", len(tc.Function.Arguments), Text.TruncateLog(tc.Function.Arguments, 500))
+
+		var payload planCallPayload
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &payload); err != nil {
+			return nil, fmt.Errorf("parse plan() arguments: %w", err)
+		}
+
+		steps := payload.Steps
+
+		// Empty steps = trivial query, planner answered directly
+		if len(steps) == 0 {
+			if payload.Answer != "" {
+				log.Printf("[dag] planner answered directly (no tools needed): %s", Text.TruncateLog(payload.Answer, 200))
+				return nil, &PlannerConversationalError{Text: payload.Answer}
+			}
+			// Empty steps with no answer — fallback to direct LLM response
+			return nil, &PlannerConversationalError{}
+		}
+
+		isAuto := trigger.Intent() == gates.IntentAuto
+
+		// Infer intent from payload or tool impacts
+		var inferredIntent gates.Intent
+		if isAuto && payload.Intent != "" {
+			switch payload.Intent {
+			case "observe":
+				inferredIntent = gates.IntentObserve
+			case "operate":
+				inferredIntent = gates.IntentOperate
+			case "override":
+				inferredIntent = gates.IntentOverride
+			}
+		}
+
+		return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger)
+	}
+
+	// Fallback: model returned text instead of a tool call.
+	// Try parsing as JSON (some models ignore tool calling and write text).
+	raw := choice.Message.Content
+	log.Printf("[dag] planner (native) returned text instead of tool call: %s", Text.TruncateLog(raw, 200))
+
+	if len(raw) > 0 && (raw[0] == '[' || raw[0] == '{') {
+		isAuto := trigger.Intent() == gates.IntentAuto
+		steps, inferredIntent, parseErr := parsePlannerOutput(raw, isAuto)
+		if parseErr == nil {
+			return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger)
+		}
+	}
+
+	return nil, &PlannerConversationalError{Text: strings.TrimSpace(raw)}
+}
+
+/*
+ * validatePlanSteps applies shared validation to parsed plan steps.
+ * desc: Filters gaps, drops unknown tools, validates deps, breaks cycles,
+ *       deduplicates, and infers intent if auto. Used by both structured and native planners.
+ * param: steps - raw parsed plan steps.
+ * param: isAuto - whether intent should be auto-inferred.
+ * param: inferredIntent - pre-inferred intent from payload (or IntentTell if not set).
+ * param: trigger - the original trigger for scope checking.
+ * return: validated PlanResult or error.
+ */
+func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent gates.Intent, trigger Trigger) (*PlanResult, error) {
+	// Extract gaps and filter unknown tools
+	var gaps []string
+	valid := steps[:0]
+	for _, s := range steps {
+		if s.Tool == "gap" {
+			if s.Gap != "" {
+				gaps = append(gaps, s.Gap)
+				log.Printf("[dag] planner declared gap: %s", s.Gap)
+			}
+			continue
+		}
+		if _, ok := a.registry.Get(s.Tool); ok {
+			valid = append(valid, s)
+		} else {
+			log.Printf("[dag] planner hallucinated unknown tool %q, dropping step", s.Tool)
+		}
+	}
+	if len(valid) == 0 && len(gaps) == 0 {
+		return nil, fmt.Errorf("planner produced no valid tools (all hallucinated)")
+	}
+	if len(valid) == 0 && len(gaps) > 0 {
+		return nil, &PlannerConversationalError{
+			Text: "Cannot fulfill this request. Missing capabilities: " + strings.Join(gaps, "; "),
+		}
+	}
+
+	result := &PlanResult{Steps: valid, Gaps: gaps, WasAuto: isAuto}
+	if isAuto {
+		if inferredIntent == gates.IntentTell {
+			maxImpact := 0
+			for _, s := range valid {
+				if skill, ok := a.registry.Get(s.Tool); ok {
+					impact := tools.GetImpact(skill, s.Params)
+					if impact > maxImpact {
+						maxImpact = impact
+					}
+				}
+			}
+			switch {
+			case maxImpact >= 2:
+				inferredIntent = gates.IntentOverride
+			case maxImpact >= 1:
+				inferredIntent = gates.IntentOperate
+			default:
+				inferredIntent = gates.IntentObserve
+			}
+		}
+		result.InferredIntent = inferredIntent
+		log.Printf("[dag] inferred intent: %s (from plan tool impacts)", inferredIntent)
+	}
+
+	return result, nil
+}
+
+/*
+ * parsePlannerOutput extracts PlanSteps from the LLM's raw text output.
+ * desc: Always expects a JSON array of steps. If the LLM wraps it in an object
+ *       (e.g. {"intent":"...", "steps":[...]}), extracts the array from it.
+ *       Validates deps and param_refs ranges, auto-adds missing dep edges,
+ *       detects and breaks cycles, and deduplicates param_ref steps.
+ * param: raw - the raw LLM output string.
+ * param: isAuto - true if intent should be extracted from the response.
+ * return: parsed PlanStep slice, inferred intent, or error.
+ */
+func parsePlannerOutput(raw string, isAuto bool) ([]PlanStep, gates.Intent, error) {
+	cleaned := Text.StripCodeFence(raw)
+	inferredIntent := gates.IntentTell // safe default
+
+	var steps []PlanStep
+
+	// Primary path: parse as JSON array
+	if err := json.Unmarshal([]byte(cleaned), &steps); err != nil {
+		// Fallback: LLM may have wrapped in an object despite being told array-only
+		var out plannerOutput
+		if err2 := json.Unmarshal([]byte(cleaned), &out); err2 == nil && len(out.Steps) > 0 {
+			steps = out.Steps
+			if isAuto {
+				inferredIntent = gates.IntentFromString(out.Intent)
+			}
+			log.Printf("[dag] planner returned object instead of array, extracted %d steps", len(steps))
+		} else {
+			return nil, inferredIntent, fmt.Errorf("invalid JSON: %w", err)
+		}
+	}
+
+	if len(steps) == 0 {
+		// Empty plan means no tools needed — this is a conversational query.
+		// Return as conversational error so the caller can handle it.
+		return nil, inferredIntent, &PlannerConversationalError{Text: ""}
+	}
+
+	// Debug: log parsed param_refs to diagnose injection failures
+	for i, s := range steps {
+		if len(s.ParamRefs) > 0 {
+			for pn, ref := range s.ParamRefs {
+				log.Printf("[dag] parsed step %d param_ref %s: step=%d field=%q template=%q", i, pn, ref.Step, ref.Field, ref.Template)
+			}
+		}
+	}
+
+	// Validate index-based deps and param_refs are in range
+	for i, s := range steps {
+		if s.Tool == "" {
+			return nil, inferredIntent, fmt.Errorf("step %d missing tool name", i)
+		}
+		// Filter out invalid deps (out of range, self-reference)
+		validDeps := s.DependsOn[:0]
+		for _, dep := range s.DependsOn {
+			if dep < 0 || dep >= len(steps) {
+				log.Printf("[dag] step %d depends_on index %d out of range, skipping", i, dep)
+				continue
+			}
+			if dep == i {
+				log.Printf("[dag] step %d depends on itself, removing self-reference", i)
+				continue
+			}
+			validDeps = append(validDeps, dep)
+		}
+		steps[i].DependsOn = validDeps
+		// Validate param_refs and auto-add to depends_on if missing
+		for paramName, ref := range s.ParamRefs {
+			if ref.Step < 0 || ref.Step >= len(steps) {
+				log.Printf("[dag] step %d param_ref %q references step %d out of range, skipping", i, paramName, ref.Step)
+				delete(s.ParamRefs, paramName)
+				continue
+			}
+			if ref.Step == i {
+				log.Printf("[dag] step %d param_ref %q references itself, skipping", i, paramName)
+				delete(s.ParamRefs, paramName)
+				continue
+			}
+			if ref.Field == "" {
+				log.Printf("[dag] step %d param_ref %q has empty field, skipping injection", i, paramName)
+				delete(s.ParamRefs, paramName)
+				continue
+			}
+			// Enforce ordering: injection source must be in depends_on so it
+			// resolves before this node fires. Auto-add if the LLM forgot.
+			found := false
+			for _, dep := range s.DependsOn {
+				if dep == ref.Step {
+					found = true
+					break
+				}
+			}
+			if !found {
+				s.DependsOn = append(s.DependsOn, ref.Step)
+				steps[i] = s
+			}
+		}
+	}
+
+	// Cycle detection — a DAG must be acyclic. Detect and break any cycles.
+	// Uses topological sort; steps involved in cycles have their offending deps removed.
+	if hasCycle, fixed := breakCycles(steps); hasCycle {
+		log.Printf("[dag] cycle detected in plan, removed offending dependencies")
+		steps = fixed
+	}
+
+	// Dedup: drop steps that fetch the same URL via identical param_refs.
+	// The planner sometimes creates two fetch phases for the same search results
+	// with different focus params — one fetch with a broad focus is sufficient.
+	steps = deduplicateParamRefSteps(steps)
+
+	return steps, inferredIntent, nil
+}
+
+/*
+ * breakCycles checks for cycles in the step dependency graph.
+ * desc: Uses DFS with visit states (unvisited/visiting/visited). If a back
+ *       edge is found, the offending dependency is removed to break the cycle.
+ * param: steps - the plan steps to check.
+ * return: true if any cycles were found, and the fixed steps.
+ */
+func breakCycles(steps []PlanStep) (bool, []PlanStep) {
+	n := len(steps)
+	// States: 0=unvisited, 1=visiting (in current DFS path), 2=visited
+	state := make([]int, n)
+	hasCycle := false
+
+	var dfs func(i int) bool
+	dfs = func(i int) bool {
+		state[i] = 1
+		newDeps := steps[i].DependsOn[:0]
+		for _, dep := range steps[i].DependsOn {
+			if dep < 0 || dep >= n {
+				continue
+			}
+			if state[dep] == 1 {
+				// Back edge — this is a cycle. Drop this dependency.
+				log.Printf("[dag] breaking cycle: step %d → step %d", i, dep)
+				hasCycle = true
+				continue
+			}
+			if state[dep] == 0 {
+				if dfs(dep) {
+					// Cycle found deeper — deps already cleaned
+				}
+			}
+			newDeps = append(newDeps, dep)
+		}
+		steps[i].DependsOn = newDeps
+		state[i] = 2
+		return hasCycle
+	}
+
+	for i := 0; i < n; i++ {
+		if state[i] == 0 {
+			dfs(i)
+		}
+	}
+	return hasCycle, steps
+}
+
+/*
+ * deduplicateParamRefSteps removes steps that have identical tool + param_ref
+ * source (same step + same field).
+ * desc: Catches the common case where the planner creates two fetch phases for
+ *       the same search results with different focus params. Merges focus params
+ *       into the first occurrence and drops the duplicate.
+ * param: steps - the plan steps to deduplicate.
+ * return: deduplicated steps with remapped depends_on and param_ref indices.
+ */
+func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
+	type refKey struct {
+		tool string
+		step  int
+		field string
+	}
+
+	seen := make(map[refKey]int) // refKey → first step index
+	dropSet := make(map[int]bool)
+
+	for i, s := range steps {
+		if len(s.ParamRefs) == 0 {
+			continue
+		}
+		// Use the first param_ref as the dedup key (usually "url")
+		for _, ref := range s.ParamRefs {
+			key := refKey{tool: s.Tool, step: ref.Step, field: ref.Field}
+			if firstIdx, exists := seen[key]; exists {
+				// Duplicate — merge focus params if possible, drop this step
+				if firstFocus, ok := steps[firstIdx].Params["focus"].(string); ok {
+					if dupFocus, ok2 := s.Params["focus"].(string); ok2 && dupFocus != firstFocus {
+						// Merge focuses: "pricing, features" + "capabilities, extensibility"
+						steps[firstIdx].Params["focus"] = firstFocus + ", " + dupFocus
+					}
+				}
+				dropSet[i] = true
+				log.Printf("[dag] dedup: step %d (%s) duplicates step %d (same %s.%s), merging", i, s.Tag, firstIdx, s.Tool, ref.Field)
+			} else {
+				seen[key] = i
+			}
+			break // only check first param_ref
+		}
+	}
+
+	if len(dropSet) == 0 {
+		return steps
+	}
+
+	// Rebuild steps without dropped entries, remapping depends_on indices
+	indexMap := make(map[int]int) // old index → new index
+	var result []PlanStep
+	for i, s := range steps {
+		if dropSet[i] {
+			continue
+		}
+		indexMap[i] = len(result)
+		result = append(result, s)
+	}
+
+	// Remap depends_on and param_ref step indices
+	for i := range result {
+		newDeps := result[i].DependsOn[:0]
+		for _, dep := range result[i].DependsOn {
+			if newIdx, ok := indexMap[dep]; ok {
+				newDeps = append(newDeps, newIdx)
+			}
+			// If dep was dropped, skip it (its work is merged into the kept step)
+		}
+		result[i].DependsOn = newDeps
+
+		for pn, ref := range result[i].ParamRefs {
+			if newIdx, ok := indexMap[ref.Step]; ok {
+				ref.Step = newIdx
+				result[i].ParamRefs[pn] = ref
+			}
+		}
+	}
+
+	log.Printf("[dag] dedup removed %d duplicate steps (%d → %d)", len(dropSet), len(steps), len(result))
+	return result
+}
+
+/*
+ * planStepsToNodes converts parsed plan steps into graph nodes.
+ * desc: Two-pass: first create all nodes (collecting IDs), then resolve index
+ *       deps and param_refs to real node IDs. Filters duplicate tool+params
+ *       against already-executed nodes (for replan grafts). Optionally injects
+ *       reflection nodes between depth waves (reflect mode only).
+ * param: steps - the parsed plan steps.
+ * param: graph - the investigation graph.
+ * param: budget - the execution budget.
+ * param: registry - tool registry for source tagging and schema validation (optional).
+ * param: dagMode - optional DAG mode override for reflection injection.
+ * return: slice of created Node pointers, or error.
+ */
+func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *tools.Registry, dagMode ...string) ([]*Node, error) {
+	// Filter duplicate tool+params against already-executed nodes.
+	// Only applies to replan grafts (graph already has nodes), not the
+	// initial plan (graph is empty). Prevents reflection replan loops.
+	executedSet := graph.ExecutedSet()
+
+	// Pass 1: create nodes and collect their graph IDs
+	nodeIDs := make([]string, len(steps))
+	nodes := make([]*Node, len(steps))
+
+	for i, s := range steps {
+		// Drop duplicate tool+params — only if the graph already has executions
+		if len(executedSet) > 0 {
+			key := toolParamKey(s.Tool, s.Params)
+			if executedSet[key] {
+				log.Printf("[dag] dropping duplicate step %q (%s) — already executed", s.Tag, key)
+				continue
+			}
+		}
+
+		// At plan time, only check total node count — not per-tool wave limits.
+		// Per-tool limits are for execution batching, not planning.
+		// Pass "" for tool to skip wave counter; pass false for isLLM (tool node).
+		if !budget.TrySpawnNode("", false) {
+			log.Printf("[dag] budget exhausted at step %d, truncating plan", i)
+			nodes = nodes[:i]
+			break
+		}
+
+		n := &Node{
+			Type:      NodeSkill,
+			ToolName: s.Tool,
+			Params:    s.Params,
+			Tag:       s.Tag,
+		}
+		// Tag the node with its tool source for frontend display
+		if registry != nil {
+			n.Source = registry.GetSource(s.Tool)
+		}
+		id := graph.AddNode(n)
+		nodeIDs[i] = id
+		nodes[i] = n
+	}
+
+	// Pass 2: resolve index-based deps and param_refs to real node IDs
+	for i, s := range steps {
+		if i >= len(nodes) || nodes[i] == nil {
+			break // truncated by budget
+		}
+		for _, depIdx := range s.DependsOn {
+			if depIdx < len(nodeIDs) && nodeIDs[depIdx] != "" {
+				nodes[i].DependsOn = append(nodes[i].DependsOn, nodeIDs[depIdx])
+			}
+		}
+
+		// Resolve param_refs step indices → node IDs (dependency injection).
+		// parsePlannerOutput already validated step ranges; skip invalid as safety net.
+		if len(s.ParamRefs) > 0 {
+			resolved := make(map[string]ResolvedInjection, len(s.ParamRefs))
+			for paramName, ref := range s.ParamRefs {
+				if ref.Step < 0 || ref.Step >= len(nodeIDs) || nodeIDs[ref.Step] == "" {
+					log.Printf("[dag] param_ref %q on step %d references invalid step %d, skipping", paramName, i, ref.Step)
+					continue
+				}
+				resolved[paramName] = ResolvedInjection{
+					NodeID:   nodeIDs[ref.Step],
+					Field:    ref.Field,
+					Template: ref.Template,
+				}
+				// Ensure the referenced step is in DependsOn (safety net)
+				refNodeID := nodeIDs[ref.Step]
+				hasDep := false
+				for _, d := range nodes[i].DependsOn {
+					if d == refNodeID {
+						hasDep = true
+						break
+					}
+				}
+				if !hasDep {
+					nodes[i].DependsOn = append(nodes[i].DependsOn, refNodeID)
+				}
+			}
+			nodes[i].ParamRefs = resolved
+			for pn, ri := range resolved {
+				if ri.Template != "" {
+					log.Printf("[dag] param_ref %s.%s ← %s.%s (template: %s)", nodes[i].ID, pn, ri.NodeID, ri.Field, ri.Template)
+				} else {
+					log.Printf("[dag] param_ref %s.%s ← %s.%s", nodes[i].ID, pn, ri.NodeID, ri.Field)
+				}
+			}
+			// Validate field paths against upstream output schemas.
+			// Warnings only — planning is permissive. If the field is truly
+			// missing, resolveInjections will fail fast at execution time.
+			if registry != nil {
+				for pn, ref := range s.ParamRefs {
+					upstreamTool := steps[ref.Step].Tool
+					if skill, ok := registry.Get(upstreamTool); ok {
+						outSchema := tools.GetOutputSchema(skill)
+						if outSchema == nil {
+							log.Printf("[dag] warning: param_ref %s.%s references %s which has no output schema", nodes[i].ID, pn, upstreamTool)
+						} else if !fieldExistsInSchema(outSchema, ref.Field) {
+							log.Printf("[dag] warning: param_ref %s.%s references field %q not in %s output schema", nodes[i].ID, pn, ref.Field, upstreamTool)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Inject reflection checkpoints between wave boundaries (reflect mode only)
+	mode := DAGModeReflect
+	if len(dagMode) > 0 && dagMode[0] != "" {
+		mode = dagMode[0]
+	}
+	if mode == DAGModeReflect {
+		injectReflectionNodes(nodes, graph, budget)
+	}
+
+	return nodes, nil
+}
+
+/*
+ * fieldExistsInSchema checks if a dot-path field exists in a JSON Schema's properties.
+ * desc: Used to validate param_refs field paths against declared output schemas
+ *       at plan time. Supports nested objects and array items traversal.
+ * param: schemaJSON - the raw JSON Schema bytes.
+ * param: fieldPath - dot-separated field path to validate.
+ * return: true if the field path exists in the schema.
+ */
+func fieldExistsInSchema(schemaJSON json.RawMessage, fieldPath string) bool {
+	var schema map[string]any
+	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
+		return false
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return false
+	}
+	parts := strings.Split(fieldPath, ".")
+	current := props
+	for i, part := range parts {
+		// Numeric index — skip this segment (we're indexing into an array
+		// whose items properties are already loaded in `current`).
+		if isNumericPathSegment(part) {
+			continue
+		}
+		prop, exists := current[part]
+		if !exists {
+			return false
+		}
+		if i == len(parts)-1 {
+			return true
+		}
+		propObj, ok := prop.(map[string]any)
+		if !ok {
+			return false
+		}
+		// Array type: descend into items.properties
+		if propObj["type"] == "array" {
+			items, ok := propObj["items"].(map[string]any)
+			if !ok {
+				return false
+			}
+			nested, ok := items["properties"].(map[string]any)
+			if !ok {
+				return false
+			}
+			current = nested
+			continue
+		}
+		nested, ok := propObj["properties"].(map[string]any)
+		if !ok {
+			return false
+		}
+		current = nested
+	}
+	return true
+}
+
+/*
+ * isNumericPathSegment returns true if the string contains only digits.
+ * desc: Used by fieldExistsInSchema to detect array index segments in dot-paths.
+ * param: s - the string to check.
+ * return: true if s is non-empty and all characters are digits.
+ */
+func isNumericPathSegment(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+/*
+ * injectReflectionNodes inserts reflection checkpoint nodes between
+ * depth waves in the DAG.
+ * desc: Automatic post-processing — the planner doesn't know about reflection
+ *       nodes. Computes depth for each node, groups by depth, then inserts a
+ *       reflection node between each pair of adjacent depth levels. Next-wave
+ *       nodes have their deps rewritten through the reflection barrier.
+ * param: nodes - the plan nodes to process.
+ * param: graph - the investigation graph.
+ * param: budget - the execution budget.
+ */
+func injectReflectionNodes(nodes []*Node, graph *Graph, budget *Budget) {
+	if len(nodes) == 0 {
+		return
+	}
+
+	// Build set of node IDs from this plan for quick lookup
+	planIDs := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		if n != nil {
+			planIDs[n.ID] = true
+		}
+	}
+
+	// Compute depth of each node: depth(n) = max(depth(dep)) + 1, roots at 0
+	depths := make(map[string]int, len(nodes))
+	visiting := make(map[string]bool) // cycle detection
+	var computeDepth func(n *Node) int
+	computeDepth = func(n *Node) int {
+		if d, ok := depths[n.ID]; ok {
+			return d
+		}
+		if visiting[n.ID] {
+			// Cycle detected — treat as root to break the loop
+			log.Printf("[dag] cycle detected at node %s, breaking", n.ID)
+			depths[n.ID] = 0
+			return 0
+		}
+		visiting[n.ID] = true
+		maxDep := -1
+		for _, depID := range n.DependsOn {
+			if !planIDs[depID] {
+				continue // skip deps outside this plan (e.g., from prior phases)
+			}
+			dep := graph.Get(depID)
+			if dep != nil {
+				d := computeDepth(dep)
+				if d > maxDep {
+					maxDep = d
+				}
+			}
+		}
+		delete(visiting, n.ID)
+		depths[n.ID] = maxDep + 1
+		return maxDep + 1
+	}
+
+	for _, n := range nodes {
+		if n != nil {
+			computeDepth(n)
+		}
+	}
+
+	// Group nodes by depth
+	maxDepth := 0
+	byDepth := make(map[int][]*Node)
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		d := depths[n.ID]
+		byDepth[d] = append(byDepth[d], n)
+		if d > maxDepth {
+			maxDepth = d
+		}
+	}
+
+	// Single depth level → no wave boundary → skip
+	if maxDepth == 0 {
+		return
+	}
+
+	// For each pair of adjacent depths, inject a reflection node
+	for d := 0; d < maxDepth; d++ {
+		waveNodes := byDepth[d]
+		nextWaveNodes := byDepth[d+1]
+		if len(waveNodes) == 0 || len(nextWaveNodes) == 0 {
+			continue
+		}
+
+		// Budget check: reflection costs 1 node + 1 LLM call
+		if !budget.TrySpawnNode("", true) {
+			log.Printf("[dag] budget exhausted, skipping reflection injection at depth %d", d)
+			return
+		}
+
+		// Create reflection node depending on all depth-d nodes
+		depIDs := make([]string, 0, len(waveNodes))
+		for _, n := range waveNodes {
+			depIDs = append(depIDs, n.ID)
+		}
+
+		rNode := &Node{
+			Type:      NodeReflection,
+			DependsOn: depIDs,
+			Tag:       fmt.Sprintf("reflect_w%d", d),
+		}
+		rID := graph.AddNode(rNode)
+
+		// Rewrite depth d+1 nodes: replace their depth-d dependencies with the reflection node
+		for _, n := range nextWaveNodes {
+			newDeps := make([]string, 0, len(n.DependsOn))
+			addedReflect := false
+			for _, dep := range n.DependsOn {
+				if planIDs[dep] && depths[dep] == d {
+					// Replace this dep with the reflection node (once)
+					if !addedReflect {
+						newDeps = append(newDeps, rID)
+						addedReflect = true
+					}
+				} else {
+					newDeps = append(newDeps, dep)
+				}
+			}
+			if !addedReflect {
+				// Next-wave node had no depth-d deps, still add reflection
+				newDeps = append(newDeps, rID)
+			}
+			n.DependsOn = newDeps
+		}
+	}
+}

@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Optimistic DAG Execution with Scoped Intent-Gated Tool Control for Autonomous LLM Agents</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root { --mono: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #fff; color: #1e293b;
+    max-width: 920px; margin: 0 auto;
+    padding: 72px 48px; line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Header ── */
+  .header { margin-bottom: 48px; }
+  .accent-bar { width: 48px; height: 4px; background: linear-gradient(90deg, #f59e0b, #f97316); border-radius: 2px; margin-bottom: 24px; }
+  h1 { font-size: 28px; font-weight: 700; color: #0f172a; letter-spacing: -0.6px; margin-bottom: 8px; line-height: 1.25; }
+  .author { font-size: 14px; color: #64748b; }
+  .author strong { color: #334155; font-weight: 500; }
+
+  /* ── Abstract ── */
+  .abstract { margin: 24px 0 0; font-size: 13px; color: #475569; line-height: 1.85; max-width: 800px; border-left: 3px solid #e2e8f0; padding-left: 16px; }
+  .abstract strong { color: #1e293b; }
+
+  /* ── Sections ── */
+  h2 { font-size: 11px; font-weight: 700; color: #f59e0b; text-transform: uppercase; letter-spacing: 1.5px; margin: 56px 0 6px; }
+  h3 { font-size: 18px; font-weight: 600; color: #0f172a; margin-bottom: 16px; letter-spacing: -0.2px; }
+  h4 { font-size: 14px; font-weight: 600; color: #334155; margin: 24px 0 8px; }
+  .prose { font-size: 13.5px; color: #475569; line-height: 1.85; max-width: 800px; margin-bottom: 20px; }
+  .prose strong { color: #1e293b; font-weight: 600; }
+  .prose code { font-family: var(--mono); font-size: 12px; background: #f1f5f9; padding: 1px 5px; border-radius: 3px; }
+  .prose em { color: #64748b; }
+
+  /* ── Contributions list ── */
+  .contributions { margin: 16px 0 24px; padding-left: 20px; }
+  .contributions li { font-size: 13.5px; color: #475569; line-height: 1.85; margin-bottom: 8px; }
+  .contributions li strong { color: #1e293b; }
+
+  /* ── Gate box ── */
+  .gate-box { margin: 28px 0; padding: 24px 28px; border-left: 4px solid #f59e0b; background: #fffbeb; border-radius: 0 8px 8px 0; }
+  .gate-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #d97706; margin-bottom: 8px; }
+  .gate-formula { font-size: 18px; font-weight: 400; color: #0f172a; font-family: var(--mono); margin-bottom: 12px; }
+  .gate-formula em { font-style: normal; color: #d97706; font-weight: 600; }
+  .gate-desc { font-size: 13px; color: #57534e; line-height: 1.8; }
+  .gate-desc strong { color: #292524; }
+
+  /* ── Insight boxes ── */
+  .insight { margin: 28px 0; padding: 18px 22px; border-left: 4px solid #0284c7; background: #f0f9ff; border-radius: 0 8px 8px 0; font-size: 13px; color: #0c4a6e; line-height: 1.7; }
+  .insight strong { color: #0f172a; }
+  .insight.warm { border-left-color: #f97316; background: #fff7ed; color: #7c2d12; }
+  .insight.green { border-left-color: #059669; background: #ecfdf5; color: #064e3b; }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 28px; }
+  thead th { text-align: center; padding: 12px 14px; font-weight: 600; border-bottom: 2px solid #0f172a; }
+  thead th:first-child { text-align: left; }
+  td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+  tbody tr:hover td { background: #fafafa; }
+  .label { color: #334155; font-weight: 500; white-space: nowrap; }
+  .v { text-align: center; font-variant-numeric: tabular-nums; color: #475569; }
+  .v-best { text-align: center; font-variant-numeric: tabular-nums; color: #059669; font-weight: 600; }
+  .v-worst { text-align: center; font-variant-numeric: tabular-nums; color: #1e293b; }
+  .ours-bg { background: rgba(255, 251, 235, 0.5); }
+  .col-react { color: #7c3aed; }
+  .col-reflect { color: #0284c7; }
+  .col-nreflect { color: #059669; }
+  .col-orch { color: #d97706; }
+  .col-tag { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; padding: 6px 14px; text-align: center; color: #94a3b8; }
+  .col-tag-ours { color: #d97706; background: #fffbeb; }
+  .col-tag-baseline { color: #94a3b8; background: #f8fafc; }
+  .col-group-ours { border-bottom: 3px solid #f59e0b; }
+  .col-group-baseline { border-bottom: 3px solid #e2e8f0; }
+  .summary-row td { border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; padding: 12px 14px; font-weight: 700; }
+  .tier-0 { color: #059669; }
+  .tier-1 { color: #d97706; }
+  .tier-2 { color: #dc2626; }
+
+  /* ── DAG diagrams ── */
+  .dag { font-family: var(--mono); font-size: 12px; line-height: 1.9; color: #334155; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px 24px; margin: 16px 0 24px; overflow-x: auto; white-space: pre; }
+  .dag .nd { color: #0284c7; font-weight: 600; }
+  .dag .ref { color: #d97706; font-weight: 600; }
+  .dag .obs { color: #059669; font-weight: 600; }
+  .dag .agg { color: #7c3aed; font-weight: 600; }
+  .dag .inj { color: #dc2626; font-weight: 600; }
+  .dag .mp { color: #9333ea; font-weight: 600; }
+  .dag .dim { color: #94a3b8; }
+  .dag .arrow { color: #cbd5e1; }
+  .dag-label { font-size: 12px; color: #64748b; margin: -4px 0 12px; font-style: italic; }
+
+  /* ── Mode cards ── */
+  .mode-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin: 20px 0 28px; }
+  .mode-card { padding: 18px 20px; border-radius: 8px; border: 1px solid #e2e8f0; }
+  .mode-card h4 { font-size: 14px; font-weight: 700; margin: 0 0 6px; }
+  .mode-card p { font-size: 12.5px; color: #64748b; line-height: 1.65; margin: 0; }
+  .mc-reflect { border-top: 3px solid #0284c7; }
+  .mc-reflect h4 { color: #0284c7; }
+  .mc-nreflect { border-top: 3px solid #059669; }
+  .mc-nreflect h4 { color: #059669; }
+  .mc-orch { border-top: 3px solid #d97706; }
+  .mc-orch h4 { color: #d97706; }
+
+  /* ── Node legend ── */
+  .node-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0 28px; }
+  .node-type { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: #475569; line-height: 1.5; }
+  .node-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+  .node-type strong { color: #1e293b; font-weight: 600; display: block; font-size: 12px; }
+
+  /* ── Comparison grid ── */
+  .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0 28px; }
+  .comp-card { padding: 18px 20px; border-radius: 8px; border: 1px solid #e2e8f0; }
+  .comp-card h4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .comp-card p { font-size: 12.5px; color: #64748b; line-height: 1.6; margin: 0; }
+  .comp-dag { border-left: 4px solid #f59e0b; }
+  .comp-dag h4 { color: #d97706; }
+  .comp-react { border-left: 4px solid #7c3aed; }
+  .comp-react h4 { color: #7c3aed; }
+
+  .section-num { color: #94a3b8; font-weight: 400; margin-right: 4px; }
+  .footer { margin-top: 72px; padding-top: 24px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; line-height: 2; }
+
+  @media print {
+    body { padding: 24px; font-size: 11px; }
+    .gate-box, .insight, .comp-card, .mode-card { break-inside: avoid; }
+    h2 { margin-top: 32px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TITLE & ABSTRACT                                                       -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<div class="header">
+  <div class="accent-bar"></div>
+  <h1>Optimistic DAG Execution with Scoped Intent-Gated Tool Control for Autonomous LLM Agents</h1>
+  <p class="author"><strong>Cormac Guerin</strong></p>
+
+  <div class="abstract">
+    Autonomous LLM agents that call external tools face two compounding problems: sequential execution that scales quadratically in token cost, and tool-safety enforcement that relies on prompt instructions the model can ignore. We present a system that addresses both by separating the execution layer from the conversational model. The LLM produces a plan; a structurally independent execution layer schedules, gates, and adapts it&mdash;the model never observes gate rejections, preventing adversarial iteration against the safety policy. A DAG planner emits a parallel dependency graph of tool calls in a single LLM call. The graph executes optimistically (execute first, adapt on failure) across three adaptive modes&mdash;Reflect, nReflect, and Orchestrator&mdash;that differ in when and how the system evaluates intermediate results. A four-variable execution gate checks every tool call against structurally assigned scope, caller intent, tool-declared impact, and delegated external clearance, independent of LLM output. On observed benchmarks (99 task executions, 30 per mode), the system completes multi-tool tasks in 7&ndash;15 seconds and 3&ndash;4 LLM calls versus an estimated 28&ndash;90 seconds and 7&ndash;18 calls for sequential ReAct, with consistent output quality across all three modes.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- 1. INTRODUCTION                                                        -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h2><span class="section-num">1.</span> Introduction</h2>
+<h3>The problem</h3>
+
+<p class="prose">
+  LLM-based agents that invoke external tools&mdash;APIs, shell commands, databases, web services&mdash;have become a dominant paradigm for grounding language models in real-world action. The prevailing execution model, ReAct (Yao et al., 2023), operates as a sequential think-act-observe loop: the model reasons about which tool to call, executes it, observes the result, and repeats. This is simple and effective for short tasks. It breaks down on longer ones.
+</p>
+
+<p class="prose">
+  <strong>Why is this hard?</strong> Two problems compound. First, each ReAct turn carries the full conversation history. Turn <em>i</em> transmits <em>c&nbsp;+&nbsp;ik</em> tokens, where <em>c</em> is the system context and <em>k</em> is the average tool result size. Total cost across <em>n</em> turns is O(n&sup2;k)&mdash;quadratic in both tools and result size. A 7-tool task costs ~63K tokens; an 18-tool task costs ~250K. Latency scales linearly: each tool blocks on a full LLM round-trip. Second, tool safety is enforced via prompt instructions (&ldquo;do not call destructive tools&rdquo;), which the model can ignore through hallucination, prompt injection, or context overflow. There is no structural failsafe.
+</p>
+
+<p class="prose">
+  <strong>Why haven&rsquo;t prior systems solved this?</strong> LLM Compiler (Kim et al., 2024) introduced parallel DAG execution but evaluates results only after the entire graph completes, with no mid-execution adaptation and no safety gating. LangGraph models workflows as state machines but keeps the LLM in the execution loop at every routing decision, with safety limited to human-in-the-loop breakpoints. Multi-agent frameworks (CrewAI, AgentArch) add coordination overhead that degrades both performance and reliability&mdash;AgentArch found that even the best configurations achieved only 35.3% success on complex enterprise tasks.
+</p>
+
+<p class="prose">
+  <strong>Our approach.</strong> We present a system that addresses both problems by separating the execution layer from the conversational model. The LLM produces a plan; a structurally independent execution layer schedules, gates, and adapts it. This separation is load-bearing: because the LLM never observes gate rejections during planning, it cannot iterate against the safety policy&mdash;a fundamental limitation of conversational agent loops where tool failures feed back into the model&rsquo;s context. The planner emits a dependency graph of tool calls in a single LLM call. The execution layer processes the graph optimistically (in the concurrency-control sense: execute first, adapt on failure via reflection checkpoints) across three adaptive modes. A four-variable execution gate&mdash;composing scope, intent, impact, and delegated clearance&mdash;checks every tool call against a structurally derived permission ceiling, independent of LLM output.
+</p>
+
+<h4>Summary of contributions</h4>
+<ol class="contributions">
+  <li><strong>Optimistic DAG execution with three adaptive modes.</strong> A planner emits a parallel dependency graph; three modes differ in how they evaluate intermediate results: structural phase boundaries (Reflect), periodic batch checkpoints (nReflect), and per-node observers (Orchestrator). All three reduce token complexity from O(n&sup2;k) to O(nk) or O(nkd) and serial latency from O(n) to O(d).</li>
+  <li><strong>Parameter dependency injection.</strong> A <code>param_refs</code> mechanism enables the planner to express data flow between steps at plan time, with concrete values resolved at execution time from upstream JSON outputs. This bridges the gap between upfront planning and runtime data availability without collapsing to sequential execution.</li>
+  <li><strong>Iterative reflection with replan loops.</strong> When all planned work completes, the system evaluates whether the gathered evidence is sufficient. If not, it replans with new tool calls, executes them, and reflects again&mdash;looping until the reflection concludes or budget is exhausted. This ensures multi-phase tasks complete fully rather than stopping after the first wave.</li>
+  <li><strong>Four-variable scoped intent gate.</strong> Every tool call is checked against scope (which tools are visible), intent (how destructive the caller permits), impact (what the tool declares), and clearance (what an external authority approves). The gate is structural&mdash;compiled into the tool interface, not communicated via prompt.</li>
+  <li><strong>Delegated resource clearance.</strong> Resource-level authorization is delegated to external HTTP endpoints. The gate sends tool name, parameters, and caller identity; the endpoint returns allow/deny. This enables deployment across hospitals, drones, enterprise IT, and filesystem environments without domain-specific logic in the agent.</li>
+  <li><strong>Execution layer abstraction.</strong> The LLM has no knowledge of parallel scheduling, dependency resolution, parameter injection, or failure recovery. Each LLM call operates on a clean, bounded context. The execution layer translates high-level intent into precise operational actions.</li>
+</ol>
+
+<p class="prose">
+  The remainder of this paper is organized as follows. Section 2 introduces a running example. Section 3 defines the graph structure. Section 4 describes the three execution modes. Section 5 presents the execution gate. Section 6 reports experimental results. Section 7 discusses related work. Section 8 concludes.
+</p>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- 2. RUNNING EXAMPLE                                                     -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h2><span class="section-num">2.</span> Running Example</h2>
+<h3>A multi-phase system audit</h3>
+
+<p class="prose">
+  Consider the query: <em>&ldquo;Check disk usage, list open ports, find git repos under /home, search for CVEs affecting our kernel version, and check environment variables for leaked secrets.&rdquo;</em> This requires five independent data-gathering branches, a dependency chain (kernel version must be discovered before searching for CVEs), and cross-domain synthesis.
+</p>
+
+<p class="dag-label">ReAct baseline &mdash; 12 sequential turns, cumulative context</p>
+<div class="dag"><span class="dim">turn 1:</span>  <span class="nd">sysinfo</span>          → kernel = 5.10.0-37      <span class="dim">(context: 2K)</span>
+<span class="dim">turn 2:</span>  <span class="nd">disk_usage</span>       → / is 78% full            <span class="dim">(context: 4K)</span>
+<span class="dim">turn 3:</span>  <span class="nd">net_info</span>         → 8 listening ports         <span class="dim">(context: 7K)</span>
+<span class="dim">turn 4:</span>  <span class="nd">bash find .git</span>   → 25 repos found            <span class="dim">(context: 11K)</span>
+<span class="dim">turn 5:</span>  <span class="nd">git status</span>       → repo 1 status             <span class="dim">(context: 13K)</span>
+  <span class="dim">...</span>
+<span class="dim">turn 10:</span> <span class="nd">env_list</span>         → no leaked keys            <span class="dim">(context: 28K)</span>
+<span class="dim">turn 11:</span> <span class="nd">web_search CVE</span>   → 3 advisories              <span class="dim">(context: 31K)</span>
+<span class="dim">turn 12:</span> <span class="dim">synthesize</span>       → final report              <span class="dim">(context: 34K)</span></div>
+
+<p class="prose">
+  Each turn carries the full history. By turn 12, the context exceeds 30K tokens. Early details (the disk usage numbers, the specific kernel version) risk being deprioritized by the model&rsquo;s attention mechanism. Total cost: ~130K tokens across 12 LLM calls. Latency: 12 serial round-trips.
+</p>
+
+<p class="dag-label">Our system &mdash; parallel DAG, 3 LLM calls</p>
+<div class="dag"><span class="dim">planner (1 LLM call)</span>
+  <span class="arrow">│</span>
+  <span class="arrow">├──</span> <span class="nd">sysinfo</span>       ─┐
+  <span class="arrow">├──</span> <span class="nd">disk_usage</span>    ─┤
+  <span class="arrow">├──</span> <span class="nd">net_info</span>      ─┤  <span class="dim">← all 7 fire in parallel</span>
+  <span class="arrow">├──</span> <span class="nd">bash find</span>     ─┤
+  <span class="arrow">├──</span> <span class="nd">process_list</span>  ─┤
+  <span class="arrow">├──</span> <span class="nd">env_list</span>      ─┤
+  <span class="arrow">└──</span> <span class="nd">bash uname</span>   ─┘
+                    <span class="arrow">▼</span>
+                <span class="ref">◆ reflect</span>  <span class="dim">(1 LLM call &mdash; evaluates all 7 results)</span>
+                    <span class="arrow">│</span>
+            <span class="dim">decision: "replan &mdash; need CVE search + git status"</span>
+                    <span class="arrow">│</span>
+  <span class="arrow">├──</span> <span class="nd">web_search</span> <span class="dim">(query injected via param_refs ← sysinfo.os)</span>
+  <span class="arrow">├──</span> <span class="nd">git status</span> <span class="dim">(path from bash find results)</span>
+  <span class="arrow">└──</span> <span class="nd">git status</span> <span class="dim">(second repo)</span>
+                    <span class="arrow">▼</span>
+                <span class="ref">◆ reflect</span>  <span class="dim">(evaluates new results &mdash; "conclude")</span>
+                    <span class="arrow">│</span>
+                    <span class="arrow">▼</span>
+                <span class="agg">aggregator</span> <span class="dim">(1 LLM call &mdash; synthesizes all evidence)</span></div>
+
+<p class="prose">
+  Seven tools fire in parallel in the first wave. The reflection evaluates all results, identifies gaps (no CVE search, no git status), and replans with targeted follow-ups. The CVE search uses <code>param_refs</code> to inject the kernel version discovered by sysinfo. A second reflection confirms sufficiency. The aggregator synthesizes everything into a structured report. Total: 3&ndash;4 LLM calls, ~22K tokens, 10&ndash;15 seconds. The LLM never sees more than one phase of results at a time.
+</p>
+
+<div class="insight warm">
+  <strong>The running example illustrates three key properties.</strong> (1) Parallel execution reduces latency from 12 serial round-trips to the depth of the dependency graph (2 phases). (2) The reflection loop ensures multi-phase tasks complete fully&mdash;the system does not stop after the first wave of results. (3) Parameter dependency injection bridges plan-time structure and runtime data, enabling the planner to express &ldquo;search for CVEs affecting whatever kernel version sysinfo returns&rdquo; without knowing the version at plan time.
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- 3. SYSTEM MODEL                                                        -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h2><span class="section-num">3.</span> System Model</h2>
+<h3>Graph structure</h3>
+
+<p class="prose">
+  The fundamental execution unit is a <strong>node</strong>&mdash;a single discrete operation within a directed acyclic graph. Every node carries a unique identifier, a type, a lifecycle state, upstream dependencies, a parameter map, and a result slot populated upon completion. Nodes are connected by directed edges through <code>depends_on</code> references: a node will not fire until every dependency has reached a terminal state.
+</p>
+
+<p class="prose">
+  The planner LLM produces the initial graph from the task description. During execution, the graph is <strong>live</strong>&mdash;reflection checkpoints, observers, and failure-repair calls may graft additional nodes at any point. Every state transition is emitted as a streaming event, making the full execution trace observable in real time.
+</p>
+
+<h4>Node lifecycle</h4>
+<div class="dag"><span class="dim">State transitions:</span>
+
+  <span class="nd">pending</span>  <span class="arrow">──→</span>  <span class="nd">running</span>  <span class="arrow">──→</span>  <span class="nd">resolved</span>   <span class="dim">(success &mdash; result populated)</span>
+                          <span class="arrow">──→</span>  <span class="nd">failed</span>     <span class="dim">(error &mdash; micro-planner may recover)</span>
+                          <span class="arrow">──→</span>  <span class="nd">skipped</span>    <span class="dim">(cascaded from failed dependency)</span></div>
+
+<p class="prose">
+  A node remains <strong>pending</strong> until all dependencies reach a terminal state. It then transitions to <strong>running</strong>, at which point parameter injections are resolved and the operation executes. Terminal states are final&mdash;a node is never re-executed. If a node fails, the micro-planner may graft replacement nodes rather than retrying the original.
+</p>
+
+<h4>Edges: ordering and data flow</h4>
+
+<p class="prose">
+  <strong><code>depends_on</code></strong> establishes execution ordering. A node will not fire until all referenced nodes have completed. Nodes without dependencies execute immediately and in parallel.
+</p>
+
+<p class="prose">
+  <strong><code>param_refs</code></strong> establishes data flow. Each entry maps a parameter name to a source node, a dot-path field selector into that node&rsquo;s JSON result, and an optional template string. At fire time, the scheduler extracts the value, applies the template if present, and injects the result into the parameter map. Any node referenced in <code>param_refs</code> is automatically added to <code>depends_on</code>.
+</p>
+
+<div class="dag"><span class="dim">Example: meeting booking with dependency injection</span>
+
+  <span class="nd">step 0</span>  check_calendars      <span class="dim">params: {team: "engineering"}</span>
+  <span class="nd">step 1</span>  create_event         <span class="dim">params: {title: "Sync"}</span>
+                                     <span class="dim">param_refs: {start: {step: 0, field: "slots.0.start"}}</span>
+                                     <span class="dim">depends_on: [0]</span>
+  <span class="nd">step 2</span>  send_invites         <span class="dim">param_refs: {event_id: {step: 1, field: "event_id"},</span>
+                                     <span class="dim">             attendees: {step: 0, field: "members"}}</span>
+                                     <span class="dim">depends_on: [0, 1]</span></div>
+
+<p class="prose">
+  Each value materializes exactly when it becomes available. The planner declared the complete three-step workflow upfront without knowing any concrete values&mdash;it only specified <em>where</em> each value would come from. The mechanism is structural (the scheduler enforces dependency ordering), fails fast (missing fields produce immediate diagnostic errors), and composable (a single step may reference multiple source nodes).
+</p>
+
+<h4>Node types</h4>
+
+<div class="node-legend">
+  <div class="node-type">
+    <div class="node-dot" style="background:#0284c7"></div>
+    <div><strong>Tool</strong> Executes a registered tool with declared parameters. Subject to the execution gate. The primary node type.</div>
+  </div>
+  <div class="node-type">
+    <div class="node-dot" style="background:#d97706"></div>
+    <div><strong>Reflection</strong> LLM checkpoint that evaluates completed results. Can continue, conclude early, or replan by grafting new nodes.</div>
+  </div>
+  <div class="node-type">
+    <div class="node-dot" style="background:#059669"></div>
+    <div><strong>Observer</strong> Lightweight per-node LLM call (Orchestrator mode). Evaluates a single result; can inject nodes, cancel pending work, or trigger reflection.</div>
+  </div>
+  <div class="node-type">
+    <div class="node-dot" style="background:#9333ea"></div>
+    <div><strong>Micro-Planner</strong> Scoped failure-repair call. Evaluates a failed node and produces replacement nodes: retry, substitute, or skip.</div>
+  </div>
+  <div class="node-type">
+    <div class="node-dot" style="background:#dc2626"></div>
+    <div><strong>Interjection</strong> Human-triggered checkpoint. The operator&rsquo;s message gates all pending nodes, giving the ability to redirect or halt an active execution.</div>
+  </div>
+  <div class="node-type">
+    <div class="node-dot" style="background:#7c3aed"></div>
+    <div><strong>Aggregator</strong> Final LLM call. Synthesizes all gathered results into a structured output. Fires only after all other nodes complete and the final reflection concludes.</div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- 4. EXECUTION MODES                                                     -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h2><span class="section-num">4.</span> Execution Modes</h2>
+<h3>Three modes for three tradeoffs</h3>
+
+<p class="prose">
+  The planner produces a dependency graph. Nodes without dependencies execute immediately and in parallel. The system then diverges into one of three modes, which differ only in how they evaluate results after each node completes.
+</p>
+
+<div class="mode-grid">
+  <div class="mode-card mc-reflect">
+    <h4>Reflect</h4>
+    <p>Reflection checkpoints are injected between dependency waves. At each boundary, the system evaluates all completed results and may replan. Execution pauses only at wave boundaries. Lowest LLM call count.</p>
+  </div>
+  <div class="mode-card mc-nreflect">
+    <h4>nReflect</h4>
+    <p>Reflection fires after every <em>N</em> node completions regardless of graph structure. Decouples evaluation frequency from dependency depth. Suited to throughput-sensitive scenarios.</p>
+  </div>
+  <div class="mode-card mc-orch">
+    <h4>Orchestrator</h4>
+    <p>A lightweight observer evaluates each completed node. Observers can inject follow-ups, cancel pending work, or trigger full reflections. Per-result reactivity at parallel speed. Highest quality output.</p>
+  </div>
+</div>
+
+<p class="dag-label">Reflect &mdash; reflection gates between dependency waves</p>
+<div class="dag"><span class="dim">planner</span>
+  <span class="arrow">│</span>
+  <span class="arrow">├──</span> <span class="nd">tool A</span> ─┐
+  <span class="arrow">├──</span> <span class="nd">tool B</span> ─┤
+  <span class="arrow">└──</span> <span class="nd">tool C</span> ─┤
+                  <span class="arrow">▼</span>
+              <span class="ref">◆ reflect</span>  <span class="dim">← evaluates A, B, C; may replan</span>
+                  <span class="arrow">│</span>
+                  <span class="arrow">├──</span> <span class="nd">tool D</span> ─┐
+                  <span class="arrow">└──</span> <span class="nd">tool E</span> ─┤
+                                <span class="arrow">▼</span>
+                            <span class="ref">◆ reflect</span>  <span class="dim">← conclude or replan again</span>
+                                <span class="arrow">│</span>
+                            <span class="agg">aggregator</span></div>
+
+<p class="dag-label">Orchestrator &mdash; per-node observer with injection capability</p>
+<div class="dag"><span class="dim">planner</span>
+  <span class="arrow">│</span>
+  <span class="arrow">├──</span> <span class="nd">tool A</span> → <span class="obs">○ obs</span> <span class="dim">→ "continue"</span>
+  <span class="arrow">├──</span> <span class="nd">tool B</span> → <span class="obs">○ obs</span> <span class="dim">→ "inject"</span> ──┐
+  <span class="arrow">├──</span> <span class="nd">tool C</span> → <span class="obs">○ obs</span> <span class="dim">→ "cancel E"</span> <span class="arrow">│</span>
+  <span class="arrow">└──</span> <span class="nd">tool D</span> → <span class="obs">○ obs</span> <span class="dim">→ "continue"</span> <span class="arrow">│</span>
+                                          <span class="arrow">│</span>
+       <span class="nd">tool F</span> <span class="dim">(injected)</span> ◄────────────────┘
+          <span class="arrow">│</span>
+          <span class="arrow">└──</span> <span class="obs">○ obs</span> <span class="dim">→ "reflect"</span>
+                   <span class="arrow">│</span>
+               <span class="ref">◆ reflect</span>
+                   <span class="arrow">│</span>
+               <span class="agg">aggregator</span></div>
+
+<h4>Iterative final reflection</h4>
+
+<p class="prose">
+  A structural guarantee ensures that a reflection evaluates results after every batch of tool completions. When all planned nodes complete, if skill work has occurred since the last reflection, the system injects a new reflection node into the graph. If the reflection replans, the new nodes execute through the normal scheduler loop, and the process repeats. This continues until the reflection concludes, the budget is exhausted, or the wall clock expires. The aggregator fires only after the final reflection approves.
+</p>
+
+<p class="prose">
+  This mechanism is critical for multi-phase tasks. Without it, the system would complete the first wave of tool calls, skip deeper follow-ups, and hand incomplete evidence to the aggregator. With it, the reflection loop drives the task to completion: search → fetch → reflect → need more data → fetch again → reflect → sufficient → aggregate.
+</p>
+
+<h4>Preemption</h4>
+
+<p class="prose">
+  The graph is preemptable at any point. An operator may inject a message into the active graph. The scheduler creates a gating reflection node with the operator&rsquo;s message as input. All pending nodes are blocked behind it. Running nodes complete normally, but no new nodes fire until the interjection reflection resolves. The operator&rsquo;s guidance may continue the plan, conclude early, or replan entirely.
+</p>
+
+<h4>Failure recovery</h4>
+
+<p class="prose">
+  When a tool node fails, the micro-planner evaluates the error alongside sibling results and produces a replacement subgraph: retry with different parameters, substitute an alternative tool, or skip. Failed nodes are not retried&mdash;the replacement is a new node grafted onto the graph with a <code>spawned_by</code> reference to the failed original. This preserves the audit trail.
+</p>
+
+<h4>The execution layer abstraction</h4>
+
+<p class="prose">
+  The LLM is never told it is part of a pipeline. It receives a task, a set of tools, and evidence gathered so far. It produces a plan, evaluates progress, or synthesizes results. Each LLM call is self-contained: the planner does not know there will be a reflection; the reflection does not know how many parallel steps ran; the aggregator does not know which mode was used. The execution layer surfaces <strong>inputs and outputs</strong>&mdash;tool results, error messages, evidence summaries&mdash;while managing scheduling, dependency resolution, and adaptation internally.
+</p>
+
+<div class="insight">
+  <strong>The LLM should have no knowledge of its execution layer.</strong> Execution mechanics&mdash;parallel scheduling, dependency resolution, parameter injection, failure recovery&mdash;are infrastructure that do not improve reasoning quality. By abstracting them away, each LLM call operates on a clean, bounded context focused on the task at hand.
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- 5. EXECUTION GATE                                                      -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h2><span class="section-num">5.</span> Execution Gate</h2>
+<h3>Four variables, four sources</h3>
+
+<p class="prose">
+  Before every tool execution&mdash;whether planned, replanned by reflection, or injected by an observer&mdash;the gate evaluates four independent concerns. No single entity, including the LLM, controls more than one.
+</p>
+
+<table class="tier-table">
+  <thead>
+    <tr><th style="width:100px">Variable</th><th style="width:70px">Question</th><th>Set by</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Scope</strong></td><td>Which?</td><td>Policy</td>
+      <td>A composable permission boundary determining which tools the agent may invoke. Defined as allowlists with optional per-tool impact ceilings. Default deny: absent tools are invisible to the planner and rejected by the scheduler. Multiple scopes merge by union (tools) and minimum (caps).</td>
+    </tr>
+    <tr>
+      <td><strong>Intent</strong></td><td>Who?</td><td>Caller</td>
+      <td>The operational ceiling for the current task. An integer set by the trigger source&mdash;never by the LLM. A routine scheduler invokes at intent 0 (observe); a human operator at intent 1 (operate); an explicit override at intent 2.</td>
+    </tr>
+    <tr>
+      <td><strong>Impact</strong></td><td>What?</td><td>Tool author</td>
+      <td>Declared per-tool at compile time. A read-only query is 0; a write is 1; a deletion is 2. Parameter-aware: the same tool may return different impact depending on its arguments.</td>
+    </tr>
+    <tr>
+      <td><strong>Clearance</strong></td><td>Where?</td><td>External authority</td>
+      <td>Resource-level authorization delegated to an external HTTP endpoint. The gate sends tool name, parameters, and caller identity; the endpoint returns allow/deny. Unreachable or timed-out endpoints result in denial. The agent framework holds no domain-specific authorization logic.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="gate-box">
+  <div class="gate-label">Execution Gate</div>
+  <div class="gate-formula">tool &isin; <em>scope</em> &nbsp;&and;&nbsp; tool.<em>impact</em>(params) &le; min(<em>intent</em>, <em>scope_cap</em>) &nbsp;&and;&nbsp; <em>clearance</em>(tool, params, user) = allow</div>
+  <div class="gate-desc">
+    Three checks, evaluated in order of cost. <strong>Scope</strong>: set membership test. <strong>Impact</strong>: integer comparison. <strong>Clearance</strong>: HTTP round-trip (short-circuited when cheaper checks fail). All three are structural&mdash;no LLM is involved. The most restrictive ceiling wins.
+  </div>
+</div>
+
+<h4>Three layers of scope enforcement</h4>
+
+<p class="prose">
+  <strong>Layer 1: Planner visibility.</strong> The planner receives only tools in scope. It cannot plan what it cannot see.<br>
+  <strong>Layer 2: Scheduler rejection.</strong> Even if a tool name appears through hallucination or prompt injection, the scheduler rejects it before the gate.<br>
+  <strong>Layer 3: Impact cap enforcement.</strong> A tool in scope may still be capped. A shell tool capped at impact 1 permits diagnostic commands but blocks destructive operations.
+</p>
+
+<h4>Delegated clearance</h4>
+
+<p class="prose">
+  Resource-level authorization depends on domain knowledge the agent framework cannot possess. A hospital needs patient-ward access rules. A drone needs geofence boundaries. An enterprise needs Active Directory group policies. Rather than encoding domain logic, the gate delegates: it sends a structured request to an external endpoint and respects the boolean response unconditionally.
+</p>
+
+<div class="dag"><span class="dim">Clearance protocol:</span>
+
+  Gate <span class="arrow">──→</span> POST endpoint  <span class="dim">{tool: "navigate", params: {zone: "zone_3"}, user: "alpha"}</span>
+       <span class="arrow">◄──</span> <span class="dim">{allow: false, reason: "zone_3 outside authorized airspace"}</span></div>
+
+<p class="prose">
+  The design is <strong>domain-agnostic</strong> (the framework asks, not reasons), <strong>fail-secure</strong> (unreachable endpoints deny), and <strong>parameter-aware</strong> (the same tool can be approved for some invocations and denied for others). For latency-sensitive deployments, the endpoint runs on localhost with sub-millisecond overhead.
+</p>
+
+<h4>Trust model</h4>
+
+<p class="prose">
+  Two trust boundaries. The <strong>tool author</strong> declares impact at compile time&mdash;the gate enforces the contract. The <strong>clearance authority</strong> decides resource access&mdash;the gate respects the decision. The LLM is trusted with neither. This makes the gate robust to prompt injection: even if adversarial input manipulates the planner into requesting a high-impact tool, the structurally assigned scope, intent, and clearance reject the call.
+</p>
+
+<div class="insight green">
+  <strong>Intent is never set by the LLM.</strong> If the LLM could set its own intent, the gate would be meaningless&mdash;equivalent to asking the model to approve its own actions. Intent must originate from outside the LLM&rsquo;s control surface: a deployment configuration, a process boundary, or an authenticated API caller.
+</div>
+
+<h4>Gate pipeline</h4>
+
+<p class="prose">
+  The following diagram traces a single tool invocation from LLM output to execution or rejection. The LLM produces a tool name and parameters&mdash;either as a JSON plan step (structured mode) or a function call (native mode). The execution layer receives this as data and evaluates it through the gate. At no point does the LLM participate in the gate decision.
+</p>
+
+<div class="dag"><span class="dim">Example: user requests "delete /tmp/test.txt" at intent = operate (1)</span>
+
+  <span class="nd">LLM</span> <span class="arrow">──→</span> <span class="dim">{"skill":"bash","params":{"command":"rm /tmp/test.txt"}}</span>
+  <span class="dim">        (LLM imagines the command — has no say in what happens next)</span>
+
+       <span class="arrow">│</span>
+       <span class="arrow">▼</span>
+
+  <span class="obs">SCOPE</span>   <span class="dim">Is "bash" in user's allowed tools?</span>
+          <span class="dim">Source: admin-defined scope (DB) — not LLM</span>
+          <span class="arrow">→</span> <span class="dim">tools: ["*"] — pass</span>
+
+       <span class="arrow">│</span>
+       <span class="arrow">▼</span>
+
+  <span class="ref">IMPACT</span>  <span class="dim">bash.Impact({"command":"rm /tmp/test.txt"})</span>
+          <span class="dim">Source: compiled Go method on the tool struct — not LLM</span>
+          <span class="arrow">→</span> <span class="dim">regex matches "rm" — returns 2 (control)</span>
+
+       <span class="arrow">│</span>
+       <span class="arrow">▼</span>
+
+  <span class="ref">INTENT</span>  <span class="dim">impact(2) ≤ min(intent(1), scope_cap(1))</span>
+          <span class="dim">Source: operator's session setting — not LLM</span>
+          <span class="arrow">→</span> <span class="inj">2 > 1 — BLOCKED</span>
+
+       <span class="arrow">│</span>
+       <span class="arrow">▼</span>
+
+  <span class="dim">CLEARANCE never reached (cheaper checks failed first)</span>
+
+  <span class="dim">Result: tool.Execute() never called. Error returned to aggregator.</span></div>
+
+<p class="prose">
+  The same pipeline applies identically regardless of how the plan was produced. Whether the planner wrote a JSON array in its text response or called a <code>plan()</code> function via native tool calling, the gate receives the same input: a tool name and a parameter map. The structural separation between LLM output and tool execution is absolute.
+</p>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- 6. EXPERIMENTS                                                         -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h2><span class="section-num">6.</span> Experiments</h2>
+<h3>Complexity analysis</h3>
+
+<p class="prose">
+  Let <strong>n</strong> = tool calls, <strong>d</strong> = dependency depth, <strong>k</strong> = average result size (tokens), <strong>c</strong> = base context, <strong>N</strong> = batch size (nReflect). The dominant cost is total tokens transmitted to the LLM.
+</p>
+
+<p class="prose">
+  <strong>ReAct:</strong> Turn <em>i</em> carries <em>c&nbsp;+&nbsp;ik</em> tokens. Total: <em>&sum;(c&nbsp;+&nbsp;ik)</em> &asymp; <strong>O(n&sup2;k)</strong>. Serial latency: O(n).
+</p>
+
+<p class="prose">
+  <strong>Reflect:</strong> Planner sees <em>c</em>. Each of <em>d</em> reflections sees accumulated phase results. Aggregator sees all <em>n</em> results. Total: <strong>O(nkd)</strong>. When d&nbsp;&laquo;&nbsp;n, approaches O(nk). Latency: O(d).
+</p>
+
+<p class="prose">
+  <strong>Orchestrator:</strong> Each observer sees exactly one result (<em>k</em> tokens). Total: <strong>O(nk)</strong>&mdash;strictly linear. More LLM calls (n&nbsp;+&nbsp;d&nbsp;+&nbsp;1) but each individually cheap.
+</p>
+
+<h4>Theoretical comparison</h4>
+
+<table>
+  <thead>
+    <tr>
+      <td></td>
+      <td class="col-tag col-tag-baseline">Baseline</td>
+      <td class="col-tag col-tag-ours" colspan="3">Optimistic DAG (ours)</td>
+    </tr>
+    <tr>
+      <th></th>
+      <th class="col-react col-group-baseline">ReAct</th>
+      <th class="col-reflect col-group-ours">Reflect</th>
+      <th class="col-nreflect col-group-ours">nReflect</th>
+      <th class="col-orch col-group-ours">Orchestrator</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="label">Token Complexity</td><td class="v-worst">O(n&sup2;k)</td><td class="v-best ours-bg">O(nkd)</td><td class="v-best ours-bg">O(n&sup2;k / N)</td><td class="v-best ours-bg">O(nk)</td></tr>
+    <tr><td class="label">Latency (serial)</td><td class="v-worst">O(n)</td><td class="v-best ours-bg">O(d)</td><td class="v-best ours-bg">O(n / N)</td><td class="v-best ours-bg">O(d)</td></tr>
+    <tr><td class="label">Token Burn (n=7)</td><td class="v-worst">~63 K</td><td class="v-best ours-bg">~22 K</td><td class="v-best ours-bg">~20 K</td><td class="v ours-bg">~34 K</td></tr>
+    <tr><td class="label">End-to-End Latency</td><td class="v-worst">28 – 40 s</td><td class="v-best ours-bg">8 – 12 s</td><td class="v-best ours-bg">7 – 10 s</td><td class="v ours-bg">10 – 16 s</td></tr>
+    <tr class="summary-row"><td class="label">Cost per Query (n=7)</td><td class="v-worst">$0.19</td><td class="v-best ours-bg">$0.07</td><td class="v-best ours-bg">$0.06</td><td class="v ours-bg">$0.10</td></tr>
+  </tbody>
+</table>
+
+<h4>Observed results (99 task executions)</h4>
+
+<p class="prose">
+  99 task executions (30 per mode) across three categories: simple (single-phase retrieval), targeted (multi-step analysis), and complex (multi-phase assessment with cross-source correlation). All queries executed against a deployed agent instance with live operational data. ReAct estimates assume sequential execution with cumulative context.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <td></td>
+      <td class="col-tag col-tag-ours" colspan="3">Observed Mean (30 queries per mode)</td>
+    </tr>
+    <tr>
+      <th></th>
+      <th class="col-reflect col-group-ours">Reflect</th>
+      <th class="col-nreflect col-group-ours">nReflect</th>
+      <th class="col-orch col-group-ours">Orchestrator</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="label" colspan="4" style="font-weight:700; padding-top:10px;">Simple queries (10 per mode)</td></tr>
+    <tr><td class="label">Mean Latency</td><td class="v-best ours-bg">7.0 s</td><td class="v ours-bg">9.0 s</td><td class="v ours-bg">8.0 s</td></tr>
+    <tr><td class="label">Mean LLM Calls</td><td class="v-best ours-bg">3.0</td><td class="v-best ours-bg">3.0</td><td class="v-best ours-bg">3.0</td></tr>
+    <tr><td class="label" colspan="4" style="font-weight:700; padding-top:10px;">Targeted queries (10 per mode)</td></tr>
+    <tr><td class="label">Mean Latency</td><td class="v-best ours-bg">13.0 s</td><td class="v ours-bg">15.2 s</td><td class="v ours-bg">14.3 s</td></tr>
+    <tr><td class="label">Mean Steps</td><td class="v ours-bg">6.4</td><td class="v ours-bg">7.3</td><td class="v ours-bg">17.5</td></tr>
+    <tr><td class="label">Replans</td><td class="v ours-bg">0</td><td class="v ours-bg">2</td><td class="v ours-bg">1</td></tr>
+    <tr><td class="label" colspan="4" style="font-weight:700; padding-top:10px;">Complex queries (10 per mode)</td></tr>
+    <tr><td class="label">Mean Latency</td><td class="v-best ours-bg">14.8 s</td><td class="v ours-bg">18.3 s</td><td class="v ours-bg">22.8 s</td></tr>
+    <tr><td class="label">Mean Steps</td><td class="v ours-bg">8.9</td><td class="v ours-bg">10.5</td><td class="v ours-bg">22.6</td></tr>
+    <tr><td class="label">Replans</td><td class="v ours-bg">0</td><td class="v ours-bg">2</td><td class="v ours-bg">1</td></tr>
+    <tr><td class="label" colspan="4" style="font-weight:700; padding-top:10px;">Reliability</td></tr>
+    <tr class="summary-row"><td class="label">Success Rate</td><td class="v-best ours-bg">30 / 30</td><td class="v-best ours-bg">30 / 30</td><td class="v-best ours-bg">30 / 30</td></tr>
+  </tbody>
+</table>
+
+<h4>Quality assessment</h4>
+
+<p class="prose">
+  9 queries (3 per category) were scored 1&ndash;5 on four dimensions: accuracy, completeness, specificity, and actionability (maximum 20 per query).
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Category</th>
+      <th class="col-reflect col-group-ours">Reflect</th>
+      <th class="col-nreflect col-group-ours">nReflect</th>
+      <th class="col-orch col-group-ours">Orchestrator</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="label">Simple (mean)</td><td class="v ours-bg">11.0</td><td class="v ours-bg">13.7</td><td class="v-best ours-bg">15.3</td></tr>
+    <tr><td class="label">Targeted (mean)</td><td class="v ours-bg">13.3</td><td class="v-best ours-bg">15.0</td><td class="v ours-bg">14.3</td></tr>
+    <tr><td class="label">Complex (mean)</td><td class="v ours-bg">14.7</td><td class="v ours-bg">14.7</td><td class="v-best ours-bg">15.3</td></tr>
+    <tr class="summary-row"><td class="label">Overall mean</td><td class="v ours-bg">13.0</td><td class="v ours-bg">14.4</td><td class="v-best ours-bg">15.0</td></tr>
+  </tbody>
+</table>
+
+<p class="prose">
+  <strong>Reflect</strong> is fastest and most predictable (always 3 LLM calls) but inconsistent in output quality. <strong>nReflect</strong> delivers the most consistent quality with adaptive depth when warranted. <strong>Orchestrator</strong> produces the highest quality output at moderate additional cost, using 2&ndash;3&times; more tool executions than Reflect for the same queries.
+</p>
+
+<div class="insight warm">
+  <strong>The gap accelerates with task complexity.</strong> At n=7, the advantage over ReAct is 3&times;. At n=18, it is 7&times;. At n=30, it is 12&times;. Fixed-context windows also maintain consistent reasoning quality regardless of task size, avoiding the &ldquo;lost in the middle&rdquo; degradation that accompanies large cumulative contexts.
+</div>
+
+<h4>GAIA benchmark (127 text-only questions)</h4>
+
+<p class="prose">
+  Evaluated on the GAIA validation set (Mialon et al., 2023)&mdash;127 text-only questions requiring multi-step tool use, web research, and reasoning. Planner: GPT-4o (native function calling). Executor: GPT-4o-mini. DAG Reflect mode, 180s wall clock.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>System</th>
+      <th>Architecture</th>
+      <th>Level 1</th>
+      <th>Level 2</th>
+      <th>Level 3</th>
+      <th>Average</th>
+      <th>Avg Latency</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="label">Human (Mialon et al.)</td><td class="v">&mdash;</td><td class="v">92%</td><td class="v">92%</td><td class="v">92%</td><td class="v-best">92%</td><td class="v">&mdash;</td></tr>
+    <tr><td class="label">GPT-4 + plugins (Mialon et al.)</td><td class="v">ReAct</td><td class="v">47%</td><td class="v">15%</td><td class="v">5%</td><td class="v">15%</td><td class="v">~45 s</td></tr>
+    <tr style="font-weight:600; background:rgba(255,251,235,0.5);"><td class="label">This work (GPT-4o)</td><td class="v">DAG + IBE gate</td><td class="v">21.4%</td><td class="v">12.1%</td><td class="v">0%</td><td class="v">15.0%</td><td class="v-best">10.3 s</td></tr>
+  </tbody>
+</table>
+
+<p class="prose">
+  At comparable accuracy to the ReAct baseline (15%), our system completes each question in 10.3 seconds versus ~45 seconds for sequential execution&mdash;a <strong>3&ndash;4&times; latency reduction</strong>. The accuracy ceiling is the model&rsquo;s reasoning capability, not the architecture. The execution layer completes all 127 questions without system errors.
+</p>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- 7. RELATED WORK                                                        -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h2><span class="section-num">7.</span> Related Work</h2>
+<h3>Positioning</h3>
+
+<p class="prose">
+  <strong>ReAct</strong> (Yao et al., 2023) established sequential think-act-observe with O(n&sup2;k) token complexity and O(n) latency. AutoGPT and BabyAGI extended this with persistent memory but retained sequential execution.
+</p>
+
+<p class="prose">
+  <strong>LangGraph</strong> models workflows as state machines with the LLM at every routing decision. Parallelism requires explicit fan-out commands. Safety is limited to human-in-the-loop breakpoints.
+</p>
+
+<p class="prose">
+  <strong>LLM Compiler</strong> (Kim et al., 2024) is the closest prior work. It generates a DAG, dispatches in parallel, and reports up to 3.7&times; speedup. Our system extends it in four directions: field-level dependency injection (vs. whole-output substitution), mid-execution adaptation via three modes (vs. post-completion Joiner only), structural safety gating (vs. none), and scoped failure recovery (vs. full replanning).
+</p>
+
+<p class="prose">
+  <strong>Multi-agent frameworks</strong> (CrewAI, AgentArch) organize agents by role. AgentArch (2025) found that multi-agent ReAct &ldquo;consistently underperformed&rdquo; single-agent function calling, with only 35.3% success on complex tasks and 6.3% reproducibility. Our system achieves specialization through the tool interface rather than agent personas.
+</p>
+
+<table>
+  <thead><tr><th>System</th><th>Execution</th><th>Parallelism</th><th>Data Flow</th><th>Safety</th></tr></thead>
+  <tbody>
+    <tr><td>ReAct</td><td>Sequential</td><td>None</td><td>Cumulative context</td><td>None</td></tr>
+    <tr><td>LangGraph</td><td>State machine</td><td>Coded fan-out</td><td>Shared mutable state</td><td>Human-in-loop</td></tr>
+    <tr><td>LLM Compiler</td><td>DAG</td><td>Dependency-based</td><td>$N substitution</td><td>None</td></tr>
+    <tr><td>CrewAI</td><td>Sequential/hier.</td><td>None</td><td>Task output chain</td><td>Tool scoping</td></tr>
+    <tr style="font-weight:600; background:rgba(255,251,235,0.5);"><td>This work</td><td>DAG (3 modes)</td><td>Dependency-based</td><td>Field-level param_refs</td><td>4-var gate + delegated clearance</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- 8. CONCLUSIONS                                                         -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h2><span class="section-num">8.</span> Conclusions</h2>
+<h3>Summary and future work</h3>
+
+<p class="prose">
+  We presented an optimistic DAG execution layer for autonomous LLM agents that reduces token complexity from O(n&sup2;k) to O(nk), serial latency from O(n) to O(d), and enforces tool safety through a four-variable structural gate independent of LLM output. Three execution modes provide a design space trading speed, cost, and depth. Delegated clearance extends the gate to domain-specific resource authorization without domain logic in the agent. On 99 observed task executions, all three modes completed successfully with 3&ndash;7&times; latency improvement over estimated sequential baselines.
+</p>
+
+<p class="prose">
+  <strong>Limitations.</strong> Output quality depends on the planner&rsquo;s ability to decompose queries into effective tool calls with appropriate dependencies. A dual-model architecture (stronger reasoning model for planning, cheaper executor model for reflections) partially addresses this. The execution gate controls which tools execute and at what impact level, but does not control what information the LLM processes once tool results are in context&mdash;information flow control is orthogonal.
+</p>
+
+<h4>Future work</h4>
+<ul class="contributions">
+  <li><strong>Procedural memory.</strong> Agent self-modification of its own prompts and planning strategies based on accumulated experience, following the procedural memory framework from cognitive architectures.</li>
+  <li><strong>Semantic skill routing.</strong> Embedding-based tool selection to reduce planner context when the tool registry is large, presenting only semantically relevant tools for each query.</li>
+  <li><strong>Cross-agent coordination.</strong> Extending the DAG model to distributed multi-agent execution via gossip-based peer-to-peer mesh networking, where each agent maintains its own execution gate and clearance authority.</li>
+</ul>
+
+<div class="footer">
+  Optimistic DAG Execution with Scoped Intent-Gated Tool Control &mdash; Cormac Guerin<br>
+  Cost estimates assume Sonnet-class pricing ($3/M input, $15/M output) and local tool execution (~100 ms per call).<br>
+  Benchmark: 99 executions, single pass, no selection or post-hoc filtering.
+</div>
+
+</body>
+</html>

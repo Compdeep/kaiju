@@ -1,0 +1,91 @@
+:root {
+  --bg: #FAFAFA;
+  --surface: #FFFFFF;
+  --surface-hover: #F5F5F5;
+  --surface-raised: #FFFFFF;
+  --border: #E8E8E8;
+  --border-subtle: #F0F0F0;
+  --text: #1A1A1A;
+  --text-secondary: #6B6B6B;
+  --text-muted: #A0A0A0;
+
+  --accent: #38BDF8;
+  --accent-hover: #0EA5E9;
+  --accent-subtle: #F0F9FF;
+  --accent-warm: #F97316;
+  --accent-warm-subtle: #FFF7ED;
+
+  --signal-green: #22C55E;
+  --signal-amber: #EAB308;
+  --signal-red: #EF4444;
+  --signal-green-bg: #F0FDF4;
+  --signal-amber-bg: #FEFCE8;
+  --signal-red-bg: #FEF2F2;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 1px 4px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+  --radius: 8px;
+  --radius-sm: 5px;
+  --radius-lg: 14px;
+  --transition: 120ms ease;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --scrollbar-thumb: #D4D4D4;
+  --scrollbar-track: transparent;
+  --chat-accent: var(--accent);
+
+  /* Panel layout */
+  --gutter-idle: #E8E8E8;
+  --gutter-hover: #D4D4D4;
+  --gutter-active: var(--accent);
+  --sidebar-w: 220px;
+  --sidebar-min: 160px;
+  --sidebar-max: 360px;
+  --chat-min: 400px;
+  --panel-min: 320px;
+  --panel-max: 900px;
+  --panel-default: 480px;
+  --gutter: 6px;
+  --gutter-hit: 12px;
+}
+
+[data-theme="dark"] {
+  --bg: #09090B;
+  --surface: #111113;
+  --surface-hover: #1A1A1E;
+  --surface-raised: #18181B;
+  --border: #27272A;
+  --border-subtle: #1C1C1F;
+  --text: #FAFAFA;
+  --text-secondary: #A1A1AA;
+  --text-muted: #52525B;
+
+  --accent: #E879A0;
+  --accent-hover: #F472B6;
+  --accent-subtle: #1F0A14;
+  --accent-warm: #86EFAC;
+  --accent-warm-subtle: #052E16;
+
+  --signal-green: #86EFAC;
+  --signal-amber: #FDE68A;
+  --signal-red: #FCA5A5;
+  --signal-green-bg: #052E16;
+  --signal-amber-bg: #1C1A00;
+  --signal-red-bg: #2A0A0A;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow: 0 1px 4px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.6);
+
+  --scrollbar-thumb: #333;
+  --chat-accent: var(--accent);
+
+  /* Panel gutter for dark */
+  --gutter-idle: #27272A;
+  --gutter-hover: #3F3F46;
+  --gutter-active: var(--accent);
+}

@@ -9,12 +9,8 @@ export const useSessionsStore = defineStore('sessions', () => {
   const loading = ref(false)
   const intent = ref('operate')
   const runMode = ref(localStorage.getItem('kaiju_run_mode') || 'reflect')
+  const aggMode = ref(localStorage.getItem('kaiju_agg_mode') || '-1')
 
-  /**
-   * desc: Set the active session ID and persist it to localStorage
-   * @param {string|null} id - The session ID to set, or null to clear
-   * @returns {void}
-   */
   function setSessionId(id) {
     sessionId.value = id
     if (id) localStorage.setItem('kaiju_session', id)
@@ -26,5 +22,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     localStorage.setItem('kaiju_run_mode', mode)
   }
 
-  return { sessionId, sessions, messages, loading, intent, runMode, setRunMode, setSessionId }
+  function setAggMode(mode) {
+    aggMode.value = mode
+    localStorage.setItem('kaiju_agg_mode', mode)
+  }
+
+  return { sessionId, sessions, messages, loading, intent, runMode, aggMode, setRunMode, setAggMode, setSessionId }
 })

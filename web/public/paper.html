@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Independent Intent-Gated Graph Execution for Autonomous Agents</title>
+<title>KAIJU: An Executive Kernel for Intent Gated Execution of LLM Agents</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -105,13 +105,13 @@
 
 <div class="header">
   <div class="accent-bar"></div>
-  <h1>Independent Intent-Gated Graph Execution for Autonomous Agents</h1>
+  <h1>KAIJU: An Executive Kernel for Intent Gated Execution of LLM Agents</h1>
   <p class="author"><strong>Cormac Guerin</strong><sup>1</sup> &nbsp; <strong>Frank Guerin</strong><sup>2</sup></p>
   <p class="author"><sup>1</sup>Compdeep &nbsp; <sup>2</sup>School of Computer Science and Electronic Engineering, University of Surrey, UK</p>
-  <p class="author" style="margin-top:8px; font-size:12px;">Code: <a href="https://github.com/cormacguerin/kaiju" style="color:var(--accent);">github.com/cormacguerin/kaiju</a></p>
+  <p class="author" style="margin-top:8px; font-size:12px;">Code: <a href="https://github.com/compdeep/kaiju" style="color:var(--accent);">github.com/compdeep/kaiju</a></p>
 
   <div class="abstract">
-    <strong>Abstract.</strong> Tool-calling autonomous agents based on large language models in ReAct configurations exhibit three compounding limitations: serial latency, quadratic context growth, and vulnerability to prompt injection and hallucination; collectively producing outcomes that are slow, costly, or potentially harmful, particularly acute in domains such as cybersecurity and defence. Prior work moves towards separating planning from execution but in each case the model remains coupled to the execution mechanics. We introduce strict execution as a first class abstraction decoupling the user presentation layer from an opaque execution layer responsible for planning, scheduling, tool dispatch and security. Consisting of an independent directed acyclic graph, the LLM plans upfront, optimistically scheduling tools in parallel with dependency-aware parameter injection; lightweight reflection nodes evaluate intermediate results and guide the graph toward resolution. Authorization is enforced at execution time via Intent-Based Execution (IBE), a paradigm in which intent is defined prior to planning and enforced independently during tool execution, using a gating mechanism based on four independent variables: scope, intent, impact, and clearance (external approval). The system supports three adaptive execution modes (Reflect, nReflect, and Orchestrator), providing progressively finer-grained execution control apt for complex investigation and deep analysis or research. Empirical evaluation against a ReAct baseline operating over the same tools and safety gates shows a latency penalty on simple queries due to planning overhead, convergence at moderate complexity, and a structural advantage on computational queries requiring parallel data gathering; Beyond latency, the separation enforces behavioural guarantees that ReAct cannot match through prompting alone: the execution layer persists through tool failures via automatic replanning, produces bounded-context LLM calls that avoid cumulative degradation, and delegates reflection to a cheaper executor model while ReAct must use the reasoning model for every turn.
+    <strong>Abstract.</strong> Tool-calling autonomous agents based on large language models using ReAct exhibit three limitations: serial latency, quadratic context growth, and vulnerability to prompt injection and hallucination. Recent work moves towards separating planning from execution but in each case the model remains coupled to the execution mechanics. We introduce a system-level abstraction for LLM agents which decouples the execution of agent workflows from the LLM reasoning layer. We define two first class abstractions: (1) Intent-Gated Execution (IGX), a security paradigm that enforces intent at execution, and (2) an Executive Kernel that manages planning, scheduling, tool dispatch, failures and security. In KAIJU, the LLM plans upfront, optimistically scheduling tools in parallel with dependency-aware parameter injection. Tools are authorised via IGX based on four independent variables: scope, intent, impact, and clearance (external approval). KAIJU supports three adaptive execution modes (Reflect, nReflect, and Orchestrator), providing progressively finer-grained execution control apt for complex investigation and deep analysis or research. Empirical evaluation against a ReAct baseline shows that KAIJU has a latency penalty on simple queries due to planning overhead, convergence at moderate complexity, and a structural advantage on computational queries requiring parallel data gathering. Beyond latency, the separation enforces behavioural guarantees that ReAct cannot match through prompting alone.
   </div>
 </div>
 
@@ -134,18 +134,18 @@
 </p>
 
 <p class="prose">
-  We introduce a strict execution abstraction consisting of two layers: a presentation layer handling user interaction, and an execution layer responsible for planning, tool dispatch, safety enforcement, and result synthesis. In the execution layer the LLM is a stateless resource invoked at discrete points (to plan, to reflect, and to aggregate) with no visibility into execution mechanics. The execution layer invokes the reasoning model once to produce a dependency graph of tool calls, then schedules, gates, and dispatches tools independently. At structured checkpoints, a lightweight reflector evaluates the evidence gathered so far against the original query and decides whether to continue, conclude, or replan with targeted follow-up nodes. An execution gate enforces authorization via four independent variables (scope, intent, impact, and clearance), each governed by a separate authority outside the model.
+  We introduce KAIJU, with a strict execution abstraction consisting of two layers: a reasoning layer handling user interaction, and an execution layer responsible for planning, tool dispatch, failures, safety enforcement, and result synthesis. In the execution layer the LLM is a stateless resource invoked at discrete points (to plan, to reflect, and to aggregate) with no visibility into execution mechanics. The execution layer invokes the reasoning model once to produce a dependency graph of tool calls, then schedules, gates, and dispatches tools independently constituting the first graph node. At structured leaf nodes, a lightweight reflector evaluates the evidence gathered so far against the original query and decides whether to continue, conclude, or replan with targeted follow-up nodes. An execution gate (IGX) enforces authorisation via four independent variables (scope, intent, impact, and clearance), each governed by a separate authority outside the model.
 </p>
 
 <p class="prose">
-  The model does not observe gate decisions within the execution layer, removing the possibility of adaptive probing of the safety policy. In conversational loops (ReAct, LangGraph), blocked tool calls feed back into the model&rsquo;s context, enabling adversarial probing; our architecture removes the feedback channel. Critically, data is only input to the execution layer from the presentation layer at call time and fed back only at return time, creating a closed execution loop, except as described in Section 4 (Preemption). The execution layer persists through tool failures via automatic replanning rather than deferring to the user. It does not ask for permission or silently substitute parametric knowledge; when a tool fails, the micro-planner retries with alternative approaches before the reflector evaluates whether sufficient evidence has been gathered. The graph is processed optimistically (execute first, adapt on failure via reflection checkpoints) across three adaptive modes.
+  The LLM does not observe gate decisions within the execution layer, removing the possibility of adaptive probing of the safety policy. In conversational loops (ReAct, LangGraph), blocked tool calls feed back into the model&rsquo;s context, enabling adversarial probing; our architecture removes the feedback channel. Critically, data is only input to the execution layer from the reasoning layer at call time and fed back only at return time, creating a closed execution loop, except as described in Section 4 (Preemption). The execution layer persists through tool failures via automatic replanning rather than deferring to the user. It does not ask for permission or silently substitute parametric knowledge; when a tool fails, the micro-planner retries with alternative approaches before the reflector evaluates whether sufficient evidence has been gathered. The graph is processed optimistically (execute first, adapt on failure via reflection checkpoints) across three adaptive modes.
 </p>
 
 <p class="prose">
-  Three execution modes provide progressively finer-grained mid-execution adaptation: structural phase boundaries (Reflect), periodic batch checkpoints (nReflect), and per-node observers (Orchestrator).
+  A structured graph-based LLM workflow enables composable, verifiable execution units, providing a foundation for enforcing guarantees such as security and content policy and service level agreements. Nodes can be added or removed to improve or alter the graph mid-flight enabling custom and controlled outcomes. In our system three execution modes provide progressively finer-grained mid-execution adaptation: structural phase boundaries (Reflect), periodic batch checkpoints (nReflect), and per-node observers (Orchestrator).
 </p>
 
-<h4>Contributions</h4>
+<h4>Contributions of IGX</h4>
 <ol class="contributions">
   <li><strong>Separation + bounded context &rarr; reduced token scaling.</strong> The planner and per-node observers operate on bounded context. Reflections see cumulative evidence within the execution layer but not the full conversational history. Token complexity reduces from O(n&sup2;k) to O(nkd) in Reflect mode or O(nk) in Orchestrator mode, where d is dependency depth.</li>
   <li><strong>Separation + parallelism &rarr; schedulable DAG.</strong> The execution graph fires tools on dependency resolution, not LLM decision. Three adaptive modes (Reflect, nReflect, Orchestrator) reduce latency to O(d) where d is dependency depth, compared to O(n) for sequential dispatch or O(t) for parallel function calling (where t is reasoning turns, t&nbsp;&laquo;&nbsp;n but structurally unbounded).</li>
@@ -155,7 +155,7 @@
 </ol>
 
 <p class="prose">
-  The remainder of this paper is organized as follows. Section 2 surveys related work. Section 3 introduces a running example referenced throughout. Section 4 defines the system model, graph structure, failure recovery, preemption, and the execution layer abstraction. Section 5 describes the three execution modes. Section 6 presents the execution gate. Section 7 reports experimental results. Section 8 concludes with limitations and future directions.
+  The remainder of this paper is organised as follows. Section 2 surveys related work. Section 3 introduces a running example referenced throughout. Section 4 defines the system model, graph structure, failure recovery, preemption, and the execution layer abstraction. Section 5 describes the three execution modes. Section 6 presents the execution gate. Section 7 reports evaluation results. Section 8 concludes with limitations and future directions.
 </p>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
@@ -201,7 +201,7 @@
     <tr><td>LLM Compiler</td><td>DAG</td><td>None</td><td>N/A</td></tr>
     <tr><td>CaMeL</td><td>Sequential</td><td>Data flow separation</td><td>No (control plane)</td></tr>
     <tr><td>Progent</td><td>Sequential</td><td>Argument condition matching</td><td>Yes (feedback)</td></tr>
-    <tr style="font-weight:600; background:rgba(255,251,235,0.5);"><td>This work</td><td>Graph (3 modes)</td><td>4-variable intent gate</td><td>No (structurally separated)</td></tr>
+    <tr style="font-weight:600; background:rgba(255,251,235,0.5);"><td>IGX (ours)</td><td>DAG (3 modes)</td><td>4-variable intent gate</td><td>No (structural separation)</td></tr>
   </tbody>
 </table>
 
@@ -358,7 +358,7 @@
 </p>
 
 <p class="prose">
-  Allowing user input directly into the execution layer runs against the separation principle laid out in this paper, and the feature should be used with caution. However, the interjection is mediated rather than direct: the user does not talk to the LLM during execution; the message enters as a reflection checkpoint, the same execution layer construct used for wave boundaries and replanning; the reflection decides what to do (continue, conclude, or replan) using the same logic as any other reflection; and the LLM does not know whether the message came from a user or from the system. The separation is narrowed rather than broken: the presentation layer can signal the execution layer, but the execution layer&rsquo;s own control flow mediates the response.
+  Allowing user input directly into the execution layer runs against the separation principle laid out in this paper, and the feature should be used with caution. However, the interjection is mediated rather than direct: the user does not talk to the LLM during execution; the message enters as a reflection checkpoint, the same execution layer construct used for wave boundaries and replanning; the reflection decides what to do (continue, conclude, or replan) using the same logic as any other reflection; and the LLM does not know whether the message came from a user or from the system. The separation is narrowed rather than broken: the reasoning layer can signal the execution layer, but the execution layer&rsquo;s own control flow mediates the response.
 </p>
 
 <h4>The execution layer abstraction</h4>
@@ -571,7 +571,7 @@
 <!-- 7. EXPERIMENTS                                                         -->
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 
-<h2><span class="section-num">7.</span> Experiments</h2>
+<h2><span class="section-num">7.</span> Evaluation</h2>
 <h3>Complexity analysis</h3>
 
 <p class="prose">
@@ -617,7 +617,7 @@
 <h4>Measured comparison: DAG modes vs ReAct</h4>
 
 <p class="prose">
-  Figure 1 plots per-query latency across 40 identical queries (10 per category) spanning four complexity levels. All modes run through the same Kaiju system with identical tools, IBE gate, scope resolution, and audit logging. DAG modes use GPT-4.1 for planning and GPT-4.1-mini for reflection; ReAct uses GPT-4.1 for all calls. The computational category consists of real-time astronomical queries requiring current planetary data, multi-step computation, and cross-source synthesis; these cannot be answered from parametric knowledge.
+  Figure 1 plots per-query latency across 40 identical queries (10 per category) spanning four complexity levels. All modes run through the same Kaiju system with identical tools, IGX gate, scope resolution, and audit logging. DAG modes use GPT-4.1 for planning and GPT-4.1-mini for reflection; ReAct uses GPT-4.1 for all calls. The computational category consists of real-time astronomical queries requiring current planetary data, multi-step computation, and cross-source synthesis; these cannot be answered from parametric knowledge.
 </p>
 
 <div style="text-align:center; margin: 24px 0 32px;">
@@ -858,13 +858,13 @@
 </div>
 
 <p class="prose" style="font-size:12px; color:#94a3b8; text-align:center; margin-top:-16px;">
-  Figure 1. Per-query latency across 40 queries (10 per category) at four complexity levels. Small markers: individual queries. Large markers: category mean. All modes run through the same Kaiju system with identical tools, IBE gate, and audit. Computational queries require real-time astronomical data and multi-step computation.
+  Figure 1. Per-query latency across 40 queries (10 per category) at four complexity levels. Small markers: individual queries. Large markers: category mean. All modes run through the same Kaiju system with identical tools, IGX gate, and audit. Computational queries require real-time astronomical data and multi-step computation.
 </p>
 
 <h4>Observed results (40 queries, same system)</h4>
 
 <p class="prose">
-  We evaluated all three DAG execution modes against ReAct on 40 identical queries across four complexity levels, all running through the same Kaiju system with identical tools, IBE gate enforcement, scope resolution, and audit logging. The computational category consists of real-time astronomical queries that cannot be answered from parametric knowledge.
+  We evaluated all three DAG execution modes against ReAct on 40 identical queries across four complexity levels, all running through the same Kaiju system with identical tools, IGX gate enforcement, scope resolution, and audit logging. The computational category consists of real-time astronomical queries that cannot be answered from parametric knowledge.
 </p>
 
 <table>
@@ -910,7 +910,7 @@
 </p>
 
 <p class="prose">
-  Both modes in this comparison run through the same production system with identical overhead: IBE gate checks, scope resolution, audit logging, and tool execution. The ReAct mode uses the same tool implementations and rate limits as the DAG modes. The only variable is the dispatch strategy. To produce a fair comparison, we augmented the ReAct system prompt with explicit instructions to persist through tool failures, never defer to parametric knowledge, and never ask the user for guidance. These instructions partially mitigate shortcut behaviour but cannot eliminate it; the model retains the option to comply or not on each turn. The DAG system requires no such prompting because persistence is enforced structurally.
+  Both modes in this comparison run through the same production system with identical overhead: IGX gate checks, scope resolution, audit logging, and tool execution. The ReAct mode uses the same tool implementations and rate limits as the DAG modes. The only variable is the dispatch strategy. To produce a fair comparison, we augmented the ReAct system prompt with explicit instructions to persist through tool failures, never defer to parametric knowledge, and never ask the user for guidance. These instructions partially mitigate shortcut behaviour but cannot eliminate it; the model retains the option to comply or not on each turn. The DAG system requires no such prompting because persistence is enforced structurally.
 </p>
 
 <div class="insight warm">
@@ -1118,9 +1118,14 @@
   <li>Mialon, G., et al. (2023). GAIA: A Benchmark for General AI Assistants. <em>arXiv:2311.12983</em>.</li>
 </ul>
 
+<h4>Impact Statement</h4>
+<p class="prose">
+  This paper presents work whose goal is to advance the field of Agentic AI. The system described enforces structural safety constraints on autonomous agent tool execution, which we believe reduces risk relative to existing conversational safety mechanisms. There are many potential societal consequences of our work, none which we feel must be specifically highlighted here beyond noting that the safety properties described depend on correct implementation of the execution gate and are not formally verified.
+</p>
+
 <div class="footer">
   <sup>1</sup> Benchmark dataset: <a href="https://huggingface.co/datasets/cormacg/agent-tests" style="color:#64748b;">huggingface.co/datasets/cormacg/agent-tests</a><br>
-  Independent Intent-Gated Graph Execution for Autonomous Agents &mdash; Cormac Guerin, Frank Guerin<br>
+  KAIJU: An Executive Kernel for Intent Gated Execution of LLM Agents &mdash; Cormac Guerin, Frank Guerin<br>
   Cost estimates assume Sonnet-class pricing ($3/M input, $15/M output) and local tool execution (~100 ms per call).<br>
   Benchmark: 40 queries &times; 4 modes (3 DAG + 1 ReAct), single pass, no selection or post-hoc filtering.
 </div>

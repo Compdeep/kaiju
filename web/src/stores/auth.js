@@ -38,7 +38,10 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchMe() {
     try {
       user.value = await api.get('/api/v1/auth/me')
-    } catch { logout() }
+    } catch (e) {
+      // Only logout on explicit 401 (invalid token), not on network errors
+      if (e.message === 'Unauthorized') logout()
+    }
   }
 
   return { token, user, isAuthenticated, login, logout, fetchMe }

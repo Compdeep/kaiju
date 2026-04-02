@@ -340,6 +340,10 @@ func (a *Agent) Memory() *Memory {
 	return a.memory
 }
 
+func (a *Agent) Workspace() string {
+	return a.cfg.Workspace
+}
+
 /*
  * Submit queues a trigger for investigation.
  * desc: Non-blocking enqueue. Drops the trigger if the queue is full.

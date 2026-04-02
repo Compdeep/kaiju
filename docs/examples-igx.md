@@ -1,6 +1,6 @@
-# IBE Examples — Intent-Based Execution in Practice
+# IGX Examples — Intent-Gated Execution in Practice
 
-## How IBE Works
+## How IGX Works
 
 Every tool declares an **impact level** per invocation. Every request carries an **intent level**. A system-wide **clearance** caps what's possible. The gate enforces:
 
@@ -208,7 +208,7 @@ Problems with approval prompts:
 3. **Reactive** — the check happens after the LLM has already decided to act
 4. **Binary** — yes or no, no graduated levels
 
-IBE advantages:
+IGX advantages:
 1. **Mathematical** — `impact ≤ min(intent, clearance)`, no judgment call
 2. **Pre-emptive** — intent is set before the conversation, not during
 3. **Graduated** — three levels allow nuanced access control

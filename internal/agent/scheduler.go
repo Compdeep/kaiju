@@ -122,6 +122,15 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 	planResult, err := a.runPlanner(ctx, trigger)
 	if err != nil {
+		// Conversational response (trivial query) — not a real failure
+		var convErr *PlannerConversationalError
+		if errors.As(err, &convErr) {
+			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "planner", Node: &NodeInfo{ID: "planner", Type: "planner", State: "resolved", Tag: "direct answer"}})
+			if convErr.Text != "" {
+				a.broadcastDAGEvent(DAGEvent{Type: "verdict", Text: convErr.Text})
+			}
+			return nil, err
+		}
 		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "planner", Node: &NodeInfo{ID: "planner", Type: "planner", State: "failed", Tag: "plan", Error: err.Error()}})
 		return nil, fmt.Errorf("planner failed: %w", err)
 	}

@@ -104,6 +104,7 @@ export async function send(text) {
       session_id: s.sessionId,
       intent: s.intent,
       mode: s.runMode,
+      agg_mode: parseInt(s.aggMode),
     })
     const msg = {
       role: 'assistant',

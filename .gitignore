@@ -1,0 +1,36 @@
+# Binary
+kaiju
+*.exe
+
+# Dependencies
+node_modules/
+web/node_modules/
+
+# Build output (embedded in binary via go:embed)
+internal/gateway/web/
+
+# Config with secrets
+kaiju.json
+*.env
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+poster_prompt.txt
+subculture_selection.txt
+business_plan.md
+report.json

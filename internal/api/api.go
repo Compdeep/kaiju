@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/user/kaiju/internal/agent"
@@ -52,6 +55,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/execute", a.handleExecute)
 	mux.HandleFunc("GET /api/v1/tools", a.handleListTools)
 	mux.HandleFunc("GET /api/v1/status", a.handleStatus)
+	mux.HandleFunc("GET /api/v1/workspace/files", a.handleWorkspaceFiles)
+	mux.HandleFunc("GET /api/v1/workspace/serve", a.handleWorkspaceServe)
 	// Sessions
 	mux.HandleFunc("POST /api/v1/sessions", a.handleCreateSession)
 	mux.HandleFunc("GET /api/v1/sessions", a.handleListSessions)
@@ -266,6 +271,85 @@ func (a *API) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		SafetyLevel: a.safetyLevel,
 		ToolCount:   len(a.agent.Registry().List()),
 	}, http.StatusOK)
+}
+
+/*
+ * handleWorkspaceFiles lists files in the workspace directory.
+ * desc: Returns directory listing for the workspace, supporting relative path navigation.
+ * param: w - HTTP response writer
+ * param: r - HTTP request with optional ?path= query param
+ */
+func (a *API) handleWorkspaceFiles(w http.ResponseWriter, r *http.Request) {
+	workspace := a.agent.Workspace()
+	if workspace == "" {
+		jsonError(w, "workspace not configured", http.StatusBadRequest)
+		return
+	}
+
+	relPath := r.URL.Query().Get("path")
+	fullPath := filepath.Join(workspace, relPath)
+
+	// Security: ensure we don't escape workspace
+	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(workspace)) {
+		jsonError(w, "path outside workspace", http.StatusForbidden)
+		return
+	}
+
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	type fileEntry struct {
+		Name  string `json:"name"`
+		IsDir bool   `json:"is_dir"`
+		Size  int64  `json:"size,omitempty"`
+	}
+
+	result := make([]fileEntry, 0, len(entries))
+	for _, e := range entries {
+		fe := fileEntry{Name: e.Name(), IsDir: e.IsDir()}
+		if !e.IsDir() {
+			if info, err := e.Info(); err == nil {
+				fe.Size = info.Size()
+			}
+		}
+		result = append(result, fe)
+	}
+
+	jsonResponse(w, map[string]any{
+		"path":    relPath,
+		"entries": result,
+	}, http.StatusOK)
+}
+
+/*
+ * handleWorkspaceServe serves a file from the workspace directory.
+ * desc: Streams file content with appropriate MIME type for viewing/downloading.
+ * param: w - HTTP response writer
+ * param: r - HTTP request with ?path= query param
+ */
+func (a *API) handleWorkspaceServe(w http.ResponseWriter, r *http.Request) {
+	workspace := a.agent.Workspace()
+	if workspace == "" {
+		jsonError(w, "workspace not configured", http.StatusBadRequest)
+		return
+	}
+
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		jsonError(w, "path required", http.StatusBadRequest)
+		return
+	}
+
+	fullPath := filepath.Join(workspace, relPath)
+	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(workspace)) {
+		jsonError(w, "path outside workspace", http.StatusForbidden)
+		return
+	}
+
+	http.ServeFile(w, r, fullPath)
 }
 
 /*

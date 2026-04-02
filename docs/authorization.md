@@ -31,7 +31,7 @@ User: "delete /tmp/test.txt"          ← human sets intent (e.g. "operate" = 1)
                            │  node fires
                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ IBE GATE (Go code, not LLM)                                        │
+│ IGX GATE (Go code, not LLM)                                        │
 │                                                                     │
 │ Step 1 — SCOPE:     Is "bash" in user's allowed tools?              │
 │                     Source: admin-defined scope in DB                │

@@ -154,7 +154,7 @@ Kaiju plans:
 Result: "Created Richardson-disclosure.zip with 14 files (2.3 MB)"
 ```
 
-## What the IBE Gate Catches
+## What the IGX Gate Catches
 
 ### Accidental deletion
 
@@ -222,7 +222,7 @@ parameters:
 (Instructions for the LLM on how to execute this skill)
 ```
 
-The `skillmd` loader reads these, registers them in the same tool registry as compiled tools, and they appear to the planner identically. The `impact` field in frontmatter sets the IBE level.
+The `skillmd` loader reads these, registers them in the same tool registry as compiled tools, and they appear to the planner identically. The `impact` field in frontmatter sets the IGX level.
 
 **No compilation. No deployment. Edit the markdown, kaiju picks it up.**
 

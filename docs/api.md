@@ -28,7 +28,8 @@ Execute a query through the DAG agent engine.
   "query": "find all open ports on 10.0.0.0/24",
   "session_id": "sess-abc123",
   "intent": "operate",
-  "mode": "reflect"
+  "mode": "reflect",
+  "agg_mode": -1
 }
 ```
 
@@ -37,7 +38,8 @@ Execute a query through the DAG agent engine.
 | `query` | string | yes | The user's request |
 | `session_id` | string | no | Conversation session for memory context |
 | `intent` | string | no | `observe`, `operate`, or `override`. Default: `auto` |
-| `mode` | string | no | DAG mode: `reflect`, `nReflect`, or `orchestrator` |
+| `mode` | string | no | Execution mode: `reflect`, `nReflect`, `orchestrator`, or `react` |
+| `agg_mode` | int | no | Aggregator mode: `-1` = auto (reflector decides), `0` = skip, `1` = executor model, `2` = reasoning model. Default: `-1` |
 
 **Response:**
 ```json
@@ -45,6 +47,8 @@ Execute a query through the DAG agent engine.
   "verdict": "Found 3 open ports on 10.0.0.5: 22 (SSH), 80 (HTTP), 443 (HTTPS)...",
   "gaps": ["nmap not installed"],
   "dag_id": "dag-1234",
+  "nodes": 5,
+  "llm_calls": 3,
   "duration_ms": 4200
 }
 ```
@@ -53,6 +57,8 @@ Execute a query through the DAG agent engine.
 |-------|------|-------------|
 | `verdict` | string | Final synthesized response |
 | `gaps` | string[] | Capability gaps the planner identified |
+| `nodes` | int | Total DAG nodes executed |
+| `llm_calls` | int | Total LLM round-trips |
 | `dag_id` | string | DAG execution ID |
 | `duration_ms` | int | Total execution time |
 | `error` | string | Error message if execution failed |

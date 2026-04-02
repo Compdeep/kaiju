@@ -37,7 +37,6 @@
 
     <!-- Col 2: Chat panel -->
     <div class="chat-panel">
-      <div class="accent-line"></div>
       <div class="chat-messages" ref="messagesEl">
         <div v-if="!sessions.messages.length" class="empty-state">
           <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-muted);margin-bottom:12px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
@@ -76,26 +75,66 @@
           <div v-if="dag.streamingVerdict" class="msg-content md" v-html="renderMd(dag.streamingVerdict)"></div>
           <div v-else class="msg-content thinking"><span></span><span></span><span></span></div>
         </div>
+
+        <!-- Breathing room: pushes content up so agent response starts visible -->
+        <div class="msg-spacer" :class="{ active: sessions.loading }"></div>
       </div>
 
       <div class="chat-compose">
-        <div class="compose-options">
-          <select v-model="sessions.runMode" @change="sessions.setRunMode(sessions.runMode)" class="option-pick">
-            <option value="reflect">reflect</option>
-            <option value="nReflect">nReflect</option>
-            <option value="orchestrator">orchestrator</option>
-            <option value="react">react</option>
-          </select>
-          <select v-model="sessions.intent" class="option-pick">
-            <option value="observe">observe</option>
-            <option value="operate">operate</option>
-            <option value="override">override</option>
-          </select>
-          <span v-if="dag.interjectMode" class="interject-chip" @click="dag.interjectMode = false">
-            interject <span class="ij-x">&times;</span>
-          </span>
-        </div>
         <div class="compose-row">
+          <!-- Inline controls (left of input) -->
+          <div class="compose-controls">
+            <!-- Mode picker: triangular M -->
+            <div class="ctl-wrap" @click.stop="openMenu = openMenu === 'mode' ? null : 'mode'">
+              <div class="ctl-btn" :class="{ active: openMenu === 'mode' }">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,20 7,4 12,14 17,4 22,20"/></svg>
+              </div>
+              <span class="ctl-tip">Mode: {{ sessions.runMode }}</span>
+              <Transition name="menu">
+                <div v-if="openMenu === 'mode'" class="ctl-menu">
+                  <div v-for="m in ['reflect','nReflect','orchestrator','react']" :key="m"
+                    class="ctl-opt" :class="{ sel: sessions.runMode === m }"
+                    @click="sessions.setRunMode(m); openMenu = null">{{ m }}</div>
+                </div>
+              </Transition>
+            </div>
+            <!-- IGX gate: inverted shield triangle -->
+            <div class="ctl-wrap" @click.stop="openMenu = openMenu === 'intent' ? null : 'intent'">
+              <div class="ctl-btn" :class="{ active: openMenu === 'intent' }">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L3 7v4c0 7 9 11 9 11s9-4 9-11V7z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
+              </div>
+              <span class="ctl-tip">IGX: {{ sessions.intent }}</span>
+              <Transition name="menu">
+                <div v-if="openMenu === 'intent'" class="ctl-menu">
+                  <div v-for="i in ['observe','operate','override']" :key="i"
+                    class="ctl-opt" :class="{ sel: sessions.intent === i }"
+                    @click="sessions.intent = i; openMenu = null">{{ i }}</div>
+                </div>
+              </Transition>
+            </div>
+            <!-- Aggregator: triangular A -->
+            <div class="ctl-wrap" @click.stop="openMenu = openMenu === 'agg' ? null : 'agg'">
+              <div class="ctl-btn" :class="{ active: openMenu === 'agg' }">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,20 12,4 21,20"/><line x1="7.5" y1="14" x2="16.5" y2="14"/></svg>
+              </div>
+              <span class="ctl-tip">Agg: {{ {'-1':'auto','0':'skip','1':'mini','2':'full'}[sessions.aggMode] }}</span>
+              <Transition name="menu">
+                <div v-if="openMenu === 'agg'" class="ctl-menu">
+                  <div v-for="a in [{v:'-1',l:'auto'},{v:'0',l:'skip'},{v:'1',l:'mini'},{v:'2',l:'full'}]" :key="a.v"
+                    class="ctl-opt" :class="{ sel: sessions.aggMode === a.v }"
+                    @click="sessions.setAggMode(a.v); openMenu = null">{{ a.l }}</div>
+                </div>
+              </Transition>
+            </div>
+            <!-- Interject chip -->
+            <Transition name="chip">
+              <span v-if="dag.interjectMode" class="interject-chip" @click="dag.interjectMode = false">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
+                <span class="ij-x">&times;</span>
+              </span>
+            </Transition>
+          </div>
+          <!-- Input -->
           <textarea
             v-model="input"
             class="compose-input"
@@ -103,10 +142,10 @@
             :placeholder="dag.interjectMode ? 'interject into running query...' : 'ask anything...'"
             @keydown.enter.exact.prevent="send"
           ></textarea>
+          <!-- Right-side actions -->
           <button class="btn-icon" @click="chat.compactSession()" title="Compact history" :disabled="sessions.messages.length < 10">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
           </button>
-          <!-- Panel toggle -->
           <button class="btn-icon" @click="panel.toggle()" :title="panel.open ? 'Close panel' : 'Open panel'" :class="{ 'panel-active': panel.open }">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8">
               <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -137,7 +176,7 @@
 /**
  * desc: Main chat page with resizable sidebar, message thread, DAG trace display, composable panel, and interjection support
  */
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, nextTick, onMounted, watch } from 'vue'
 import { useSessionsStore } from '../stores/sessions'
 import { useDagStore } from '../stores/dag'
 import { usePanelStore } from '../stores/panel'
@@ -151,6 +190,23 @@ const dag = useDagStore()
 const panel = usePanelStore()
 const input = ref('')
 const messagesEl = ref(null)
+const openMenu = ref(null)
+
+// Close menus on outside click
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', () => { openMenu.value = null })
+}
+
+// Load sessions on mount; restore active session if saved
+onMounted(async () => {
+  await chat.loadSessions()
+  if (sessions.sessionId && sessions.sessions.find(s => s.id === sessions.sessionId)) {
+    await chat.switchSession(sessions.sessionId)
+  } else if (sessions.sessions.length > 0) {
+    await chat.switchSession(sessions.sessions[0].id)
+  }
+  tools.connect()
+})
 
 // ── Resize logic ──────────────────────────────────────────────────────────────
 const sidebarW = ref(parseInt(localStorage.getItem('kaiju_sidebar_w')) || 220)
@@ -239,15 +295,31 @@ async function send() {
   if (!text) return
   input.value = ''
 
-  if (dag.interjectMode && dag.running) {
+  const isInterject = dag.interjectMode && dag.running
+
+  if (isInterject) {
     await chat.interject(text)
   } else {
     await chat.send(text)
   }
 
-  await nextTick()
-  if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+  scrollToBottom()
 }
+
+function scrollToBottom() {
+  if (!messagesEl.value) return
+  messagesEl.value.scrollTo({ top: messagesEl.value.scrollHeight, behavior: 'smooth' })
+}
+
+// Auto-scroll when streaming verdict updates
+watch(() => dag.streamingVerdict, () => {
+  nextTick(scrollToBottom)
+})
+
+// Auto-scroll when new messages arrive
+watch(() => sessions.messages.length, () => {
+  nextTick(scrollToBottom)
+})
 
 /**
  * desc: Convert markdown-formatted text to HTML for message rendering
@@ -293,7 +365,7 @@ onMounted(async () => {
 
 <style scoped>
 .chat-page {
-  display: flex; height: calc(100vh - 44px);
+  display: flex; height: calc(100vh - 82px);
   user-select: none;
 }
 .chat-page * { user-select: text; }
@@ -372,12 +444,6 @@ onMounted(async () => {
   display: flex; flex-direction: column;
   position: relative;
 }
-.accent-line {
-  position: absolute; left: 0; top: 0; bottom: 0;
-  width: 2px;
-  background: linear-gradient(180deg, var(--accent) 0%, transparent 100%);
-  opacity: 0.3;
-}
 
 .chat-messages {
   flex: 1; overflow-y: auto;
@@ -410,6 +476,16 @@ onMounted(async () => {
 }
 .thinking span:nth-child(2) { animation-delay: 0.2s; }
 .thinking span:nth-child(3) { animation-delay: 0.4s; }
+
+/* Spacer: creates breathing room below the last message when loading */
+.msg-spacer {
+  height: 0;
+  transition: height 240ms ease-out;
+  flex-shrink: 0;
+}
+.msg-spacer.active {
+  height: 60vh;
+}
 
 /* DAGTrace */
 .trace-click { cursor: pointer; }
@@ -450,32 +526,76 @@ onMounted(async () => {
 /* Compose */
 .chat-compose { padding: 12px 32px 16px 36px; border-top: 1px solid var(--border-subtle); }
 .compose-row {
-  display: flex; gap: 6px; align-items: flex-end;
+  display: flex; gap: 4px; align-items: flex-end;
   background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius);
   padding: 6px 8px; box-shadow: var(--shadow-sm);
   transition: border-color var(--transition);
+  flex-wrap: wrap;
 }
 .compose-row:focus-within { border-color: var(--accent); }
+.compose-controls {
+  display: flex; align-items: center; gap: 1px;
+  flex-shrink: 0;
+}
+.ctl-wrap {
+  position: relative; user-select: none;
+}
+.ctl-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px;
+  color: var(--text-muted); cursor: pointer;
+  transition: all 0.12s ease;
+}
+.ctl-btn:hover, .ctl-btn.active { color: var(--accent); background: var(--bg-soft); }
+/* Tooltip */
+.ctl-tip {
+  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  padding: 3px 8px; border-radius: 4px;
+  background: var(--text); color: var(--surface);
+  font-size: 10px; font-family: var(--mono); white-space: nowrap;
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.ctl-wrap:hover .ctl-tip { opacity: 1; }
+/* Dropdown menu */
+.ctl-menu {
+  position: absolute; bottom: calc(100% + 4px); left: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 110px; z-index: 100;
+}
+.ctl-opt {
+  padding: 5px 10px; border-radius: 5px;
+  font-size: 11px; font-family: var(--mono);
+  color: var(--text-secondary); cursor: pointer;
+  transition: all 0.08s ease;
+}
+.ctl-opt:hover { background: var(--bg-soft); color: var(--text); }
+.ctl-opt.sel { color: var(--accent); font-weight: 600; }
+/* Menu transition: slide up + fade */
+.menu-enter-active, .menu-leave-active { transition: all 0.12s ease; }
+.menu-enter-from, .menu-leave-to { opacity: 0; transform: translateY(6px); }
+.menu-enter-to, .menu-leave-from { opacity: 1; transform: translateY(0); }
 .compose-input {
   flex: 1; border: none; background: transparent;
   resize: none; font-size: 14px; padding: 6px 4px;
   min-height: 24px; max-height: 140px;
   font-family: var(--font); color: var(--text);
+  min-width: 0;
 }
 .compose-input:focus { outline: none; }
 .compose-input::placeholder { color: var(--text-muted); }
-.compose-options {
-  display: flex; align-items: center; gap: 6px;
-  padding: 0 8px 2px;
+/* Chip transition */
+.chip-enter-active, .chip-leave-active { transition: all 0.2s ease; }
+.chip-enter-from, .chip-leave-to { opacity: 0; transform: scale(0.8); }
+/* Responsive: stack controls above input on small screens */
+@media (max-width: 768px) {
+  .compose-row { flex-wrap: wrap; }
+  .compose-controls { width: 100%; padding-bottom: 4px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 2px; }
+  .compose-input { width: 100%; }
 }
-.option-pick {
-  border: 1px solid var(--border); background: var(--bg-soft);
-  font-size: 11px; font-family: var(--mono);
-  color: var(--text-muted); padding: 2px 4px; cursor: pointer;
-  border-radius: 4px;
-}
-.option-pick:hover { color: var(--text); border-color: var(--text-muted); }
 .send { padding: 6px; }
 .send:not(:disabled):hover { color: var(--accent) !important; }
 .send:disabled { opacity: 0.2; cursor: default; }

@@ -27,8 +27,8 @@ Kaiju is a general-purpose AI assistant built in Go. It combines a battle-tested
      └─────────────┬─────────────┘
                    │
      ┌─────────────▼─────────────┐
-     │    IBE Gate (Safety)      │
-     │  tell │ triage │ act      │
+     │    IGX Gate (Safety)      │
+     │ observe│operate│override  │
      └──────────────────────────-┘
 ```
 
@@ -40,7 +40,7 @@ Kaiju is a general-purpose AI assistant built in Go. It combines a battle-tested
 | `internal/agent` | DAG agent engine (copied from omamori, logic untouched) |
 | `internal/agent/llm` | OpenAI/Anthropic-compatible HTTP client |
 | `internal/agent/tools` | Tool interface + thread-safe registry |
-| `internal/agent/gates` | Intent-Based Execution (IBE) safety gate |
+| `internal/agent/gates` | Intent-Gated Execution (IGX) safety gate |
 | `internal/agent/skillmd` | SKILL.md hot-reload loader for user-defined skills |
 | `internal/channels` | Channel plugin interface + registry |
 | `internal/gateway` | HTTP server, WebSocket, SSE streaming |
@@ -63,7 +63,7 @@ Kaiju is a general-purpose AI assistant built in Go. It combines a battle-tested
 5. **Reflection** checkpoints decide: continue, conclude early, or replan
 6. **Micro-planner** handles individual node failures (skip, retry, or replace)
 7. **Aggregator** synthesizes all tool results into a final verdict
-8. **Actuator** executes any follow-up actions (gated by IBE)
+8. **Actuator** executes any follow-up actions (gated by IGX)
 
 ## Budget & Resource Limits
 
@@ -83,7 +83,7 @@ The web_fetch nodes can't fire until their dependency completes, so they don't a
 pressure. Enforcing per-skill limits at plan time would truncate mid-chain, breaking
 dependency injection (`param_refs`) and causing nodes to fire without their dependencies.
 
-## Intent-Based Execution (IBE)
+## Intent-Gated Execution (IGX)
 
 Every tool declares an impact level. Every request carries an intent level.
 The gate enforces: `tool.Impact(params) ≤ min(intent, clearance)`.

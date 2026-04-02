@@ -89,11 +89,9 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	if len(a.activeCards) > 0 {
 		aggGuidance = a.capabilities.ComposeAggregatorGuidance(a.activeCards)
 	}
-	// TODO: restore soul prompt after benchmarking
-	// messages use rolePrompt only, no soul prompt — soul says "explain" which conflicts with concise answers
 	rolePrompt := fmt.Sprintf(defaultAggregatorRolePrompt, aggGuidance, intentStr)
 	messages := BuildMessagesWithHistory(
-		rolePrompt,
+		ComposeSystemPrompt(a.soulPrompt, rolePrompt),
 		sb.String(),
 		history,
 	)

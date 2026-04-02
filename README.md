@@ -1,6 +1,6 @@
 # Kaiju
 
-A general-purpose AI agent framework with DAG-based parallel execution, intent-based safety gates, and modular tool/skill architecture.
+A general-purpose AI agent framework with DAG-based parallel execution, intent-based safety gates, and modular tool/skill architecture. KAIJU aims to become a main OS execution layer for next generation AI powered operating systems.
 
 MIT License
 

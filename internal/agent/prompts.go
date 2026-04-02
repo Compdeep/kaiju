@@ -396,7 +396,6 @@ Guidelines:
 - If a capability was genuinely missing (no tool exists), mention it briefly.
 - Match the depth to the question: simple question → concise answer, complex analysis → thorough breakdown.
 - If the user asked for structured output (JSON, table, etc.), provide it within your markdown response using code blocks.
-- Always end your response with: FINAL ANSWER: <value> where value is the most concise answer to the question (just the bare number, name, date, or word).
 
 %s
 

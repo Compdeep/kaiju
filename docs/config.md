@@ -35,6 +35,8 @@ Environment variables can be referenced as `${VAR_NAME}` in any string field.
     "rate_limit": 100,
     "safety_level": 1,
     "data_dir": "~/.kaiju",
+    "workspace": "~/.kaiju/workspace",
+    "planner_mode": "native",
     "embeddings": {
       "enabled": false,
       "endpoint": "",
@@ -61,7 +63,11 @@ Environment variables can be referenced as `${VAR_NAME}` in any string field.
   "tools": {
     "bash": { "enabled": true, "shell": "auto" },
     "file": { "enabled": true, "allowed_paths": ["."] },
-    "web": { "enabled": true },
+    "web": {
+      "enabled": true,
+      "search_provider": "startpage+ddg",
+      "search_delay_sec": 0.2
+    },
     "sysinfo": { "enabled": true }
   },
 
@@ -86,18 +92,20 @@ Environment variables can be referenced as `${VAR_NAME}` in any string field.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `dag_enabled` | `true` | Enable DAG parallel execution (false = ReAct fallback) |
-| `dag_mode` | `"orchestrator"` | DAG mode: `reflect`, `nReflect`, `orchestrator` |
-| `max_nodes` | `30` | Max total DAG nodes per investigation. Enforced at both plan time and execution time. |
-| `max_per_skill` | `5` | Max invocations of a single skill per wave. Only enforced at execution time (not plan time) to avoid truncating dependency chains. Resets at reflection boundaries. |
+| `dag_enabled` | `true` | Enable DAG parallel execution (false = ReAct fallback for async triggers) |
+| `dag_mode` | `"reflect"` | Default DAG mode: `reflect`, `nReflect`, `orchestrator` |
+| `max_nodes` | `30` | Max total DAG nodes per investigation |
+| `max_per_skill` | `5` | Max invocations of a single skill per wave. Resets at reflection boundaries. |
 | `max_llm_calls` | `20` | Max LLM calls per investigation (planner + reflections + aggregator) |
 | `max_observer_calls` | `50` | Max observer LLM calls (orchestrator mode) |
 | `batch_size` | `5` | Skill completions before reflection (nReflect mode) |
 | `wall_clock_sec` | `120` | Investigation timeout in seconds |
-| `max_turns` | `15` | Max ReAct loop turns (when DAG disabled) |
-| `rate_limit` | `100` | Max tool invocations per hour |
-| `safety_level` | `1` | Default IBE intent: 0=tell, 1=triage, 2=act |
+| `max_turns` | `15` | Max ReAct loop turns |
+| `rate_limit` | `1000` | Max tool invocations per hour |
+| `safety_level` | `1` | Default IGX intent: 0=observe, 1=operate, 2=override |
 | `data_dir` | `"~/.kaiju"` | Data directory for memory, audit logs, skills |
+| `workspace` | `"~/.kaiju/workspace"` | Working directory for bash tool execution (downloads, file creation) |
+| `planner_mode` | `"native"` | Planner mode: `native` (function calling) or `structured` (JSON text) |
 
 ### `agent.embeddings`
 
@@ -129,9 +137,9 @@ Environment variables can be referenced as `${VAR_NAME}` in any string field.
 
 | Tool | Fields | Description |
 |------|--------|-------------|
-| `bash` | `enabled`, `shell` | Shell execution. `shell`: `auto`, `sh`, `powershell`, `cmd` |
+| `bash` | `enabled`, `shell` | Shell execution. `shell`: `auto`, `sh`, `powershell`, `cmd`. Working directory defaults to `workspace`. |
 | `file` | `enabled`, `allowed_paths` | File read/write/list |
-| `web` | `enabled` | HTTP fetch |
+| `web` | `enabled`, `search_provider`, `search_delay_sec` | Web search and fetch. `search_provider`: `startpage`, `ddg`, or `startpage+ddg` (default). `search_delay_sec`: minimum seconds between search requests (default `0.2`). |
 | `sysinfo` | `enabled` | System information |
 
 ### `skills_dirs`

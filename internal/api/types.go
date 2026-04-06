@@ -2,11 +2,12 @@ package api
 
 // ExecuteRequest is the payload for POST /api/v1/execute.
 type ExecuteRequest struct {
-	Query      string `json:"query"`
-	Mode       string `json:"mode,omitempty"`        // "reflect", "nReflect", "orchestrator"
-	Intent     string `json:"intent,omitempty"`      // "observe", "operate", "override"
-	SessionID  string `json:"session_id,omitempty"`  // conversation session for memory
-	AggMode    *int   `json:"agg_mode,omitempty"`    // 0=skip, 1=executor model (default), 2=reasoning model
+	Query         string `json:"query"`
+	Mode          string `json:"mode,omitempty"`           // "reflect", "nReflect", "orchestrator"
+	Intent        string `json:"intent,omitempty"`         // any intent name registered in the intent registry (loaded from config/DB)
+	SessionID     string `json:"session_id,omitempty"`     // conversation session for memory
+	AggMode       *int   `json:"agg_mode,omitempty"`       // 0=skip, 1=executor model (default), 2=reasoning model
+	ExecutionMode string `json:"execution_mode,omitempty"` // "interactive" or "autonomous" (per-request override)
 }
 
 // ActionInfo describes a recommended follow-up action from the aggregator.

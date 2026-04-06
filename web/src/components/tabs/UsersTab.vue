@@ -17,7 +17,9 @@
         </div>
         <div class="form-row">
           <div class="form-group"><label>max intent</label>
-            <select v-model.number="form.max_intent"><option :value="0">observe</option><option :value="1">operate</option><option :value="2">override</option></select>
+            <select v-model.number="form.max_intent">
+              <option v-for="i in intentOptions" :key="i.name" :value="i.rank">{{ i.name }} ({{ i.rank }})</option>
+            </select>
           </div>
           <div class="form-group"><label>scopes</label><input v-model="scopesInput" placeholder="admin, standard, readonly" /></div>
         </div>
@@ -31,7 +33,7 @@
       <tbody>
         <tr v-for="u in users" :key="u.username">
           <td><code>{{ u.username }}</code></td>
-          <td><span class="intent-tag">{{ ['observe','operate','override'][u.max_intent] }}</span></td>
+          <td><span class="intent-tag">{{ intentName(u.max_intent) }}</span></td>
           <td><code class="dim">{{ (u.scopes||[]).join(', ') || '—' }}</code></td>
           <td><code class="dim">{{ (u.groups||[]).join(', ') || '—' }}</code></td>
           <td class="actions"><button class="btn-icon" @click="edit(u)"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="btn-icon del" @click="remove(u.username)"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button></td>
@@ -51,9 +53,37 @@ import api from '../../api/client'
 const users = ref([])
 const showForm = ref(false)
 const editing = ref(false)
-const form = ref({ username: '', password: '', max_intent: 1 })
+const form = ref({ username: '', password: '', max_intent: 0 })
 const scopesInput = ref('')
 const groupsInput = ref('')
+const intentOptions = ref([])
+
+/**
+ * desc: Resolve a stored max_intent rank to its registry name.
+ * @param {number} r - Rank from the user record
+ * @returns {string} Intent name, or "rank(N)" if not in the registry
+ */
+function intentName(r) {
+  const match = intentOptions.value.find(o => o.rank === r)
+  return match ? match.name : `rank(${r})`
+}
+
+/**
+ * desc: Load the intent registry. The registry is the sole source of truth —
+ *       no hardcoded fallback. On failure, intentOptions stays empty.
+ * @returns {Promise<void>}
+ */
+async function loadIntents() {
+  try {
+    const list = await api.get('/api/v1/intents')
+    if (Array.isArray(list)) {
+      intentOptions.value = list.map(i => ({ name: i.name, rank: i.rank }))
+    }
+  } catch (e) {
+    console.error('[users] failed to load intents registry:', e)
+    intentOptions.value = []
+  }
+}
 
 /**
  * desc: Parse a comma-separated string into a trimmed, non-empty array of strings
@@ -87,7 +117,7 @@ async function save() { try { editing.value ? await api.put(`/api/v1/users/${for
  * @returns {Promise<void>}
  */
 async function remove(u) { if(!confirm(`Delete "${u}"?`)) return; try { await api.del(`/api/v1/users/${u}`); await load() } catch(e) { alert(e.message) } }
-onMounted(load)
+onMounted(() => { load(); loadIntents() })
 </script>
 
 <style scoped>

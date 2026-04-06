@@ -9,7 +9,6 @@ import (
 
 	"github.com/user/kaiju/internal/agent/gates"
 	"github.com/user/kaiju/internal/agent/llm"
-	"github.com/user/kaiju/internal/agent/tools"
 )
 
 /*
@@ -65,7 +64,7 @@ Rules:
 func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	graph *Graph, budget *Budget, ch chan<- nodeCompletion, trigger Trigger, intent ...gates.Intent) {
 
-	resolvedIntent := gates.IntentTell
+	resolvedIntent := gates.Intent(0)
 	if len(intent) > 0 {
 		resolvedIntent = intent[0]
 	}
@@ -104,7 +103,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	// Create a graph node for tracking
 	obsNode := &Node{
 		Type: NodeObserver,
-		Tag:  "observe_" + completedNode.Tag,
+		Tag:  "observer_" + completedNode.Tag,
 	}
 	obsID := graph.AddNode(obsNode)
 	graph.SetState(obsID, StateRunning)
@@ -118,15 +117,17 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		if !ok {
 			continue
 		}
-		impact := tools.GetImpact(skill, nil)
-		if impact > int(resolvedIntent) {
+		// Resolve through the intent registry (honors DB pins;
+		// compiled Impact() already returns ranks on the same scale).
+		rank := a.intentRegistry.ResolveToolIntent(name, skill, nil)
+		if rank > int(resolvedIntent) {
 			continue
 		}
 		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
 	}
 
 	messages := []llm.Message{
-		{Role: "system", Content: ComposeSystemPrompt(a.soulPrompt, defaultObserverRolePrompt+toolSection.String()+a.fleetSection())},
+		{Role: "system", Content: defaultObserverRolePrompt + toolSection.String() + a.fleetSection()},
 		{Role: "user", Content: sb.String()},
 	}
 

@@ -9,8 +9,21 @@ import (
 
 	"github.com/user/kaiju/internal/agent/gates"
 	"github.com/user/kaiju/internal/agent/llm"
-	"github.com/user/kaiju/internal/agent/tools"
 )
+
+// injectBlueprintSection appends the latest blueprint to a strings.Builder
+// for reflector context. Truncates to 4000 chars to avoid token burn.
+func (a *Agent) injectBlueprintSection(sb *strings.Builder) {
+	blueprint := loadLatestBlueprint(a.cfg.Workspace)
+	if blueprint != "" {
+		if len(blueprint) > 4000 {
+			blueprint = blueprint[:4000] + "\n...(truncated)"
+		}
+		sb.WriteString("\n## Blueprint (the design this work should match)\n")
+		sb.WriteString(blueprint)
+		sb.WriteString("\n\n")
+	}
+}
 
 /*
  * reflectionOutput is the structured response from a reflection checkpoint.
@@ -47,6 +60,21 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	evidence := graph.ResolvedResultsSoFar()
 
 	var sb strings.Builder
+
+	// Extract failures first so they appear at the top of the message.
+	// Rule burial is the reflector's main failure mode — putting failures
+	// last inside an "Evidence Gathered" block causes the mini model to
+	// read the section as progress and conclude "successfully."
+	failures := extractFailures(evidence)
+	if len(failures) > 0 {
+		sb.WriteString("## FAILURES DETECTED\n\n")
+		sb.WriteString("The following steps failed. You MUST either replan to fix them, OR conclude with an honest verdict that explains what broke and why the goal was not achieved. Do NOT conclude \"successfully\" if these failures are unaddressed.\n\n")
+		for _, f := range failures {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", f.Label, f.Snippet))
+		}
+		sb.WriteString("\n")
+	}
+
 	sb.WriteString("## Evidence Gathered So Far\n\n")
 	if len(evidence) == 0 {
 		sb.WriteString("(no evidence yet)\n")
@@ -96,13 +124,21 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	}
 
 	// Resolve intent for this reflection
-	resolvedIntent := gates.IntentTell
+	resolvedIntent := gates.Intent(0)
 	if len(intent) > 0 {
 		resolvedIntent = intent[0]
 	}
 
 	sb.WriteString(fmt.Sprintf("\n## Intent Level: %s\n", resolvedIntent))
 	sb.WriteString(fmt.Sprintf("\n## Original Request\n\n%s\n", formatTrigger(trigger)))
+
+	// Include worklog for system state context
+	worklog := readWorklog(a.cfg.Workspace, 20)
+	if worklog != "" {
+		sb.WriteString("\n## System State (worklog)\n```\n" + worklog + "\n```\n")
+	}
+
+	a.injectBlueprintSection(&sb)
 
 	// Inject declared capability gaps — reflection must not replan for these
 	if len(graph.Gaps) > 0 {
@@ -124,17 +160,22 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 		if !ok {
 			continue
 		}
-		impact := tools.GetImpact(skill, nil)
-		if impact > int(resolvedIntent) {
+		// Resolve through the intent registry (honors DB pins;
+		// compiled Impact() already returns ranks on the same scale).
+		rank := a.intentRegistry.ResolveToolIntent(name, skill, nil)
+		if rank > int(resolvedIntent) {
 			continue // omit tools that would be blocked
 		}
 		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
 	}
 
+	// Reflector runs without soul injection — soul contains "conclude early
+	// when evidence is sufficient" which biases the mini model toward the
+	// exact failure mode (premature conclusion despite errors).
 	messages := []llm.Message{
 		{
 			Role:    "system",
-			Content: ComposeSystemPrompt(a.soulPrompt, defaultReflectionRolePrompt+toolSection.String()+a.fleetSection()),
+			Content: defaultReflectionRolePrompt + toolSection.String() + a.fleetSection(),
 		},
 		{Role: "user", Content: sb.String()},
 	}
@@ -233,13 +274,15 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 		}
 	}
 
-	resolvedIntent := gates.IntentTell
+	resolvedIntent := gates.Intent(0)
 	if len(intent) > 0 {
 		resolvedIntent = intent[0]
 	}
 
 	sb.WriteString(fmt.Sprintf("\n## Intent Level: %s\n", resolvedIntent))
 	sb.WriteString(fmt.Sprintf("\n## Original Request\n\n%s\n", formatTrigger(trigger)))
+
+	a.injectBlueprintSection(&sb)
 
 	// Include intent-filtered tools for replanning
 	var toolSection strings.Builder
@@ -250,17 +293,20 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 		if !ok {
 			continue
 		}
-		impact := tools.GetImpact(skill, nil)
-		if impact > int(resolvedIntent) {
+		// Resolve through the intent registry (honors DB pins;
+		// compiled Impact() already returns ranks on the same scale).
+		rank := a.intentRegistry.ResolveToolIntent(name, skill, nil)
+		if rank > int(resolvedIntent) {
 			continue
 		}
 		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
 	}
 
+	// No soul injection — same reason as fireReflection.
 	messages := []llm.Message{
 		{
 			Role:    "system",
-			Content: ComposeSystemPrompt(a.soulPrompt, interjectionReflectionPrompt+toolSection.String()+a.fleetSection()),
+			Content: interjectionReflectionPrompt + toolSection.String() + a.fleetSection(),
 		},
 		{Role: "user", Content: sb.String()},
 	}
@@ -284,6 +330,52 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	log.Printf("[dag] interjection reflection output: %s", Text.TruncateLog(raw, 200))
 
 	ch <- nodeCompletion{NodeID: rNode.ID, Result: raw}
+}
+
+/*
+ * failureRecord is one extracted failure from the evidence set.
+ */
+type failureRecord struct {
+	Label   string
+	Snippet string
+}
+
+/*
+ * extractFailures scans evidence for failure markers and returns a concise
+ * list for promotion to the top of the reflection message.
+ * desc: Looks for "(failed)", "bash_error", and "FAILED" in each evidence
+ *       entry. When found, extracts a short snippet around the marker so
+ *       the reflector can see what broke without scrolling through the full
+ *       evidence blob.
+ */
+func extractFailures(evidence map[string]string) []failureRecord {
+	markers := []string{"(failed)", "bash_error", "FAILED"}
+	var out []failureRecord
+	for label, result := range evidence {
+		lower := result
+		for _, m := range markers {
+			idx := strings.Index(lower, m)
+			if idx < 0 {
+				continue
+			}
+			start := idx - 80
+			if start < 0 {
+				start = 0
+			}
+			end := idx + 200
+			if end > len(result) {
+				end = len(result)
+			}
+			snippet := strings.ReplaceAll(result[start:end], "\n", " ")
+			snippet = strings.TrimSpace(snippet)
+			if len(snippet) > 280 {
+				snippet = snippet[:280] + "…"
+			}
+			out = append(out, failureRecord{Label: label, Snippet: snippet})
+			break // one marker per evidence entry is enough
+		}
+	}
+	return out
 }
 
 /*

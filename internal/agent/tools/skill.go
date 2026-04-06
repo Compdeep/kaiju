@@ -8,11 +8,15 @@ import (
 	"github.com/user/kaiju/internal/agent/llm"
 )
 
-// Impact tiers for tool classification (IBE Triad Gate).
+// Impact tiers for tool classification (IBE Triad Gate). Values are ranks
+// on the same scale as the intent registry's builtin ranks — the gate
+// compares impact and intent directly. These ranks are locked by invariant
+// (UpdateIntent rejects rank changes on builtins), so tool authors can
+// safely hardcode them.
 const (
-	ImpactObserve = 0 // read-only, no side effects
-	ImpactAffect  = 1 // reversible side effects
-	ImpactControl = 2 // irreversible / destructive
+	ImpactObserve = 0   // read-only, no side effects
+	ImpactAffect  = 100 // reversible side effects
+	ImpactControl = 200 // irreversible / destructive
 )
 
 /*
@@ -45,7 +49,8 @@ type Tool interface {
 	 * Impact returns the IBE impact tier for the given params.
 	 * desc: Classifies the tool invocation's side-effect severity so the gate can enforce policy
 	 * param: params - the parameters that will be passed to Execute
-	 * return: impact tier integer (0=observe, 1=affect, 2=control)
+	 * return: impact tier integer (0, 1, or 2; the intent registry maps
+	 *         these to ranks on the configured ladder)
 	 */
 	Impact(params map[string]any) int
 

@@ -52,21 +52,49 @@ type ExecutorConfig struct {
  * desc: Controls DAG mode, node/call limits, rate limiting, safety level, data directory, and workspace path.
  */
 type AgentConfig struct {
-	DAGEnabled       bool          `json:"dag_enabled"`
-	DAGMode          string        `json:"dag_mode"`
-	MaxNodes         int           `json:"max_nodes"`
-	MaxPerSkill      int           `json:"max_per_skill"`
-	MaxLLMCalls      int           `json:"max_llm_calls"`
-	MaxObserverCalls int           `json:"max_observer_calls"`
-	BatchSize        int           `json:"batch_size"`
-	WallClockSec     int           `json:"wall_clock_sec"`
-	MaxTurns         int           `json:"max_turns"`
-	RateLimit        int           `json:"rate_limit"`
-	SafetyLevel      int           `json:"safety_level"`
-	DataDir          string        `json:"data_dir"`
-	Workspace        string        `json:"workspace"`
-	PlannerMode      string        `json:"planner_mode"`
-	Embeddings       EmbedConfig   `json:"embeddings"`
+	DAGEnabled        bool        `json:"dag_enabled"`
+	DAGMode           string      `json:"dag_mode"`
+	MaxNodes          int         `json:"max_nodes"`
+	MaxPerSkill       int         `json:"max_per_skill"`
+	MaxLLMCalls       int         `json:"max_llm_calls"`
+	MaxObserverCalls  int         `json:"max_observer_calls"`
+	BatchSize         int         `json:"batch_size"`
+	MaxReplans        int         `json:"max_replans"`
+	MaxNodeRetries    int         `json:"max_node_retries"`
+	ExecutionMode     string      `json:"execution_mode"` // "interactive" (default) or "autonomous"
+	WallClockSec      int         `json:"wall_clock_sec"`
+	MaxTurns          int         `json:"max_turns"`
+	RateLimit         int         `json:"rate_limit"`
+	SafetyLevel       int         `json:"safety_level"`
+	DataDir           string      `json:"data_dir"`
+	Workspace         string      `json:"workspace"`
+	PlannerMode       string      `json:"planner_mode"`
+	// ClassifierEnabled controls the pre-plan preflight LLM call that selects
+	// skill guidance, infers intent, routes chat/meta queries, and hints
+	// required tool categories. Default true — disabling degrades behavior
+	// (no skill guidance, no chat short-circuit) and is only useful for tests.
+	ClassifierEnabled *bool         `json:"classifier_enabled,omitempty"`
+	// Intents optionally seeds the intent registry on first run. After the
+	// DB has any intents rows, this is ignored — the DB is authoritative.
+	// Admins can edit via the UI after first startup.
+	Intents    []IntentSeed `json:"intents,omitempty"`
+	Embeddings EmbedConfig  `json:"embeddings"`
+}
+
+/*
+ * IntentSeed is a single intent definition in the config file.
+ * desc: Used to bootstrap the intents table on first run. The config file
+ *       is the sole source of truth for intent names and ranks — Go code
+ *       never hardcodes specific intent names. Defaults live in Default()
+ *       and can be fully replaced by user config.
+ */
+type IntentSeed struct {
+	Name              string `json:"name"`
+	Rank              int    `json:"rank"`
+	Description       string `json:"description"`
+	PromptDescription string `json:"prompt_description"`
+	Builtin           bool   `json:"builtin,omitempty"`
+	Default           bool   `json:"default,omitempty"` // exactly one intent should be marked default
 }
 
 /*
@@ -144,10 +172,20 @@ type APIConfig struct {
  * desc: Contains sub-configs for bash, file, web, and sysinfo tools.
  */
 type ToolsConfig struct {
-	Bash    BashToolConfig `json:"bash"`
-	File    FileToolConfig `json:"file"`
-	Web     WebToolConfig  `json:"web"`
-	Sysinfo SysinfoConfig `json:"sysinfo"`
+	Bash    BashToolConfig    `json:"bash"`
+	File    FileToolConfig    `json:"file"`
+	Web     WebToolConfig     `json:"web"`
+	Sysinfo SysinfoConfig    `json:"sysinfo"`
+	Compute ComputeToolConfig `json:"compute"`
+}
+
+/*
+ * ComputeToolConfig configures the LLM-powered compute tool.
+ * desc: Controls whether compute nodes are enabled and the max code execution timeout.
+ */
+type ComputeToolConfig struct {
+	Enabled    bool `json:"enabled"`
+	TimeoutSec int  `json:"timeout_sec"` // max code execution time (default 120)
 }
 
 /*

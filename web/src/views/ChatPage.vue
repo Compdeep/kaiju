@@ -103,12 +103,13 @@
               <div class="ctl-btn" :class="{ active: openMenu === 'intent' }">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L3 7v4c0 7 9 11 9 11s9-4 9-11V7z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
               </div>
-              <span class="ctl-tip">IGX: {{ sessions.intent }}</span>
+              <span class="ctl-tip">IBE: {{ sessions.intent || 'auto' }}</span>
               <Transition name="menu">
                 <div v-if="openMenu === 'intent'" class="ctl-menu">
-                  <div v-for="i in ['observe','operate','override']" :key="i"
-                    class="ctl-opt" :class="{ sel: sessions.intent === i }"
-                    @click="sessions.intent = i; openMenu = null">{{ i }}</div>
+                  <div v-for="i in availableIntents" :key="i.name"
+                    class="ctl-opt" :class="{ sel: sessions.intent === i.name }"
+                    :title="i.description"
+                    @click="sessions.intent = i.name; openMenu = null">{{ i.name }}</div>
                 </div>
               </Transition>
             </div>
@@ -125,6 +126,13 @@
                     @click="sessions.setAggMode(a.v); openMenu = null">{{ a.l }}</div>
                 </div>
               </Transition>
+            </div>
+            <!-- Execution mode: bolt icon -->
+            <div class="ctl-wrap" @click.stop="sessions.setExecutionMode(sessions.executionMode === 'interactive' ? 'autonomous' : 'interactive')">
+              <div class="ctl-btn" :class="{ active: sessions.executionMode === 'autonomous' }">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              </div>
+              <span class="ctl-tip">{{ sessions.executionMode === 'autonomous' ? 'auto' : 'chat' }}</span>
             </div>
             <!-- Interject chip -->
             <Transition name="chip">
@@ -182,8 +190,52 @@ import { useDagStore } from '../stores/dag'
 import { usePanelStore } from '../stores/panel'
 import * as chat from '../services/chat'
 import * as tools from '../services/tools'
+import api from '../api/client'
+import { marked } from 'marked'
+import hljs from 'highlight.js/lib/core'
+import hljsJavascript from 'highlight.js/lib/languages/javascript'
+import hljsPython from 'highlight.js/lib/languages/python'
+import hljsGo from 'highlight.js/lib/languages/go'
+import hljsBash from 'highlight.js/lib/languages/bash'
+import hljsJson from 'highlight.js/lib/languages/json'
+import hljsCss from 'highlight.js/lib/languages/css'
+import hljsXml from 'highlight.js/lib/languages/xml'
+import hljsYaml from 'highlight.js/lib/languages/yaml'
+import hljsSql from 'highlight.js/lib/languages/sql'
+import hljsRust from 'highlight.js/lib/languages/rust'
+import hljsCpp from 'highlight.js/lib/languages/cpp'
+import hljsTypescript from 'highlight.js/lib/languages/typescript'
 import DAGTrace from '../components/DAGTrace.vue'
 import ComposablePanel from '../components/ComposablePanel.vue'
+
+hljs.registerLanguage('javascript', hljsJavascript)
+hljs.registerLanguage('js', hljsJavascript)
+hljs.registerLanguage('python', hljsPython)
+hljs.registerLanguage('go', hljsGo)
+hljs.registerLanguage('bash', hljsBash)
+hljs.registerLanguage('sh', hljsBash)
+hljs.registerLanguage('json', hljsJson)
+hljs.registerLanguage('css', hljsCss)
+hljs.registerLanguage('xml', hljsXml)
+hljs.registerLanguage('html', hljsXml)
+hljs.registerLanguage('yaml', hljsYaml)
+hljs.registerLanguage('sql', hljsSql)
+hljs.registerLanguage('rust', hljsRust)
+hljs.registerLanguage('cpp', hljsCpp)
+hljs.registerLanguage('typescript', hljsTypescript)
+hljs.registerLanguage('ts', hljsTypescript)
+
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+  highlight: (code, lang) => {
+    if (lang && hljs.getLanguage(lang)) {
+      try { return hljs.highlight(code, { language: lang }).value } catch {}
+    }
+    try { return hljs.highlightAuto(code).value } catch {}
+    return code
+  },
+})
 
 const sessions = useSessionsStore()
 const dag = useDagStore()
@@ -197,8 +249,25 @@ if (typeof document !== 'undefined') {
   document.addEventListener('click', () => { openMenu.value = null })
 }
 
+// Available intents loaded from the API (configurable via admin → intents tab).
+// The registry is the sole source of truth — no hardcoded fallback.
+const availableIntents = ref([])
+
+async function loadIntents() {
+  try {
+    const intents = await api.get('/api/v1/intents')
+    if (Array.isArray(intents)) {
+      availableIntents.value = intents.map(i => ({ name: i.name, description: i.description }))
+    }
+  } catch (e) {
+    console.error('[chat] failed to load intents registry:', e)
+    availableIntents.value = []
+  }
+}
+
 // Load sessions on mount; restore active session if saved
 onMounted(async () => {
+  await loadIntents()
   await chat.loadSessions()
   if (sessions.sessionId && sessions.sessions.find(s => s.id === sessions.sessionId)) {
     await chat.switchSession(sessions.sessionId)
@@ -300,58 +369,22 @@ async function send() {
   if (isInterject) {
     await chat.interject(text)
   } else {
-    await chat.send(text)
+    // Don't await — send starts loading, spacer expands via CSS
+    chat.send(text)
   }
 
-  scrollToBottom()
 }
 
-function scrollToBottom() {
-  if (!messagesEl.value) return
-  messagesEl.value.scrollTo({ top: messagesEl.value.scrollHeight, behavior: 'smooth' })
-}
 
-// Auto-scroll when streaming verdict updates
-watch(() => dag.streamingVerdict, () => {
-  nextTick(scrollToBottom)
-})
-
-// Auto-scroll when new messages arrive
-watch(() => sessions.messages.length, () => {
-  nextTick(scrollToBottom)
-})
 
 /**
- * desc: Convert markdown-formatted text to HTML for message rendering
+ * desc: Convert markdown-formatted text to HTML using marked + highlight.js
  * @param {string} text - Raw markdown text
- * @returns {string} HTML string
+ * @returns {string} HTML string with syntax-highlighted code blocks
  */
 function renderMd(text) {
   if (!text) return ''
-  let html = escHtml(text)
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>')
-  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-  html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-  html = html.replace(/\n\n/g, '</p><p>')
-  html = '<p>' + html + '</p>'
-  html = html.replace(/<p><\/p>/g, '')
-  return html
-}
-
-/**
- * desc: Escape HTML special characters to prevent XSS in rendered content
- * @param {string} s - Raw string to escape
- * @returns {string} Escaped HTML-safe string
- */
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  return marked.parse(text)
 }
 
 onMounted(async () => {

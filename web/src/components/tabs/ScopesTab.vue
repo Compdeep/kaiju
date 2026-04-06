@@ -29,7 +29,7 @@
             <label v-for="t in availableTools" :key="t.name" class="tool-check" :title="t.description">
               <input type="checkbox" :value="t.name" v-model="selectedTools" />
               <span class="tool-name">{{ t.name }}</span>
-              <span :class="['tool-badge', 'impact-' + t.impact]">{{ impactLabel(t.impact) }}</span>
+              <span class="tool-badge" :class="impactBadgeClass(t.default_impact)">{{ impactLabel(t.default_impact) }}</span>
             </label>
           </div>
         </div>
@@ -42,9 +42,7 @@
               <code>{{ t }}</code>
               <select v-model="caps[t]" class="cap-select">
                 <option :value="undefined">no cap</option>
-                <option :value="0">observe (0)</option>
-                <option :value="1">operate (1)</option>
-                <option :value="2">override (2)</option>
+                <option v-for="i in intentOptions" :key="i.name" :value="i.rank">{{ i.name }} ({{ i.rank }})</option>
               </select>
             </div>
           </div>
@@ -81,6 +79,7 @@ import api from '../../api/client'
 
 const scopes = ref([])
 const availableTools = ref([])
+const intentOptions = ref([])
 const showForm = ref(false)
 const editing = ref(false)
 const form = ref({ name: '', description: '' })
@@ -109,16 +108,34 @@ async function loadTools() {
 }
 
 /**
+ * desc: Fetch the intent registry. The registry is the sole source of truth —
+ *       no hardcoded fallback. On failure, intentOptions stays empty and the
+ *       form surfaces that the registry is unreachable rather than fabricating
+ *       names the backend does not know.
+ */
+async function loadIntents() {
+  try {
+    const list = await api.get('/api/v1/intents')
+    if (Array.isArray(list)) {
+      intentOptions.value = list.map(i => ({ name: i.name, rank: i.rank }))
+    }
+  } catch (e) {
+    console.error('[scopes] failed to load intents registry:', e)
+    intentOptions.value = []
+  }
+}
+
+/**
  * desc: Compute the list of selected tools that have impact > 0 and can have caps applied
  * @returns {Array<string>} Tool names eligible for impact caps
  */
 const cappableTools = computed(() => {
   if (allTools.value) {
-    return availableTools.value.filter(t => t.impact > 0).map(t => t.name)
+    return availableTools.value.filter(t => (t.default_impact || 0) > 0).map(t => t.name)
   }
   return selectedTools.value.filter(name => {
     const t = availableTools.value.find(x => x.name === name)
-    return t && t.impact > 0
+    return t && (t.default_impact || 0) > 0
   })
 })
 
@@ -135,12 +152,31 @@ function toggleAll(e) {
 }
 
 /**
- * desc: Map an impact level number to its human-readable label
- * @param {number} i - Impact level (0=observe, 1=operate, 2=override)
- * @returns {string} Impact label string
+ * desc: Map an impact rank to its name via the intent registry. Returns
+ *       "rank(N)" for ranks not in the registry.
+ * @param {number} rank - Impact rank
+ * @returns {string} Intent name string, or "rank(N)" if not found
  */
-function impactLabel(i) {
-  return ['observe', 'operate', 'override'][i] || '?'
+function impactLabel(rank) {
+  if (rank === undefined || rank === null) return ''
+  const match = intentOptions.value.find(o => o.rank === rank)
+  return match ? match.name : `rank(${rank})`
+}
+
+/**
+ * desc: Bucket an impact rank into low/mid/high tiers for badge color.
+ *       Buckets by position in the sorted registry: ≤ first → low,
+ *       ≥ last → high, else mid.
+ * @param {number} rank - Impact rank
+ * @returns {string} CSS class name for the badge
+ */
+function impactBadgeClass(rank) {
+  if (rank === undefined || rank === null) return 'badge-tier-low'
+  const sorted = [...intentOptions.value].sort((a, b) => a.rank - b.rank)
+  if (!sorted.length) return 'badge-tier-low'
+  if (rank <= sorted[0].rank) return 'badge-tier-low'
+  if (rank >= sorted[sorted.length - 1].rank) return 'badge-tier-high'
+  return 'badge-tier-mid'
 }
 
 /**
@@ -235,7 +271,7 @@ function fmtCap(c) {
   return Object.entries(c).map(([k, v]) => `${k}: ${impactLabel(v)}`).join(', ')
 }
 
-onMounted(() => { load(); loadTools() })
+onMounted(() => { load(); loadTools(); loadIntents() })
 </script>
 
 <style scoped>
@@ -287,9 +323,9 @@ code { font-family: var(--mono); font-size: 12px; }
   font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
   flex-shrink: 0;
 }
-.impact-0 { background: var(--signal-green-bg); color: var(--signal-green); }
-.impact-1 { background: var(--signal-amber-bg); color: var(--signal-amber); }
-.impact-2 { background: var(--signal-red-bg); color: var(--signal-red); }
+.tool-badge.badge-tier-low  { background: var(--signal-green-bg); color: var(--signal-green); }
+.tool-badge.badge-tier-mid  { background: var(--signal-amber-bg); color: var(--signal-amber); }
+.tool-badge.badge-tier-high { background: var(--signal-red-bg);   color: var(--signal-red); }
 
 /* Cap grid */
 .cap-grid {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/user/kaiju/internal/agent/gates"
 	"github.com/user/kaiju/internal/agent/llm"
-	"github.com/user/kaiju/internal/agent/tools"
 )
 
 const maxToolResultLen = 4096
@@ -60,18 +59,19 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
 	)
 
 	// Get tool definitions (filtered by semantic routing if enabled)
-	relevant := a.relevantSkills(ctx, formatTrigger(trigger), trigger.Scope)
+	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
 	toolDefs := a.registry.ToolDefsForNames(relevant)
 	if len(toolDefs) == 0 {
 		log.Printf("[agent] no tools registered, skipping investigation")
 		return
 	}
 
-	// IBE: derive intent once for the entire investigation
-	// ReAct path doesn't have a planner to infer intent, so auto defaults to operate
+	// IBE: derive intent once for the entire investigation. The ReAct path
+	// has no planner to infer from, so auto falls back to the registry's
+	// default rank.
 	intent := trigger.Intent()
 	if intent == gates.IntentAuto {
-		intent = gates.IntentTriage
+		intent = gates.Intent(a.intentRegistry.DefaultRank())
 	}
 	log.Printf("[agent] intent: %s", intent)
 
@@ -191,7 +191,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	startTime := time.Now()
 
 	// Get relevant tools and skills — same set the DAG planner sees
-	relevant := a.relevantSkills(ctx, formatTrigger(trigger), trigger.Scope)
+	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
 	toolDefs := a.registry.ToolDefsForNames(relevant)
 
 	// Build initial messages — no skill guidance injection (same as native planner).
@@ -208,10 +208,10 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 		return &SyncResult{Verdict: "No tools available."}, nil
 	}
 
-	// IBE: derive intent
+	// IBE: derive intent. Auto falls back to the registry's default rank.
 	intent := trigger.Intent()
 	if intent == gates.IntentAuto {
-		intent = gates.IntentTriage
+		intent = gates.Intent(a.intentRegistry.DefaultRank())
 	}
 
 	var verdict string
@@ -278,7 +278,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			}
 
 			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nodeID, Node: &NodeInfo{
-				ID: nodeID, Type: "skill", State: "running",
+				ID: nodeID, Type: "tool", State: "running",
 				Tool: tc.Function.Name, Tag: tc.Function.Name,
 				Params: paramsStr,
 			}})
@@ -296,7 +296,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			if execErr != nil {
 				toolMsg.Content = fmt.Sprintf("error: %v", execErr)
 				a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nodeID, Node: &NodeInfo{
-					ID: nodeID, Type: "skill", State: "failed",
+					ID: nodeID, Type: "tool", State: "failed",
 					Tool: tc.Function.Name, Tag: tc.Function.Name,
 					Ms: toolMs, Error: execErr.Error(),
 					Params: paramsStr,
@@ -307,7 +307,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 					truncResult = truncResult[:200] + "..."
 				}
 				a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nodeID, Node: &NodeInfo{
-					ID: nodeID, Type: "skill", State: "resolved",
+					ID: nodeID, Type: "tool", State: "resolved",
 					Tool: tc.Function.Name, Tag: tc.Function.Name,
 					Ms: toolMs, ResultSize: len(result),
 					Result: truncResult, Params: paramsStr,
@@ -389,6 +389,9 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 		}
 	}
 
+	// Resolve the tool's effective impact via the intent registry.
+	impact := a.intentRegistry.ResolveToolIntent(toolName, skill, params)
+
 	// Gate: IBE triad check with scope — impact <= min(intent, clearance, scope_cap)
 	scopeCap := -1
 	if scope != nil {
@@ -396,13 +399,13 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 			scopeCap = cap
 		}
 	}
-	if err := a.gate.CheckTriadWithScope(intent, skill, params, scopeCap); err != nil {
+	if err := a.gate.CheckTriadWithScope(intent, toolName, impact, scopeCap); err != nil {
 		a.gate.Audit(gates.AuditEntry{
 			Tool:    toolName,
 			AlertID: alertID,
 			Error:   err.Error(),
 			Intent:  int(intent),
-			Impact:  tools.GetImpact(skill, params),
+			Impact:  impact,
 		})
 		return "", err
 	}
@@ -419,7 +422,7 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 				AlertID: alertID,
 				Error:   err.Error(),
 				Intent:  int(intent),
-				Impact:  tools.GetImpact(skill, params),
+				Impact:  impact,
 			})
 			return "", err
 		}
@@ -434,7 +437,7 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 		Params:  params,
 		AlertID: alertID,
 		Intent:  int(intent),
-		Impact:  tools.GetImpact(skill, params),
+		Impact:  impact,
 	}
 	if err != nil {
 		entry.Error = err.Error()

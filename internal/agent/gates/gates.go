@@ -9,73 +9,28 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/tools"
 )
 
 // ─── Intent-Based Execution (IBE) ───────────────────────────────────────────
 
-// Intent represents the purpose of an investigation, derived structurally
-// from the trigger type. Not LLM-declared — set by the code path that
-// creates the trigger.
+// Intent is a rank on the configurable intent ladder. The ladder itself
+// lives in the intent registry (loaded from config/DB); this type is just
+// the integer rank that flows through the gate. Go code never translates
+// ranks back to names — naming is the registry's job.
 type Intent int
 
-const (
-	IntentAuto     Intent = -1 // planner infers intent (chat_query only)
-	IntentObserve  Intent = 0  // read-only, zero side effects
-	IntentOperate  Intent = 1  // normal work, reversible side effects
-	IntentOverride Intent = 2  // full authority, irreversible operations
+// IntentAuto asks the planner to infer an intent from tool impacts.
+// Any non-negative value is a concrete rank from the registry.
+const IntentAuto Intent = -1
 
-	// Aliases for backward compatibility
-	IntentTell   = IntentObserve
-	IntentTriage = IntentOperate
-	IntentAct    = IntentOverride
-)
-
-// String returns the human-readable intent name.
+// String renders a rank for log lines. Go has no knowledge of which name
+// a rank corresponds to — that lookup belongs to the caller with access
+// to the registry.
 func (i Intent) String() string {
-	switch i {
-	case IntentAuto:
+	if i == IntentAuto {
 		return "auto"
-	case IntentObserve:
-		return "observe"
-	case IntentOperate:
-		return "operate"
-	case IntentOverride:
-		return "override"
-	default:
-		return fmt.Sprintf("intent(%d)", int(i))
 	}
-}
-
-// IntentFromString parses an intent string.
-// Accepts both new (observe/operate/override) and legacy (tell/triage/act) names.
-// Returns IntentObserve for unrecognized values (safe default).
-func IntentFromString(s string) Intent {
-	switch s {
-	case "observe", "tell":
-		return IntentObserve
-	case "operate", "triage":
-		return IntentOperate
-	case "override", "act":
-		return IntentOverride
-	default:
-		return IntentObserve
-	}
-}
-
-// IntentFromTriggerType maps a trigger type string to an Intent.
-// Unknown types default to IntentObserve (safest).
-func IntentFromTriggerType(triggerType string) Intent {
-	switch triggerType {
-	case "chat_query", "scheduled":
-		return IntentObserve
-	case "event":
-		return IntentOperate
-	case "command":
-		return IntentOverride
-	default:
-		return IntentObserve
-	}
+	return fmt.Sprintf("rank(%d)", int(i))
 }
 
 // ─── Clearance ──────────────────────────────────────────────────────────────
@@ -111,7 +66,7 @@ type Gate struct {
 	maxTurns     int
 	rateLimit    int              // max invocations per hour
 	invocations  []time.Time      // sliding window
-	clearance    ClearanceSource  // nil = default clearance 1
+	clearance    ClearanceSource  // nil = deny all (clearance 0)
 	lockdown     bool             // when true, all impact>0 is blocked
 	auditFile    *os.File         // append-only NDJSON
 	auditEncoder *json.Encoder
@@ -122,7 +77,7 @@ type GateConfig struct {
 	MaxTurns  int
 	RateLimit int              // max invocations per hour
 	AuditDir  string           // directory for audit.jsonl
-	Clearance ClearanceSource  // nil = default clearance 1
+	Clearance ClearanceSource  // nil = deny all (clearance 0)
 }
 
 // NewGate creates a Gate with the given configuration.
@@ -151,26 +106,26 @@ func NewGate(cfg GateConfig) (*Gate, error) {
 
 // ─── Triad Gate ─────────────────────────────────────────────────────────────
 
-// CheckTriad enforces the IBE triad: tool.Impact(params) <= min(intent, clearance).
-// Returns nil if allowed, descriptive error if blocked.
-func (g *Gate) CheckTriad(intent Intent, skill tools.Tool, params map[string]any) error {
-	impact := tools.GetImpact(skill, params)
-
+// CheckTriad enforces the IBE triad: impact <= min(intent, clearance).
+// The caller pre-resolves the tool's effective impact via the intent
+// registry (so DB overrides apply). Returns nil if allowed, descriptive
+// error if blocked.
+func (g *Gate) CheckTriad(intent Intent, skillName string, impact int) error {
 	// Observe tools (impact 0) always pass
 	if impact == 0 {
 		return nil
 	}
 
-	// Lockdown blocks all non-observe tools
+	// Lockdown blocks all impact>0 tools
 	g.mu.Lock()
 	locked := g.lockdown
 	g.mu.Unlock()
 	if locked {
-		return fmt.Errorf("gate: lockdown active, %s blocked (impact=%d)", skill.Name(), impact)
+		return fmt.Errorf("gate: lockdown active, %s blocked (impact=%d)", skillName, impact)
 	}
 
 	// Compute ceiling = min(intent, clearance)
-	clr := 1 // default clearance
+	clr := 0 // no clearance source = deny all non-zero impact
 	if g.clearance != nil {
 		clr = g.clearance.Clearance()
 	}
@@ -181,18 +136,17 @@ func (g *Gate) CheckTriad(intent Intent, skill tools.Tool, params map[string]any
 
 	if impact > ceiling {
 		return fmt.Errorf("gate: %s blocked (impact=%d > min(intent=%s, clearance=%d) = %d)",
-			skill.Name(), impact, intent, clr, ceiling)
+			skillName, impact, intent, clr, ceiling)
 	}
 
 	return nil
 }
 
 // CheckTriadWithScope extends CheckTriad with a per-tool scope impact cap.
-// scopeMaxImpact is the maximum impact allowed by the user's scope for this tool.
-// Pass -1 to disable scope cap (equivalent to CheckTriad).
-func (g *Gate) CheckTriadWithScope(intent Intent, skill tools.Tool, params map[string]any, scopeMaxImpact int) error {
-	impact := tools.GetImpact(skill, params)
-
+// impact is the pre-resolved tool impact (from the intent registry).
+// scopeMaxImpact is the maximum impact allowed by the user's scope for
+// this tool. Pass -1 to disable scope cap (equivalent to CheckTriad).
+func (g *Gate) CheckTriadWithScope(intent Intent, skillName string, impact int, scopeMaxImpact int) error {
 	if impact == 0 {
 		return nil
 	}
@@ -201,11 +155,11 @@ func (g *Gate) CheckTriadWithScope(intent Intent, skill tools.Tool, params map[s
 	locked := g.lockdown
 	g.mu.Unlock()
 	if locked {
-		return fmt.Errorf("gate: lockdown active, %s blocked (impact=%d)", skill.Name(), impact)
+		return fmt.Errorf("gate: lockdown active, %s blocked (impact=%d)", skillName, impact)
 	}
 
 	// Compute ceiling = min(intent, clearance, scopeCap)
-	clr := 1
+	clr := 0 // no clearance source = deny all non-zero impact
 	if g.clearance != nil {
 		clr = g.clearance.Clearance()
 	}
@@ -219,7 +173,7 @@ func (g *Gate) CheckTriadWithScope(intent Intent, skill tools.Tool, params map[s
 
 	if impact > ceiling {
 		return fmt.Errorf("gate: %s blocked (impact=%d > min(intent=%s, clearance=%d, scope=%d) = %d)",
-			skill.Name(), impact, intent, clr, scopeMaxImpact, ceiling)
+			skillName, impact, intent, clr, scopeMaxImpact, ceiling)
 	}
 
 	return nil

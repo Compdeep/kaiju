@@ -107,9 +107,10 @@ func (b *Bash) Parameters() json.RawMessage {
 
 /*
  * Impact analyzes the command string to determine its safety level.
- * desc: Classifies the command as observe, affect, or control based on regex pattern matching.
+ * desc: Classifies the command into one of three impact tiers (0/1/2) via
+ *       regex pattern matching. The registry maps these tiers to ranks.
  * param: params - tool parameters containing the "command" string to analyze
- * return: impact level constant (ImpactObserve, ImpactAffect, or ImpactControl)
+ * return: impact tier 0, 1, or 2
  */
 func (b *Bash) Impact(params map[string]any) int {
 	cmd, _ := params["command"].(string)
@@ -196,8 +197,30 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 		if ctx.Err() == context.DeadlineExceeded {
 			return output, fmt.Errorf("bash: command timed out after %s", timeout)
 		}
-		// Return output even on error (non-zero exit code is useful info)
-		return fmt.Sprintf("%s\n[exit: %v]", output, err), nil
+		// Return structured error as result (nil error so node resolves).
+		// The scheduler detects execute node failures from the result content.
+		exitCode := -1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+		stdoutStr := stdout.String()
+		stderrStr := stderr.String()
+		if len(stdoutStr) > 200 {
+			stdoutStr = stdoutStr[:200] + "..."
+		}
+		if len(stderrStr) > 200 {
+			stderrStr = stderrStr[:200] + "..."
+		}
+		errInfo := map[string]any{
+			"bash_error": true,
+			"exit_code":  exitCode,
+			"stdout":     stdoutStr,
+			"stderr":     stderrStr,
+			"error":      err.Error(),
+			"command":    command,
+		}
+		errJSON, _ := json.Marshal(errInfo)
+		return string(errJSON), nil
 	}
 
 	return output, nil

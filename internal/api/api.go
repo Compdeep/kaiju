@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/user/kaiju/internal/agent"
-	"github.com/user/kaiju/internal/agent/gates"
 	"github.com/user/kaiju/internal/agent/llm"
 	"github.com/user/kaiju/internal/clearance"
 	"github.com/user/kaiju/internal/db"
@@ -57,6 +56,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/status", a.handleStatus)
 	mux.HandleFunc("GET /api/v1/workspace/files", a.handleWorkspaceFiles)
 	mux.HandleFunc("GET /api/v1/workspace/serve", a.handleWorkspaceServe)
+	mux.HandleFunc("POST /api/v1/workspace/write", a.handleWorkspaceWrite)
+	mux.HandleFunc("GET /api/v1/workspace/live/", a.handleCanvasServe)
 	// Sessions
 	mux.HandleFunc("POST /api/v1/sessions", a.handleCreateSession)
 	mux.HandleFunc("GET /api/v1/sessions", a.handleListSessions)
@@ -93,15 +94,14 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map intent string to gates.Intent
+	// Resolve intent via the registry. Everything is ranks — no name
+	// knowledge in Go, no legacy alias fallbacks. Unknown names fall
+	// through to the configured safety level.
 	intent := a.safetyLevel
-	switch req.Intent {
-	case "observe", "tell":
-		intent = int(gates.IntentObserve)
-	case "operate", "triage":
-		intent = int(gates.IntentOperate)
-	case "override", "act":
-		intent = int(gates.IntentOverride)
+	if req.Intent != "" {
+		if i, ok := a.agent.Intents().ByName(req.Intent); ok {
+			intent = i.Rank
+		}
 	}
 
 	// Resolve user context from JWT claims
@@ -165,13 +165,22 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	if req.Mode != "" {
 		trigger.DAGMode = req.Mode
 	}
+	if req.ExecutionMode != "" {
+		trigger.ExecutionMode = req.ExecutionMode
+	}
 	if req.AggMode != nil {
 		trigger.AggMode = *req.AggMode
 	} else {
 		trigger.AggMode = -1 // default: auto (reflector decides)
 	}
-	maxIntent := intent
-	trigger.MaxIntent = &maxIntent
+	// Only pin the intent rank when the client explicitly asked for one.
+	// When absent, leave MaxIntent nil so the planner infers from tool
+	// impacts (IntentAuto). The scheduler caps the inferred value by
+	// clearance and the user's scope ceiling.
+	if req.Intent != "" {
+		maxIntent := intent
+		trigger.MaxIntent = &maxIntent
+	}
 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
@@ -350,6 +359,80 @@ func (a *API) handleWorkspaceServe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeFile(w, r, fullPath)
+}
+
+/*
+ * handleCanvasServe serves files from workspace/canvas/ with path-based URLs.
+ * desc: Enables multi-file webapps in the canvas — relative imports (./style.css,
+ *       ./app.js) resolve correctly because the URL path mirrors the filesystem.
+ *       Path: /api/v1/workspace/canvas/{filepath...}
+ */
+func (a *API) handleCanvasServe(w http.ResponseWriter, r *http.Request) {
+	workspace := a.agent.Workspace()
+	if workspace == "" {
+		jsonError(w, "workspace not configured", http.StatusBadRequest)
+		return
+	}
+
+	// Strip prefix to get the relative path within project/
+	relPath := strings.TrimPrefix(r.URL.Path, "/api/v1/workspace/live/")
+	if relPath == "" {
+		jsonError(w, "path required", http.StatusBadRequest)
+		return
+	}
+
+	fullPath := filepath.Join(workspace, "project", relPath)
+	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(filepath.Join(workspace, "project"))) {
+		jsonError(w, "path outside project directory", http.StatusForbidden)
+		return
+	}
+
+	http.ServeFile(w, r, fullPath)
+}
+
+/*
+ * handleWorkspaceWrite writes content to a file in the workspace directory.
+ * desc: Accepts a JSON body with path and content fields. Creates parent
+ *       directories if needed. Validates path is within workspace.
+ */
+func (a *API) handleWorkspaceWrite(w http.ResponseWriter, r *http.Request) {
+	workspace := a.agent.Workspace()
+	if workspace == "" {
+		jsonError(w, "workspace not configured", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if req.Path == "" {
+		jsonError(w, "path required", http.StatusBadRequest)
+		return
+	}
+
+	fullPath := filepath.Join(workspace, req.Path)
+	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(workspace)) {
+		jsonError(w, "path outside workspace", http.StatusForbidden)
+		return
+	}
+
+	// Create parent directories
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		jsonError(w, "create directory: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(fullPath, []byte(req.Content), 0644); err != nil {
+		jsonError(w, "write file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jsonResponse(w, map[string]string{"status": "ok", "path": req.Path}, http.StatusOK)
 }
 
 /*

@@ -34,7 +34,7 @@
             <span class="t-pipe">│</span>
             <span v-if="item.inWave" class="t-wf">├</span>
             <span :class="['t-ty', item.node.type, { 'is-skill': item.node.source === 'skillmd' }]">{{ item.node.source === 'skillmd' ? 'SKI' : tyLabel(item.node.type) }}</span>
-            <span :class="['t-name', { 'is-skill': item.node.source === 'skillmd' }]">{{ item.node.tool || item.node.tag || item.node.id }}</span>
+            <span :class="['t-name', { 'is-skill': item.node.source === 'skillmd' }]">{{ item.node.tag || item.node.tool || item.node.id }}</span>
             <span v-if="item.node.params" class="t-params">[{{ compactParams(item.node.params) }}]</span>
             <span v-if="item.node.summary" class="t-summary">{{ item.node.summary }}</span>
             <span class="t-ms">{{ item.node.ms || 0 }}ms</span>
@@ -62,6 +62,15 @@
             <span v-if="item.inWave" class="t-wf">│</span>
             <span class="t-art">╰──</span>
             <span class="t-spawn">spawned by {{ item.name }}</span>
+          </div>
+
+          <div v-if="item.type === 'skills'" class="tl tl-sub">
+            <span class="t-idx"></span>
+            <span class="t-pipe">│</span>
+            <span v-if="item.inWave" class="t-wf">│</span>
+            <span class="t-art">╰──</span>
+            <span class="t-skill-label">guided by</span>
+            <span v-for="s in item.skills" :key="s" class="t-skill-chip">{{ s }}</span>
           </div>
 
           <div v-if="item.type === 'error'" class="tl tl-sub">
@@ -143,11 +152,16 @@ const failCount = computed(() => props.nodes.filter(n => n.state === 'failed').l
  */
 const layout = computed(() => {
   const nodes = [...props.nodes]
-  const pri = { planner: -10, skill: 0, reflection: 5, observer: 5, micro_planner: 6, interjection: 7, actuator: 8, aggregator: 99 }
+  // Sort by node ID (chronological creation order). IDs are "n1", "n2", etc.
+  // Planner and aggregator are pinned to start/end.
   nodes.sort((a, b) => {
-    const pa = pri[a.type] ?? 0, pb = pri[b.type] ?? 0
-    if (pa !== pb) return pa - pb
-    return (a.id || '').localeCompare(b.id || '')
+    const aIsBookend = a.type === 'planner' ? -1 : a.type === 'aggregator' ? 1 : 0
+    const bIsBookend = b.type === 'planner' ? -1 : b.type === 'aggregator' ? 1 : 0
+    if (aIsBookend !== bIsBookend) return aIsBookend - bIsBookend
+    // Extract numeric part of ID for natural sort (n1, n2, ... n10, n11)
+    const aNum = parseInt((a.id || '').replace(/\D/g, '')) || 0
+    const bNum = parseInt((b.id || '').replace(/\D/g, '')) || 0
+    return aNum - bNum
   })
 
   const items = []
@@ -157,10 +171,10 @@ const layout = computed(() => {
   while (i < nodes.length) {
     const n = nodes[i]
 
-    if (n.type === 'skill' && (!n.deps || !n.deps.length) && !n.spawn) {
+    if (n.type === 'tool' && (!n.deps || !n.deps.length) && !n.spawn) {
       let waveEnd = i + 1
       while (waveEnd < nodes.length &&
-             nodes[waveEnd].type === 'skill' &&
+             nodes[waveEnd].type === 'tool' &&
              (!nodes[waveEnd].deps || !nodes[waveEnd].deps.length) &&
              !nodes[waveEnd].spawn) {
         waveEnd++
@@ -191,11 +205,16 @@ const layout = computed(() => {
  */
 function pushNode(items, n, idx, inWave) {
   items.push({ type: 'node', key: `n-${n.id}`, node: n, index: idx, inWave })
-  if (n.deps && n.deps.length) {
-    for (const d of n.deps) {
-      const dn = props.nodes.find(x => x.id === d)
-      items.push({ type: 'dep', key: `d-${n.id}-${d}`, name: dn ? (dn.tool || dn.tag || dn.id) : d, inWave })
-    }
+  if (n.skills && n.skills.length) {
+    items.push({ type: 'skills', key: `sk-${n.id}`, skills: n.skills, inWave })
+  }
+  // Show only the immediate parent (spawner or first dep), not the full chain.
+  // Use tag first (descriptive), then tool type as fallback.
+  if (n.deps && n.deps.length && !n.spawn) {
+    const parentId = n.deps[n.deps.length - 1] // last dep = most direct parent
+    const dn = props.nodes.find(x => x.id === parentId)
+    const label = dn ? (dn.tag || dn.tool || dn.id) : parentId
+    items.push({ type: 'dep', key: `d-${n.id}-${parentId}`, name: label, inWave })
   }
   if (n.spawn) {
     const sn = props.nodes.find(x => x.id === n.spawn)
@@ -256,7 +275,7 @@ function stChr(s) { return { running: '\u25B8', resolved: '\u2713', failed: '\u2
  * @param {string} t - Node type (planner, aggregator, skill, etc.)
  * @returns {string} Three-letter type label
  */
-function tyLabel(t) { return { planner:'PLN', aggregator:'AGG', skill:'SKL', reflection:'RFL', observer:'OBS', micro_planner:'MPL', interjection:'INJ', actuator:'ACT' }[t] || '???' }
+function tyLabel(t) { return { planner:'PLN', aggregator:'AGG', tool:'SKL', compute:'CMP', reflection:'RFL', observer:'OBS', micro_planner:'MPL', interjection:'INJ', actuator:'ACT' }[t] || '???' }
 
 /**
  * desc: Truncate a string to a maximum length, appending an ellipsis if needed
@@ -310,7 +329,8 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
 .t-ty { width: 26px; flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 .t-ty.planner, .t-ty.aggregator { color: var(--accent); }
 .t-ty.reflection, .t-ty.observer, .t-ty.micro_planner { color: var(--accent-warm); }
-.t-ty.skill { color: var(--text-muted); }
+.t-ty.tool { color: var(--text-muted); }
+.t-ty.compute { color: #a78bfa; }
 .t-ty.is-skill { color: #e879a0; }
 .t-name.is-skill { color: #e879a0; font-style: italic; }
 .t-ty.interjection { color: var(--signal-amber); }
@@ -337,6 +357,19 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
 .t-dep-arrow { color: var(--accent); }
 .t-dep-ref { color: var(--accent); font-size: 10px; font-weight: 500; }
 .t-spawn { color: var(--accent-warm); font-size: 10px; }
+.t-skill-label { color: var(--text-dim); font-size: 10px; font-style: italic; }
+.t-skill-chip {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  margin-left: 4px;
+  border-radius: 3px;
+  background: var(--accent-bg, rgba(100, 150, 200, 0.15));
+  color: var(--accent, #6ea8d8);
+  border: 1px solid var(--accent-border, rgba(100, 150, 200, 0.35));
+}
 
 /* Errors */
 .t-err-badge { font-size: 9px; font-weight: 700; letter-spacing: 0.05em; padding: 0 4px; border-radius: 2px; }

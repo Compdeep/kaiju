@@ -74,7 +74,7 @@ func (s *SkillMD) HasCommandDispatch() bool {
 }
 
 // Impact returns the IBE impact tier. For command-dispatch skills, delegates
-// to the target tool. For guidance-only skills, returns 0 (observe).
+// to the target tool. For guidance-only skills, returns 0 (lowest tier).
 func (s *SkillMD) Impact(params map[string]any) int {
 	if s.fm.CommandDispatch != "" && s.registry != nil {
 		if target, ok := s.registry.Get(s.fm.CommandDispatch); ok {

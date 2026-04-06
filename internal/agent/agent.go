@@ -15,6 +15,7 @@ import (
 	"github.com/user/kaiju/internal/compat/ipc"
 	"github.com/user/kaiju/internal/compat/protocol"
 	"github.com/user/kaiju/internal/compat/store"
+	"github.com/user/kaiju/internal/db"
 )
 
 /*
@@ -67,7 +68,8 @@ type Trigger struct {
 	Scope     *ResolvedScope  `json:"scope,omitempty"`      // tool access scope (nil = full access)
 	SessionID string          `json:"session_id,omitempty"` // conversation session for memory
 	History   []llm.Message   `json:"history,omitempty"`    // conversation history
-	AggMode   int             `json:"agg_mode,omitempty"`   // 0=skip aggregator, 1=executor model (default), 2=reasoning model
+	AggMode       int    `json:"agg_mode,omitempty"`        // 0=skip aggregator, 1=executor model (default), 2=reasoning model
+	ExecutionMode string `json:"execution_mode,omitempty"` // per-request override: "interactive" or "autonomous"
 }
 
 /*
@@ -96,19 +98,20 @@ func BuildMessagesWithHistory(system, userQuery string, history []llm.Message) [
  * return: the resolved IBE Intent value.
  */
 func (t Trigger) Intent() gates.Intent {
-	// Chat queries: explicit override or auto-infer
+	// Chat queries default to auto-inference unless the caller pinned a rank.
 	if t.Type == "chat_query" {
 		if t.MaxIntent != nil {
 			return gates.Intent(*t.MaxIntent)
 		}
 		return gates.IntentAuto
 	}
-	// All other triggers: structural intent, MaxIntent can only lower
-	base := gates.IntentFromTriggerType(t.Type)
-	if t.MaxIntent != nil && gates.Intent(*t.MaxIntent) < base {
+	// Non-chat triggers must carry an explicit rank set by the trigger
+	// creator. Go has no knowledge of which rank is appropriate for which
+	// trigger type — that policy lives in the caller/config.
+	if t.MaxIntent != nil {
 		return gates.Intent(*t.MaxIntent)
 	}
-	return base
+	return gates.IntentAuto
 }
 
 /*
@@ -139,7 +142,10 @@ type Config struct {
 	MaxLLMCalls  int
 	MaxObserverCalls int  // separate budget for observer LLM calls (default: 50)
 	BatchSize    int   // nodes completed before injecting reflection in nReflect mode (default: 5)
-	DAGWallClock time.Duration
+	MaxReplans     int // max replan attempts before forcing conclude (default: 3)
+	MaxNodeRetries int    // max micro-planner retries per failed node before unblocking dependents (default: 2)
+	ExecutionMode  string // "interactive" (chat allowed) or "autonomous" (always investigate)
+	DAGWallClock   time.Duration
 
 	// Embeddings (semantic skill routing)
 	EmbeddingsEnabled  bool
@@ -152,6 +158,9 @@ type Config struct {
 	CustomSystemPrompt string
 	BootMDPath         string
 	ClassifierEnabled  bool // enable per-query capability card classification (extra LLM call)
+
+	// Compute node
+	ComputeTimeout time.Duration // max code execution time for compute nodes (default 120s)
 }
 
 /*
@@ -207,7 +216,8 @@ type Agent struct {
 	registry    *tools.Registry
 	gate        *gates.Gate
 	clearanceCheck ClearanceChecker // external authorization (nil = no check)
-	clearance   *localClearance // IBE node clearance
+	clearance         *localClearance // IBE node clearance
+	clearanceExplicit bool            // true if cfg.NodeClearance was set; false means we're on the bootstrap default
 	memory      *Memory
 	gossip      GossipPublisher
 	ipc         IPCSender
@@ -221,7 +231,14 @@ type Agent struct {
 	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
 	fleet         FleetContextProvider // nil on standalone nodes
 	capabilities  CapabilityRegistry   // composable prompt cards
-	activeCards   []string             // selected per-investigation by classifier
+	intentRegistry *IntentRegistry     // DB-backed intent registry; loaded at startup
+	// NOTE: activeCards and preflight live on the Agent singleton, not on the
+	// per-investigation Graph. Concurrent investigations will race and clobber
+	// each other's state (last writer wins). Kaiju's normal runtime serializes
+	// investigations via a.investigating, so this is latent under current usage.
+	// Fix would move both fields onto Graph alongside Gaps.
+	activeCards []string         // selected per-investigation by preflight (formerly classifier)
+	preflight   *PreflightResult // pre-plan result (mode/intent/categories/skills)
 	eventStore    *store.Store          // nil if no event store
 
 	interjections chan string     // user messages during active investigation
@@ -271,10 +288,14 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 
 	reg := tools.NewRegistry()
 
-	// IBE clearance: use configured value, default to 1
-	clrValue := cfg.NodeClearance
-	if clrValue <= 0 {
-		clrValue = 1
+	// IBE clearance: use configured value. Before the intent registry is
+	// loaded we have no concept of a "default working rank", so we start at
+	// 0 (the safest possible) and LoadIntentRegistry() bumps us to the
+	// registry's default rank after config/DB seeding has run.
+	clearanceExplicit := cfg.NodeClearance > 0
+	clrValue := 0
+	if clearanceExplicit {
+		clrValue = cfg.NodeClearance
 	}
 	clr := &localClearance{value: clrValue}
 
@@ -303,24 +324,51 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 	executorClient := client
 
 	return &Agent{
-		cfg:           cfg,
-		llm:           client,
-		executor:      executorClient,
-		registry:      reg,
-		gate:          gate,
-		clearance:     clr,
-		memory:        mem,
-		gossip:        gossip,
-		ipc:           ipcSender,
-		triggers:      make(chan Trigger, 16),
-		interjections: make(chan string, 8),
-		dagSubs:       make(map[int]chan DAGEvent),
-		skillGuidance: make(map[string]*skillmd.SkillMD),
-		soulPrompt:    soul,
-		plannerPrompt: planner,
-		capabilities:  caps,
+		cfg:               cfg,
+		llm:               client,
+		executor:          executorClient,
+		registry:          reg,
+		gate:              gate,
+		clearance:         clr,
+		clearanceExplicit: clearanceExplicit,
+		memory:            mem,
+		gossip:            gossip,
+		ipc:               ipcSender,
+		triggers:          make(chan Trigger, 16),
+		interjections:     make(chan string, 8),
+		dagSubs:           make(map[int]chan DAGEvent),
+		skillGuidance:     make(map[string]*skillmd.SkillMD),
+		soulPrompt:        soul,
+		plannerPrompt:     planner,
+		capabilities:      caps,
+		intentRegistry:    NewIntentRegistry(),
 	}, nil
 }
+
+/*
+ * LoadIntentRegistry populates the in-memory intent registry from the DB.
+ * desc: Called from main.go after DB migrations run and config-seeded
+ *       intents are in place. Requires restart to pick up DB changes.
+ *       When the config did not explicitly set NodeClearance, this also
+ *       resolves the default clearance to the registry's default rank
+ *       (the middle of the ladder).
+ * param: database - the DB instance.
+ * return: error if loading fails.
+ */
+func (a *Agent) LoadIntentRegistry(database *db.DB) error {
+	if err := a.intentRegistry.Load(database); err != nil {
+		return err
+	}
+	if !a.clearanceExplicit {
+		a.clearance.Set(a.intentRegistry.DefaultRank())
+	}
+	return nil
+}
+
+/*
+ * IntentRegistry returns the agent's intent registry for read access.
+ */
+func (a *Agent) Intents() *IntentRegistry { return a.intentRegistry }
 
 /*
  * Registry returns the skill registry for external registration.
@@ -441,33 +489,31 @@ func (a *Agent) InitEmbeddings(ctx context.Context) error {
 }
 
 /*
- * relevantSkills returns ranked skills from the embedding store, or all skills
- * if embeddings are disabled or failed.
- * desc: Applies scope filtering after ranking — tools not in scope are invisible
- *       to the planner. nil scope = full access (CLI local user).
+ * relevantTools returns the ranked list of executable tools (registry entries
+ * with Execute methods).
+ * desc: "Tools" here means things that DO work — bash, file_read, compute,
+ *       etc. Uses embedding-based semantic ranking if enabled, else returns
+ *       all registered tools. Guidance-only SkillMD entries (planning
+ *       guidance, no Execute) are NOT included — those live in
+ *       a.skillGuidance and are consumed separately via the classifier /
+ *       preflight pipeline.
  * param: ctx - context for the embedding API call.
- * param: triggerText - the trigger text to rank skills against.
+ * param: triggerText - the trigger text to rank tools against.
  * param: scope - resolved tool access scope (nil for full access).
- * return: ordered slice of skill names visible to the planner.
+ * return: ordered slice of tool names visible to the planner.
  */
-func (a *Agent) relevantSkills(ctx context.Context, triggerText string, scope *ResolvedScope) []string {
+func (a *Agent) relevantTools(ctx context.Context, triggerText string, scope *ResolvedScope) []string {
 	var base []string
 	if a.embedStore == nil || a.embedClient == nil {
 		base = a.registry.List()
 	} else {
 		ranked, err := a.embedStore.RankTools(ctx, a.embedClient, triggerText, a.registry)
 		if err != nil {
-			log.Printf("[agent] skill ranking failed, using all: %v", err)
+			log.Printf("[agent] tool ranking failed, using all: %v", err)
 			base = a.registry.List()
 		} else {
 			base = ranked
 		}
-	}
-
-	// Append guidance-only skill names so the planner sees their guidance.
-	// These are NOT in the registry — they provide planning context only.
-	for name := range a.skillGuidance {
-		base = append(base, name)
 	}
 
 	// Apply scope filtering — tools not in scope are invisible to the planner.
@@ -754,9 +800,11 @@ func (a *Agent) SetClearanceChecker(cc ClearanceChecker) {
 }
 
 /*
- * SetClearance updates the node's IBE clearance level at runtime.
- * desc: Called externally to update clearance at runtime.
- * param: level - the new clearance level.
+ * SetClearance updates the node's IBE clearance rank at runtime.
+ * desc: Called externally to update clearance at runtime. The value is a
+ *       raw rank from the intent registry — callers are responsible for
+ *       resolving names to ranks before passing them in.
+ * param: level - the new clearance rank.
  */
 func (a *Agent) SetClearance(level int) {
 	a.clearance.Set(level)

@@ -13,7 +13,7 @@ import (
 
 /*
  * Git provides git operations with impact that varies by action.
- * desc: Tool for executing git commands; observe for status/log/diff, affect for add/commit/branch, control for push/reset.
+ * desc: Tool for executing git commands; impact tier 0 for status/log/diff, tier 1 for add/commit/branch, tier 2 for push/reset.
  */
 type Git struct{}
 

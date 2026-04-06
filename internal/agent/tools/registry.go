@@ -145,6 +145,7 @@ func (r *Registry) List() []string {
 	for name := range r.tools {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
@@ -155,7 +156,7 @@ func (r *Registry) List() []string {
 type ToolInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Impact      int    `json:"impact"` // IBE impact tier: 0=observe, 1=affect, 2=control
+	Impact      int    `json:"impact"` // IBE impact tier index (0/1/2); registry maps to ranks on the configured ladder
 	IsBuiltin   bool   `json:"isBuiltin"`
 	Enabled     bool   `json:"enabled"`
 	Source      string `json:"source"`

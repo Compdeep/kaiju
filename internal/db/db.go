@@ -189,6 +189,21 @@ func (d *DB) migrate() error {
 			description TEXT NOT NULL DEFAULT '',
 			profiles    TEXT NOT NULL DEFAULT '[]'
 		)`,
+		// Intents (configurable IBE levels, sparse rank ordering)
+		`CREATE TABLE IF NOT EXISTS intents (
+			name               TEXT PRIMARY KEY,
+			rank               INTEGER NOT NULL,
+			description        TEXT NOT NULL DEFAULT '',
+			prompt_description TEXT NOT NULL DEFAULT '',
+			is_builtin         INTEGER NOT NULL DEFAULT 0,
+			is_default         INTEGER NOT NULL DEFAULT 0
+		)`,
+		// Tool intent overrides (tool name → intent name). Tools not in this
+		// table fall back to their Go Impact() default.
+		`CREATE TABLE IF NOT EXISTS tool_intents (
+			tool_name   TEXT PRIMARY KEY,
+			intent_name TEXT NOT NULL
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -203,6 +218,7 @@ func (d *DB) migrate() error {
 		`ALTER TABLE users ADD COLUMN groups TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE messages ADD COLUMN dag_trace TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE scopes ADD COLUMN cap TEXT NOT NULL DEFAULT '{}'`,
+		`ALTER TABLE intents ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, m := range alterMigrations {
 		d.conn.Exec(m) // ignore duplicate column errors

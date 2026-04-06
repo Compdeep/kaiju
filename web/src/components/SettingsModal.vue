@@ -113,9 +113,7 @@
             <div class="form-group">
               <label>default safety</label>
               <select v-model.number="cfg.agent.safety_level" @change="patchConfig">
-                <option :value="0">observe — read only</option>
-                <option :value="1">operate — read + write</option>
-                <option :value="2">override — full access</option>
+                <option v-for="i in intentOptions" :key="i.name" :value="i.rank">{{ i.name }} ({{ i.rank }})</option>
               </select>
             </div>
           </div>
@@ -154,6 +152,7 @@ const cfg = ref({ llm: { provider: '', model: '', endpoint: '' }, executor: { pr
 const allModels = ref([])
 const apiKey = ref('')
 const execProvider = ref('')
+const intentOptions = ref([])
 
 const ENDPOINTS = {
   openai: 'https://api.openai.com/v1',
@@ -238,6 +237,17 @@ onMounted(async () => {
     execProvider.value = cfg.value.executor.provider || ''
     allModels.value = m
   } catch (err) { console.error('settings load:', err) }
+  // Load intent registry — the sole source of truth for the default-safety
+  // dropdown. On failure the dropdown is empty; no hardcoded fallback.
+  try {
+    const list = await api.get('/api/v1/intents')
+    if (Array.isArray(list)) {
+      intentOptions.value = list.map(i => ({ name: i.name, rank: i.rank }))
+    }
+  } catch (err) {
+    console.error('[settings] failed to load intents registry:', err)
+    intentOptions.value = []
+  }
 })
 </script>
 

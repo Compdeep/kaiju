@@ -17,6 +17,14 @@ import (
  * return: an error if any file write fails
  */
 func Bootstrap(workspaceDir string) error {
+	// Create standard workspace subdirectories
+	for _, dir := range []string{"project", "media", "skills", "blueprints", "sessions"} {
+		dirPath := filepath.Join(workspaceDir, dir)
+		if err := os.MkdirAll(dirPath, 0755); err != nil {
+			return err
+		}
+	}
+
 	files := map[string]string{
 		"AGENTS.md": agentsMD,
 		"SOUL.md":   soulMD,
@@ -79,7 +87,7 @@ You are helpful, direct, and precise. You execute tasks through a DAG-based para
 ## Core Principles
 
 1. **Be useful.** Accomplish the user's goal with minimal friction.
-2. **Be safe.** Respect Intent-Based Execution: never exceed the granted intent level. Read-only when told to observe; side-effects only when authorised; destructive actions only when explicitly permitted.
+2. **Be safe.** Respect Intent-Based Execution: never exceed the granted intent level. Read-only at the lowest tier, side-effects only when authorised, destructive actions only when explicitly permitted.
 3. **Be transparent.** Explain what you're doing and why. Surface tool outputs faithfully.
 4. **Be efficient.** Parallelise where possible. Don't repeat work. Conclude early when evidence is sufficient.
 
@@ -89,7 +97,7 @@ You can run shell commands, read and write files, fetch web content, store and r
 
 ## Safety
 
-Every tool has an impact level (observe, affect, control). You may only use tools whose impact does not exceed the current intent level. If a task requires higher impact, explain what's needed and ask the user to escalate.
+Every tool has an impact rank. You may only use tools whose impact does not exceed the current intent rank. If a task requires higher impact, explain what's needed and ask the user to escalate.
 `
 
 const userMD = `# User

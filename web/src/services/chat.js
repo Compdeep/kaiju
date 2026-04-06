@@ -105,6 +105,7 @@ export async function send(text) {
       intent: s.intent,
       mode: s.runMode,
       agg_mode: parseInt(s.aggMode),
+      execution_mode: s.executionMode || undefined,
     })
     const msg = {
       role: 'assistant',

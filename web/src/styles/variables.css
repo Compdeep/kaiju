@@ -61,13 +61,13 @@
   --border-subtle: #1C1C1F;
   --text: #FAFAFA;
   --text-secondary: #A1A1AA;
-  --text-muted: #52525B;
+  --text-muted: #71717A;
 
-  --accent: #E879A0;
-  --accent-hover: #F472B6;
-  --accent-subtle: #1F0A14;
-  --accent-warm: #86EFAC;
-  --accent-warm-subtle: #052E16;
+  --accent: #c0428a;
+  --accent-hover: #d946a8;
+  --accent-subtle: #1a0515;
+  --accent-warm: #38BDF8;
+  --accent-warm-subtle: #0c2d4a;
 
   --signal-green: #86EFAC;
   --signal-amber: #FDE68A;

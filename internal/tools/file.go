@@ -17,14 +17,16 @@ import (
  * FileRead reads a file's contents with optional line limit.
  * desc: Tool that reads file content as text, truncating at a configurable max line count.
  */
-type FileRead struct{}
+type FileRead struct {
+	workspace string
+}
 
 /*
  * NewFileRead creates a new FileRead tool instance.
  * desc: Returns a zero-value FileRead ready for use.
  * return: pointer to a new FileRead
  */
-func NewFileRead() *FileRead { return &FileRead{} }
+func NewFileRead(workspace string) *FileRead { return &FileRead{workspace: workspace} }
 
 /*
  * Name returns the tool identifier.
@@ -88,6 +90,10 @@ func (f *FileRead) Execute(_ context.Context, params map[string]any) (string, er
 	if path == "" {
 		return "", fmt.Errorf("file_read: path is required")
 	}
+	// Resolve relative paths against workspace
+	if !filepath.IsAbs(path) && f.workspace != "" {
+		path = filepath.Join(f.workspace, path)
+	}
 	path = filepath.Clean(path)
 
 	data, err := os.ReadFile(path)
@@ -117,14 +123,16 @@ var _ tools.Tool = (*FileRead)(nil)
  * FileWrite writes content to a file, creating or overwriting it.
  * desc: Tool that writes string content to a file path, with optional append mode.
  */
-type FileWrite struct{}
+type FileWrite struct {
+	workspace string
+}
 
 /*
  * NewFileWrite creates a new FileWrite tool instance.
  * desc: Returns a zero-value FileWrite ready for use.
  * return: pointer to a new FileWrite
  */
-func NewFileWrite() *FileWrite { return &FileWrite{} }
+func NewFileWrite(workspace string) *FileWrite { return &FileWrite{workspace: workspace} }
 
 /*
  * Name returns the tool identifier.
@@ -190,6 +198,10 @@ func (f *FileWrite) Execute(_ context.Context, params map[string]any) (string, e
 	if path == "" {
 		return "", fmt.Errorf("file_write: path is required")
 	}
+	// Resolve relative paths against workspace
+	if !filepath.IsAbs(path) && f.workspace != "" {
+		path = filepath.Join(f.workspace, path)
+	}
 	path = filepath.Clean(path)
 
 	// Ensure parent directory exists
@@ -253,14 +265,16 @@ var _ tools.Displayer = (*FileWrite)(nil)
  * FileList lists files and directories at a given path.
  * desc: Tool that reads a directory and returns entries with name, type, and size.
  */
-type FileList struct{}
+type FileList struct {
+	workspace string
+}
 
 /*
  * NewFileList creates a new FileList tool instance.
  * desc: Returns a zero-value FileList ready for use.
  * return: pointer to a new FileList
  */
-func NewFileList() *FileList { return &FileList{} }
+func NewFileList(workspace string) *FileList { return &FileList{workspace: workspace} }
 
 /*
  * Name returns the tool identifier.
@@ -293,7 +307,7 @@ func (f *FileList) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"path": {"type": "string", "description": "Directory path to list (default: current directory)"}
+			"path": {"type": "string", "description": "Directory path to list (default: workspace)"}
 		},
 		"additionalProperties": false
 	}`)
@@ -317,8 +331,14 @@ func (f *FileList) OutputSchema() json.RawMessage {
  */
 func (f *FileList) Execute(_ context.Context, params map[string]any) (string, error) {
 	path, _ := params["path"].(string)
-	if path == "" {
+	path = strings.TrimSpace(path)
+	if (path == "" || path == "." || path == "./") && f.workspace != "" {
+		path = f.workspace
+	} else if path == "" {
 		path = "."
+	} else if !filepath.IsAbs(path) && f.workspace != "" {
+		// Resolve relative paths against workspace
+		path = filepath.Join(f.workspace, path)
 	}
 	path = filepath.Clean(path)
 

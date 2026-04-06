@@ -139,7 +139,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		log.Printf("[dag] exec %s (%s) params=%s", n.ID, n.ToolName, Text.TruncateLog(string(paramJSON), 200))
 	}
 
-	result, err := a.executeToolNode(ctx, n.ToolName, n.Params, alertID, intent, scope)
+	result, err := a.executeToolNode(ctx, n, graph, budget, n.ToolName, n.Params, alertID, intent, scope)
 
 	// Attach tool actions to the node before completion so they're
 	// included in the node event when SetResult emits it.
@@ -186,12 +186,29 @@ func resolveInjections(n *Node, graph *Graph) error {
 		// ReadyNodes() guarantees deps are terminal, but we need StateResolved specifically
 		// (not failed/skipped) because we need the result data.
 		if dep.State != StateResolved {
+			// For context params (file reads), gracefully degrade — inject placeholder
+			// instead of failing the entire node. The coder can work without some context.
+			if strings.HasPrefix(paramName, "context.") {
+				if n.Params == nil {
+					n.Params = make(map[string]any)
+				}
+				n.Params[paramName] = fmt.Sprintf("[file unavailable: %s]", dep.Tag)
+				log.Printf("[dag] param_ref %q: dep %s not resolved (state: %s), injecting placeholder", paramName, ref.NodeID, dep.State)
+				continue
+			}
 			return fmt.Errorf("param_ref %q: dependency node %s not resolved (state: %s)", paramName, ref.NodeID, dep.State)
 		}
 
-		value, err := extractJSONField(dep.Result, ref.Field)
-		if err != nil {
-			return fmt.Errorf("param_ref %q: extract field %q from node %s: %w", paramName, ref.Field, ref.NodeID, err)
+		var value string
+		if ref.Field == "" {
+			// Empty field = use the entire result as-is (e.g., file_read raw text)
+			value = dep.Result
+		} else {
+			var err error
+			value, err = extractJSONField(dep.Result, ref.Field)
+			if err != nil {
+				return fmt.Errorf("param_ref %q: extract field %q from node %s: %w", paramName, ref.Field, ref.NodeID, err)
+			}
 		}
 		// Empty values are rejected — they'd produce invalid tool parameters.
 		if value == "" {
@@ -259,8 +276,13 @@ func extractJSONField(jsonStr, fieldPath string) (string, error) {
  * desc: Performs scope check, rate limit check, IBE triad check (impact <=
  *       min(intent, clearance, scope_cap)), optional external clearance check,
  *       then executes the tool. Audits all attempts and records side-effects
- *       in the event store.
+ *       in the event store. Tools implementing ContextualExecutor are invoked
+ *       via ExecuteWithContext with a populated ExecuteContext; others fall
+ *       through to plain Execute.
  * param: ctx - context for execution.
+ * param: n - the node being executed (may be nil for actuator path).
+ * param: graph - the investigation graph (may be nil for actuator path).
+ * param: budget - the execution budget (may be nil for actuator path).
  * param: toolName - the name of the tool to execute.
  * param: params - the tool parameters.
  * param: alertID - the investigation alert ID.
@@ -268,8 +290,8 @@ func extractJSONField(jsonStr, fieldPath string) (string, error) {
  * param: scope - resolved tool access scope (nil for full access).
  * return: result string and error.
  */
-func (a *Agent) executeToolNode(ctx context.Context, toolName string,
-	params map[string]any, alertID string, intent gates.Intent, scope *ResolvedScope) (string, error) {
+func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budget *Budget,
+	toolName string, params map[string]any, alertID string, intent gates.Intent, scope *ResolvedScope) (string, error) {
 
 	// Scope check: reject tools not in the user's scope (defense-in-depth)
 	// Wildcard "*" in AllowedTools means all tools allowed.
@@ -282,8 +304,10 @@ func (a *Agent) executeToolNode(ctx context.Context, toolName string,
 		return "", fmt.Errorf("unknown tool: %s", toolName)
 	}
 
-	// Gate: rate limit (observe tools exempt — reading local files should not be throttled)
-	impact := tools.GetImpact(skill, params)
+	// Resolve the tool's effective impact via the intent registry (DB
+	// override wins, falls back to tool.Impact() default).
+	impact := a.intentRegistry.ResolveToolIntent(toolName, skill, params)
+	// Gate: rate limit (rank-0 tools exempt — reading local files should not be throttled)
 	if impact > 0 {
 		if err := a.gate.CheckRateLimit(); err != nil {
 			a.gate.Audit(gates.AuditEntry{
@@ -307,13 +331,13 @@ func (a *Agent) executeToolNode(ctx context.Context, toolName string,
 			scopeCap = cap
 		}
 	}
-	if err := a.gate.CheckTriadWithScope(intent, skill, params, scopeCap); err != nil {
+	if err := a.gate.CheckTriadWithScope(intent, toolName, impact, scopeCap); err != nil {
 		a.gate.Audit(gates.AuditEntry{
 			Tool:    toolName,
 			AlertID: alertID,
 			Error:   err.Error(),
 			Intent:  int(intent),
-			Impact:  tools.GetImpact(skill, params),
+			Impact:  impact,
 		})
 		return "", err
 	}
@@ -330,14 +354,43 @@ func (a *Agent) executeToolNode(ctx context.Context, toolName string,
 				AlertID: alertID,
 				Error:   err.Error(),
 				Intent:  int(intent),
-				Impact:  tools.GetImpact(skill, params),
+				Impact:  impact,
 			})
 			return "", err
 		}
 	}
 
-	// Execute
-	result, err := skill.Execute(ctx, params)
+	// Execute — tools implementing ContextualExecutor get a rich context
+	// built from scheduler-held state; others fall through to plain Execute.
+	// Contextual results are structured pipeline data (e.g. compute plans
+	// with follow_up graft instructions) and must not be truncated.
+	var result string
+	var err error
+	isContextual := false
+	if cx, ok := skill.(ContextualExecutor); ok && n != nil {
+		isContextual = true
+		// Resolve classifier-active skills into per-role guidance sections.
+		// Compute uses this; other contextual tools may ignore it.
+		cards, names := a.resolveComputeSkillCards()
+		if len(names) > 0 {
+			n.Skills = names
+		}
+		ec := &ExecuteContext{
+			Ctx:        ctx,
+			Node:       n,
+			Graph:      graph,
+			Budget:     budget,
+			LLM:        a.llm,
+			Executor:   a.executor,
+			Workspace:  a.cfg.Workspace,
+			AlertID:    alertID,
+			Intent:     intent,
+			SkillCards: cards,
+		}
+		result, err = cx.ExecuteWithContext(ec, params)
+	} else {
+		result, err = skill.Execute(ctx, params)
+	}
 
 	// Audit
 	entry := gates.AuditEntry{
@@ -345,7 +398,7 @@ func (a *Agent) executeToolNode(ctx context.Context, toolName string,
 		Params:  params,
 		AlertID: alertID,
 		Intent:  int(intent),
-		Impact:  tools.GetImpact(skill, params),
+		Impact:  impact,
 	}
 	if err != nil {
 		entry.Error = err.Error()
@@ -379,8 +432,11 @@ func (a *Agent) executeToolNode(ctx context.Context, toolName string,
 		return "", err
 	}
 
-	// Truncate large results
-	if len(result) > maxToolResultLen {
+	// Truncate large results for normal tools. Contextual tools (compute)
+	// return structured pipeline data that the scheduler unmarshals for
+	// graft instructions — truncating would corrupt the JSON and silently
+	// break the graft.
+	if !isContextual && len(result) > maxToolResultLen {
 		result = result[:maxToolResultLen] + "\n... (truncated)"
 	}
 

@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 )
 
 /*
@@ -158,7 +159,9 @@ func (d *DB) ResolveUserScope(user *User) (*UserScopeResult, error) {
 		Username:     user.Username,
 		AllowedTools: make(map[string]bool),
 		MaxImpact:    make(map[string]int),
-		MaxIntent:    2, // start at max, take min
+		// Start at infinity so the min-walk below finds the real ceiling
+		// from the user's max_intent.
+		MaxIntent: math.MaxInt32,
 	}
 
 	for _, scopeName := range user.Scopes {
@@ -208,7 +211,7 @@ func (d *DB) SeedDefaultScopes() error {
 			Name:        "standard",
 			Description: "All tools with destructive operations capped",
 			Tools:       []string{"*"},
-			Cap:         map[string]int{"bash": 1, "git": 1},
+			Cap:         map[string]int{"bash": 100, "git": 100},
 		},
 		{
 			Name:        "readonly",

@@ -9,6 +9,7 @@
       </div>
       <div class="modal-tabs">
         <button :class="['modal-tab', { active: tab === 'scopes' }]" @click="tab = 'scopes'">scopes</button>
+        <button :class="['modal-tab', { active: tab === 'intents' }]" @click="tab = 'intents'">intents</button>
         <button :class="['modal-tab', { active: tab === 'users' }]" @click="tab = 'users'">users</button>
         <button :class="['modal-tab', { active: tab === 'groups' }]" @click="tab = 'groups'">groups</button>
         <button :class="['modal-tab', { active: tab === 'memories' }]" @click="tab = 'memories'">memories</button>
@@ -16,6 +17,7 @@
       <div class="modal-body">
         <transition name="slide" mode="out-in">
           <ScopesTab v-if="tab === 'scopes'" :key="'scopes'" />
+          <IntentsTab v-else-if="tab === 'intents'" :key="'intents'" />
           <UsersTab v-else-if="tab === 'users'" :key="'users'" />
           <GroupsTab v-else-if="tab === 'groups'" :key="'groups'" />
           <MemoriesTab v-else :key="'memories'" />
@@ -31,6 +33,7 @@
  */
 import { ref } from 'vue'
 import ScopesTab from './tabs/ScopesTab.vue'
+import IntentsTab from './tabs/IntentsTab.vue'
 import UsersTab from './tabs/UsersTab.vue'
 import GroupsTab from './tabs/GroupsTab.vue'
 import MemoriesTab from './tabs/MemoriesTab.vue'

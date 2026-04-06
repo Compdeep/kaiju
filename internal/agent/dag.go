@@ -40,7 +40,8 @@ const (
 type NodeType int
 
 const (
-	NodeSkill         NodeType = iota // executes a registered tool
+	NodeTool         NodeType = iota // executes a registered tool
+	NodeCompute                       // LLM-powered code generation + execution
 	NodePlanner                       // initial plan LLM call
 	NodeMicroPlanner                  // scoped failure-repair LLM call
 	NodeAggregator                    // final synthesis LLM call
@@ -53,12 +54,14 @@ const (
 /*
  * String converts a NodeType to its string representation.
  * desc: Returns a human-readable label for the node type.
- * return: string label such as "skill", "planner", "aggregator", etc.
+ * return: string label such as "tool", "planner", "aggregator", etc.
  */
 func (t NodeType) String() string {
 	switch t {
-	case NodeSkill:
-		return "skill"
+	case NodeTool:
+		return "tool"
+	case NodeCompute:
+		return "compute"
 	case NodePlanner:
 		return "planner"
 	case NodeMicroPlanner:
@@ -134,8 +137,18 @@ type Node struct {
 	Tag       string       // human-readable label from planner
 	Source    string       // tool source: "builtin", "skillmd", "custom"
 	Actions   []NodeAction // side-effects from tool execution
+	Skills    []string     // guidance skill names whose sections shaped this node's prompts (compute only)
 	StartedAt time.Time
 	EndedAt   time.Time
+
+	// Retry proxy: when a node fails and the micro-planner creates a
+	// replacement, the original node stays "running" (not resolved) so its
+	// dependents remain blocked. The replacement's result is copied back
+	// into this node when it succeeds. RetryCount tracks how many
+	// replacement attempts have been made; after MaxNodeRetries the node
+	// resolves with the last failure and dependents unblock.
+	RetryCount    int    // number of micro-planner retries so far
+	ProxyForID    string // if non-empty, this node is a retry proxy — copy result back to this ID
 }
 
 /*
@@ -200,6 +213,7 @@ type NodeInfo struct {
 	ErrType    string       `json:"err_type,omitempty"`    // "gate", "clearance", "timeout", "exec"
 	Source     string       `json:"source,omitempty"`      // "builtin", "skillmd", "custom"
 	Actions    []NodeAction `json:"actions,omitempty"`     // side-effects: panel_show, notify, etc.
+	Skills     []string     `json:"skills,omitempty"`      // guidance skills whose sections shaped this node's prompts
 }
 
 /*
@@ -207,12 +221,22 @@ type NodeInfo struct {
  * desc: Thread-safe container for the investigation graph. Supports observer
  *       channels for live event streaming and monotonic node ID assignment.
  */
+// ValidatorDef is a stored validation check from the architect's plan.
+// The scheduler re-grafts these after reflector replans complete to verify
+// that fixes actually worked, without needing a new LLM call.
+type ValidatorDef struct {
+	Name  string
+	Check string
+}
+
 type Graph struct {
-	mu       sync.RWMutex
-	nodes    map[string]*Node
-	counter  int
-	observer chan<- DAGEvent
-	Gaps     []string // capability gaps declared by the planner (not mutex-protected — set once after planning)
+	mu         sync.RWMutex
+	nodes      map[string]*Node
+	counter    int
+	observer   chan<- DAGEvent
+	Gaps       []string       // capability gaps declared by the planner (not mutex-protected — set once after planning)
+	SessionID  string         // conversation session for per-session state (blueprints + interfaces.json)
+	Validators []ValidatorDef // architect-declared validation checks, stored for replay after replans
 }
 
 /*
@@ -319,6 +343,9 @@ func (g *Graph) nodeInfo(n *Node) *NodeInfo {
 	}
 	if len(n.Actions) > 0 {
 		info.Actions = n.Actions
+	}
+	if len(n.Skills) > 0 {
+		info.Skills = n.Skills
 	}
 	if n.Error != nil {
 		errStr := n.Error.Error()
@@ -514,6 +541,27 @@ func (g *Graph) ReadyNodes() []*Node {
 }
 
 /*
+ * HasPendingDependents returns true if any pending node lists nodeID in its
+ * DependsOn. Used to decide whether a failed node should use the retry proxy
+ * pattern (hold open for dependents) or just fail normally.
+ */
+func (g *Graph) HasPendingDependents(nodeID string) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, n := range g.nodes {
+		if n.State != StatePending {
+			continue
+		}
+		for _, dep := range n.DependsOn {
+			if dep == nodeID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+/*
  * SiblingResults returns resolved results from nodes that share the same
  * dependency set as the given node (i.e. siblings in the plan).
  * desc: Used by the micro-planner to see peer results for context when
@@ -558,7 +606,7 @@ func (g *Graph) AllResults() map[string]string {
 
 	results := make(map[string]string)
 	for _, n := range g.nodes {
-		if n.Type != NodeSkill && n.Type != NodeActuator {
+		if n.Type != NodeTool && n.Type != NodeCompute && n.Type != NodeActuator {
 			continue
 		}
 		if n.State == StateResolved {
@@ -748,7 +796,7 @@ func (g *Graph) ResolvedResultsSoFar() map[string]string {
 		if n.State != StateResolved {
 			continue
 		}
-		if n.Type != NodeSkill && n.Type != NodeReflection {
+		if n.Type != NodeTool && n.Type != NodeCompute && n.Type != NodeReflection {
 			continue
 		}
 		label := n.ToolName
@@ -820,7 +868,7 @@ func (g *Graph) ExecutedTools() []ExecutedTool {
 
 	var out []ExecutedTool
 	for _, n := range g.nodes {
-		if n.Type != NodeSkill {
+		if n.Type != NodeTool && n.Type != NodeCompute {
 			continue
 		}
 		if n.State == StatePending || n.State == StateRunning {
@@ -862,7 +910,7 @@ func (g *Graph) ExecutedSet() map[string]bool {
 
 	set := make(map[string]bool)
 	for _, n := range g.nodes {
-		if n.Type != NodeSkill {
+		if n.Type != NodeTool && n.Type != NodeCompute {
 			continue
 		}
 		if n.State == StatePending || n.State == StateRunning {

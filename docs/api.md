@@ -86,7 +86,7 @@ Agent status and configuration summary.
 {
   "status": "ready",
   "dag_mode": "reflect",
-  "safety_level": 1,
+  "safety_level": 100,
   "tool_count": 15
 }
 ```
@@ -263,7 +263,7 @@ Update LLM, executor, or agent configuration at runtime.
 ```json
 {
   "llm": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
-  "agent": {"dag_mode": "nReflect", "safety_level": 2}
+  "agent": {"dag_mode": "nReflect", "safety_level": 200}
 }
 ```
 

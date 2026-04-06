@@ -1,12 +1,16 @@
 # Kaiju
 
-A general-purpose AI agent framework with DAG-based parallel execution, intent-based safety gates, and modular tool/skill architecture. KAIJU aims to become a main OS execution layer for next generation AI powered operating systems.
+A general-purpose AI assistant and agent framework with a web UI, file/media browser, DAG-based parallel execution, intent-gated safety, and a modular skill system inspired by OpenClaw. Kaiju separates reasoning from execution, enabling parallel tool dispatch, structural safety enforcement, and adaptive replanning — while remaining a practical, everyday assistant.
 
 MIT License
 
 ## What it does
 
-Kaiju separates planning from execution. The LLM produces a dependency graph of tool calls upfront, then the execution layer schedules, gates, and adapts the graph independently. Tools fire in parallel where dependencies allow. Reflection checkpoints evaluate intermediate results and replan when needed. An intent-based execution gate enforces tool authorization at runtime without LLM involvement.
+Kaiju is two things: a **conversational AI assistant** with a modern web interface, and an **execution kernel** that manages how the AI uses tools safely and efficiently.
+
+As an assistant, it provides a chat UI with session history, a composable side panel (file browser, media viewer, code preview, canvas), configurable execution modes, and support for custom skills that extend its capabilities.
+
+As an execution kernel, it separates planning from execution. The LLM produces a dependency graph of tool calls upfront, then the execution layer schedules, gates, and adapts the graph independently. Tools fire in parallel where dependencies allow. Reflection checkpoints evaluate intermediate results and replan when needed. An intent-based execution gate (IBE) enforces tool authorization at runtime without LLM involvement.
 
 ## Quick start
 
@@ -23,6 +27,16 @@ cp kaiju.json.example kaiju.json
 ./kaiju chat               # Interactive CLI
 ./kaiju run "your query"   # One-shot query
 ```
+
+## Web UI
+
+The web interface includes:
+- **Chat** with session history, streaming responses, and live DAG trace visualization
+- **File browser** for the workspace directory
+- **Media viewer** with floating player (keyboard: Space=play/pause, F=fullscreen, Esc=close)
+- **Code preview** with syntax-aware display
+- **Composable panel** with tabbed plugins (files, media, canvas, code, preview)
+- **Configurable controls** — execution mode, IBE intent level, and aggregator mode selectable from the input bar
 
 ## Configuration
 
@@ -45,7 +59,8 @@ Minimal configuration:
     "dag_enabled": true,
     "dag_mode": "reflect",
     "safety_level": 1,
-    "data_dir": "~/.kaiju"
+    "data_dir": "~/.kaiju",
+    "workspace": "~/.kaiju/workspace"
   },
   "channels": {
     "web": { "enabled": true, "port": 8080 }
@@ -76,27 +91,51 @@ An optional executor model (cheaper, used for reflection/aggregation) can be con
 | **Reflect** | Reflection checkpoints between dependency waves | Predictable, lowest LLM calls |
 | **nReflect** | Reflection every N node completions | Balanced throughput and oversight |
 | **Orchestrator** | Per-node observer evaluates each result | Highest quality, most thorough |
+| **React** | Sequential reason-act-observe loop (for benchmarking) | Baseline comparison |
 
 ## Intent-Based Execution (IBE)
 
-Every tool call passes through a four-variable gate before execution:
+Every tool call passes through a four-variable gate before execution. The gate formula `impact ≤ min(intent, clearance, scope_cap)` is enforced at tool execution time in compiled code:
 
 | Variable | Question | Set by |
 |----------|----------|--------|
-| **Scope** | Which tools? | Policy (admin-defined allowlists) |
-| **Intent** | What level? | Caller (0=observe, 1=operate, 2=override) |
-| **Impact** | How dangerous? | Tool author (declared at compile time) |
+| **Scope** | Which tools? | Policy (admin-defined allowlists with per-tool impact caps) |
+| **Intent** | What level? | Caller — a rank from the intent registry (default: 0/100/200, extensible via config/UI) |
+| **Impact** | How dangerous? | Tool author (declared at compile time, parameter-aware) |
 | **Clearance** | Approved? | External authority (HTTP endpoint) |
 
 The gate runs in compiled code. The LLM does not observe gate decisions — blocked tools appear as generic failures, preventing adversarial probing of the safety policy.
+
+### Delegated clearance via API
+
+The clearance variable delegates authorization to an external HTTP endpoint. The gate sends `{tool, params, user}` and respects the boolean response. This enables domain-specific authorization logic (hospital ward access, drone geofences, enterprise AD policies) without any domain logic in the agent. Endpoints are configurable per-tool:
+
+```json
+{
+  "clearance_endpoints": [
+    { "tool": "bash", "url": "http://localhost:9090/approve", "timeout_ms": 500 }
+  ]
+}
+```
+
+## Multi-tenant user support
+
+Kaiju supports multiple users with independent scopes and intent ceilings:
+
+- Users authenticate via JWT (login endpoint or API token)
+- Each user has a max intent level and one or more scopes controlling which tools they can access
+- Scopes are composable — multiple scopes merge by union (tools) and minimum (caps)
+- The first user created is automatically assigned admin scope
+- Users are managed via the web UI (Users & Scopes tab) or CLI (`kaiju user add`)
+- Currently backed by a local SQLite database; future versions will support syncing with OS-level user directories (Linux PAM, Windows AD)
 
 ## Built-in tools
 
 | Tool | Impact | Description |
 |------|--------|-------------|
 | `bash` | 0-2 | Shell commands (impact varies by command content) |
-| `web_search` | 0 | Web search (Startpage + DuckDuckGo) |
-| `web_fetch` | 0 | Fetch URLs with content extraction |
+| `web_search` | 0 | Web search (Startpage + DuckDuckGo fallback) |
+| `web_fetch` | 0 | Fetch URLs with content extraction (markdown, text, summary) |
 | `file_read` | 0 | Read files |
 | `file_write` | 1 | Write/create files |
 | `file_list` | 0 | List directory contents |
@@ -116,7 +155,7 @@ The gate runs in compiled code. The LLM does not observe gate decisions — bloc
 
 ## Skills
 
-Skills are SKILL.md files that teach the agent domain-specific strategies. They hot-reload from configured directories.
+Skills are SKILL.md files that teach the agent domain-specific strategies, similar to OpenClaw's skill system. They hot-reload from configured directories and can include planning guidance, approach selection matrices, and tool usage recipes.
 
 ### Bundled skills
 
@@ -140,7 +179,7 @@ Use when the user asks to...
 2. Then, use `bash` to process...
 ```
 
-Skills are guidance — they teach the planner how to use existing tools for specific tasks.
+Skills are guidance — they teach the planner how to use existing tools for specific tasks. Skills with `CommandDispatch` can also wrap tools with custom execution logic.
 
 ## API
 
@@ -150,7 +189,7 @@ Skills are guidance — they teach the planner how to use existing tools for spe
 curl -X POST http://localhost:8080/api/v1/execute \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"query": "your question", "intent": "operate"}'
+  -d '{"query": "your question", "intent": "operate", "mode": "reflect", "agg_mode": -1}'
 ```
 
 ### Key endpoints
@@ -165,6 +204,8 @@ curl -X POST http://localhost:8080/api/v1/execute \
 | `GET` | `/api/v1/sessions` | List sessions |
 | `GET` | `/api/v1/sessions/{id}/messages` | Conversation history |
 | `POST` | `/api/v1/auth/login` | Get JWT token |
+| `GET` | `/api/v1/workspace/files` | Browse workspace files |
+| `GET` | `/api/v1/workspace/serve` | Serve workspace file content |
 | `GET` | `/events` | SSE stream for live DAG events |
 | `PATCH` | `/api/v1/config` | Update config at runtime |
 
@@ -173,24 +214,24 @@ Full API documentation: [docs/api.md](docs/api.md)
 ## Architecture
 
 ```
-Presentation Layer          Execution Layer
-─────────────────          ─────────────────
- User ←→ Chat UI            Planner (LLM)
+Reasoning Layer             Execution Layer (Executive Kernel)
+─────────────────          ──────────────────────────────────
+ User ←→ Chat UI            Planner (reasoning model)
          ↕                      ↓
      REST API  ──────→  DAG Scheduler
          ↕                  ↓     ↓
-     SSE Stream         Tools    Reflection
+     SSE Stream         Tools    Reflection (executor model)
                          ↓         ↓
                      IBE Gate   Micro-Planner
                          ↓         ↓
                      Execute    Replan/Skip
                          ↓
-                     Aggregator (LLM)
+                     Aggregator (optional)
                          ↓
                      Verdict ──→ User
 ```
 
-The LLM is invoked at discrete points (plan, reflect, aggregate) with no visibility into scheduling, gating, or dispatch mechanics. Each LLM call operates on bounded context — reflections see current-wave evidence, not full conversation history.
+The LLM is invoked at discrete points (plan, reflect, aggregate) with no visibility into scheduling, gating, or dispatch mechanics. Each LLM call operates on bounded context — reflections see current-wave evidence, not full conversation history. Data flows from the reasoning layer to the execution layer at call time and back only at return time, creating a closed execution loop.
 
 ## Build
 
@@ -219,9 +260,11 @@ internal/
   channels/         Channel plugins (CLI, web, Telegram, Discord)
   memory/           Session history + semantic memory
   auth/             JWT service
+  workspace/        Workspace bootstrapping
 skills/bundled/     19 bundled skills
 web/                Vue 3 frontend (Vite + Pinia)
 docs/               Architecture, API, config, authorization docs
+benchmarks/         GAIA, solar triage, and DAG vs ReAct benchmarks
 ```
 
 ## Documentation
@@ -230,7 +273,10 @@ docs/               Architecture, API, config, authorization docs
 - [API Reference](docs/api.md)
 - [Configuration](docs/config.md)
 - [Authorization & IBE](docs/authorization.md)
+- [IBE Examples](docs/examples-igx.md)
 - [Memory System](docs/memory.md)
+- [Workspace](docs/workspace.md)
+- [Academic Paper](/paper.html)
 
 ## License
 

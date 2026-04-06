@@ -33,7 +33,7 @@ Environment variables can be referenced as `${VAR_NAME}` in any string field.
     "wall_clock_sec": 120,
     "max_turns": 15,
     "rate_limit": 100,
-    "safety_level": 1,
+    "safety_level": 100,
     "data_dir": "~/.kaiju",
     "workspace": "~/.kaiju/workspace",
     "planner_mode": "native",
@@ -102,7 +102,7 @@ Environment variables can be referenced as `${VAR_NAME}` in any string field.
 | `wall_clock_sec` | `120` | Investigation timeout in seconds |
 | `max_turns` | `15` | Max ReAct loop turns |
 | `rate_limit` | `1000` | Max tool invocations per hour |
-| `safety_level` | `1` | Default IGX intent: 0=observe, 1=operate, 2=override |
+| `safety_level` | `100` | Default IBE intent rank. Builtin ranks: `0`=observe, `100`=operate, `200`=override. Custom ranks defined via the intent registry are also accepted. |
 | `data_dir` | `"~/.kaiju"` | Data directory for memory, audit logs, skills |
 | `workspace` | `"~/.kaiju/workspace"` | Working directory for bash tool execution (downloads, file creation) |
 | `planner_mode` | `"native"` | Planner mode: `native` (function calling) or `structured` (JSON text) |
@@ -154,15 +154,24 @@ Array of directories to scan for SKILL.md user-defined skills. Hot-reloaded on f
 | `nReflect` | Parallel with batched reflection every N completions | Balanced autonomy/oversight |
 | `orchestrator` | Parallel with per-node observer LLM calls | Interactive chat, maximum responsiveness |
 
-## Safety Levels
+## Intent Levels
 
-| Level | Name | Allowed tools |
-|-------|------|---------------|
-| 0 | tell | Read-only: sysinfo, file_read, web_fetch |
-| 1 | triage | + side effects: file_write, bash (non-destructive) |
-| 2 | act | + destructive: bash (rm, kill), system changes |
+The gate enforces `tool.impact <= min(intent, clearance, scope_cap)`. Builtin
+intents ship at ranks `0` (observe), `100` (operate), and `200` (override).
+Admins can add custom intents at any rank via the registry (admin UI → Intents
+tab, or the `intents` seed list in the config file) — these flow through the
+gate and are selectable anywhere the builtins are.
 
-Default is `1` (triage). Can be overridden per-request via the API `intent` field.
+| Rank | Builtin name | Typical allowed tools |
+|------|--------------|------------------------|
+| 0    | observe      | Read-only: sysinfo, file_read, web_fetch |
+| 100  | operate      | + side effects: file_write, bash (non-destructive) |
+| 200  | override     | + destructive: bash (rm, kill), system changes |
+
+Default is `100` (operate). Can be overridden per-request via the API `intent`
+field, which accepts any name registered in the intent registry — builtin or
+custom. When no `intent` is provided, the planner auto-infers the lowest
+sufficient rank from the tools it selects.
 
 ## Environment Variables
 

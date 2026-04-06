@@ -85,6 +85,7 @@ type configPatch struct {
 		DAGMode     *string `json:"dag_mode,omitempty"`
 		PlannerMode *string `json:"planner_mode,omitempty"`
 		SafetyLevel *int    `json:"safety_level,omitempty"`
+		MaxReplans  *int    `json:"max_replans,omitempty"`
 	} `json:"agent,omitempty"`
 }
 
@@ -137,6 +138,9 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.Agent.SafetyLevel != nil {
 			c.cfg.Agent.SafetyLevel = *patch.Agent.SafetyLevel
+		}
+		if patch.Agent.MaxReplans != nil {
+			c.cfg.Agent.MaxReplans = *patch.Agent.MaxReplans
 		}
 	}
 

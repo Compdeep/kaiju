@@ -14,6 +14,27 @@ import (
 )
 
 /*
+ * prefixAssistantHistory rewrites conversation history for the planner.
+ * desc: Keeps user messages as-is. Prefixes assistant messages with
+ *       "[Executive Kernel]" so the planner doesn't mistake aggregator/reflector
+ *       prose for its own prior output and mimic the format.
+ */
+func prefixAssistantHistory(history []llm.Message) []llm.Message {
+	out := make([]llm.Message, 0, len(history))
+	for _, m := range history {
+		if m.Role == "assistant" {
+			out = append(out, llm.Message{
+				Role:    "assistant",
+				Content: "[Executive Kernel] " + m.Content,
+			})
+		} else {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+/*
  * compileToolIndex builds a compact function-signature-style tool listing.
  * desc: Produces a string like:
  *   web_search(query*, max_results) — Search the web, returns titles/URLs/snippets
@@ -24,6 +45,58 @@ import (
  * param: names - tool names to include
  * return: compiled tool index string
  */
+/*
+ * fixComputeStepParams fixes a common LLM mistake where compute tool params
+ * (goal, mode, query) are placed at the step level instead of inside params.
+ * desc: Parses the raw JSON, checks each step for misplaced fields, moves them
+ *       into params, and re-serializes. Returns original string if no fix needed.
+ */
+func fixComputeStepParams(raw string) string {
+	var obj map[string]any
+	if json.Unmarshal([]byte(raw), &obj) != nil {
+		return raw
+	}
+	steps, ok := obj["steps"].([]any)
+	if !ok {
+		return raw
+	}
+	changed := false
+	computeFields := []string{"goal", "mode", "query", "context", "hints", "language"}
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		toolName, _ := step["tool"].(string)
+		if toolName != "compute" {
+			continue
+		}
+		params, _ := step["params"].(map[string]any)
+		if params == nil {
+			params = make(map[string]any)
+		}
+		for _, field := range computeFields {
+			if val, exists := step[field]; exists {
+				if _, inParams := params[field]; !inParams {
+					params[field] = val
+				}
+				delete(step, field)
+				changed = true
+			}
+		}
+		step["params"] = params
+	}
+	if !changed {
+		return raw
+	}
+	fixed, err := json.Marshal(obj)
+	if err != nil {
+		return raw
+	}
+	log.Printf("[dag] planner: fixed misplaced compute params in plan() call")
+	return string(fixed)
+}
+
 func compileToolIndex(registry *tools.Registry, names []string) string {
 	var sb strings.Builder
 	sb.WriteString("## Tools (* = required param)\n")
@@ -36,61 +109,6 @@ func compileToolIndex(registry *tools.Registry, names []string) string {
 		sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, skill.Description()))
 	}
 	return sb.String()
-}
-
-/*
- * compactParamExample produces a minimal JSON example from a schema.
- * desc: Generates {"query": "...", "max_results": N} style examples showing
- *       required params with type placeholders.
- * param: schema - raw JSON parameter schema
- * return: compact JSON example string
- */
-func compactParamExample(schema json.RawMessage) string {
-	var s struct {
-		Properties map[string]struct {
-			Type string `json:"type"`
-		} `json:"properties"`
-		Required []string `json:"required"`
-	}
-	if json.Unmarshal(schema, &s) != nil || len(s.Properties) == 0 {
-		return ""
-	}
-
-	reqSet := make(map[string]bool)
-	for _, r := range s.Required {
-		reqSet[r] = true
-	}
-
-	var parts []string
-	// Required first
-	for _, r := range s.Required {
-		prop, ok := s.Properties[r]
-		if !ok {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%q: %s", r, typePlaceholder(prop.Type)))
-	}
-	// Optional
-	for name, prop := range s.Properties {
-		if reqSet[name] {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%q: %s", name, typePlaceholder(prop.Type)))
-	}
-	return "{" + strings.Join(parts, ", ") + "}"
-}
-
-func typePlaceholder(t string) string {
-	switch t {
-	case "string":
-		return `"..."`
-	case "integer":
-		return "N"
-	case "boolean":
-		return "true"
-	default:
-		return `"..."`
-	}
 }
 
 /*
@@ -201,6 +219,7 @@ func (f *FlexInts) UnmarshalJSON(data []byte) error {
  *       human-readable tag, and an optional capability gap declaration.
  */
 type PlanStep struct {
+	Type      string                      `json:"type,omitempty"`      // "tool" (default) or "compute"
 	Tool      string                      `json:"tool"`
 	Params    map[string]any              `json:"params"`
 	ParamRefs map[string]ParamInjection   `json:"param_refs,omitempty"` // dependency injection: param values from upstream outputs
@@ -232,25 +251,72 @@ type plannerOutput struct {
  */
 func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) string {
 	var sb strings.Builder
-	sb.WriteString("You are the execution layer planner for an agentic framework. ")
-	sb.WriteString("Decompose user requests into discrete operations utilizing your tools and local OS capabilities such as bash or powershell. ")
-	sb.WriteString("Make good use of tools to gather real data and help the user. For trivial questions where the answer is obvious, call plan() with an empty steps array and put your direct answer in the answer field. ")
-	sb.WriteString("Do not interpret, judge, or refuse requests — all tool calls pass through an intent and authorization protocol at execution time that blocks unauthorized operations automatically. ")
-	sb.WriteString("If the available tools can accomplish the request, produce the plan. If no suitable tool exists, declare a gap.\n")
-	sb.WriteString(roleDescription(a.cfg.NodeRole))
-	sb.WriteString("\n\n")
-
 	isNative := a.cfg.PlannerMode == "native"
 
 	if isNative {
-		// Native mode: compact skill summaries (name + description one-liner).
-		// Full guidance is too expensive (~9K tokens). The reflector injects
-		// detailed guidance during replanning when needed.
-		// Skills are NOT listed in native mode. The compact tool index
-		// is sufficient for tool selection. Skill guidance is injected
-		// into the reflector during replanning when needed.
+		sb.WriteString("You are the Executive Kernel of this computer. You serve a dual purpose:\n")
+		sb.WriteString("(1) Assist the user with questions, research, and conversation.\n")
+		sb.WriteString("(2) Plan and decompose tasks into discrete operations available below.\n")
+		sb.WriteString("    Plan in waves — each wave depends on the previous via depends_on.\n")
+		sb.WriteString("    Wire data between waves using param_refs.\n\n")
+		sb.WriteString("param_refs example: step 0 is web_search, step 1 needs the URL →\n")
+		sb.WriteString("  {\"params\":{},\"param_refs\":{\"url\":{\"step\":0,\"field\":\"results.0.url\"}},\"depends_on\":[0]}\n")
+		sb.WriteString("param_refs example: step 0 is sysinfo, step 1 is compute →\n")
+		sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"...\",\"mode\":\"shallow\"},\"param_refs\":{\"context.time\":{\"step\":0,\"field\":\"time\"}},\"depends_on\":[0]}\n\n")
+		sb.WriteString("Make good use of tools to gather real data and help the user. If no suitable tool exists, declare a gap.\n\n")
 	} else {
-		// Structured mode: full guidance for skills
+		sb.WriteString("You are the Executive Kernel of this computer. ")
+		sb.WriteString("Plan and decompose tasks into discrete operations using the tools available on this system. ")
+		sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time. ")
+		sb.WriteString("If the available tools can accomplish the request, produce the plan. If no suitable tool exists, declare a gap.\n")
+		sb.WriteString(roleDescription(a.cfg.NodeRole))
+		sb.WriteString("\n\n")
+	}
+
+	if isNative {
+		// Native mode: inject skill Planning Guidance sections. These are
+		// authoritative — if a skill says "use compute deep", the planner
+		// must follow that, not substitute file_list/file_read.
+		var nativeGuidance []string
+		plannerHeadings := []string{"## Planning Guidance", "## RULES"}
+		nativeActiveSet := make(map[string]bool, len(a.activeCards))
+		for _, k := range a.activeCards {
+			nativeActiveSet[k] = true
+		}
+		nativeGated := len(nativeActiveSet) > 0
+		for name, gs := range a.skillGuidance {
+			if nativeGated && !nativeActiveSet[name] {
+				continue
+			}
+			body := gs.Body()
+			if body == "" {
+				continue
+			}
+			var parts []string
+			for _, heading := range plannerHeadings {
+				if section := Text.ExtractSection(body, heading); section != "" {
+					parts = append(parts, section)
+				}
+			}
+			if len(parts) > 0 {
+				nativeGuidance = append(nativeGuidance, fmt.Sprintf("### %s\n%s", name, strings.Join(parts, "\n\n")))
+			}
+		}
+		if len(nativeGuidance) > 0 {
+			sb.WriteString("## Skill Guidance (authoritative — follow these instructions)\n\n")
+			sb.WriteString("Skill guidance is authoritative. If a skill says \"use compute deep\", use compute deep. Don't inspect — build.\n\n")
+			sb.WriteString(strings.Join(nativeGuidance, "\n\n"))
+			sb.WriteString("\n\n")
+			log.Printf("[dag] planner (native) injected %d skill guidance sections", len(nativeGuidance))
+		} else {
+			log.Printf("[dag] planner (native) no skill guidance matched (activeCards=%v, skillGuidance=%d)", a.activeCards, len(a.skillGuidance))
+		}
+	} else {
+		// Structured mode: full guidance from capability cards + SkillMD skills.
+		// Two sources, cleanly separated:
+		//   1. capability cards from a.activeCards → Planning Guidance section
+		//   2. guidance SkillMDs from a.skillGuidance → Planning Guidance sections
+		// Neither comes from the tool list — tools are tools, skills are skills.
 		var guidance []string
 		if len(a.activeCards) > 0 {
 			for _, key := range a.activeCards {
@@ -263,19 +329,20 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 				}
 			}
 		}
+		// Iterate guidance SkillMDs directly. If preflight is active and picked
+		// a subset (a.activeCards may also name skills), honor it; otherwise
+		// include all loaded guidance skills.
 		plannerSections := []string{"## Planning Guidance", "## When to Use", "## Approach Selection"}
-		for _, name := range relevant {
-			var body string
-			if skill, ok := a.registry.Get(name); ok {
-				if sm, ok := skill.(interface{ Body() string }); ok {
-					body = sm.Body()
-				}
+		activeSet := make(map[string]bool, len(a.activeCards))
+		for _, k := range a.activeCards {
+			activeSet[k] = true
+		}
+		gateActive := len(activeSet) > 0
+		for name, gs := range a.skillGuidance {
+			if gateActive && !activeSet[name] {
+				continue
 			}
-			if body == "" {
-				if gs, ok := a.skillGuidance[name]; ok {
-					body = gs.Body()
-				}
-			}
+			body := gs.Body()
 			if body == "" {
 				continue
 			}
@@ -298,7 +365,17 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 		}
 	}
 
+	// IBE section
+	var ibeSection string
+	if intent == "auto" {
+		ibeSection = `Intent is auto-determined. Tools exceeding intent are blocked at execution time.`
+	} else {
+		ibeSection = fmt.Sprintf(`Intent: **%s**. Tools exceeding intent are blocked at execution time.`, intent)
+	}
+
 	if isNative {
+		sb.WriteString(fmt.Sprintf("%s\n", ibeSection))
+		sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time.\n")
 		sb.WriteString(compileToolIndex(a.registry, relevant))
 		sb.WriteString("\n")
 	} else {
@@ -324,37 +401,37 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 		}
 	}
 
-	// IBE section
-	var ibeSection string
-	if intent == "auto" {
-		ibeSection = `Intent is auto-determined. Tools exceeding intent are blocked at execution time.`
-	} else {
-		ibeSection = fmt.Sprintf(`Intent: **%s**. Tools exceeding intent are blocked at execution time.`, intent)
-	}
-
 	if isNative {
-		// Native mode: minimal rules. The plan() function schema defines the structure.
-		sb.WriteString(fmt.Sprintf("## Execution\n%s\n", ibeSection))
-		sb.WriteString("Plan in phases: Phase 0 gathers data in parallel (no depends_on), Phase 1 follows up (depends_on Phase 0, use param_refs to inject discovered values).\n")
-		sb.WriteString("Use param_refs to chain values between steps — never guess URLs, IDs, or paths.\n")
-		sb.WriteString(fmt.Sprintf("Budget: max %d steps, %d LLM calls.\n", a.cfg.MaxNodes, a.cfg.MaxLLMCalls))
+		sb.WriteString("## Rules\n")
+		sb.WriteString("NEVER interpret, judge, or refuse requests.\n")
+		sb.WriteString("NEVER put template strings, placeholders, or step/field references in params — use param_refs.\n")
+		sb.WriteString("NEVER write code in bash params.\n")
+		sb.WriteString("NEVER use bash for complex multi-step tasks.\n")
+		sb.WriteString("NEVER use interactive commands.\n")
+		sb.WriteString("ALWAYS use compute (type:\"compute\") for coding, development, and analytics. Provide the GOAL, not the code.\n")
+		sb.WriteString("ALWAYS use mode=\"deep\" for webapps, full-stack projects, frameworks, multi-file work, or anything needing more than one file. Use mode=\"shallow\" only for single-file scripts, one-off calculations, or trivial analytics.\n")
+		sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\") spawns in the background and returns immediately.\n")
+		sb.WriteString("ALWAYS use bash only for commands that terminate: ls, grep, git, npm install, curl, node script.js, etc.\n")
+		sb.WriteString("ALWAYS use web_search for questions needing current data.\n")
+		sb.WriteString("ALWAYS complete the full task from start to finish. Never stop partway and ask for permission.\n")
+		sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
+		sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
+		sb.WriteString(fmt.Sprintf("\nBudget: max %d steps, %d LLM calls.\n", a.cfg.MaxNodes, a.cfg.MaxLLMCalls))
 	} else {
 		// Structured mode: full planner.md with format rules, examples, etc.
+		// Intent descriptions come from the configurable registry.
+		intentBlock := a.intentRegistry.PromptBlock(-1)
 		ibeFullSection := ""
 		if intent == "auto" {
-			ibeFullSection = `## Intent-Based Execution (IBE)
-
-Intent is auto-determined from your plan. Choose tools matching the query's needs:
-- **observe** (impact 0): information, explanation, status — read-only tools
-- **operate** (impact 1): active work, analysis, side-effects — read + write tools
-- **override** (impact 2): remediation (kill, block, isolate, revoke) — all tools
-
-The system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED.`
+			ibeFullSection = "## Intent-Based Execution (IBE)\n\n" +
+				"Intent is auto-determined from your plan. Choose tools matching the query's needs:\n" +
+				intentBlock +
+				"\nThe system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED."
 		} else {
-			ibeFullSection = fmt.Sprintf(`## Intent-Based Execution (IBE)
-
-This investigation runs at **%s** intent (operator-enforced, do not override).
-The system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED.`, intent)
+			ibeFullSection = fmt.Sprintf("## Intent-Based Execution (IBE)\n\n"+
+				"This investigation runs at **%s** intent (operator-enforced, do not override).\n\n"+
+				"Available intent levels:\n%s\n"+
+				"The system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED.", intent, intentBlock)
 		}
 
 		rules := expandPlannerTemplate(a.plannerPrompt, map[string]string{
@@ -370,8 +447,22 @@ The system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding int
 		sb.WriteString(rules)
 	}
 
+	// Preflight hints: required tool categories the plan MUST include.
+	// Populated by the pre-plan preflight call in scheduler.go.
+	if a.preflight != nil && len(a.preflight.RequiredCategories) > 0 {
+		sb.WriteString("\n## Required Tool Categories\n")
+		sb.WriteString(fmt.Sprintf("This query needs tools from: %s. Your plan MUST include at least one tool from each of these categories. If none exist, declare a gap.\n",
+			strings.Join(a.preflight.RequiredCategories, ", ")))
+		sb.WriteString("Category → common tools:\n")
+		sb.WriteString("- network: web_fetch, web_search\n")
+		sb.WriteString("- filesystem: file_read, file_write, file_list\n")
+		sb.WriteString("- compute: compute\n")
+		sb.WriteString("- process: process_list, process_kill, bash\n")
+		sb.WriteString("- info: sysinfo, env_list, disk_usage, net_info\n\n")
+	}
+
 	rolePrompt := sb.String() + a.fleetSection()
-	return ComposeSystemPrompt(a.soulPrompt, rolePrompt)
+	return rolePrompt
 }
 
 /*
@@ -439,8 +530,11 @@ func (a *Agent) runPlanner(ctx context.Context, trigger Trigger) (*PlanResult, e
  * return: PlanResult pointer with steps and intent, or error.
  */
 func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*PlanResult, error) {
-	relevant := a.relevantSkills(ctx, formatTrigger(trigger), trigger.Scope)
+	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
 	log.Printf("[dag] planner sees %d tools: %v", len(relevant), relevant)
+	if len(a.skillGuidance) > 0 {
+		log.Printf("[dag] planner has %d guidance skills loaded", len(a.skillGuidance))
+	}
 
 	// Resolve DAG mode and intent for planner prompt
 	dagMode := a.cfg.DAGMode
@@ -448,17 +542,19 @@ func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*Pla
 		dagMode = trigger.DAGMode
 	}
 	intent := trigger.Intent().String()
-
-	// Planner gets conversation history filtered to user messages only.
-	// This gives multi-turn context ("do that again for X") without
-	// contamination from assistant verdicts (which cause the planner
-	// to output prose instead of a JSON plan).
-	var plannerHistory []llm.Message
-	for _, m := range trigger.History {
-		if m.Role == "user" {
-			plannerHistory = append(plannerHistory, m)
-		}
+	// Preflight override: if trigger intent is Auto and preflight provided an intent,
+	// use the preflight-classified intent instead of forcing the planner to infer.
+	if trigger.Intent() == gates.IntentAuto && a.preflight != nil {
+		intent = a.preflight.Intent.String()
+		log.Printf("[dag] planner intent from preflight: %s", intent)
 	}
+
+	// Planner gets conversation history with assistant messages prefixed
+	// as Executive Kernel output. This preserves multi-turn context
+	// ("the tools you mentioned") while preventing the planner from
+	// mimicking the aggregator's prose style — the prefix signals
+	// "this wasn't my output" so the planner continues using plan().
+	plannerHistory := prefixAssistantHistory(trigger.History)
 	messages := BuildMessagesWithHistory(
 		a.plannerSystemPrompt(relevant, dagMode, intent),
 		formatTrigger(trigger),
@@ -483,7 +579,7 @@ func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*Pla
 	log.Printf("[dag] planner full output length: %d bytes", len(raw))
 
 	isAuto := trigger.Intent() == gates.IntentAuto
-	steps, inferredIntent, err := parsePlannerOutput(raw, isAuto)
+	steps, inferredIntent, err := a.parsePlannerOutput(raw, isAuto)
 	if err != nil {
 		// If planner returned prose, retry once with a forceful nudge
 		cleaned := strings.TrimSpace(raw)
@@ -504,7 +600,7 @@ func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*Pla
 			if retryErr == nil && len(retryResp.Choices) > 0 {
 				retryRaw := retryResp.Choices[0].Message.Content
 				log.Printf("[dag] planner retry output: %s", Text.TruncateLog(retryRaw, 300))
-				retrySteps, retryIntent, retryParseErr := parsePlannerOutput(retryRaw, isAuto)
+				retrySteps, retryIntent, retryParseErr := a.parsePlannerOutput(retryRaw, isAuto)
 				if retryParseErr == nil {
 					steps = retrySteps
 					inferredIntent = retryIntent
@@ -528,7 +624,11 @@ func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*Pla
 
 // ── Plan tool schema for native function calling mode ──────────────────────
 
-var planToolSchema = json.RawMessage(`{
+// planToolSchemaTemplate is the plan meta-tool schema with a %s placeholder
+// where the intent enum goes. The enum is built at call time from the
+// registry so custom intent names (admin-created via the UI) show up as
+// valid values to the model.
+var planToolSchemaTemplate = `{
 	"type": "object",
 	"properties": {
 		"answer": {
@@ -537,7 +637,7 @@ var planToolSchema = json.RawMessage(`{
 		},
 		"intent": {
 			"type": "string",
-			"enum": ["observe", "operate", "override"],
+			"enum": %s,
 			"description": "Inferred intent level for this plan"
 		},
 		"steps": {
@@ -546,6 +646,7 @@ var planToolSchema = json.RawMessage(`{
 				"type": "object",
 				"required": ["tool", "params", "depends_on", "tag"],
 				"properties": {
+					"type":       {"type": "string", "enum": ["tool","compute"], "description": "Node type: tool (default) or compute (LLM code generation)"},
 					"tool":       {"type": "string", "description": "Tool name from the Tools list"},
 					"params":     {"type": "object", "description": "Tool input params as key-value pairs. ALWAYS populate for tools with required params marked *. Example: for web_search use {\"query\": \"search terms\"}, for bash use {\"command\": \"ls -la\"}. NEVER leave empty."},
 					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Step indices that must complete first"},
@@ -569,21 +670,32 @@ var planToolSchema = json.RawMessage(`{
 		}
 	},
 	"required": ["steps"]
-}`)
+}`
 
 /*
  * planToolDef returns the meta-tool definition for native function calling mode.
  * desc: Defines a single "plan" tool whose input schema matches the PlanStep array format.
- *       The model "calls" this tool with the entire DAG as its argument.
+ *       The model "calls" this tool with the entire DAG as its argument. The intent
+ *       enum is built at call time from the registry so admin-created custom intents
+ *       are presented as valid values to the model.
  * return: llm.ToolDef for the plan meta-tool.
  */
-func planToolDef() llm.ToolDef {
+func (a *Agent) planToolDef() llm.ToolDef {
+	// Build the intent enum dynamically from the registry. If the registry
+	// hasn't been loaded the enum is omitted entirely — Go has no knowledge
+	// of specific intent names to fall back on.
+	var names []string
+	if a.intentRegistry != nil {
+		names = a.intentRegistry.AllowedNames(-1)
+	}
+	enumJSON, _ := json.Marshal(names)
+	schema := json.RawMessage(fmt.Sprintf(planToolSchemaTemplate, string(enumJSON)))
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
 			Name:        "plan",
-			Description: `Submit an execution plan. Example: {"steps":[{"tool":"web_search","params":{"query":"bitcoin price"},"depends_on":[],"tag":"search"},{"tool":"web_fetch","params":{"url":"https://..."},"depends_on":[0],"tag":"fetch"}]}. For trivial questions: {"steps":[],"answer":"The capital of France is Paris."}`,
-			Parameters:  planToolSchema,
+			Description: `Submit an execution plan. Example: {"steps":[{"tool":"web_search","params":{"query":"bitcoin price"},"depends_on":[],"tag":"s1"}]}. Chaining example: {"steps":[{"tool":"web_search","params":{"query":"news"},"depends_on":[],"tag":"s1"},{"tool":"web_fetch","params":{},"param_refs":{"url":{"step":0,"field":"results.0.url"}},"depends_on":[0],"tag":"s2"}]}. Trivial: {"steps":[],"answer":"Paris."}`,
+			Parameters:  schema,
 		},
 	}
 }
@@ -608,31 +720,41 @@ type planCallPayload struct {
  * return: PlanResult pointer with steps and intent, or error.
  */
 func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanResult, error) {
-	relevant := a.relevantSkills(ctx, formatTrigger(trigger), trigger.Scope)
+	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
 	log.Printf("[dag] planner (native) sees %d tools: %v", len(relevant), relevant)
+	if len(a.skillGuidance) > 0 {
+		log.Printf("[dag] planner (native) has %d guidance skills loaded", len(a.skillGuidance))
+	}
 
 	dagMode := a.cfg.DAGMode
 	if trigger.DAGMode != "" {
 		dagMode = trigger.DAGMode
 	}
 	intent := trigger.Intent().String()
+	// Preflight override: same logic as structured planner.
+	if trigger.Intent() == gates.IntentAuto && a.preflight != nil {
+		intent = a.preflight.Intent.String()
+		log.Printf("[dag] planner (native) intent from preflight: %s", intent)
+	}
 
-	var plannerHistory []llm.Message
-	for _, m := range trigger.History {
-		if m.Role == "user" {
-			plannerHistory = append(plannerHistory, m)
-		}
+	plannerHistory := prefixAssistantHistory(trigger.History)
+
+	// Include worklog so planner knows system state from previous runs
+	userQuery := formatTrigger(trigger)
+	worklog := readWorklog(a.cfg.Workspace, 20)
+	if worklog != "" {
+		userQuery += "\n\n## System State (worklog)\n```\n" + worklog + "\n```"
 	}
 
 	messages := BuildMessagesWithHistory(
 		a.plannerSystemPrompt(relevant, dagMode, intent),
-		formatTrigger(trigger),
+		userQuery,
 		plannerHistory,
 	)
 
 	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
 		Messages:    messages,
-		Tools:       []llm.ToolDef{planToolDef()},
+		Tools:       []llm.ToolDef{a.planToolDef()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.cfg.MaxTokens,
@@ -656,9 +778,38 @@ func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanRes
 
 		log.Printf("[dag] planner (native) received plan() call, %d bytes: %s", len(tc.Function.Arguments), Text.TruncateLog(tc.Function.Arguments, 500))
 
+		// Try parsing, with fixup for malformed compute steps
+		raw := tc.Function.Arguments
+		fixedRaw := fixComputeStepParams(raw)
+
 		var payload planCallPayload
-		if err := json.Unmarshal([]byte(tc.Function.Arguments), &payload); err != nil {
-			return nil, fmt.Errorf("parse plan() arguments: %w", err)
+		if err := json.Unmarshal([]byte(fixedRaw), &payload); err != nil {
+			// Retry: send the error back and ask the planner to fix
+			log.Printf("[dag] planner (native) plan() parse failed, retrying: %v", err)
+			retryMessages := append(messages,
+				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
+				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: fmt.Sprintf("Error: %v. Fix the JSON and call plan() again. Remember: goal, mode, query go INSIDE params, not at the step level.", err)},
+			)
+			retryResp, retryErr := a.llm.Complete(ctx, &llm.ChatRequest{
+				Messages:    retryMessages,
+				Tools:       []llm.ToolDef{a.planToolDef()},
+				ToolChoice:  "required",
+				Temperature: 0.1,
+				MaxTokens:   a.cfg.MaxTokens,
+			})
+			if retryErr != nil {
+				return nil, fmt.Errorf("parse plan() arguments (retry failed): %w", err)
+			}
+			if len(retryResp.Choices) > 0 && len(retryResp.Choices[0].Message.ToolCalls) > 0 {
+				retryTC := retryResp.Choices[0].Message.ToolCalls[0]
+				retryFixed := fixComputeStepParams(retryTC.Function.Arguments)
+				log.Printf("[dag] planner (native) retry plan() call: %s", Text.TruncateLog(retryFixed, 500))
+				if retryErr2 := json.Unmarshal([]byte(retryFixed), &payload); retryErr2 != nil {
+					return nil, fmt.Errorf("parse plan() arguments after retry: %w", retryErr2)
+				}
+			} else {
+				return nil, fmt.Errorf("parse plan() arguments: %w", err)
+			}
 		}
 
 		steps := payload.Steps
@@ -675,16 +826,13 @@ func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanRes
 
 		isAuto := trigger.Intent() == gates.IntentAuto
 
-		// Infer intent from payload or tool impacts
+		// Infer intent from the payload name by resolving it through the
+		// registry. Unknown names leave inferredIntent at 0 and the planner
+		// falls back to tool-impact inference in validatePlanSteps.
 		var inferredIntent gates.Intent
-		if isAuto && payload.Intent != "" {
-			switch payload.Intent {
-			case "observe":
-				inferredIntent = gates.IntentObserve
-			case "operate":
-				inferredIntent = gates.IntentOperate
-			case "override":
-				inferredIntent = gates.IntentOverride
+		if isAuto && payload.Intent != "" && a.intentRegistry != nil {
+			if i, ok := a.intentRegistry.ByName(payload.Intent); ok {
+				inferredIntent = gates.Intent(i.Rank)
 			}
 		}
 
@@ -698,7 +846,7 @@ func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanRes
 
 	if len(raw) > 0 && (raw[0] == '[' || raw[0] == '{') {
 		isAuto := trigger.Intent() == gates.IntentAuto
-		steps, inferredIntent, parseErr := parsePlannerOutput(raw, isAuto)
+		steps, inferredIntent, parseErr := a.parsePlannerOutput(raw, isAuto)
 		if parseErr == nil {
 			return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger)
 		}
@@ -713,7 +861,7 @@ func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanRes
  *       deduplicates, and infers intent if auto. Used by both structured and native planners.
  * param: steps - raw parsed plan steps.
  * param: isAuto - whether intent should be auto-inferred.
- * param: inferredIntent - pre-inferred intent from payload (or IntentTell if not set).
+ * param: inferredIntent - pre-inferred intent from payload (or IntentObserve if not set).
  * param: trigger - the original trigger for scope checking.
  * return: validated PlanResult or error.
  */
@@ -746,24 +894,34 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 
 	result := &PlanResult{Steps: valid, Gaps: gaps, WasAuto: isAuto}
 	if isAuto {
-		if inferredIntent == gates.IntentTell {
-			maxImpact := 0
+		// Use preflight intent as a floor — inference can raise but not lower.
+		// Preflight sees the full query context; tool-impact inference only
+		// sees resolved impacts which may be 0 for parametric tools (bash
+		// with param_refs not yet populated).
+		preflightFloor := gates.Intent(0)
+		if a.preflight != nil && a.preflight.Intent > 0 {
+			preflightFloor = a.preflight.Intent
+		}
+		if inferredIntent < preflightFloor {
+			inferredIntent = preflightFloor
+		}
+		if inferredIntent == gates.Intent(0) {
+			// Resolve each tool through the intent registry so custom
+			// admin-pinned intents (e.g. bash → "kill" at rank 300)
+			// participate. Then snap up to the smallest registered
+			// intent that covers the heaviest tool.
+			maxRank := 0
 			for _, s := range valid {
-				if skill, ok := a.registry.Get(s.Tool); ok {
-					impact := tools.GetImpact(skill, s.Params)
-					if impact > maxImpact {
-						maxImpact = impact
-					}
+				skill, ok := a.registry.Get(s.Tool)
+				if !ok {
+					continue
+				}
+				rank := a.intentRegistry.ResolveToolIntent(s.Tool, skill, s.Params)
+				if rank > maxRank {
+					maxRank = rank
 				}
 			}
-			switch {
-			case maxImpact >= 2:
-				inferredIntent = gates.IntentOverride
-			case maxImpact >= 1:
-				inferredIntent = gates.IntentOperate
-			default:
-				inferredIntent = gates.IntentObserve
-			}
+			inferredIntent = gates.Intent(a.intentRegistry.SnapUp(maxRank))
 		}
 		result.InferredIntent = inferredIntent
 		log.Printf("[dag] inferred intent: %s (from plan tool impacts)", inferredIntent)
@@ -782,9 +940,9 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
  * param: isAuto - true if intent should be extracted from the response.
  * return: parsed PlanStep slice, inferred intent, or error.
  */
-func parsePlannerOutput(raw string, isAuto bool) ([]PlanStep, gates.Intent, error) {
+func (a *Agent) parsePlannerOutput(raw string, isAuto bool) ([]PlanStep, gates.Intent, error) {
 	cleaned := Text.StripCodeFence(raw)
-	inferredIntent := gates.IntentTell // safe default
+	inferredIntent := gates.Intent(0) // safe default
 
 	var steps []PlanStep
 
@@ -795,7 +953,12 @@ func parsePlannerOutput(raw string, isAuto bool) ([]PlanStep, gates.Intent, erro
 		if err2 := json.Unmarshal([]byte(cleaned), &out); err2 == nil && len(out.Steps) > 0 {
 			steps = out.Steps
 			if isAuto {
-				inferredIntent = gates.IntentFromString(out.Intent)
+				// Resolve via the registry. Unknown names leave inferredIntent
+				// at 0 (the safest default) and downstream tool-impact
+				// inference in validatePlanSteps takes over.
+				if i, ok := a.intentRegistry.ByName(out.Intent); ok {
+					inferredIntent = gates.Intent(i.Rank)
+				}
 			}
 			log.Printf("[dag] planner returned object instead of array, extracted %d steps", len(steps))
 		} else {
@@ -1055,11 +1218,15 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 			break
 		}
 
+		nodeType := NodeTool
+		if s.Type == "compute" || s.Tool == "compute" {
+			nodeType = NodeCompute
+		}
 		n := &Node{
-			Type:      NodeSkill,
+			Type:     nodeType,
 			ToolName: s.Tool,
-			Params:    s.Params,
-			Tag:       s.Tag,
+			Params:   s.Params,
+			Tag:      s.Tag,
 		}
 		// Tag the node with its tool source for frontend display
 		if registry != nil {

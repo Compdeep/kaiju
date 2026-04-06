@@ -66,6 +66,7 @@ import api from '../api/client'
 defineEmits(['close'])
 const tab = ref('tools')
 const tools = ref([])
+const intentOptions = ref([])
 
 /**
  * desc: Group tools by source type (skills, custom, builtin) for categorized display
@@ -84,21 +85,43 @@ const toolGroups = computed(() => {
 
 onMounted(async () => {
   try { tools.value = await api.get('/api/v1/tools') } catch {}
+  try {
+    const list = await api.get('/api/v1/intents')
+    if (Array.isArray(list)) {
+      intentOptions.value = list.map(i => ({ name: i.name, rank: i.rank }))
+    }
+  } catch (e) {
+    console.error('[tools] failed to load intents registry:', e)
+    intentOptions.value = []
+  }
 })
 
 /**
- * desc: Map an impact level number to its CSS badge class
- * @param {number} l - Impact level (0=observe, 1=operate, 2=override)
+ * desc: CSS class for the impact badge. Buckets by position in the registry's
+ *       ordered rank list: bottom third → lowest tier, top third → highest,
+ *       middle → mid. No hardcoded names.
+ * @param {number} rank - Impact rank
  * @returns {string} CSS class name for the badge
  */
-function impactClass(l) { return ['badge-observe', 'badge-operate', 'badge-override'][l] || 'badge-observe' }
+function impactClass(rank) {
+  const sorted = [...intentOptions.value].sort((a, b) => a.rank - b.rank)
+  if (!sorted.length) return 'badge-tier-low'
+  const top = sorted[sorted.length - 1].rank
+  if (rank <= 0) return 'badge-tier-low'
+  if (rank >= top) return 'badge-tier-high'
+  return 'badge-tier-mid'
+}
 
 /**
- * desc: Map an impact level number to its human-readable label
- * @param {number} l - Impact level (0=observe, 1=operate, 2=override)
- * @returns {string} Impact label string
+ * desc: Resolve an impact rank to its registry name. Unknown ranks render as
+ *       "rank(N)" — nothing is hardcoded.
+ * @param {number} rank - Impact rank
+ * @returns {string} Intent name, or "rank(N)" if not in the registry
  */
-function impactLabel(l) { return ['observe', 'operate', 'override'][l] || 'observe' }
+function impactLabel(rank) {
+  const match = intentOptions.value.find(o => o.rank === rank)
+  return match ? match.name : `rank(${rank})`
+}
 </script>
 
 <style scoped>

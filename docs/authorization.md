@@ -7,7 +7,7 @@ Kaiju splits authorization into three independent dimensions. Each is checked at
 How a user request becomes a gated tool execution:
 
 ```
-User: "delete /tmp/test.txt"          ← human sets intent (e.g. "operate" = 1)
+User: "delete /tmp/test.txt"          ← human sets intent (e.g. "operate" = 100)
   │
   ▼
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -31,28 +31,35 @@ User: "delete /tmp/test.txt"          ← human sets intent (e.g. "operate" = 1)
                            │  node fires
                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ IGX GATE (Go code, not LLM)                                        │
+│ IBE GATE (Go code, not LLM)                                        │
 │                                                                     │
 │ Step 1 — SCOPE:     Is "bash" in user's allowed tools?              │
 │                     Source: admin-defined scope in DB                │
 │                                                                     │
-│ Step 2 — IMPACT:    bash.Impact({"command":"rm /tmp/test.txt"})     │
-│                     Source: Go method on the tool struct             │
-│                     bash regex matches "rm" → returns 2 (control)   │
+│ Step 2 — IMPACT:    registry.ResolveToolIntent("bash", ...)          │
+│                     Source: DB override (if admin configured) OR    │
+│                     fallback to tool's Go Impact() method            │
+│                     bash → rank 200 (override) via registry         │
 │                                                                     │
-│ Step 3 — INTENT:    impact(2) ≤ min(intent(1), scope_cap(1))       │
-│                     Source: user's session setting (operate = 1)    │
-│                     2 > 1 → BLOCKED                                 │
+│ Step 3 — INTENT:    impact(200) ≤ min(intent(100), scope_cap(100)) │
+│                     Source: user's session setting (operate = 100)  │
+│                     200 > 100 → BLOCKED                             │
 │                                                                     │
 │ Step 4 — CLEARANCE: (never reached — cheaper checks failed first)   │
 │                     Source: external HTTP endpoint                   │
 │                                                                     │
-│ Result: "gate: bash blocked (impact=2 > ceiling=1)"                │
+│ Result: "gate: bash blocked (impact=200 > ceiling=100)"             │
 │ The rm command NEVER executes. Logged in audit trail.               │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-Key principle: **the LLM produces the plan, but Go code decides what runs.** Impact is computed by the tool's own Go method, not by the LLM. Intent is set by the human operator, not by the LLM. The LLM is untrusted — it can plan anything, but the gate enforces reality.
+Key principle: **the LLM produces the plan, but Go code decides what runs.** Impact is resolved by the intent registry (DB override with Go `Impact()` fallback), not by the LLM. Intent is set by the human operator, not by the LLM. The LLM is untrusted — it can plan anything, but the gate enforces reality.
+
+Impact resolution is two-layered:
+1. If an admin has set a DB override for this tool (via the Intents admin tab), the override's rank wins.
+2. Otherwise, the tool's Go `Impact(params)` method runs. Compiled tools return ranks directly (0, 100, or 200) on the same scale as the intent registry. The gate compares impact and intent as plain integers — no translation step.
+
+This means admins can reclassify any tool's impact without touching Go code — a `bash` that defaults to `override` can be pinned to `operate` for a particular deployment by setting the DB override. See `docs/intents.md` for the admin workflow.
 
 This is identical for both planner modes (structured JSON and native function calling). The gate sees the same data either way: a tool name and parameters. It doesn't know or care how the plan was produced.
 
@@ -88,13 +95,13 @@ Scopes define **which tools** a user can use. Default deny — if a tool isn't l
   "name": "operator",
   "description": "Normal work mode — all tools, destructive commands capped",
   "tools": ["*"],
-  "cap": {"bash": 1, "git": 1}
+  "cap": {"bash": 100, "git": 100}
 }
 ```
 
 **`tools`** — array of tool names, or `["*"]` for all. Everything not listed is denied.
 
-**`cap`** — optional per-tool impact ceiling. `"bash": 1` means bash is allowed but capped at impact 1 (operate), so destructive bash commands (impact 2) are blocked even though bash itself is in scope.
+**`cap`** — optional per-tool impact ceiling, expressed as a rank from the intent registry. `"bash": 100` means bash is allowed but capped at rank 100 (operate), so destructive bash commands (impact 200) are blocked even though bash itself is in scope.
 
 ### Built-in Scopes
 
@@ -103,7 +110,7 @@ Seeded on first run:
 | Scope | Tools | Caps | Use case |
 |-------|-------|------|----------|
 | `observer` | sysinfo, file_read, file_list, web_search, web_fetch, process_list, net_info, env_list, disk_usage, memory_recall, memory_search, clipboard | — | Read-only access |
-| `operator` | `*` (all) | bash:1, git:1 | Normal work, destructive commands capped |
+| `operator` | `*` (all) | bash:100, git:100 | Normal work, destructive commands capped |
 | `full` | `*` (all) | — | Unrestricted |
 
 ### Three Layers of Defense
@@ -160,18 +167,27 @@ Intent controls **how hard** tools can hit. It's the user's per-session safety l
 
 ### Levels
 
-| Level | Name | Impact allowed | Examples |
-|-------|------|---------------|----------|
-| 0 | **observe** | Read-only (impact 0) | sysinfo, file_read, web_search |
-| 1 | **operate** | + reversible side-effects (impact 0-1) | file_write, bash (non-destructive) |
-| 2 | **override** | + destructive operations (impact 0-2) | bash (rm, kill), git push |
+Intent names and ranks come from the intent registry. Three builtins ship by
+default, and admins can insert custom intents at any rank between or above
+them (see `docs/intents.md`).
+
+| Rank | Builtin name | Impact allowed | Examples |
+|------|--------------|----------------|----------|
+| 0    | **observe**  | Read-only (impact 0) | sysinfo, file_read, web_search |
+| 100  | **operate**  | + reversible side-effects (impact 0–100) | file_write, bash (non-destructive) |
+| 200  | **override** | + destructive operations (impact 0–200) | bash (rm, kill), git push |
+
+Custom intents slot in by rank. A `triage` intent at rank 50 would allow
+anything with impact ≤ 50, blocking normal `operate` tools. The comparison
+the gate performs is always `tool.impact ≤ intent.rank`, never a name match.
 
 ### How It's Set
 
-- **Config default** — `agent.safety_level: 1` in kaiju.json
-- **Per-user max** — user's `max_intent` caps what they can request
+- **Config default** — `agent.safety_level: 100` in kaiju.json (a rank, not an enum)
+- **Per-user max** — user's `max_intent` rank caps what they can request
 - **Per-session** — CLI: `/intent operate`, UI: dropdown in chat input
-- **Per-request** — API: `{"intent": "override"}` in execute request
+- **Per-request** — API: `{"intent": "override"}` in execute request. Any name
+  registered in the intent registry is valid, including custom ones.
 
 The effective intent is: `min(requested, user_max, config_default)`
 
@@ -180,11 +196,11 @@ The effective intent is: `min(requested, user_max, config_default)`
 ```
 tool.Impact(params) ≤ min(intent, scope_cap)
 
-bash({"command": "ls"})       → impact 0 ≤ 1 → allowed
-bash({"command": "rm -rf /"}) → impact 2 > 1 → blocked
+bash({"command": "ls"})       → impact 0   ≤ 100 → allowed
+bash({"command": "rm -rf /"}) → impact 200 > 100 → blocked
 ```
 
-Impact is **dynamic per invocation** — the same tool returns different impact levels depending on its parameters. `bash("ls")` is impact 0, `bash("rm -rf /")` is impact 2.
+Impact is **dynamic per invocation** — the same tool returns different impact levels depending on its parameters. `bash("ls")` is impact 0, `bash("rm -rf /")` is impact 200.
 
 ---
 
@@ -321,12 +337,12 @@ User: alice (scopes: ["operator"], intent: operate)
 1. SCOPE CHECK
    Is "bash" in alice's resolved scope?
    → operator scope has tools: ["*"] → yes
-   → Is there a cap? operator has bash:1
+   → Is there a cap? operator has bash:100
 
 2. INTENT CHECK
-   impact = bash.Impact({"command": "echo hello > output.txt"}) → 1 (write pattern)
-   ceiling = min(intent=1, scope_cap=1) → 1
-   1 ≤ 1 → pass
+   rank = registry.ResolveToolIntent("bash", bash, {"command": "echo hello > output.txt"}) → 100 (write pattern)
+   ceiling = min(intent=100, scope_cap=100) → 100
+   100 ≤ 100 → pass
 
 3. CLEARANCE CHECK
    Is there an endpoint configured for "bash"?
@@ -343,7 +359,7 @@ User: alice (scopes: ["operator"], intent: operate)
 If any step fails:
 ```
 Step 1 fails → "gate: bash not in user scope"
-Step 2 fails → "gate: bash blocked (impact=2 > ceiling=1)"
+Step 2 fails → "gate: bash blocked (impact=200 > ceiling=100)"
 Step 3 fails → "clearance: bash — destructive command on production path"
 ```
 
@@ -372,7 +388,7 @@ groups (
 -- Users
 users (
   username    TEXT PRIMARY KEY,
-  max_intent  INTEGER NOT NULL DEFAULT 1,     -- 0=observe, 1=operate, 2=override
+  max_intent  INTEGER NOT NULL DEFAULT 100,   -- rank from the intent registry (0=observe, 100=operate, 200=override, or custom)
   scopes      TEXT NOT NULL DEFAULT '[]',     -- JSON array of scope names
   groups      TEXT NOT NULL DEFAULT '[]',     -- JSON array of group names
   ...

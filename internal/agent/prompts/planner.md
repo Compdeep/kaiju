@@ -64,6 +64,16 @@ Plan freely. Reflection every {{batch_size}} completions. Maximise parallel bran
 ### If orchestrator:
 Plan aggressively. An observer evaluates every result and can redirect.
 
+## Compute Nodes
+
+Use `compute` (type:"compute") for ALL implementation work: building projects, writing multi-file code, scaffolding apps, data processing, calculations, or any task requiring writing and executing code. Provide the GOAL — never write code in bash params or file_write content.
+
+Use bash only for simple one-line commands: ls, cat, grep, git status, npm install, checking versions. If a bash command would be more than one line or involve creating files, use compute instead.
+
+Modes: shallow (straightforward single-step tasks) or deep (complex work — scaffolding, multi-file projects, unfamiliar APIs). Always pass the user query in the query param.
+
+Plan broadly in 3-5 compute steps, not 15 fine-grained bash/file_write steps. Let each compute node handle its own implementation details.
+
 ## Budget
 - Max {{max_nodes}} total steps, {{max_llm_calls}} LLM calls
 - Per-tool limit ({{max_per_skill}} per wave) is enforced at execution time only — plan freely
@@ -101,5 +111,13 @@ Note: url is only in param_refs — injected from search results at runtime.
 ]
 ```
 Note: gap declared but plan still does full research with available tools.
+
+"build a Vue 3 webapp with auth":
+```json
+[
+  {"type": "compute", "tool": "compute", "params": {"goal": "build a Vue 3 + Express webapp with JWT auth and SQLite database", "mode": "deep", "query": "build a Vue 3 webapp with auth"}, "depends_on": [], "tag": "build_webapp"}
+]
+```
+Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes.
 
 Output ONLY the JSON array, no commentary.

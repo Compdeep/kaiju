@@ -15,14 +15,22 @@ import (
  * Sysinfo returns basic system information including hostname, OS, architecture, and time.
  * desc: Tool that gathers and returns system metadata as a JSON object.
  */
-type Sysinfo struct{}
+type Sysinfo struct {
+	workspace string
+}
 
 /*
  * NewSysinfo creates a new Sysinfo tool instance.
  * desc: Returns a zero-value Sysinfo ready for use.
  * return: pointer to a new Sysinfo
  */
-func NewSysinfo() *Sysinfo { return &Sysinfo{} }
+func NewSysinfo(workspace ...string) *Sysinfo {
+	s := &Sysinfo{}
+	if len(workspace) > 0 {
+		s.workspace = workspace[0]
+	}
+	return s
+}
 
 /*
  * Name returns the tool identifier.
@@ -75,15 +83,19 @@ func (s *Sysinfo) OutputSchema() json.RawMessage {
  */
 func (s *Sysinfo) Execute(_ context.Context, _ map[string]any) (string, error) {
 	hostname, _ := os.Hostname()
-	cwd, _ := os.Getwd()
+	cwd := s.workspace
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
 
 	info := map[string]any{
-		"hostname": hostname,
-		"os":       runtime.GOOS,
-		"arch":     runtime.GOARCH,
-		"cwd":      cwd,
-		"time":     time.Now().UTC().Format(time.RFC3339),
-		"cpus":     runtime.NumCPU(),
+		"hostname":  hostname,
+		"os":        runtime.GOOS,
+		"arch":      runtime.GOARCH,
+		"cwd":       cwd,
+		"workspace": cwd,
+		"time":      time.Now().UTC().Format(time.RFC3339),
+		"cpus":      runtime.NumCPU(),
 	}
 	b, _ := json.Marshal(info)
 	return string(b), nil

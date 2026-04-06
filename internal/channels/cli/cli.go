@@ -14,14 +14,24 @@ import (
 
 // Channel implements an interactive CLI channel (stdin/stdout).
 type Channel struct {
-	sessionID string
-	mu        sync.RWMutex
-	intent    string // "", "observe", "operate", "override"
+	sessionID    string
+	mu           sync.RWMutex
+	intent       string // "", or any intent name from the registry
+	intentLister func() []string // returns valid intent names from the registry; nil = no validation
 }
 
 // New creates a CLI channel.
 func New() *Channel {
 	return &Channel{sessionID: "cli-local"}
+}
+
+// SetIntentLister injects a function that returns the current list of valid
+// intent names from the agent's intent registry. Optional — when unset, the
+// CLI accepts any name and defers validation to the agent. When set, the CLI
+// validates /intent <name> commands interactively and shows custom intents in
+// help text.
+func (c *Channel) SetIntentLister(fn func() []string) {
+	c.intentLister = fn
 }
 
 func (c *Channel) ID() string { return "cli" }
@@ -78,7 +88,7 @@ func (c *Channel) Start(ctx context.Context, inbox chan<- channels.InboundMessag
 		}
 
 		if text == "/help" {
-			fmt.Println("  /intent observe|operate|override  — set safety level")
+			fmt.Println("  /intent <name>  — set safety level (any name from the intent registry, or 'auto')")
 			fmt.Println("  /intent                  — show current level")
 			fmt.Println("  /quit                    — exit")
 			fmt.Print(c.prompt())
@@ -111,30 +121,33 @@ func (c *Channel) handleIntentCommand(text string) {
 	}
 
 	level := parts[1]
-	switch level {
-	case "observe":
-		c.mu.Lock()
-		c.intent = "observe"
-		c.mu.Unlock()
-		fmt.Println("  intent set to: observe (read-only)")
-	case "operate":
-		c.mu.Lock()
-		c.intent = "operate"
-		c.mu.Unlock()
-		fmt.Println("  intent set to: operate (read + write)")
-	case "override":
-		c.mu.Lock()
-		c.intent = "override"
-		c.mu.Unlock()
-		fmt.Println("  intent set to: override (full access)")
-	case "auto":
+	if level == "auto" {
 		c.mu.Lock()
 		c.intent = ""
 		c.mu.Unlock()
 		fmt.Println("  intent set to: auto (planner infers)")
-	default:
-		fmt.Printf("  unknown intent: %s (use observe, operate, override, auto)\n", level)
+		return
 	}
+	// Validate against the registry if a lister is wired. Otherwise accept
+	// any name and let the agent validate downstream.
+	if c.intentLister != nil {
+		valid := false
+		names := c.intentLister()
+		for _, n := range names {
+			if n == level {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			fmt.Printf("  unknown intent: %s (use %s, or auto)\n", level, strings.Join(names, ", "))
+			return
+		}
+	}
+	c.mu.Lock()
+	c.intent = level
+	c.mu.Unlock()
+	fmt.Printf("  intent set to: %s\n", level)
 }
 
 // Send prints the outbound message to stdout.

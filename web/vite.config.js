@@ -6,6 +6,7 @@ export default defineConfig({
   build: {
     outDir: '../internal/gateway/web',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1000,
   },
   server: {
     proxy: {

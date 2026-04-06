@@ -7,9 +7,11 @@ export const useSessionsStore = defineStore('sessions', () => {
   const sessions = ref([])
   const messages = ref([])
   const loading = ref(false)
-  const intent = ref('operate')
+  // Empty string means "unset — use the backend default from the intent registry".
+  const intent = ref('')
   const runMode = ref(localStorage.getItem('kaiju_run_mode') || 'reflect')
   const aggMode = ref(localStorage.getItem('kaiju_agg_mode') || '-1')
+  const executionMode = ref(localStorage.getItem('kaiju_exec_mode') || 'interactive')
 
   function setSessionId(id) {
     sessionId.value = id
@@ -27,5 +29,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     localStorage.setItem('kaiju_agg_mode', mode)
   }
 
-  return { sessionId, sessions, messages, loading, intent, runMode, aggMode, setRunMode, setAggMode, setSessionId }
+  function setExecutionMode(mode) {
+    executionMode.value = mode
+    localStorage.setItem('kaiju_exec_mode', mode)
+  }
+
+  return { sessionId, sessions, messages, loading, intent, runMode, aggMode, executionMode, setRunMode, setAggMode, setExecutionMode, setSessionId }
 })

@@ -74,9 +74,13 @@ func (textNS) StripCodeFence(s string) string {
 		}
 	}
 
-	// Remove closing fence
-	if strings.HasSuffix(s, "```") {
-		s = s[:len(s)-3]
+	// Remove closing fence — only if it's on its own line (not inside code content)
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "```" {
+			s = strings.Join(lines[:i], "\n")
+			break
+		}
 	}
 
 	s = strings.TrimSpace(s)

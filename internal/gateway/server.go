@@ -34,7 +34,7 @@ func New(addr string) *Server {
 			Addr:         addr,
 			Handler:      mux,
 			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 120 * time.Second,
+			WriteTimeout: 0, // disabled — execute endpoint blocks for full DAG duration (5m+); the DAG wall clock is the authority
 			IdleTimeout:  120 * time.Second,
 		},
 	}

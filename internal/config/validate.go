@@ -21,7 +21,7 @@ func (c *Config) Validate() error {
 	if c.Agent.SafetyLevel < 0 || c.Agent.SafetyLevel > 2 {
 		return fmt.Errorf("config: agent.safety_level must be 0, 1, or 2")
 	}
-	if c.Agent.PlannerMode != "" && c.Agent.PlannerMode != "structured" && c.Agent.PlannerMode != "native" {
+	if c.Agent.ExecutiveMode != "" && c.Agent.ExecutiveMode != "structured" && c.Agent.ExecutiveMode != "native" {
 		return fmt.Errorf("config: agent.planner_mode must be structured or native")
 	}
 	if c.Agent.DAGMode != "" && c.Agent.DAGMode != "reflect" && c.Agent.DAGMode != "nReflect" && c.Agent.DAGMode != "orchestrator" {

@@ -1,16 +1,16 @@
-// Package sidecar provides a lightweight IPC protocol for integrating kaiju
+// Package bridge provides a lightweight IPC protocol for integrating kaiju
 // with external processes via newline-delimited JSON (NDJSON) over stdio,
 // named pipes, or unix sockets.
 //
 // Any program that can read/write NDJSON can communicate with kaiju as a
-// sidecar — enabling IDE integration, plugin systems, monitoring dashboards,
+// bridge — enabling IDE integration, plugin systems, monitoring dashboards,
 // and CI/CD pipelines.
 //
 // The protocol supports three communication patterns:
 //   - Fire-and-forget (async): send a message, no response expected
 //   - Request/response (sync): send with req_id, block until matching response
 //   - Broadcast (push): kaiju pushes events to the external process
-package sidecar
+package bridge
 
 import (
 	"bufio"
@@ -23,14 +23,14 @@ import (
 	"sync"
 )
 
-// Envelope is the wire format for all sidecar messages.
+// Envelope is the wire format for all bridge messages.
 type Envelope struct {
 	Type  string          `json:"type"`
 	Data  json.RawMessage `json:"data,omitempty"`
 	ReqID string          `json:"req_id,omitempty"`
 }
 
-// Config holds sidecar configuration.
+// Config holds bridge configuration.
 type Config struct {
 	Enabled           bool   `json:"enabled"`
 	Transport         string `json:"transport"`           // "stdio", "pipe", "unix"
@@ -38,7 +38,7 @@ type Config struct {
 	StatusIntervalSec int    `json:"status_interval_sec"` // heartbeat interval (default: 10)
 }
 
-// DefaultConfig returns sidecar configuration with sensible defaults.
+// DefaultConfig returns bridge configuration with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
 		Enabled:           false,
@@ -75,7 +75,7 @@ func NewBridge(r io.Reader, w io.Writer) *Bridge {
 func (b *Bridge) Send(env Envelope) error {
 	data, err := json.Marshal(env)
 	if err != nil {
-		return fmt.Errorf("sidecar: marshal: %w", err)
+		return fmt.Errorf("bridge: marshal: %w", err)
 	}
 	data = append(data, '\n')
 

@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"time"
 
-	agenttools "github.com/user/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 // ─── NetInfo ────────────────────────────────────────────────────────────────

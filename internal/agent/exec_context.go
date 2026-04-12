@@ -6,8 +6,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/user/kaiju/internal/agent/gates"
-	"github.com/user/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 )
 
 /*
@@ -56,13 +56,15 @@ type ContextualExecutor interface {
  * return: SkillCards map with "architect"/"coder" keys, and a slice of
  *         contributing skill names. Both nil/empty if nothing applies.
  */
-func (a *Agent) resolveComputeSkillCards() (map[string]string, []string) {
-	if len(a.activeCards) == 0 {
+// resolveComputeSkillCards extracts architect/coder guidance for the given
+// list of skill keys. Caller passes the cards (typically graph.ActiveCards).
+func (a *Agent) resolveComputeSkillCards(cards []string) (map[string]string, []string) {
+	if len(cards) == 0 {
 		return nil, nil
 	}
 	var architectParts, coderParts []string
 	var contributed []string
-	for _, key := range a.activeCards {
+	for _, key := range cards {
 		body, name := a.lookupGuidanceBody(key)
 		if body == "" {
 			continue
@@ -85,7 +87,7 @@ func (a *Agent) resolveComputeSkillCards() (map[string]string, []string) {
 		}
 	}
 	if len(contributed) == 0 {
-		log.Printf("[dag] compute: no skill guidance matched for architect/coder (activeCards=%v)", a.activeCards)
+		log.Printf("[dag] compute: no skill guidance matched for architect/coder (cards=%v)", cards)
 		return nil, nil
 	}
 	out := make(map[string]string)

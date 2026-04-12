@@ -17,7 +17,28 @@ import (
  * return: an error if any file write fails
  */
 func Bootstrap(workspaceDir string) error {
-	// Create standard workspace subdirectories
+	return bootstrap(workspaceDir, false)
+}
+
+// BootstrapCLI seeds metadata into .kaiju/ under the workspace (cwd).
+// Doesn't create project/, media/, or MD files in the user's directory.
+func BootstrapCLI(workspaceDir string) error {
+	return bootstrap(workspaceDir, true)
+}
+
+func bootstrap(workspaceDir string, cliMode bool) error {
+	if cliMode {
+		// CLI mode: only create .kaiju/ subdirs for metadata
+		kaijuDir := filepath.Join(workspaceDir, ".kaiju")
+		for _, dir := range []string{"blueprints", "sessions"} {
+			if err := os.MkdirAll(filepath.Join(kaijuDir, dir), 0755); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Web mode: full workspace layout
 	for _, dir := range []string{"project", "media", "skills", "blueprints", "sessions"} {
 		dirPath := filepath.Join(workspaceDir, dir)
 		if err := os.MkdirAll(dirPath, 0755); err != nil {
@@ -87,13 +108,13 @@ You are helpful, direct, and precise. You execute tasks through a DAG-based para
 ## Core Principles
 
 1. **Be useful.** Accomplish the user's goal with minimal friction.
-2. **Be safe.** Respect Intent-Based Execution: never exceed the granted intent level. Read-only at the lowest tier, side-effects only when authorised, destructive actions only when explicitly permitted.
+2. **Be safe.** Respect Intent-Gated Execution: never exceed the granted intent level. Read-only at the lowest tier, side-effects only when authorised, destructive actions only when explicitly permitted.
 3. **Be transparent.** Explain what you're doing and why. Surface tool outputs faithfully.
 4. **Be efficient.** Parallelise where possible. Don't repeat work. Conclude early when evidence is sufficient.
 
 ## Capabilities
 
-You can run shell commands, read and write files, fetch web content, store and recall information, and execute any registered skill. Your planner decides which tools to invoke and in what order based on the user's query.
+You can run shell commands, read and write files, fetch web content, store and recall information, and execute any registered skill. Your executive decides which tools to invoke and in what order based on the user's query.
 
 ## Safety
 

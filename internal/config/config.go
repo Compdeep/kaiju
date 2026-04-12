@@ -59,8 +59,7 @@ type AgentConfig struct {
 	MaxLLMCalls       int         `json:"max_llm_calls"`
 	MaxObserverCalls  int         `json:"max_observer_calls"`
 	BatchSize         int         `json:"batch_size"`
-	MaxReplans        int         `json:"max_replans"`
-	MaxNodeRetries    int         `json:"max_node_retries"`
+	MaxInvestigations int         `json:"max_investigations"`
 	ExecutionMode     string      `json:"execution_mode"` // "interactive" (default) or "autonomous"
 	WallClockSec      int         `json:"wall_clock_sec"`
 	MaxTurns          int         `json:"max_turns"`
@@ -68,7 +67,9 @@ type AgentConfig struct {
 	SafetyLevel       int         `json:"safety_level"`
 	DataDir           string      `json:"data_dir"`
 	Workspace         string      `json:"workspace"`
-	PlannerMode       string      `json:"planner_mode"`
+	MetadataDir       string      `json:"-"` // set at runtime — .kaiju/ in CLI, same as workspace in web
+	CLIMode           bool        `json:"-"` // set at runtime, not from config file
+	ExecutiveMode       string      `json:"executive_mode"`
 	// ClassifierEnabled controls the pre-plan preflight LLM call that selects
 	// skill guidance, infers intent, routes chat/meta queries, and hints
 	// required tool categories. Default true — disabling degrades behavior

@@ -11,7 +11,7 @@ import (
 
 )
 
-// ─── Intent-Based Execution (IBE) ───────────────────────────────────────────
+// ─── Intent-Gated Execution (IGX) ───────────────────────────────────────────
 
 // Intent is a rank on the configurable intent ladder. The ladder itself
 // lives in the intent registry (loaded from config/DB); this type is just
@@ -19,7 +19,7 @@ import (
 // ranks back to names — naming is the registry's job.
 type Intent int
 
-// IntentAuto asks the planner to infer an intent from tool impacts.
+// IntentAuto asks the executive to infer an intent from tool impacts.
 // Any non-negative value is a concrete rank from the registry.
 const IntentAuto Intent = -1
 
@@ -106,7 +106,7 @@ func NewGate(cfg GateConfig) (*Gate, error) {
 
 // ─── Triad Gate ─────────────────────────────────────────────────────────────
 
-// CheckTriad enforces the IBE triad: impact <= min(intent, clearance).
+// CheckTriad enforces the IGX triad: impact <= min(intent, clearance).
 // The caller pre-resolves the tool's effective impact via the intent
 // registry (so DB overrides apply). Returns nil if allowed, descriptive
 // error if blocked.

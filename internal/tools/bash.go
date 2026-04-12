@@ -9,9 +9,10 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 /*
@@ -70,7 +71,7 @@ func (b *Bash) Name() string { return "bash" }
  * return: description string
  */
 func (b *Bash) Description() string {
-	return "Execute any command, script, or program available on the system. This is the general-purpose tool — if something can be done from the command line, use bash. Covers: running CLI tools, downloading files, processing data, managing packages, automation, and anything else the OS can do."
+	return "Execute any command, script, or program available on the system. This is the general-purpose tool — if something can be done from the command line, use bash. Covers: running CLI tools, downloading files, processing data, managing packages, automation, and anything else the OS can do. To manage processes (kill PIDs, free ports, signal daemons) prefer the process_list and process_kill tools."
 }
 
 /*
@@ -118,15 +119,58 @@ func (b *Bash) Impact(params map[string]any) int {
 		cmd, _ = params["cmd"].(string)
 	}
 	if cmd == "" {
+		cmd, _ = params["script"].(string)
+	}
+	if cmd == "" {
 		return tools.ImpactObserve
 	}
 	if destructivePattern.MatchString(cmd) {
+		// Destructive commands targeting only workspace paths are safe —
+		// the workspace is the agent's sandbox. Downgrade to ImpactAffect.
+		if b.workDir != "" && b.isWorkspaceOnly(cmd) {
+			return tools.ImpactAffect
+		}
 		return tools.ImpactControl
 	}
 	if writePattern.MatchString(cmd) {
 		return tools.ImpactAffect
 	}
 	return tools.ImpactObserve
+}
+
+// isWorkspaceOnly checks if all paths in a destructive command are relative
+// (resolved against workDir) or absolute paths inside workDir.
+func (b *Bash) isWorkspaceOnly(cmd string) bool {
+	// Extract path arguments after rm -rf / rm -r
+	parts := strings.Fields(cmd)
+	inRm := false
+	for _, p := range parts {
+		if p == "rm" || p == "rmdir" {
+			inRm = true
+			continue
+		}
+		if inRm && strings.HasPrefix(p, "-") {
+			continue // flags like -rf
+		}
+		if inRm {
+			// Check each path argument
+			if strings.HasPrefix(p, "/") {
+				// Absolute path — must be inside workspace
+				if !strings.HasPrefix(p, b.workDir) {
+					return false
+				}
+			}
+			// Relative paths resolve against workDir — always safe
+			// But reject obvious escapes
+			if strings.Contains(p, "..") {
+				return false
+			}
+		}
+		if p == "&&" || p == ";" || p == "||" {
+			inRm = false // new command segment
+		}
+	}
+	return true
 }
 
 /*
@@ -138,12 +182,28 @@ func (b *Bash) Impact(params map[string]any) int {
  */
 func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, error) {
 	command, _ := params["command"].(string)
-	// Accept "cmd" as alias — LLMs frequently hallucinate this param name
+	// Accept common aliases — LLMs frequently hallucinate param names
 	if command == "" {
 		command, _ = params["cmd"].(string)
 	}
 	if command == "" {
+		command, _ = params["script"].(string)
+	}
+	if command == "" {
 		return "", fmt.Errorf("bash: command is required")
+	}
+
+	// Reject long-running server commands — these belong in the service tool.
+	if looksLikeServer(command) {
+		return "", fmt.Errorf(
+			"bash: refusing long-running command %q. "+
+				"This is a server/dev process that does not terminate. "+
+				"Use the `service` tool instead: "+
+				`{"action":"start","name":"<short-name>","command":"<command>","workdir":"<dir>","port":<port>}. `+
+				"The service tool spawns the process in a detached session, returns immediately, "+
+				"and tracks the PID for later stop/restart/logs.",
+			command,
+		)
 	}
 
 	timeout := b.timeout
@@ -152,6 +212,21 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 			ts = 300
 		}
 		timeout = time.Duration(ts) * time.Second
+	} else {
+		// Auto-detect slow commands and use longer timeout
+		cmdLower := strings.ToLower(command)
+		if strings.Contains(cmdLower, "npm install") ||
+			strings.Contains(cmdLower, "pip install") ||
+			strings.Contains(cmdLower, "cargo build") ||
+			strings.Contains(cmdLower, "docker build") ||
+			strings.Contains(cmdLower, "apt install") ||
+			strings.Contains(cmdLower, "apt-get install") ||
+			strings.Contains(cmdLower, "yarn install") ||
+			strings.Contains(cmdLower, "go build") ||
+			strings.Contains(cmdLower, "npm run build") ||
+			strings.Contains(cmdLower, "npx create-") {
+			timeout = 180 * time.Second // 3 minutes for install/build commands
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -170,11 +245,19 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	if b.workDir != "" {
 		cmd.Dir = b.workDir
 	}
+	// Put command in its own process group so we can kill the entire tree
+	// (including backgrounded children like `npx vite &`) on timeout.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	// If context timed out, kill the entire process group
+	if ctx.Err() == context.DeadlineExceeded && cmd.Process != nil {
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	var result strings.Builder
 	if stdout.Len() > 0 {
@@ -224,6 +307,33 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	}
 
 	return output, nil
+}
+
+// serverPattern matches commands that start long-running servers.
+// serverPattern matches commands that start long-running servers.
+var serverPattern = regexp.MustCompile(`(?i)\b(npm\s+run\s+dev|npm\s+run\s+serve|npm\s+start|yarn\s+dev|yarn\s+start|pnpm\s+dev|pnpm\s+start|npx\s+next\s+(dev|start)|npx\s+nuxt\s+(dev|start)|python\s+-m\s+http\.server|flask\s+run|uvicorn\s|gunicorn\s|rails\s+server|php\s+-S|vite\s+(dev|preview|serve))\b`)
+
+// vitePattern handles npx vite specially: matches "npx vite" only when NOT
+// followed by a terminating subcommand like build/preview-build.
+var vitePattern = regexp.MustCompile(`(?i)\bnpx\s+vite\b`)
+var viteBuildPattern = regexp.MustCompile(`(?i)\bnpx\s+vite\s+(build|optimize)\b`)
+
+// looksLikeServer checks if a command would start a long-running process.
+func looksLikeServer(cmd string) bool {
+	// Strip leading cd/env setup to check the actual command
+	// e.g. "cd project && npm run dev" → check "npm run dev"
+	parts := regexp.MustCompile(`\s*&&\s*|\s*\|\|\s*`).Split(cmd, -1)
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if serverPattern.MatchString(p) {
+			return true
+		}
+		// npx vite is a server UNLESS it's a build/optimize subcommand
+		if vitePattern.MatchString(p) && !viteBuildPattern.MatchString(p) {
+			return true
+		}
+	}
+	return false
 }
 
 var _ tools.Tool = (*Bash)(nil)

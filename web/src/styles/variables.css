@@ -30,7 +30,8 @@
   --radius-sm: 5px;
   --radius-lg: 14px;
   --transition: 120ms ease;
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font: 'Exo 2', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --display: 'Michroma', 'Exo 2', sans-serif;
   --mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   --scrollbar-thumb: #D4D4D4;

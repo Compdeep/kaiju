@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/user/kaiju/internal/agent"
-	"github.com/user/kaiju/internal/db"
+	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/internal/db"
 )
 
 /*
  * IntentAPI handles CRUD endpoints for intents and tool_intent assignments.
- * desc: Intents are configurable IBE levels with sparse integer ranks and
+ * desc: Intents are configurable IGX levels with sparse integer ranks and
  *       per-intent prompt descriptions. Builtins cannot be deleted and their
  *       rank cannot change. Tool assignments override a tool's Go Impact()
  *       default with a named intent.

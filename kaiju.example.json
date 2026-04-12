@@ -1,0 +1,46 @@
+{
+  "llm": {
+    "provider": "openai",
+    "endpoint": "https://api.openai.com/v1",
+    "api_key": "${OPENAI_API_KEY}",
+    "model": "gpt-4o",
+    "temperature": 0.3,
+    "max_tokens": 4096
+  },
+  "executor": {
+    "model": "gpt-4.1-mini"
+  },
+  "agent": {
+    "dag_enabled": true,
+    "dag_mode": "reflect",
+    "max_nodes": 100,
+    "max_per_skill": 10,
+    "max_llm_calls": 50,
+    "max_observer_calls": 50,
+    "batch_size": 5,
+    "max_replans": 3,
+    "wall_clock_sec": 300,
+    "max_turns": 15,
+    "rate_limit": 1000,
+    "safety_level": 200,
+    "data_dir": "~/.kaiju",
+    "workspace": "~/.kaiju/workspace",
+    "executive_mode": "native"
+  },
+  "channels": {
+    "cli": { "enabled": true },
+    "web": { "enabled": true, "port": 8080 }
+  },
+  "api": {
+    "enabled": true,
+    "port": 8080
+  },
+  "tools": {
+    "bash": { "enabled": true, "shell": "auto" },
+    "file": { "enabled": true },
+    "web": { "enabled": true },
+    "sysinfo": { "enabled": true },
+    "compute": { "enabled": true, "timeout_sec": 120 }
+  },
+  "skills_dirs": ["~/.kaiju/skills"]
+}

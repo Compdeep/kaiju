@@ -113,7 +113,7 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)`,
 
-		// Audit log (IBE gate decisions)
+		// Audit log (IGX gate decisions)
 		`CREATE TABLE IF NOT EXISTS audit_log (
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,
 			timestamp   INTEGER NOT NULL,
@@ -189,7 +189,7 @@ func (d *DB) migrate() error {
 			description TEXT NOT NULL DEFAULT '',
 			profiles    TEXT NOT NULL DEFAULT '[]'
 		)`,
-		// Intents (configurable IBE levels, sparse rank ordering)
+		// Intents (configurable IGX levels, sparse rank ordering)
 		`CREATE TABLE IF NOT EXISTS intents (
 			name               TEXT PRIMARY KEY,
 			rank               INTEGER NOT NULL,

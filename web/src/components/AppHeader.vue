@@ -35,7 +35,7 @@
         </button>
         <transition name="fade">
           <div v-if="showInfo" class="info-dropdown">
-            <a href="/paper.html" target="_blank" class="info-link">
+            <a href="https://arxiv.org/abs/2604.02375" target="_blank" class="info-link">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
               <span>Academic Paper</span>
             </a>

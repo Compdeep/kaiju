@@ -2,6 +2,54 @@
 // Supports short-term (session history), long-term semantic (facts), long-term episodic
 // (experiences), and procedural (future) memory types.
 // All operations are scoped by user ID for multi-tenant isolation.
+//
+// ── Architectural boundary (READ THIS BEFORE WIRING MEMORY ANYWHERE) ────────
+//
+// Memory belongs at the CHAT BOUNDARY only. The two legitimate access points
+// are:
+//
+//   1. Chat input  (internal/api/api.go handleChat)
+//        - Loads conversation history into Trigger.History
+//        - Calls InjectLongTermContext to prepend semantic + episodic facts
+//        - Stores the user's incoming message
+//
+//   2. Chat output (after the aggregator runs, also in api.go)
+//        - Stores the assistant's verdict as the next message
+//        - Optionally extracts new semantic / episodic facts
+//
+// The agent's EXECUTION LAYER must never query or write memory:
+//   - ContextGate has no memory source by design
+//   - Graph nodes (executive, compute, reflector, debugger, observer,
+//     aggregator) must not call this package directly
+//   - Source implementations in internal/agent/contextgate.go must not
+//     reach into memory state
+//
+// Why this matters (anti-prompt-injection security):
+//
+// The execution layer runs UNTRUSTED tool output through reasoning steps:
+// bash command output, web fetches, the responses of compute/coder LLM
+// calls, debugger plans, and so on. Any of those can contain adversarial
+// content trying to manipulate the agent. If memory were reachable from
+// inside the execution layer, a malicious tool result could either:
+//   - Exfiltrate the user's stored facts by causing them to be quoted in
+//     a subsequent LLM call that goes to a logging/network sink, or
+//   - Rewrite the user's memory by inducing the agent to call a hidden
+//     memory_store-like path with attacker-supplied content.
+//
+// By keeping memory at the chat boundary, both reads and writes are
+// attested by the authenticated user request itself. Untrusted tool
+// content cannot reach memory because there is no code path from the
+// execution layer to this package.
+//
+// The ONLY exception is the explicit memory tools (memory_store,
+// memory_recall, memory_search). Those let the LLM DELIBERATELY interact
+// with memory as a tool call, just like file_write or bash. That requires
+// the LLM to make an active decision and is auditable in the worklog.
+// Automatic injection inside execution-layer code is not.
+//
+// If you want to add a new memory access path, ask: "is this attested by
+// an authenticated user request, or is it triggered automatically by code
+// that might be processing untrusted input?" If the latter, do not add it.
 package memory
 
 import (
@@ -11,8 +59,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/user/kaiju/internal/agent/llm"
-	"github.com/user/kaiju/internal/db"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/db"
 )
 
 const (

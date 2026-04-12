@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,28 +15,76 @@ import (
 	"syscall"
 	"time"
 
-	agenttools "github.com/user/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 /*
  * Service is a lightweight process manager tool.
  * desc: Spawns long-running processes in detached sessions, tracks them
  *       in a JSON registry, and exposes start/stop/restart/status/logs/list/remove
- *       actions to the planner. Fixes the nohup-blocks-investigation bug —
- *       the planner uses this instead of bash for any process that doesn't
+ *       actions to the executive. Fixes the nohup-blocks-investigation bug —
+ *       the executive uses this instead of bash for any process that doesn't
  *       terminate quickly. Only manages processes kaiju spawns itself; it
  *       does NOT track systemd, pm2, or other OS-managed services.
  */
 type Service struct {
 	workspace string
 	mu        sync.Mutex // serializes registry file writes
+	stopPoll  chan struct{}
 }
 
 // Compile-time interface check
 var _ agenttools.Tool = (*Service)(nil)
 
 func NewService(workspace string) *Service {
-	return &Service{workspace: workspace}
+	s := &Service{workspace: workspace, stopPoll: make(chan struct{})}
+	go s.healthLoop()
+	return s
+}
+
+// healthLoop polls registered services every 10 seconds and marks dead
+// ones as crashed. Only checks processes we started ourselves.
+func (s *Service) healthLoop() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopPoll:
+			return
+		case <-ticker.C:
+			s.reapDead()
+		}
+	}
+}
+
+// reapDead checks all registered services and marks dead/zombie ones as crashed.
+func (s *Service) reapDead() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	recs, err := s.loadRegistry()
+	if err != nil || len(recs) == 0 {
+		return
+	}
+	changed := false
+	for i := range recs {
+		if recs[i].Status != "running" {
+			continue
+		}
+		if !isAlive(recs[i].PID) {
+			log.Printf("[service] %s (pid %d) detected dead, marking crashed", recs[i].Name, recs[i].PID)
+			recs[i].Status = "crashed"
+			changed = true
+		}
+	}
+	if changed {
+		s.saveRegistry(recs)
+	}
+}
+
+// StopPolling shuts down the background health checker. Call on agent shutdown.
+func (s *Service) StopPolling() {
+	close(s.stopPoll)
 }
 
 func (s *Service) Name() string { return "service" }
@@ -65,6 +114,7 @@ var serviceParamSchema = json.RawMessage(`{
 		"name":    {"type": "string", "description": "Service name — required for all actions except list"},
 		"command": {"type": "string", "description": "Shell command to run — required for start"},
 		"workdir": {"type": "string", "description": "Working directory for the command (optional, defaults to workspace)"},
+		"port":    {"type": "integer", "description": "Port the service listens on — used for health checks (optional)"},
 		"lines":   {"type": "integer", "description": "Number of log lines to return (default 50, for logs action)"},
 		"stream":  {"type": "string", "enum": ["out","err","both"], "description": "Which log stream to tail (default both, for logs action)"}
 	},
@@ -78,6 +128,7 @@ type ServiceRecord struct {
 	Name      string    `json:"name"`
 	Command   string    `json:"command"`
 	Workdir   string    `json:"workdir"`
+	Port      int       `json:"port,omitempty"`
 	PID       int       `json:"pid"`
 	StartedAt time.Time `json:"started_at"`
 	Status    string    `json:"status"` // running | stopped | crashed
@@ -167,13 +218,29 @@ func (s *Service) findRecord(name string) (*ServiceRecord, []ServiceRecord, int,
 
 // ── Process helpers ──
 
-// isAlive returns true if the PID exists and is owned by us. Uses signal 0
-// which tests process existence without actually signaling.
+// isAlive returns true if the PID exists, is owned by us, and is not a
+// zombie. Uses signal 0 for existence check, then reads /proc/<pid>/status
+// to detect zombies (State: Z). Zombies still have a pid entry but are
+// dead — the service tool must not treat them as running.
 func isAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	return syscall.Kill(pid, 0) == nil
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	// Check for zombie state on Linux
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		// Can't read proc — assume alive if signal 0 passed
+		return true
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "State:") {
+			return !strings.Contains(line, "Z (zombie)")
+		}
+	}
+	return true
 }
 
 // killGracefully sends SIGTERM, waits up to timeout, then SIGKILL if still alive.
@@ -203,6 +270,7 @@ func (s *Service) start(params map[string]any) (string, error) {
 	name, _ := params["name"].(string)
 	command, _ := params["command"].(string)
 	workdir, _ := params["workdir"].(string)
+	port, _ := params["port"].(float64) // JSON numbers are float64
 	if name == "" {
 		return "", fmt.Errorf("start: name is required")
 	}
@@ -211,19 +279,36 @@ func (s *Service) start(params map[string]any) (string, error) {
 	}
 	if workdir == "" {
 		workdir = s.workspace
+	} else if !filepath.IsAbs(workdir) {
+		workdir = filepath.Join(s.workspace, workdir)
 	}
 
 	existing, recs, idx, err := s.findRecord(name)
 	if err != nil {
 		return "", err
 	}
-	if existing != nil && isAlive(existing.PID) {
-		return toJSON(map[string]any{
-			"status":  "already_running",
-			"name":    existing.Name,
-			"pid":     existing.PID,
-			"message": fmt.Sprintf("service %q already running (pid %d)", name, existing.PID),
-		}), nil
+	if existing != nil {
+		if isAlive(existing.PID) {
+			// Check if command changed — if so, restart with new command
+			if existing.Command == command {
+				return toJSON(map[string]any{
+					"status":  "already_running",
+					"name":    existing.Name,
+					"pid":     existing.PID,
+					"message": fmt.Sprintf("service %q already running (pid %d)", name, existing.PID),
+				}), nil
+			}
+			// Command changed — kill old process and start fresh
+			log.Printf("[service] %s command changed, restarting (old pid %d)", name, existing.PID)
+			killGracefully(existing.PID, 3*time.Second)
+		} else {
+			// Process is dead/zombie — clean up and proceed to start
+			log.Printf("[service] %s pid %d is dead, restarting", name, existing.PID)
+		}
+		// Remove stale record — the start logic below will create a new one
+		recs = append(recs[:idx], recs[idx+1:]...)
+		idx = -1 // invalidate — new record will be appended
+		s.saveRegistry(recs)
 	}
 
 	// Ensure logs directory exists
@@ -233,12 +318,17 @@ func (s *Service) start(params map[string]any) (string, error) {
 	logOut := filepath.Join(s.logsDir(), name+".out.log")
 	logErr := filepath.Join(s.logsDir(), name+".err.log")
 
-	outFile, err := os.OpenFile(logOut, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Truncate logs on every start. Each `service start` is semantically a
+	// fresh run (the old process was killed above), and validators tail these
+	// files looking for current-run errors. Appending across runs leaves stale
+	// pre-fix errors in place and traps the debugger in infinite "still broken"
+	// loops on a problem that was already resolved.
+	outFile, err := os.OpenFile(logOut, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return "", fmt.Errorf("open stdout log: %w", err)
 	}
 	defer outFile.Close()
-	errFile, err := os.OpenFile(logErr, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	errFile, err := os.OpenFile(logErr, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return "", fmt.Errorf("open stderr log: %w", err)
 	}
@@ -261,6 +351,7 @@ func (s *Service) start(params map[string]any) (string, error) {
 		Name:      name,
 		Command:   command,
 		Workdir:   workdir,
+		Port:      int(port),
 		PID:       pid,
 		StartedAt: time.Now().UTC(),
 		Status:    "running",
@@ -277,13 +368,17 @@ func (s *Service) start(params map[string]any) (string, error) {
 		return "", fmt.Errorf("save registry: %w", err)
 	}
 
-	return toJSON(map[string]any{
+	result := map[string]any{
 		"status":  "started",
 		"name":    name,
 		"pid":     pid,
 		"log_out": logOut,
 		"log_err": logErr,
-	}), nil
+	}
+	if port > 0 {
+		result["port"] = int(port)
+	}
+	return toJSON(result), nil
 }
 
 func (s *Service) stop(params map[string]any) (string, error) {
@@ -342,11 +437,15 @@ func (s *Service) restart(params map[string]any) (string, error) {
 	if _, err := s.stop(map[string]any{"name": name}); err != nil {
 		return "", err
 	}
-	return s.start(map[string]any{
+	startParams := map[string]any{
 		"name":    name,
 		"command": rec.Command,
 		"workdir": rec.Workdir,
-	})
+	}
+	if rec.Port > 0 {
+		startParams["port"] = float64(rec.Port)
+	}
+	return s.start(startParams)
 }
 
 func (s *Service) status(params map[string]any) (string, error) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/user/kaiju/internal/agent/tools"
-	"github.com/user/kaiju/internal/db"
+	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/db"
 )
 
 // mockTool is a minimal Tool for testing. Its Impact is configurable via

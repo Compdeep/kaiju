@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/user/kaiju/internal/channels"
+	"github.com/Compdeep/kaiju/internal/channels"
 )
 
 var upgrader = websocket.Upgrader{

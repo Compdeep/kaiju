@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/user/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 // DefaultDirs returns the standard skill search directories in precedence order.
@@ -85,9 +85,11 @@ func LoadFromDirs(dirs []string, reg *tools.Registry) ([]*SkillMD, error) {
 		}
 		for _, s := range skills {
 			if _, exists := byName[s.Name()]; !exists {
+				// First wins — home dir skills take priority over bundled/repo.
+				// Users edit their home copy; the bundled copy is the recovery default.
 				order = append(order, s.Name())
+				byName[s.Name()] = s
 			}
-			byName[s.Name()] = s // last wins
 		}
 	}
 

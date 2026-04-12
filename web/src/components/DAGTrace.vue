@@ -9,8 +9,7 @@
       <span class="h-sep">·</span>
       <span class="h-val">{{ totalMs }}</span>
       <span class="h-dim">ms</span>
-      <span v-if="failCount" class="h-fail">{{ failCount }}✗</span>
-      <span :class="['h-status', status]">{{ status }}</span>
+      <span :class="['h-status', status]">{{ statusLabel }}</span>
     </div>
 
     <transition name="expand">
@@ -73,12 +72,17 @@
             <span v-for="s in item.skills" :key="s" class="t-skill-chip">{{ s }}</span>
           </div>
 
-          <div v-if="item.type === 'error'" class="tl tl-sub">
+          <div v-if="item.type === 'error'" class="tl tl-sub tl-clickable" @click="toggleResult('err-' + item.key)">
             <span class="t-idx"></span>
             <span class="t-pipe">│</span>
             <span v-if="item.inWave" class="t-wf">│</span>
             <span :class="['t-err-badge', item.errType || 'exec']">{{ errLabel(item.errType) }}</span>
             <span class="t-err-msg">{{ trunc(item.msg, 55) }}</span>
+            <span class="t-expand">{{ expandedResults['err-' + item.key] ? '−' : '+' }}</span>
+          </div>
+
+          <div v-if="item.type === 'error' && expandedResults['err-' + item.key]" class="tl-result">
+            <pre class="t-result-content">{{ item.msg }}</pre>
           </div>
 
         </template>
@@ -89,9 +93,8 @@
           <span class="t-dim">{{ nodes.length }} nodes</span>
           <span class="t-dim">·</span>
           <span class="t-dim">{{ totalMs }}ms</span>
-          <span v-if="failCount" class="t-dim">· <span class="t-err-count">{{ failCount }} failed</span></span>
           <span class="t-dim">·</span>
-          <span :class="['t-final', status]">{{ status }}</span>
+          <span :class="['t-final', status]">{{ statusLabel }}</span>
         </div>
       </div>
     </transition>
@@ -129,8 +132,22 @@ function toggleResult(id) {
  */
 const status = computed(() => {
   if (props.running) return 'live'
-  if (props.nodes.some(n => n.state === 'failed')) return 'fail'
-  if (props.nodes.length && props.nodes.every(n => n.state === 'resolved' || n.state === 'skipped')) return 'done'
+  const failed = failCount.value
+  const total = props.nodes.length
+  if (failed > 0 && failed < total) return 'partial'
+  if (failed > 0) return 'fail'
+  if (total && props.nodes.every(n => n.state === 'resolved' || n.state === 'skipped')) return 'done'
+  return 'idle'
+})
+
+const statusLabel = computed(() => {
+  if (status.value === 'live') return 'live'
+  if (status.value === 'done') return 'done'
+  if (status.value === 'partial') {
+    const passed = props.nodes.filter(n => n.state === 'resolved').length
+    return `${passed} ok · ${failCount.value} failed`
+  }
+  if (status.value === 'fail') return `${failCount.value} failed`
   return 'idle'
 })
 
@@ -153,10 +170,10 @@ const failCount = computed(() => props.nodes.filter(n => n.state === 'failed').l
 const layout = computed(() => {
   const nodes = [...props.nodes]
   // Sort by node ID (chronological creation order). IDs are "n1", "n2", etc.
-  // Planner and aggregator are pinned to start/end.
+  // Executive and aggregator are pinned to start/end.
   nodes.sort((a, b) => {
-    const aIsBookend = a.type === 'planner' ? -1 : a.type === 'aggregator' ? 1 : 0
-    const bIsBookend = b.type === 'planner' ? -1 : b.type === 'aggregator' ? 1 : 0
+    const aIsBookend = a.type === 'executive' ? -1 : a.type === 'aggregator' ? 1 : 0
+    const bIsBookend = b.type === 'executive' ? -1 : b.type === 'aggregator' ? 1 : 0
     if (aIsBookend !== bIsBookend) return aIsBookend - bIsBookend
     // Extract numeric part of ID for natural sort (n1, n2, ... n10, n11)
     const aNum = parseInt((a.id || '').replace(/\D/g, '')) || 0
@@ -275,7 +292,7 @@ function stChr(s) { return { running: '\u25B8', resolved: '\u2713', failed: '\u2
  * @param {string} t - Node type (planner, aggregator, skill, etc.)
  * @returns {string} Three-letter type label
  */
-function tyLabel(t) { return { planner:'PLN', aggregator:'AGG', tool:'SKL', compute:'CMP', reflection:'RFL', observer:'OBS', micro_planner:'MPL', interjection:'INJ', actuator:'ACT' }[t] || '???' }
+function tyLabel(t) { return { executive:'EXE', aggregator:'AGG', tool:'TLL', compute:'CMP', reflection:'RFL', observer:'OBS', micro_planner:'MPL', interjection:'INJ', actuator:'ACT', holmes:'RCA' }[t] || '???' }
 
 /**
  * desc: Truncate a string to a maximum length, appending an ellipsis if needed
@@ -307,10 +324,11 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
 .h-sep { color: var(--border); }
 .h-val { color: var(--text); font-weight: 600; }
 .h-dim { color: var(--text-muted); }
-.h-fail { color: var(--signal-red); font-weight: 600; font-size: 10px; }
+.h-fail { color: var(--signal-red); font-weight: 600; font-size: 10px; } /* kept for compat */
 .h-status { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
 .h-status.live { color: var(--accent); }
 .h-status.done { color: var(--signal-green); }
+.h-status.partial { color: var(--signal-amber); }
 .h-status.fail { color: var(--signal-red); }
 
 .trace-body { padding: 4px 0; }
@@ -327,10 +345,11 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
 
 /* Type — now before name */
 .t-ty { width: 26px; flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-.t-ty.planner, .t-ty.aggregator { color: var(--accent); }
+.t-ty.executive, .t-ty.aggregator { color: var(--accent); }
 .t-ty.reflection, .t-ty.observer, .t-ty.micro_planner { color: var(--accent-warm); }
 .t-ty.tool { color: var(--text-muted); }
-.t-ty.compute { color: #a78bfa; }
+.t-ty.compute { color: #60a5fa; }
+.t-ty.holmes { color: #a78bfa; } /* RCA — purple, groups with dep arrows/expansions */
 .t-ty.is-skill { color: #e879a0; }
 .t-name.is-skill { color: #e879a0; font-style: italic; }
 .t-ty.interjection { color: var(--signal-amber); }
@@ -352,10 +371,12 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
 .t-st.skipped, .t-st.pending { color: var(--text-muted); }
 @keyframes blink-st { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-/* Deps */
-.t-art { color: var(--accent); opacity: 0.5; }
-.t-dep-arrow { color: var(--accent); }
-.t-dep-ref { color: var(--accent); font-size: 10px; font-weight: 500; }
+/* Deps — purple to match compute (CMP) so the dependency lines visually
+   group with the compute nodes they're chaining instead of stealing the
+   eye with the dark-pink accent. */
+.t-art { color: #a78bfa; opacity: 0.5; }
+.t-dep-arrow { color: #a78bfa; }
+.t-dep-ref { color: #a78bfa; font-size: 10px; font-weight: 500; }
 .t-spawn { color: var(--accent-warm); font-size: 10px; }
 .t-skill-label { color: var(--text-dim); font-size: 10px; font-style: italic; }
 .t-skill-chip {
@@ -371,20 +392,23 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
   border: 1px solid var(--accent-border, rgba(100, 150, 200, 0.35));
 }
 
-/* Errors */
+/* Errors — dark pink (#c0428a) so failures are sharper than the soft
+   light-pink signal-red they used to share with informational warnings.
+   Hardcoded so the contrast holds in both light and dark themes. */
 .t-err-badge { font-size: 9px; font-weight: 700; letter-spacing: 0.05em; padding: 0 4px; border-radius: 2px; }
-.t-err-badge.gate { color: var(--signal-red); background: var(--signal-red-bg); }
+.t-err-badge.gate { color: #c0428a; background: var(--signal-red-bg); }
 .t-err-badge.clearance { color: var(--signal-amber); background: var(--signal-amber-bg); }
 .t-err-badge.timeout { color: var(--accent-warm); background: var(--accent-warm-subtle); }
-.t-err-badge.exec { color: var(--signal-red); }
-.t-err-msg { color: var(--signal-red); font-size: 10px; opacity: 0.8; }
+.t-err-badge.exec { color: #c0428a; }
+.t-err-msg { color: #c0428a; font-size: 10px; opacity: 0.85; }
 
 /* Footer */
 .tl-footer { margin-top: 3px; }
 .t-dim { color: var(--text-muted); }
-.t-err-count { color: var(--signal-red); }
+.t-err-count { color: #c0428a; }
 .t-final { font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
 .t-final.done { color: var(--signal-green); }
+.t-final.partial { color: var(--signal-amber); }
 .t-final.fail { color: var(--signal-red); }
 .t-final.live { color: var(--accent); }
 
@@ -392,12 +416,13 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
 .tl-clickable { cursor: pointer; border-radius: 2px; transition: background var(--transition); }
 .tl-clickable:hover { background: var(--surface-hover, rgba(128,128,128,0.08)); }
 
-/* Expanded result block */
+/* Expanded result block — purple left border so the expanded payload
+   visually belongs to the dep/compute family rather than the accent. */
 .tl-result {
   margin: 0 0 4px 30px;
   padding: 6px 8px;
   background: var(--surface-alt, rgba(0,0,0,0.04));
-  border-left: 2px solid var(--accent);
+  border-left: 2px solid #a78bfa;
   border-radius: 0 3px 3px 0;
   max-height: 200px;
   overflow-y: auto;

@@ -3,7 +3,7 @@ package db
 import "fmt"
 
 /*
- * Intent is a configurable IBE level.
+ * Intent is a configurable IGX level.
  * desc: Database-backed intent registry. Each intent has a sparse integer
  *       rank used by the gate for ordered comparison (lower rank = less
  *       privileged). Seed data comes from the config file; nothing is

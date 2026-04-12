@@ -6,8 +6,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/user/kaiju/internal/agent/llm"
-	"github.com/user/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 /*

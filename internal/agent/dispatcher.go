@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/gates"
-	"github.com/user/kaiju/internal/agent/tools"
-	"github.com/user/kaiju/internal/compat/store"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/compat/store"
 )
 
 /*
@@ -23,8 +22,8 @@ import (
  *       since the previous call.
  */
 type toolThrottle struct {
-	mu       sync.Mutex
-	gates    map[string]*throttleGate
+	mu    sync.Mutex
+	gates map[string]*throttleGate
 }
 
 /*
@@ -102,7 +101,7 @@ func (st *toolThrottle) waitThrottle(ctx context.Context, toolName string, coold
  * param: ch - channel to send the completion result.
  * param: alertID - the investigation alert ID.
  * param: throttle - the tool throttle instance.
- * param: intent - the IBE intent level.
+ * param: intent - the IGX intent level.
  * param: scope - resolved tool access scope (nil for full access).
  */
 func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
@@ -207,7 +206,10 @@ func resolveInjections(n *Node, graph *Graph) error {
 			var err error
 			value, err = extractJSONField(dep.Result, ref.Field)
 			if err != nil {
-				return fmt.Errorf("param_ref %q: extract field %q from node %s: %w", paramName, ref.Field, ref.NodeID, err)
+				// Field extraction failed — use the full result as fallback.
+				// This handles: plain text results, malformed JSON, missing fields.
+				value = dep.Result
+				log.Printf("[dag] param_ref %q: field %q extraction failed from %s (%v), using full result", paramName, ref.Field, ref.NodeID, err)
 			}
 		}
 		// Empty values are rejected — they'd produce invalid tool parameters.
@@ -235,45 +237,10 @@ func resolveInjections(n *Node, graph *Graph) error {
  * param: fieldPath - dot-separated path to the desired field.
  * return: the extracted value as a string, or error.
  */
-func extractJSONField(jsonStr, fieldPath string) (string, error) {
-	var data any
-	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return "", fmt.Errorf("result is not JSON: %w", err)
-	}
-
-	parts := strings.Split(fieldPath, ".")
-	current := data
-	for _, part := range parts {
-		switch m := current.(type) {
-		case map[string]any:
-			val, ok := m[part]
-			if !ok {
-				return "", fmt.Errorf("field %q not found", part)
-			}
-			current = val
-		case []any:
-			idx, err := strconv.Atoi(part)
-			if err != nil || idx < 0 || idx >= len(m) {
-				return "", fmt.Errorf("invalid array index %q", part)
-			}
-			current = m[idx]
-		default:
-			return "", fmt.Errorf("cannot traverse into %T at %q", current, part)
-		}
-	}
-
-	switch v := current.(type) {
-	case string:
-		return v, nil
-	default:
-		b, _ := json.Marshal(v)
-		return string(b), nil
-	}
-}
 
 /*
- * executeToolNode runs a tool through the IBE gate pipeline.
- * desc: Performs scope check, rate limit check, IBE triad check (impact <=
+ * executeToolNode runs a tool through the IGX gate pipeline.
+ * desc: Performs scope check, rate limit check, IGX triad check (impact <=
  *       min(intent, clearance, scope_cap)), optional external clearance check,
  *       then executes the tool. Audits all attempts and records side-effects
  *       in the event store. Tools implementing ContextualExecutor are invoked
@@ -286,7 +253,7 @@ func extractJSONField(jsonStr, fieldPath string) (string, error) {
  * param: toolName - the name of the tool to execute.
  * param: params - the tool parameters.
  * param: alertID - the investigation alert ID.
- * param: intent - the IBE intent level.
+ * param: intent - the IGX intent level.
  * param: scope - resolved tool access scope (nil for full access).
  * return: result string and error.
  */
@@ -324,7 +291,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		params = make(map[string]any)
 	}
 
-	// Gate: IBE triad check with scope cap — impact <= min(intent, clearance, scope_cap)
+	// Gate: IGX triad check with scope cap — impact <= min(intent, clearance, scope_cap)
 	scopeCap := -1
 	if scope != nil {
 		if cap, ok := scope.MaxImpact[toolName]; ok {
@@ -371,7 +338,13 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		isContextual = true
 		// Resolve classifier-active skills into per-role guidance sections.
 		// Compute uses this; other contextual tools may ignore it.
-		cards, names := a.resolveComputeSkillCards()
+		// Cards live on the graph (per-investigation), with fallback to the
+		// legacy agent field for safety.
+		activeCards := a.activeCards
+		if graph != nil && len(graph.ActiveCards) > 0 {
+			activeCards = graph.ActiveCards
+		}
+		cards, names := a.resolveComputeSkillCards(activeCards)
 		if len(names) > 0 {
 			n.Skills = names
 		}

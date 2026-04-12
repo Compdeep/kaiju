@@ -102,7 +102,7 @@ Environment variables can be referenced as `${VAR_NAME}` in any string field.
 | `wall_clock_sec` | `120` | Investigation timeout in seconds |
 | `max_turns` | `15` | Max ReAct loop turns |
 | `rate_limit` | `1000` | Max tool invocations per hour |
-| `safety_level` | `100` | Default IBE intent rank. Builtin ranks: `0`=observe, `100`=operate, `200`=override. Custom ranks defined via the intent registry are also accepted. |
+| `safety_level` | `100` | Default IGX intent rank. Builtin ranks: `0`=observe, `100`=operate, `200`=override. Custom ranks defined via the intent registry are also accepted. |
 | `data_dir` | `"~/.kaiju"` | Data directory for memory, audit logs, skills |
 | `workspace` | `"~/.kaiju/workspace"` | Working directory for bash tool execution (downloads, file creation) |
 | `planner_mode` | `"native"` | Planner mode: `native` (function calling) or `structured` (JSON text) |

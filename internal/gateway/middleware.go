@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/kaiju/internal/auth"
+	"github.com/Compdeep/kaiju/internal/auth"
 )
 
 /*

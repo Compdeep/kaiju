@@ -31,7 +31,7 @@ User: "delete /tmp/test.txt"          ← human sets intent (e.g. "operate" = 10
                            │  node fires
                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ IBE GATE (Go code, not LLM)                                        │
+│ IGX GATE (Go code, not LLM)                                        │
 │                                                                     │
 │ Step 1 — SCOPE:     Is "bash" in user's allowed tools?              │
 │                     Source: admin-defined scope in DB                │
@@ -183,13 +183,22 @@ the gate performs is always `tool.impact ≤ intent.rank`, never a name match.
 
 ### How It's Set
 
-- **Config default** — `agent.safety_level: 100` in kaiju.json (a rank, not an enum)
-- **Per-user max** — user's `max_intent` rank caps what they can request
-- **Per-session** — CLI: `/intent operate`, UI: dropdown in chat input
-- **Per-request** — API: `{"intent": "override"}` in execute request. Any name
-  registered in the intent registry is valid, including custom ones.
+Intent can be set explicitly or inferred automatically:
 
-The effective intent is: `min(requested, user_max, config_default)`
+- **Explicit (per-session)** — CLI: `/intent operate`, UI: dropdown in chat input
+- **Explicit (per-request)** — API: `{"intent": "override"}` in execute request. Any name registered in the intent registry is valid, including custom ones.
+- **Automatic inference** — when no explicit intent is set, a preflight LLM call classifies the query and picks the appropriate level. "Build a webapp" → operate. "Delete all logs" → override. "What's running on port 8080" → observe. The inference uses both the query text and prior conversation context — a follow-up like "it's still not working" after a prior fix attempt infers operate, not observe.
+
+The effective intent is always capped:
+
+```
+effective = min(requested_or_inferred, user_max_intent, scope_cap)
+```
+
+- **Per-user max** — user's `max_intent` rank is a hard ceiling. A user with `max_intent: 100` can never exceed operate, even if they explicitly request override or the preflight infers it.
+- **Scope cap** — per-tool caps from the user's scope apply on top. Even at override intent, a scope cap of `bash: 100` blocks destructive bash commands.
+
+The LLM never controls the effective intent. Every layer in the chain can only lower it, never raise it.
 
 ### Gate Check
 

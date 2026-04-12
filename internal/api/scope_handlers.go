@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/user/kaiju/internal/db"
+	"github.com/Compdeep/kaiju/internal/db"
 )
 
 /*

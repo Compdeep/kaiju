@@ -2,12 +2,11 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 
-	"github.com/user/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 )
 
 const classifierSystemPrompt = `You are a query classifier. Given a user query and a list of capability domains, select which domains are relevant to addressing the query.
@@ -68,10 +67,8 @@ func (a *Agent) classifyCapabilities(ctx context.Context, query string) []string
 	}
 
 	raw := resp.Choices[0].Message.Content
-	cleaned := Text.StripCodeFence(raw)
-
 	var out classifierOutput
-	if err := json.Unmarshal([]byte(cleaned), &out); err != nil {
+	if err := ParseLLMJSON(raw, &out); err != nil {
 		log.Printf("[dag] classifier parse failed (%v), using all cards", err)
 		return a.allGuidanceKeys()
 	}

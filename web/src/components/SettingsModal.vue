@@ -35,7 +35,7 @@
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                 reasoning
               </div>
-              <div class="model-desc">planner, aggregator, classifier, direct responses</div>
+              <div class="model-desc">executive, aggregator, classifier, direct responses</div>
               <div class="form-row">
                 <div class="form-group">
                   <label>provider</label>
@@ -104,8 +104,8 @@
               </select>
             </div>
             <div class="form-group">
-              <label>planner mode</label>
-              <select v-model="cfg.agent.planner_mode" @change="patchConfig">
+              <label>executive mode</label>
+              <select v-model="cfg.agent.executive_mode" @change="patchConfig">
                 <option value="structured">structured — text JSON parsing</option>
                 <option value="native">native — function calling</option>
               </select>
@@ -148,7 +148,7 @@ import api from '../api/client'
 defineEmits(['close'])
 const settings = useSettingsStore()
 const tab = ref('models')
-const cfg = ref({ llm: { provider: '', model: '', endpoint: '' }, executor: { provider: '', model: '' }, agent: { dag_mode: '', planner_mode: 'structured', safety_level: 1 } })
+const cfg = ref({ llm: { provider: '', model: '', endpoint: '' }, executor: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1 } })
 const allModels = ref([])
 const apiKey = ref('')
 const execProvider = ref('')
@@ -211,7 +211,7 @@ async function patchConfig() {
     await api.patch('/api/v1/config', {
       llm: { provider: cfg.value.llm.provider, model: cfg.value.llm.model, endpoint: cfg.value.llm.endpoint },
       executor: { provider: cfg.value.executor.provider || undefined, model: cfg.value.executor.model || undefined },
-      agent: { dag_mode: cfg.value.agent.dag_mode, planner_mode: cfg.value.agent.planner_mode, safety_level: cfg.value.agent.safety_level },
+      agent: { dag_mode: cfg.value.agent.dag_mode, executive_mode: cfg.value.agent.executive_mode, safety_level: cfg.value.agent.safety_level },
     })
   } catch (err) { console.error('config patch:', err) }
 }

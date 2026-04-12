@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/user/kaiju/internal/agent/gates"
-	"github.com/user/kaiju/internal/db"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/db"
 )
 
 // End-to-end enforcement: registry resolves impact → gate enforces. No full

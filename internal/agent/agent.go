@@ -8,14 +8,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/gates"
-	"github.com/user/kaiju/internal/agent/llm"
-	"github.com/user/kaiju/internal/agent/skillmd"
-	"github.com/user/kaiju/internal/agent/tools"
-	"github.com/user/kaiju/internal/compat/ipc"
-	"github.com/user/kaiju/internal/compat/protocol"
-	"github.com/user/kaiju/internal/compat/store"
-	"github.com/user/kaiju/internal/db"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/skillmd"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/compat/ipc"
+	"github.com/Compdeep/kaiju/internal/compat/protocol"
+	"github.com/Compdeep/kaiju/internal/compat/store"
+	"github.com/Compdeep/kaiju/internal/db"
 )
 
 /*
@@ -54,7 +54,7 @@ type ResolvedScope struct {
 /*
  * Trigger describes what initiated an investigation.
  * desc: Contains the trigger type, alert ID, raw data payload, source peer,
- *       DAG mode override, data directory override, IBE intent cap, tool
+ *       DAG mode override, data directory override, IGX intent cap, tool
  *       access scope, session ID, and conversation history.
  */
 type Trigger struct {
@@ -64,7 +64,7 @@ type Trigger struct {
 	Source    string          `json:"source"`      // peer ID or "local"
 	DAGMode   string          `json:"dag_mode"`    // optional override: "reflect", "nReflect", "orchestrator"
 	DataDir   string          `json:"data_dir"`    // override data dir for retrieval skills (relay/gateway use temp path)
-	MaxIntent *int            `json:"max_intent,omitempty"` // optional IBE cap (can only lower intent, never escalate)
+	MaxIntent *int            `json:"max_intent,omitempty"` // optional IGX cap (can only lower intent, never escalate)
 	Scope     *ResolvedScope  `json:"scope,omitempty"`      // tool access scope (nil = full access)
 	SessionID string          `json:"session_id,omitempty"` // conversation session for memory
 	History   []llm.Message   `json:"history,omitempty"`    // conversation history
@@ -74,7 +74,7 @@ type Trigger struct {
 
 /*
  * BuildMessagesWithHistory constructs a message array with optional history injection.
- * desc: Pattern: [system, ...history, user_query]. Used by planner, aggregator,
+ * desc: Pattern: [system, ...history, user_query]. Used by executive, aggregator,
  *       and ReAct loop to build LLM message sequences.
  * param: system - the system prompt string.
  * param: userQuery - the user's query or trigger text.
@@ -90,12 +90,12 @@ func BuildMessagesWithHistory(system, userQuery string, history []llm.Message) [
 }
 
 /*
- * Intent returns the effective IBE intent for this trigger.
+ * Intent returns the effective IGX intent for this trigger.
  * desc: For chat queries with no explicit override, returns IntentAuto so the
- *       planner can infer the appropriate level. All other trigger types return
+ *       executive can infer the appropriate level. All other trigger types return
  *       their structural intent (never auto — autonomous alerts are hardcoded).
  *       MaxIntent can only LOWER intent for non-chat triggers (defense in depth).
- * return: the resolved IBE Intent value.
+ * return: the resolved IGX Intent value.
  */
 func (t Trigger) Intent() gates.Intent {
 	// Chat queries default to auto-inference unless the caller pinned a rank.
@@ -116,7 +116,7 @@ func (t Trigger) Intent() gates.Intent {
 
 /*
  * Config holds agent configuration.
- * desc: Contains LLM endpoint settings, rate limits, IBE clearance,
+ * desc: Contains LLM endpoint settings, rate limits, IGX clearance,
  *       DAG engine parameters, embedding configuration, and paths.
  */
 type Config struct {
@@ -127,11 +127,13 @@ type Config struct {
 	Temperature   float64
 	MaxTokens     int
 	RateLimit     int
-	NodeClearance int    // IBE clearance (0 = default 1)
+	NodeClearance int    // IGX clearance (0 = default 1)
 	NodeRole      string // "node" or "coordinator"
 	DataDir       string
-	Workspace     string
-	PlannerMode   string // "structured" (text JSON) or "native" (function calling)
+	Workspace     string    // where files are written (cwd in CLI mode, sandbox in web mode)
+	MetadataDir   string    // where blueprints, worklog, sessions live (.kaiju/ in CLI, same as workspace in web)
+	CLIMode       bool      // true = workspace is cwd, no project/ prefix, .kaiju/ for metadata
+	ExecutiveMode   string // "structured" (text JSON) or "native" (function calling)
 	NodeID        string
 
 	// DAG engine (optimistic parallel investigation)
@@ -142,8 +144,8 @@ type Config struct {
 	MaxLLMCalls  int
 	MaxObserverCalls int  // separate budget for observer LLM calls (default: 50)
 	BatchSize    int   // nodes completed before injecting reflection in nReflect mode (default: 5)
-	MaxReplans     int // max replan attempts before forcing conclude (default: 3)
-	MaxNodeRetries int    // max micro-planner retries per failed node before unblocking dependents (default: 2)
+	MaxInvestigations int // max investigation cycles (Holmes + fix attempts) before forcing conclude (default: 1)
+	MaxHolmesIters int // max ReAct iterations per Holmes investigation (default: 5)
 	ExecutionMode  string // "interactive" (chat allowed) or "autonomous" (always investigate)
 	DAGWallClock   time.Duration
 
@@ -165,7 +167,7 @@ type Config struct {
 
 /*
  * localClearance implements gates.ClearanceSource with a mutex-protected int.
- * desc: Thread-safe wrapper around the node's IBE clearance level.
+ * desc: Thread-safe wrapper around the node's IGX clearance level.
  */
 type localClearance struct {
 	mu    sync.RWMutex
@@ -206,17 +208,17 @@ type ClearanceChecker interface {
 /*
  * Agent is the agentic reasoning engine.
  * desc: Core agent struct that orchestrates investigations via DAG or ReAct loop.
- *       Manages LLM clients, tool registry, IBE gate, memory, gossip, IPC,
+ *       Manages LLM clients, tool registry, IGX gate, memory, gossip, IPC,
  *       embeddings, skill watching, fleet context, and live DAG streaming.
  */
 type Agent struct {
 	cfg         Config
-	llm         *llm.Client     // reasoning model (planner, aggregator, classifier)
+	llm         *llm.Client     // reasoning model (executive, aggregator, classifier)
 	executor    *llm.Client     // executor model (reflection, observer, micro-planner)
 	registry    *tools.Registry
 	gate        *gates.Gate
 	clearanceCheck ClearanceChecker // external authorization (nil = no check)
-	clearance         *localClearance // IBE node clearance
+	clearance         *localClearance // IGX node clearance
 	clearanceExplicit bool            // true if cfg.NodeClearance was set; false means we're on the bootstrap default
 	memory      *Memory
 	gossip      GossipPublisher
@@ -226,7 +228,7 @@ type Agent struct {
 	embedClient *llm.Client    // nil if embeddings disabled
 
 	soulPrompt    string // from SOUL.md → BOOT.md body → default
-	plannerPrompt string // from planner.md → default
+	executivePrompt string // from executive.md → default
 	skillWatcher  *skillmd.Watcher
 	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
 	fleet         FleetContextProvider // nil on standalone nodes
@@ -243,6 +245,7 @@ type Agent struct {
 
 	interjections chan string     // user messages during active investigation
 	investigating atomic.Bool    // true while investigate is executing
+	kernel        *Kernel          // core runtime — owns investigation lifecycle
 
 	// DAG observation (live thought process streaming)
 	dagMu      sync.RWMutex
@@ -273,7 +276,7 @@ func (a *Agent) SetFleet(f FleetContextProvider) {
 
 /*
  * New creates an Agent with the given configuration.
- * desc: Initializes all subsystems: LLM client, tool registry, IBE gate,
+ * desc: Initializes all subsystems: LLM client, tool registry, IGX gate,
  *       memory, prompts, and capability cards. Returns the configured agent.
  * param: cfg - agent configuration.
  * param: gossip - gossip publisher for fleet communication.
@@ -283,12 +286,15 @@ func (a *Agent) SetFleet(f FleetContextProvider) {
  */
 func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string) (*Agent, error) {
 	cfg.NodeID = nodeID
+	if cfg.MetadataDir == "" {
+		cfg.MetadataDir = cfg.Workspace
+	}
 
 	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel)
 
 	reg := tools.NewRegistry()
 
-	// IBE clearance: use configured value. Before the intent registry is
+	// IGX clearance: use configured value. Before the intent registry is
 	// loaded we have no concept of a "default working rank", so we start at
 	// 0 (the safest possible) and LoadIntentRegistry() bumps us to the
 	// registry's default rank after config/DB seeding has run.
@@ -317,7 +323,7 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 
 	// Load externalized prompts
 	soul := loadSoulPrompt(cfg.DataDir, cfg.CustomSystemPrompt)
-	planner := loadPlannerPrompt(cfg.DataDir)
+	executive := loadExecutivePrompt(cfg.DataDir)
 	caps := loadCapabilities(cfg.DataDir)
 
 	// Executor defaults to same client if not configured separately
@@ -339,7 +345,7 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 		dagSubs:           make(map[int]chan DAGEvent),
 		skillGuidance:     make(map[string]*skillmd.SkillMD),
 		soulPrompt:        soul,
-		plannerPrompt:     planner,
+		executivePrompt:     executive,
 		capabilities:      caps,
 		intentRegistry:    NewIntentRegistry(),
 	}, nil
@@ -419,6 +425,12 @@ func (a *Agent) Start(ctx context.Context) {
 	log.Printf("[agent] started (model=%s, maxTurns=%d, rateLimit=%d/hr, dag=%s)",
 		a.cfg.LLMModel, a.cfg.MaxTurns, a.cfg.RateLimit, dagLabel)
 
+	// Initialize kernel with built-in modules
+	a.kernel = NewKernel(a)
+	a.kernel.Register(NewHeartbeatModule(90 * time.Second))
+	a.kernel.Register(&ExecutiveModule{})
+	go a.kernel.Run(ctx)
+
 	// Memory prune ticker
 	pruneTicker := time.NewTicker(10 * time.Minute)
 	defer pruneTicker.Stop()
@@ -431,7 +443,7 @@ func (a *Agent) Start(ctx context.Context) {
 			return
 
 		case trigger := <-a.triggers:
-			a.investigate(ctx, trigger)
+			a.kernel.Submit(trigger)
 
 		case <-pruneTicker.C:
 			if n := a.memory.Prune(); n > 0 {
@@ -439,6 +451,11 @@ func (a *Agent) Start(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// Kernel returns the kernel instance. Used by API/CLI for SubmitSync.
+func (a *Agent) Kernel() *Kernel {
+	return a.kernel
 }
 
 /*
@@ -500,7 +517,7 @@ func (a *Agent) InitEmbeddings(ctx context.Context) error {
  * param: ctx - context for the embedding API call.
  * param: triggerText - the trigger text to rank tools against.
  * param: scope - resolved tool access scope (nil for full access).
- * return: ordered slice of tool names visible to the planner.
+ * return: ordered slice of tool names visible to the executive.
  */
 func (a *Agent) relevantTools(ctx context.Context, triggerText string, scope *ResolvedScope) []string {
 	var base []string
@@ -516,7 +533,7 @@ func (a *Agent) relevantTools(ctx context.Context, triggerText string, scope *Re
 		}
 	}
 
-	// Apply scope filtering — tools not in scope are invisible to the planner.
+	// Apply scope filtering — tools not in scope are invisible to the executive.
 	// nil scope = full access (CLI local user).
 	// Wildcard "*" in AllowedTools means all tools.
 	if scope == nil || scope.AllowedTools["*"] {
@@ -700,7 +717,7 @@ func (a *Agent) InitSkills(ctx context.Context, extraDirs []string, pollSec int)
 			a.registry.Replace(s, "skillmd:"+s.FilePath())
 			toolCount++
 		} else {
-			// Guidance-only skills — store separately for planner injection
+			// Guidance-only skills — store separately for executive injection
 			a.skillGuidance[s.Name()] = s
 			guidanceCount++
 		}
@@ -744,7 +761,7 @@ func (a *Agent) SetToolEnabled(name string, enabled bool) error {
 }
 
 /*
- * GateInfo returns current gate configuration including IBE clearance and lockdown.
+ * GateInfo returns current gate configuration including IGX clearance and lockdown.
  * desc: Exposes gate settings for dashboard display.
  * return: rateLimit, maxTurns, clearance level, and lockdown status.
  */
@@ -800,7 +817,7 @@ func (a *Agent) SetClearanceChecker(cc ClearanceChecker) {
 }
 
 /*
- * SetClearance updates the node's IBE clearance rank at runtime.
+ * SetClearance updates the node's IGX clearance rank at runtime.
  * desc: Called externally to update clearance at runtime. The value is a
  *       raw rank from the intent registry — callers are responsible for
  *       resolving names to ranks before passing them in.
@@ -811,7 +828,7 @@ func (a *Agent) SetClearance(level int) {
 }
 
 /*
- * NodeClearance returns the current IBE clearance level.
+ * NodeClearance returns the current IGX clearance level.
  * desc: Thread-safe read of the current clearance value.
  * return: the current clearance integer.
  */

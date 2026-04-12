@@ -2,7 +2,17 @@
   <div class="login-page">
     <div class="login-card" :class="{ shake: shaking }">
       <div class="login-mark">
-        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <svg viewBox="0 0 100 100" width="48" height="48" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+          <g stroke="#818cf8">
+            <g transform="translate(50,44) rotate(180)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+            <g transform="translate(29,57) rotate(90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+            <g transform="translate(71,57) rotate(-90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+            <g transform="translate(50,68)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+            <g transform="translate(50,79)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+          </g>
+          <line x1="42" y1="52" x2="42" y2="60" stroke="#f472b6" stroke-width="2.5"/>
+          <line x1="58" y1="52" x2="58" y2="60" stroke="#f472b6" stroke-width="2.5"/>
+        </svg>
       </div>
       <h1>kaiju</h1>
       <p class="subtitle">sign in to continue</p>

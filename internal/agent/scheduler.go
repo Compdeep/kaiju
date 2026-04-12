@@ -9,19 +9,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/gates"
-	"github.com/user/kaiju/internal/agent/llm"
-	"github.com/user/kaiju/internal/agent/tools"
-	"github.com/user/kaiju/internal/compat/store"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/compat/store"
 )
 
 // ── Scheduler: DAG execution engine ─────────────────────────────────────────
 //
 // Node roles:
-//   Planner       — LLM call that decomposes user query into a DAG of steps
+//   Executive      — LLM call that decomposes user query into a DAG of steps
 //   Tool          — executes a registered tool (bash, file_read, web_search, etc)
 //   Compute       — LLM code generation: deep=architect, shallow=coder
-//   Reflection    — checkpoint that evaluates evidence and decides continue/replan/conclude
+//   Reflection    — checkpoint that evaluates evidence and decides continue/investigate/conclude
 //   Observer      — per-node LLM evaluator (orchestrator mode only)
 //   MicroPlanner  — lightweight LLM that repairs a single failed node
 //   Interjection  — human message injected mid-investigation
@@ -38,7 +38,7 @@ import (
 //   - Nodes with pending dependents use the retry proxy pattern: stay "running"
 //     while micro-planner retries, dependents blocked until success or retries exhaust
 //   - Leaf nodes (no dependents) fail normally, errors flow as evidence to reflector
-//   - After a reflector replan, stored validators are re-grafted to verify the fix
+//   - After a reflector investigate decision and Holmes-led fix, stored validators are re-grafted to verify the fix
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -60,6 +60,11 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
 		a.cfg.MaxObserverCalls,
 		a.cfg.DAGWallClock,
 	)
+
+	// Construct the per-investigation ContextGate. This is the single API
+	// every prompt builder uses to fetch context. Lives on the graph so it
+	// dies cleanly when the investigation ends.
+	graph.Context = NewContextGate(graph, &trigger, a)
 
 	observerCh := make(chan DAGEvent, 128)
 	graph.SetObserver(observerCh)
@@ -83,7 +88,7 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
 }
 
 /*
- * runPlanAndSchedule runs phases 1-2: planner then scheduler loop.
+ * runPlanAndSchedule runs phases 1-2: executive then scheduler loop.
  * desc: Returns nil error if all nodes complete (even if some failed/skipped).
  *
  *       The scheduler loop is mode-aware but structurally identical:
@@ -91,7 +96,7 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
  *         2. Wait for a completion
  *         3. Handle the completion based on node type:
  *            - Tool: record result, then mode-specific post-processing
- *            - Reflection/Interjection: parse decision (continue/conclude/replan)
+ *            - Reflection/Interjection: parse decision (continue/conclude/investigate)
  *            - Observer: parse action (continue/inject/cancel/reflect)
  *            - MicroPlanner: graft replacement nodes for failed tools
  *         4. Check for human interjection (all modes)
@@ -99,25 +104,25 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
  *         6. Repeat until no inflight nodes remain
  *
  *       Mode-specific behavior happens at step 3 only:
- *         - reflect: reflections are structural (injected by planner, gate downstream)
+ *         - reflect: reflections are structural (injected by executive, gate downstream)
  *         - nReflect: reflection injected every BatchSize tool completions
  *         - orchestrator: per-node orchestrator LLM spawned after each tool completes
  *
  *       Returns the resolved intent (which may differ from trigger.Intent() when
- *       the planner auto-infers it). A pre-aggregator reflection always fires at
+ *       the executive auto-infers it). A pre-aggregator reflection always fires at
  *       the end to evaluate results before aggregation.
  * param: ctx - context for the investigation (with wall clock timeout).
  * param: trigger - the investigation trigger.
  * param: graph - the investigation graph.
  * param: budget - the execution budget.
- * return: resolved IBE intent and error.
+ * return: resolved IGX intent and error.
  */
 // scheduleOutcome holds the outcome of plan+schedule, including an optional verdict
 // from reflection that can skip the aggregator.
 type scheduleOutcome struct {
-	Intent             gates.Intent
-	ReflectionVerdict  string // non-empty if reflection concluded with a full verdict
-	ReflectionAggregate *bool // reflector's recommendation: true = needs aggregator, false = verdict is complete
+	Intent              gates.Intent
+	ReflectionVerdict   string // non-empty if reflection concluded with a full verdict
+	ReflectionAggregate *bool  // reflector's recommendation: true = needs aggregator, false = verdict is complete
 }
 
 func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *Graph, budget *Budget) (*scheduleOutcome, error) {
@@ -138,7 +143,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	// ── Phase 0: Preflight ──
 	// One executor-model LLM call answers four questions at once:
 	//   - skills: which guidance cards apply
-	//   - mode: chat / meta / investigate (chat and meta short-circuit the planner)
+	//   - mode: chat / meta / investigate (chat and meta short-circuit the executive)
 	//   - intent: a rank from the intent registry (used when trigger intent is Auto)
 	//   - required_categories: tool categories the plan must include
 	if a.cfg.ClassifierEnabled {
@@ -146,6 +151,10 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			return nil, fmt.Errorf("budget exhausted before preflight")
 		}
 		a.preflight = a.preflightQuery(ctx, formatTrigger(trigger), trigger.History)
+		// Per-investigation card list lives on the Graph (DAG path).
+		// a.activeCards is also set so the legacy ReAct path keeps working
+		// — ReAct doesn't use Graph the same way and is still serialized.
+		graph.ActiveCards = a.preflight.Skills
 		a.activeCards = a.preflight.Skills
 		log.Printf("[dag] preflight: mode=%s intent=%s skills=%v categories=%v",
 			a.preflight.Mode, a.preflight.Intent, a.preflight.Skills, a.preflight.RequiredCategories)
@@ -161,11 +170,11 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			a.preflight.Mode = "investigate"
 		}
 
-		// Short-circuit chat/meta queries — skip the planner entirely.
+		// Short-circuit chat/meta queries — skip the executive entirely.
 		// Only fires in interactive mode (autonomous overrides above).
 		if a.preflight.Mode == "chat" || a.preflight.Mode == "meta" {
 			log.Printf("[dag] preflight short-circuit: mode=%s, skipping planner", a.preflight.Mode)
-			return nil, &PlannerConversationalError{Text: ""}
+			return nil, &ExecutiveConversationalError{Text: ""}
 		}
 	}
 
@@ -173,23 +182,23 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	if !budget.TrySpawnNode("", true) {
 		return nil, fmt.Errorf("budget exhausted before planner")
 	}
-	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "planner", Node: &NodeInfo{ID: "planner", Type: "planner", State: "running", Tag: "plan"}})
+	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "running", Tag: "plan"}})
 
-	planResult, err := a.runPlanner(ctx, trigger)
+	planResult, err := a.runExecutive(ctx, trigger, graph)
 	if err != nil {
 		// Conversational response (trivial query) — not a real failure
-		var convErr *PlannerConversationalError
+		var convErr *ExecutiveConversationalError
 		if errors.As(err, &convErr) {
-			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "planner", Node: &NodeInfo{ID: "planner", Type: "planner", State: "resolved", Tag: "direct answer"}})
+			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "direct answer"}})
 			if convErr.Text != "" {
 				a.broadcastDAGEvent(DAGEvent{Type: "verdict", Text: convErr.Text})
 			}
 			return nil, err
 		}
-		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "planner", Node: &NodeInfo{ID: "planner", Type: "planner", State: "failed", Tag: "plan", Error: err.Error()}})
+		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "failed", Tag: "plan", Error: err.Error()}})
 		return nil, fmt.Errorf("planner failed: %w", err)
 	}
-	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "planner", Node: &NodeInfo{ID: "planner", Type: "planner", State: "resolved", Tag: "plan"}})
+	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "plan"}})
 
 	initialNodes, err := planStepsToNodes(planResult.Steps, graph, budget, a.registry, dagMode)
 	if err != nil {
@@ -208,27 +217,44 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	completionCh := make(chan nodeCompletion, 64)
 	inflight := 0
 	throttle := newToolThrottle()
-	batchCounter := 0           // nodes resolved since last reflection (nReflect mode)
+	batchCounter := 0             // nodes resolved since last reflection (nReflect mode)
 	reflectionConcluded := false  // true if a reflection already decided "conclude"
 	reflectionVerdict := ""       // full verdict from reflection (skips aggregator if non-empty)
 	var reflectionAggregate *bool // reflector's recommendation on aggregation
-	reflectionInflight := false  // true while a reflection node is running — prevents double injection
-	workSinceReflection := 0    // tool nodes completed since last reflection — used to ensure final reflect
+	reflectionInflight := false   // true while a reflection node is running — prevents double injection
+	workSinceReflection := 0      // tool nodes completed since last reflection — used to ensure final reflect
+	// debugGraftPending tracks debugger-grafted nodes that haven't reached a
+	// terminal state yet. Reflection injection waits for this to reach 0
+	// before firing so we don't re-read stale failure state mid-fix.
+	debugGraftPending := 0
+	debugGraftIDs := make(map[string]bool)
+	// debuggerInflight is true while a Holmes or microplanner cycle is
+	// running. Both batch reflection and quiescence reflection hold while
+	// this is set. The reflector is the sync point — it clears the flag at
+	// fire time. Declared up here (not next to the main loop) so the
+	// injectBatchReflection closure below can capture it.
+	debuggerInflight := false
 
-	// IBE: resolve intent — use planner-inferred intent for auto, else structural
+	// addressingByInvestigation tracks which failed node IDs each investigation cycle is
+	// addressing. Snapshotted at Holmes dispatch (when failures are still
+	// fresh) and consumed at microplanner dispatch (after Holmes concludes).
+	// Keyed by investigationCount.
+	addressingByInvestigation := make(map[int][]string)
+
+	// IGX: resolve intent — use planner-inferred intent for auto, else structural
 	intent := trigger.Intent()
 	if planResult.WasAuto {
 		intent = planResult.InferredIntent
 		// Cap inferred intent by clearance (planner can't escalate beyond node's ceiling)
 		clr := gates.Intent(a.clearance.Clearance())
 		if intent > clr {
-			log.Printf("[dag] planner inferred %s but clearance is %d, capping", intent, clr)
+			log.Printf("[dag] executive inferred %s but clearance is %d, capping", intent, clr)
 			intent = clr
 		}
 		// Cap by user's scope ceiling (planner can't escalate beyond what
 		// the user is allowed to request)
 		if trigger.Scope != nil && gates.Intent(trigger.Scope.MaxIntent) < intent {
-			log.Printf("[dag] planner inferred %s but user scope caps at %d, capping", intent, trigger.Scope.MaxIntent)
+			log.Printf("[dag] executive inferred %s but user scope caps at %d, capping", intent, trigger.Scope.MaxIntent)
 			intent = gates.Intent(trigger.Scope.MaxIntent)
 		}
 	}
@@ -243,13 +269,57 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			// Broadcast node running event
 			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: n.ID, Node: graph.SnapshotNode(n.ID)})
 			if n.Type == NodeReflection {
+				// Reflector is the sync point for the debug-cycle flag. Fix 2
+				// guarantees no reflection fires while debuggerInflight is true,
+				// so by the time we get here the previous Holmes/microplanner
+				// cycle is provably done. Clearing once here removes the need
+				// for scattered clears in every completion handler.
+				debuggerInflight = false
+				// Build deterministic reflection context via ContextGate.
+				rCtxResp, rctxErr := graph.Context.Get(ctx, ContextRequest{
+					ReturnSources: Sources(
+						NodeReturns("all"),
+						Worklog(10, "all"),
+					),
+					MaxBudget: 8000,
+				})
+				if rctxErr != nil {
+					log.Printf("[dag] launchReady reflection context build failed: %v", rctxErr)
+					rCtxResp = &ContextResponse{Sources: map[string]string{}}
+				}
 				reflectionInflight = true
-				go a.fireReflection(ctx, n, graph, budget, completionCh, trigger, intent)
+				go a.fireReflection(ctx, n, graph, budget, completionCh, trigger, rCtxResp, intent)
+			} else if n.Type == NodeHolmes {
+				// Holmes iterations carry their own state in params and do
+				// not go through the normal tool dispatcher. Before firing,
+				// stitch action observations into the prior turn so the next
+				// iteration sees them. LastActionNodeIDs lists all parallel
+				// action nodes from the previous iteration.
+				if state, err := loadHolmesState(n); err == nil && len(state.History) > 0 {
+					lastIdx := len(state.History) - 1
+					actionIDs := state.LastActionNodeIDs
+					// Migration: if old single-ID field is set, use it
+					if len(actionIDs) == 0 && state.LastActionNodeID != "" {
+						actionIDs = []string{state.LastActionNodeID}
+					}
+					if len(actionIDs) > 0 && len(state.History[lastIdx].Observations) == 0 {
+						obs := make([]string, len(actionIDs))
+						for i, aid := range actionIDs {
+							if depNode := graph.Get(aid); depNode != nil {
+								obs[i] = depNode.Result
+								if obs[i] == "" && depNode.Error != nil {
+									obs[i] = "ERROR: " + depNode.Error.Error()
+								}
+							}
+						}
+						state.History[lastIdx].Observations = obs
+						_ = saveHolmesState(n, state)
+					}
+				}
+				go a.fireHolmes(ctx, n, graph, budget, completionCh, trigger, intent)
 			} else {
-				// NodeCompute and NodeTool both flow through fireNode. Compute
-				// is a ContextualExecutor and the dispatcher routes it to
-				// ExecuteWithContext. The NodeCompute classification remains
-				// for post-completion graft logic below.
+				// Tool/compute nodes pull their own context via graph.Context inside
+				// the dispatcher / compute layer.
 				go a.fireNode(ctx, n, graph, budget, completionCh, trigger.AlertID, throttle, intent, trigger.Scope)
 			}
 		}
@@ -283,7 +353,20 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			rNode.StartedAt = time.Now()
 			inflight++
 			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
-			go a.fireInterjectionReflection(ctx, rNode, graph, budget, completionCh, trigger, msg, intent)
+			// Build interjection context via ContextGate. Reflector is
+			// deterministic — no Query, just node returns + worklog.
+			intCtx, ictxErr := graph.Context.Get(ctx, ContextRequest{
+				ReturnSources: Sources(
+					NodeReturns("all"),
+					Worklog(20, "all"),
+				),
+				MaxBudget: 8000,
+			})
+			if ictxErr != nil {
+				log.Printf("[dag] interjection context build failed: %v", ictxErr)
+				intCtx = &ContextResponse{Sources: map[string]string{}}
+			}
+			go a.fireInterjectionReflection(ctx, rNode, graph, budget, completionCh, trigger, msg, intCtx, intent)
 			return true
 		default:
 			return false
@@ -295,6 +378,22 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		// Only one reflection at a time — prevents double injection when
 		// multiple nodes complete simultaneously and hit the batch threshold
 		if reflectionInflight {
+			return
+		}
+		// Hold reflection until any in-flight debug cycle has fully terminated.
+		// Otherwise we may re-read stale failures and re-investigate a fix that's
+		// already running.
+		if debugGraftPending > 0 {
+			log.Printf("[dag] skipping batch reflection — %d debug-grafted nodes still pending", debugGraftPending)
+			return
+		}
+		// Hold while a Holmes or microplanner cycle is in flight. Holmes's
+		// per-iteration action nodes count as tool completions and would
+		// otherwise trip the batch threshold mid-investigation, spawning a
+		// parallel reflector that fights the in-flight one. The reflector is
+		// the sync point — it only fires after the current cycle drains.
+		if debuggerInflight {
+			log.Printf("[dag] skipping batch reflection — holmes/microplanner cycle in flight")
 			return
 		}
 		// Reserve at least 1 LLM call for the aggregator
@@ -315,15 +414,115 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		rNode.StartedAt = time.Now()
 		inflight++
 		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
-		go a.fireReflection(ctx, rNode, graph, budget, completionCh, trigger, intent)
+		// Build batch reflection context via ContextGate. Deterministic, no curator.
+		batchCtxResp, bctxErr := graph.Context.Get(ctx, ContextRequest{
+			ReturnSources: Sources(
+				NodeReturns("all"),
+				Worklog(10, "all"),
+			),
+			MaxBudget: 8000,
+		})
+		if bctxErr != nil {
+			log.Printf("[dag] batch reflection context build failed: %v", bctxErr)
+			batchCtxResp = &ContextResponse{Sources: map[string]string{}}
+		}
+		go a.fireReflection(ctx, rNode, graph, budget, completionCh, trigger, batchCtxResp, intent)
 		budget.ResetWaveCounters()
 		batchCounter = 0
 		log.Printf("[dag] batch reflection injected at %s", rID)
 	}
 
+	maxInvestigations := a.cfg.MaxInvestigations
+	if maxInvestigations <= 0 {
+		maxInvestigations = 1
+	}
+	investigationCount := 0
+	// debuggerInflight is declared above (alongside other top-level state)
+	// so injectBatchReflection can close over it.
+
 	launchReady()
 
-	for inflight > 0 {
+	// Main scheduler loop. Stays alive until reflection concludes or budget/time runs out.
+	// When inflight hits 0, injects a reflection instead of exiting — the reflection
+	// either concludes (loop exits) or investigates (new nodes graft, loop continues).
+	for !reflectionConcluded {
+		// If nothing is running, inject a reflection to evaluate and decide next steps.
+		if inflight == 0 && debuggerInflight {
+			// Shouldn't happen — debugger is counted in inflight. Defensive
+			// log only; the reflection that fires below will clear the flag
+			// at its launchReady fire site.
+			log.Printf("[dag] WARNING: debuggerInflight but inflight==0 (reflector will clear)")
+		}
+		if inflight == 0 {
+			if workSinceReflection == 0 {
+				// No work happened since last reflection — nothing more to evaluate
+				break
+			}
+			if investigationCount >= maxInvestigations {
+				log.Printf("[dag] max investigations (%d) reached, forcing conclude", maxInvestigations)
+				break
+			}
+			if budget.LLMRemaining() <= 2 || ctx.Err() != nil {
+				break
+			}
+			if !budget.TrySpawnNode("", true) {
+				break
+			}
+			// If a debug cycle is still in flight (any of its grafted children
+			// has not yet reached a terminal state), wait for it to finish
+			// before reflecting. Reflecting mid-fix re-reads stale failure
+			// state and triggers a duplicate investigation.
+			if debugGraftPending > 0 {
+				log.Printf("[dag] holding reflection — %d debug-grafted nodes still pending", debugGraftPending)
+				continue
+			}
+			// Before reflecting, supersede any failures a debugger cycle has
+			// already addressed — otherwise the reflector will keep re-investigating
+			// the same resolved issue.
+			if marked, fixed := graph.SupersedeFailuresIfDebugSucceeded(); marked > 0 {
+				log.Printf("[dag] superseded %d failed node(s) — addressed by successful debug cycle", marked)
+				// Write a FIXED marker to the worklog for each completed debug
+				// cycle. The reflector reads the worklog and uses these markers
+				// to recognize that a recurring symptom was already addressed,
+				// avoiding the "fix it, see stale error, fix it again" loop.
+				for _, dbg := range fixed {
+					summary := extractDebugSummary(dbg.Result)
+					if summary == "" {
+						summary = fmt.Sprintf("%d-step fix applied", len(dbg.Children))
+					}
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, dbg.Tag, "FIXED", summary)
+				}
+			}
+			log.Printf("[dag] injecting reflection (%d tool completions since last reflect, investigation %d/%d)", workSinceReflection, investigationCount, maxInvestigations)
+			rNode := &Node{
+				Type:   NodeReflection,
+				Tag:    "reflect",
+				Params: map[string]any{"investigation_count": investigationCount},
+			}
+			rID := graph.AddNode(rNode)
+			graph.SetState(rID, StateRunning)
+			rNode.StartedAt = time.Now()
+			inflight = 1
+			reflectionInflight = true
+			// Sync point: previous Holmes/microplanner cycle is provably done
+			// by the time we get here (inflight has dropped to 0). Clear once.
+			debuggerInflight = false
+			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
+			// Build main reflection context via ContextGate. Deterministic, no curator.
+			reflCtxResp, rctxErr := graph.Context.Get(ctx, ContextRequest{
+				ReturnSources: Sources(
+					NodeReturns("all"),
+					Worklog(10, "all"),
+				),
+				MaxBudget: 8000,
+			})
+			if rctxErr != nil {
+				log.Printf("[dag] reflection context build failed: %v", rctxErr)
+				reflCtxResp = &ContextResponse{Sources: map[string]string{}}
+			}
+			go a.fireReflection(ctx, rNode, graph, budget, completionCh, trigger, reflCtxResp, intent)
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Printf("[dag] wall clock expired, aborting %d inflight nodes", inflight)
@@ -334,6 +533,15 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			node := graph.Get(comp.NodeID)
 			if node == nil {
 				continue
+			}
+			// Decrement debug-grafted pending counter when one of those nodes
+			// reaches a terminal state. Used to gate reflection injection so
+			// we don't re-evaluate mid-fix.
+			if debugGraftIDs[comp.NodeID] {
+				delete(debugGraftIDs, comp.NodeID)
+				if debugGraftPending > 0 {
+					debugGraftPending--
+				}
 			}
 			// Broadcast node completion event
 			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: node.ID, Node: graph.SnapshotNode(node.ID)})
@@ -376,8 +584,21 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							rNode.StartedAt = time.Now()
 							inflight++
 							reflectionInflight = true
+							// Sync point: any prior debug cycle is acknowledged done.
+							debuggerInflight = false
 							a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
-							go a.fireReflection(ctx, rNode, graph, budget, completionCh, trigger, intent)
+							obsCtxResp, octxErr := graph.Context.Get(ctx, ContextRequest{
+								ReturnSources: Sources(
+									NodeReturns("all"),
+									Worklog(10, "all"),
+								),
+								MaxBudget: 8000,
+							})
+							if octxErr != nil {
+								log.Printf("[dag] observer reflection context build failed: %v", octxErr)
+								obsCtxResp = &ContextResponse{Sources: map[string]string{}}
+							}
+							go a.fireReflection(ctx, rNode, graph, budget, completionCh, trigger, obsCtxResp, intent)
 							budget.ResetWaveCounters()
 							log.Printf("[dag] observer triggered reflection (%s)", obs.Reason)
 						}
@@ -387,125 +608,321 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				continue
 			}
 
-			// ── Retry proxy: a replacement node succeeded — copy result
-			// back to the original node so its dependents unblock. ──
-			if comp.Err == nil && node.ProxyForID != "" {
-				graph.SetResult(comp.NodeID, comp.Result)
-				original := graph.Get(node.ProxyForID)
-				if original != nil {
-					graph.SetResult(original.ID, comp.Result)
-					graph.SetState(original.ID, StateResolved)
-					log.Printf("[dag] retry proxy: %s succeeded, unblocking %s", comp.NodeID, original.ID)
+			if comp.Err != nil {
+				errMsg := comp.Err.Error()
+				log.Printf("[dag] node %s (%s) failed: %v", comp.NodeID, node.ToolName, comp.Err)
+				// debuggerInflight is cleared by the next reflection that
+				// fires (Fix 4 — reflector is the sync point), so no need
+				// to clear it here on individual completion failures.
+
+				// ── Three-tier retry ──
+				// Tier 1: skip — structural error, no retry will help
+				// Tier 2: blind — transient error, rerun same command
+				// Tier 3: oneshot — executor LLM fix with tiny context
+				tier := classifyRetryTier(errMsg)
+				alreadyRetried := strings.Contains(node.Tag, "[")
+
+				// Holmes-spawned action nodes are exempt from retry. Holmes
+				// is investigating; failure observations are signal, not bugs to
+				// fix. Rewriting the command would invalidate the experiment.
+				if tier != "skip" && !alreadyRetried && node.Type == NodeTool && node.ToolName != "service" && node.Source != "holmes" {
+					if tier == "blind" {
+						node.Tag = node.Tag + " [blind_retry]"
+						node.Error = nil
+						graph.SetState(comp.NodeID, StatePending)
+						log.Printf("[dag] blind retry for %s", comp.NodeID)
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BLIND_RETRY", errMsg)
+						a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
+						launchReady()
+						continue
+					}
+					if tier == "oneshot" && budget.LLMRemaining() > 0 {
+						// Fire a tiny executor call: just command + error → fixed command.
+						// Keep node in failed state so dependents can proceed.
+						// Track inflight so scheduler doesn't exit early.
+						// If retry succeeds, resolve the node and dependents will
+						// see the result on the next launchReady cycle.
+						graph.SetError(comp.NodeID, comp.Err)
+						node.Tag = node.Tag + " [oneshot_retry]"
+						inflight++ // track the async retry
+						go a.oneshotRetry(ctx, node, comp, graph, budget, completionCh, errMsg, intent, trigger.Scope)
+						log.Printf("[dag] oneshot retry for %s", comp.NodeID)
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "ONESHOT_RETRY", errMsg)
+						a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
+						launchReady() // let dependents proceed with failed dep
+						continue
+					}
 				}
+
+				// No retry — fail and prune
+				graph.SetError(comp.NodeID, comp.Err)
+				if strings.Contains(errMsg, "gate:") {
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "GATE_BLOCKED", errMsg)
+				} else {
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "FAILED", errMsg)
+				}
+				// Don't cascade prune — let downstream nodes attempt to run.
+				// The reflector will see the failure and decide what to do.
 				launchReady()
 				continue
-			}
 
-			if comp.Err != nil {
-				log.Printf("[dag] node %s (%s) failed: %v", comp.NodeID, node.ToolName, comp.Err)
-				appendWorklog(a.cfg.Workspace, node.Tag, "FAILED", Text.TruncateLog(comp.Err.Error(), 150))
+			} else if node.Type == NodeHolmes {
+				// Holmes investigation iteration completed.
+				// Three possible next steps:
+				//   1. conclude=true   → dispatch microplanner with the RCA
+				//   2. actions present → graft all as parallel tool nodes + queue
+				//                        the next Holmes iteration depending on all
+				//   3. iter cap hit    → force conclude with low confidence
+				graph.SetResult(comp.NodeID, comp.Result)
+				out, perr := parseHolmesOutput(comp.Result)
+				prevState, _ := loadHolmesState(node)
+				if perr != nil || prevState == nil {
+					log.Printf("[dag] holmes parse failed for %s: %v", comp.NodeID, perr)
+					// Flag is cleared by the next reflection (Fix 4).
+					launchReady()
+					continue
+				}
 
-				// If this is a retry proxy that failed, bump the original's
-				// retry count. If retries exhausted, resolve the original
-				// with the failure so dependents unblock.
-				if node.ProxyForID != "" {
-					original := graph.Get(node.ProxyForID)
-					if original != nil {
-						original.RetryCount++
-						if original.RetryCount >= a.cfg.MaxNodeRetries {
-							graph.SetError(original.ID, comp.Err)
-							log.Printf("[dag] retry proxy: %s exhausted %d retries, unblocking %s with failure", comp.NodeID, a.cfg.MaxNodeRetries, original.ID)
-							launchReady()
-							continue
+				// Holmes-voice prose to the worklog so future runs can see what
+				// was investigated even after the trace is gone.
+				if out.Reasoning != "" {
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "HOLMES",
+						fmt.Sprintf("[iter %d/%d] %s", prevState.Iter, prevState.MaxIter, Text.TruncateLog(out.Reasoning, 240)))
+				}
+
+				// Cycle detection: if Holmes proposed a hypothesis we already
+				// tested AND has not concluded, force conclude with low confidence
+				// rather than spinning forever.
+				cycled := !out.Conclude && holmesSeenHypothesis(prevState, out.Hypothesis)
+				if cycled {
+					log.Printf("[dag] holmes cycle detected on hypothesis %q — forcing conclude", out.Hypothesis)
+				}
+
+				// Iteration cap: same forced-conclude path.
+				atCap := prevState.Iter >= prevState.MaxIter
+
+				if out.Conclude || cycled || atCap {
+					// CONCLUDE PATH — Holmes is done; dispatch microplanner.
+					rca := out.RCA
+					if rca == nil {
+						rca = &RCAReport{
+							RootCause:         out.Hypothesis,
+							Evidence:          []string{},
+							Confidence:        "low",
+							SuggestedStrategy: "Investigation hit iteration cap or cycle without converging — fix planner should treat the named hypothesis as a guess.",
 						}
 					}
-				}
-
-				if node.Type == NodeMicroPlanner {
-					// Micro-planner itself failed — resolve the original
-					// with the failure so dependents unblock.
-					failedNode := graph.Get(node.SpawnedBy)
-					if failedNode != nil && failedNode.State == StateRunning && failedNode.ProxyForID == "" {
-						graph.SetError(failedNode.ID, comp.Err)
-					}
-					graph.SetError(comp.NodeID, comp.Err)
-					launchReady()
-					continue
-				}
-
-				graph.SetError(comp.NodeID, comp.Err)
-
-				// Skip micro-planner for systemic failures — no repair will help.
-				errMsg := comp.Err.Error()
-				if strings.Contains(errMsg, "rate limit") ||
-					strings.Contains(errMsg, "gate:") ||
-					strings.Contains(errMsg, "HTTP 429") {
-					log.Printf("[dag] systemic failure (%s), skipping micro-planner", node.ToolName)
-					graph.CascadeSkip(comp.NodeID)
-					launchReady()
-					continue
-				}
-
-				// Circuit breaker: skip microplanner after 5 accumulated failures
-				if hasCircuitBroken(node) {
-					log.Printf("[dag] circuit breaker: %s has 5+ accumulated failures, skipping microplanner", node.Tag)
-					graph.CascadeSkip(comp.NodeID)
-					launchReady()
-					continue
-				}
-
-				// Retry proxy pattern: if other nodes depend on this one,
-				// keep it "running" so dependents stay blocked while the
-				// micro-planner tries a replacement. Nodes with no dependents
-				// just fail normally — no point holding them open.
-				maxRetries := a.cfg.MaxNodeRetries
-				if maxRetries <= 0 {
-					maxRetries = 2
-				}
-				hasDeps := graph.HasPendingDependents(comp.NodeID)
-				if hasDeps && node.RetryCount < maxRetries && budget.LLMRemaining() > 1 {
-					// Keep node in running state — don't resolve, don't cascade.
-					// Revert the SetError above so the node stays "running".
-					graph.SetState(comp.NodeID, StateRunning)
-					node.RetryCount++
-					if a.spawnMicroPlannerNode(ctx, node, comp, graph, budget, completionCh, trigger) {
-						inflight++
+					addressing := addressingByInvestigation[prevState.InvestigationCount]
+					_, err := dispatchMicroplannerWithRCA(ctx, a, graph, budget, completionCh, trigger,
+						comp.NodeID, prevState.InvestigationCount, prevState.Problem, rca, addressing, intent)
+					if err != nil {
+						log.Printf("[dag] holmes → microplanner dispatch failed: %v", err)
+						// Flag is cleared by the next reflection (Fix 4).
 					} else {
-						// Micro-planner spawn failed — resolve with failure
-						graph.SetError(comp.NodeID, comp.Err)
-						graph.CascadeSkip(comp.NodeID)
-					}
-				} else if budget.LLMRemaining() > 1 {
-					// No dependents or retries exhausted — normal micro-planner
-					// (node is already marked failed, dependents can proceed)
-					if a.spawnMicroPlannerNode(ctx, node, comp, graph, budget, completionCh, trigger) {
 						inflight++
 					}
-				} else {
-					log.Printf("[dag] no budget for micro-planner, cascading skip from %s", comp.NodeID)
-					graph.CascadeSkip(comp.NodeID)
+					launchReady()
+					continue
 				}
+
+				// CONTINUE PATH — graft the next action as a tool node, then
+				// schedule the next Holmes iteration depending on it.
+
+				// Reserve LLM budget for the NEXT Holmes iteration before
+				// we graft anything. The first iteration was budget-checked at
+				// dispatch time; iterations 2..N need their own reservation
+				// here so a long investigation can't outrun the LLM budget.
+				// Action tool nodes are budget-checked separately inside
+				// planStepsToNodes — this check is only for the LLM call.
+				if !budget.TrySpawnNode("", true) {
+					log.Printf("[dag] holmes iter %d: no LLM budget for next iter, forcing conclude", prevState.Iter)
+					rca := &RCAReport{
+						RootCause:         out.Hypothesis,
+						Evidence:          []string{},
+						Confidence:        "low",
+						SuggestedStrategy: "Investigation halted: LLM budget exhausted before Holmes could converge. Fix planner should treat the named hypothesis as a working guess, not a proven cause.",
+					}
+					addressing := addressingByInvestigation[prevState.InvestigationCount]
+					if _, err := dispatchMicroplannerWithRCA(ctx, a, graph, budget, completionCh, trigger,
+						comp.NodeID, prevState.InvestigationCount, prevState.Problem, rca, addressing, intent); err != nil {
+						log.Printf("[dag] holmes → microplanner dispatch (budget cap) failed: %v", err)
+						// Flag is cleared by the next reflection (Fix 4).
+					} else {
+						inflight++
+					}
+					launchReady()
+					continue
+				}
+
+				if len(out.Actions) == 0 {
+					log.Printf("[dag] holmes returned no actions and no conclude — forcing conclude")
+					rca := &RCAReport{
+						RootCause:         out.Hypothesis,
+						Evidence:          []string{},
+						Confidence:        "low",
+						SuggestedStrategy: "Holmes emitted no actions and no conclusion — treat as guess.",
+					}
+					addressing := addressingByInvestigation[prevState.InvestigationCount]
+					if _, err := dispatchMicroplannerWithRCA(ctx, a, graph, budget, completionCh, trigger,
+						comp.NodeID, prevState.InvestigationCount, prevState.Problem, rca, addressing, intent); err != nil {
+						log.Printf("[dag] holmes → microplanner dispatch failed: %v", err)
+					} else {
+						inflight++
+					}
+					launchReady()
+					continue
+				}
+
+				// Build PlanSteps for all actions and graft as parallel nodes.
+				var actionSteps []PlanStep
+				for i, act := range out.Actions {
+					actionSteps = append(actionSteps, PlanStep{
+						Tool:   act.Tool,
+						Params: act.Params,
+						Tag:    fmt.Sprintf("analyse_%d_act_%d_%d", prevState.InvestigationCount, prevState.Iter, i+1),
+					})
+				}
+				newNodes, gerr := planStepsToNodes(actionSteps, graph, budget, a.registry, dagMode)
+				// Filter out nil nodes (unknown tools get dropped by planStepsToNodes).
+				var actionNodes []*Node
+				for _, nn := range newNodes {
+					if nn != nil {
+						actionNodes = append(actionNodes, nn)
+					}
+				}
+				if gerr != nil || len(actionNodes) == 0 {
+					log.Printf("[dag] holmes action graft failed (%d actions, err: %v)", len(out.Actions), gerr)
+					rca := &RCAReport{
+						RootCause:         out.Hypothesis,
+						Evidence:          []string{},
+						Confidence:        "low",
+						SuggestedStrategy: "Holmes proposed unrunnable actions — fix planner should treat hypothesis as a guess.",
+					}
+					addressing := addressingByInvestigation[prevState.InvestigationCount]
+					if _, err := dispatchMicroplannerWithRCA(ctx, a, graph, budget, completionCh, trigger,
+						comp.NodeID, prevState.InvestigationCount, prevState.Problem, rca, addressing, intent); err != nil {
+						log.Printf("[dag] holmes → microplanner fallback dispatch failed: %v", err)
+					} else {
+						inflight++
+					}
+					launchReady()
+					continue
+				}
+				// Mark all as Holmes-spawned and wire into graph.
+				var actionNodeIDs []string
+				for _, an := range actionNodes {
+					an.Source = "holmes"
+					graph.AddChild(comp.NodeID, an.ID)
+					a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: an.ID, Node: graph.SnapshotNode(an.ID)})
+					actionNodeIDs = append(actionNodeIDs, an.ID)
+				}
+
+				// Build the HolmesTurn for THIS iteration's contribution.
+				// Observations will be filled in by the next iteration when it
+				// reads the action nodes' results.
+				thisTurn := HolmesTurn{
+					Iter:       prevState.Iter,
+					Reasoning:  out.Reasoning,
+					Hypothesis: out.Hypothesis,
+					Actions:    out.Actions,
+				}
+
+				// Spawn the next Holmes iteration node — depends on ALL actions.
+				nextNode, nerr := spawnNextHolmes(graph, prevState, thisTurn, comp.NodeID, prevState.InvestigationCount, actionNodeIDs)
+				if nerr != nil {
+					log.Printf("[dag] holmes next iter setup failed: %v", nerr)
+					launchReady()
+					continue
+				}
+				nextNode.DependsOn = actionNodeIDs
+				a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nextNode.ID, Node: graph.SnapshotNode(nextNode.ID)})
+				log.Printf("[dag] holmes iter %d → %d actions → iter %d queued",
+					prevState.Iter, len(actionNodes), prevState.Iter+1)
+				launchReady()
 
 			} else if node.Type == NodeMicroPlanner {
+				// Clean-room debugger completed — parse plan and graft steps
 				graph.SetResult(comp.NodeID, comp.Result)
-				failedNode := graph.Get(node.SpawnedBy)
-				if failedNode != nil {
-					newNodes, parseErr := parseMicroPlannerOutput(comp.Result, failedNode, graph, budget)
-					if parseErr != nil {
-						log.Printf("[dag] micro-planner parse failed: %v", parseErr)
-						// If the original was held open as a proxy, resolve it now
-						if failedNode.State == StateRunning {
-							graph.SetError(failedNode.ID, fmt.Errorf("micro-planner parse failed: %v", parseErr))
-						}
-						graph.CascadeSkip(failedNode.ID)
+
+				var mpOutput microPlannerOutput
+				if err := ParseLLMJSON(comp.Result, &mpOutput); err != nil {
+					log.Printf("[dag] debugger parse failed: %v", err)
+				} else if len(mpOutput.Nodes) > 0 {
+					log.Printf("[dag] debugger diagnosis: %s (%d steps)", Text.TruncateLog(mpOutput.Summary, 200), len(mpOutput.Nodes))
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "DEBUG_PLAN", fmt.Sprintf("%d steps: %s", len(mpOutput.Nodes), Text.TruncateLog(mpOutput.Summary, 150)))
+
+					newNodes, graftErr := planStepsToNodes(mpOutput.Nodes, graph, budget, a.registry, dagMode)
+					if graftErr != nil {
+						log.Printf("[dag] debugger graft failed: %v", graftErr)
 					} else {
+						// Reset the debug pending tracker for this new cycle.
+						debugGraftIDs = make(map[string]bool)
+						debugGraftPending = 0
+						fixIDs := make([]string, 0, len(newNodes))
 						for _, nn := range newNodes {
-							// Tag replacement nodes as proxies for the original
-							nn.ProxyForID = failedNode.ID
-							graph.AddChild(comp.NodeID, nn.ID)
+							if nn != nil {
+								graph.AddChild(comp.NodeID, nn.ID)
+								fixIDs = append(fixIDs, nn.ID)
+								debugGraftIDs[nn.ID] = true
+								debugGraftPending++
+								a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nn.ID, Node: graph.SnapshotNode(nn.ID)})
+							}
+						}
+						// Inject blueprint_ref into compute nodes that don't have one.
+						// The debugger doesn't know the file path — we do. Both the
+						// deep (architect) and shallow (coder) paths use it as input
+						// context; it is NOT a routing signal.
+						//
+						// Direct call to latestBlueprintPath (NOT via ContextGate) is
+						// intentional: we need the path STRING to inject as a node
+						// param, not the blueprint CONTENT. ContextGate is for
+						// content retrieval; path resolution is a metadata operation
+						// outside the gate's scope.
+						if bpPath := latestBlueprintPath(a.cfg.MetadataDir, graph.SessionID); bpPath != "" {
+							for _, nn := range newNodes {
+								if nn != nil && nn.Type == NodeCompute {
+									if ref, _ := nn.Params["blueprint_ref"].(string); ref == "" {
+										nn.Params["blueprint_ref"] = bpPath
+									}
+								}
+							}
+						}
+						log.Printf("[dag] debugger grafted %d nodes", len(fixIDs))
+
+						// Re-graft stored validators after debug plan
+						if len(fixIDs) > 0 && len(graph.Validators) > 0 {
+							rv := 0
+							for _, v := range graph.Validators {
+								if !budget.TrySpawnNode("bash", false) {
+									break
+								}
+								vNode := &Node{
+									Type:      NodeTool,
+									ToolName:  "bash",
+									Params:    map[string]any{"command": "sleep 3 && " + v.Check, "timeout_sec": 20},
+									DependsOn: append([]string{}, fixIDs...),
+									SpawnedBy: comp.NodeID,
+									Tag:       "revalidate_" + sanitizeTag(v.Name),
+									Source:    "builtin",
+								}
+								vID := graph.AddNode(vNode)
+								graph.AddChild(comp.NodeID, vID)
+								debugGraftIDs[vID] = true
+								debugGraftPending++
+								a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
+								rv++
+							}
+							if rv > 0 {
+								log.Printf("[dag] re-grafted %d validators after debug plan", rv)
+							}
 						}
 					}
+				} else {
+					log.Printf("[dag] debugger returned no steps: %s", Text.TruncateLog(mpOutput.Summary, 200))
 				}
+				// debuggerInflight is cleared by the next reflection that fires
+				// (Fix 4 — reflector is the unconditional sync point).
+				launchReady()
 
 			} else if node.Type == NodeReflection || node.Type == NodeInterjection {
 				reflectionInflight = false
@@ -519,7 +936,18 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					case "continue":
 						graph.SetResult(comp.NodeID, comp.Result)
 						budget.ResetWaveCounters()
+						investigationCount = 0 // reset — if previous investigation worked, next reflection starts fresh
 						log.Printf("[dag] reflection: continue (%s), wave counters reset", ref.Reason)
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONTINUE", Text.TruncateLog(ref.Reason, 200))
+						launchReady()
+						// If nothing launched, the reflector expected pending steps that
+						// don't exist (deduped or already completed). Force another
+						// reflection so it sees "0 pending" and either investigates or concludes.
+						if inflight == 0 {
+							log.Printf("[dag] reflection said continue but nothing to launch — forcing re-evaluation")
+							appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONTINUE_EMPTY", "reflector expected pending steps but none remain")
+							workSinceReflection = 1 // prevent the "no work" break
+						}
 
 					case "conclude":
 						graph.SetResult(comp.NodeID, ref.Verdict)
@@ -528,53 +956,70 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						reflectionVerdict = ref.Verdict
 						reflectionAggregate = ref.Aggregate
 						log.Printf("[dag] reflection: conclude early (%s)", ref.Reason)
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONCLUDE", Text.TruncateLog(ref.Reason, 200))
 
-					case "replan":
+					case "investigate":
+						investigationCount++
 						graph.SetResult(comp.NodeID, comp.Result)
-						// Skip old pending nodes — the replan replaces them.
 						skipped := graph.SkipAllPending()
 						budget.ResetWaveCounters()
-						log.Printf("[dag] reflection: replan (%s), skipped %d pending, wave counters reset", ref.Reason, skipped)
-						var replanGrafted int
-						if len(ref.Nodes) > 0 {
-							newNodes, graftErr := planStepsToNodes(ref.Nodes, graph, budget, a.registry, dagMode)
-							if graftErr != nil {
-								log.Printf("[dag] reflection replan graft failed: %v", graftErr)
-							} else {
-								replanIDs := make([]string, 0, len(newNodes))
-								for _, nn := range newNodes {
-									if nn != nil {
-										graph.AddChild(comp.NodeID, nn.ID)
-										replanIDs = append(replanIDs, nn.ID)
-										replanGrafted++
-									}
-								}
-								// Re-graft stored validators after replan
-								if replanGrafted > 0 && len(graph.Validators) > 0 {
-									rv := 0
-									for _, v := range graph.Validators {
-										if !budget.TrySpawnNode("bash", false) {
-											break
-										}
-										vNode := &Node{
-											Type:      NodeTool,
-											ToolName:  "bash",
-											Params:    map[string]any{"command": v.Check, "timeout_sec": 15},
-											DependsOn: append([]string{}, replanIDs...),
-											SpawnedBy: comp.NodeID,
-											Tag:       "revalidate_" + sanitizeTag(v.Name),
-											Source:    "builtin",
-										}
-										vID := graph.AddNode(vNode)
-										graph.AddChild(comp.NodeID, vID)
-										a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
-										rv++
-									}
-									if rv > 0 {
-										log.Printf("[dag] re-grafted %d validators after replan", rv)
-									}
-								}
+
+						// Use Summary with Reason as fallback
+						summary := ref.Summary
+						if summary == "" {
+							summary = ref.Reason
+						}
+						problem := ref.Problem
+						if problem == "" {
+							problem = summary
+						}
+
+						log.Printf("[dag] reflection: investigate #%d (%s), skipped %d pending", investigationCount, summary, skipped)
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "INVESTIGATE", fmt.Sprintf("#%d, skipped %d pending | %s", investigationCount, skipped, Text.TruncateLog(summary, 200)))
+
+						// Holmes fires on EVERY investigation regardless of plan
+						// shape. The old gate skipped non-compute investigations
+						// because the prior microplanner would invent fictional
+						// code fixes. Holmes is read-only — it can investigate
+						// any failure type (ops, research, code) without risk.
+						// If the resulting RCA isn't actionable by the microplanner
+						// (e.g., a research query whose root cause is "the source
+						// site is down"), the microplanner will produce a no-op
+						// plan and the next reflection cycle concludes naturally.
+
+						// Dispatch to Holmes — the ReAct investigator phase. Holmes
+						// gathers evidence with read-only tools, forms hypotheses, and
+						// emits a structured RCA. The microplanner only fires after
+						// Holmes concludes (handled in the NodeHolmes completion
+						// branch below). This is the "investigate before fixing" rule:
+						// every investigate decision goes through diagnosis first, no shortcuts.
+						if budget.TrySpawnNode("", true) {
+							// Snapshot currently-failed node IDs so we can mark them
+							// superseded once the eventual fix succeeds. We carry this
+							// forward through Holmes to the microplanner via the
+							// addressingFailures map keyed by investigationCount.
+							var addressing []string
+							for _, fn := range graph.FailedNodes() {
+								addressing = append(addressing, fn.ID)
 							}
+							addressingByInvestigation[investigationCount] = addressing
+
+							maxIter := a.cfg.MaxHolmesIters
+							if maxIter <= 0 {
+								maxIter = 5
+							}
+							sNode, err := spawnFirstHolmes(graph, problem, comp.NodeID, investigationCount, maxIter)
+							if err != nil {
+								log.Printf("[dag] holmes setup failed: %v", err)
+							} else {
+								inflight++
+								a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: sNode.ID, Node: graph.SnapshotNode(sNode.ID)})
+								go a.fireHolmes(ctx, sNode, graph, budget, completionCh, trigger, intent)
+								debuggerInflight = true
+								log.Printf("[dag] dispatched holmes %s (iter 1/%d): %s", sNode.ID, maxIter, Text.TruncateLog(problem, 200))
+							}
+						} else {
+							log.Printf("[dag] no budget for holmes, investigation stalled")
 						}
 					}
 				}
@@ -588,16 +1033,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					log.Printf("[dag] node %s (bash) completed with error: %s", comp.NodeID, Text.TruncateLog(comp.Result, 500))
 					graph.SetError(comp.NodeID, bashErr)
 					node.Error = bashErr
-					appendWorklog(a.cfg.Workspace, node.Tag, "BASH_ERROR", Text.TruncateLog(comp.Result, 150))
-
-					if hasCircuitBroken(node) {
-						log.Printf("[dag] circuit breaker: %s has 5+ accumulated failures, skipping", node.Tag)
-						graph.CascadeSkip(comp.NodeID)
-					} else if budget.LLMRemaining() > 1 {
-						if a.spawnMicroPlannerNode(ctx, node, comp, graph, budget, completionCh, trigger) {
-							inflight++
-						}
+					if strings.HasPrefix(node.Tag, "verify_") || strings.HasPrefix(node.Tag, "revalidate_") {
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_FAIL", comp.Result)
+					} else {
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BASH_ERROR", comp.Result)
 					}
+
+					// No cascade prune — the reflector will catch this
 					injectInterjection()
 					launchReady()
 					continue
@@ -605,18 +1047,95 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 				if node.Type == NodeTool || node.Type == NodeCompute || node.Type == NodeActuator {
 					workSinceReflection++
-					appendWorklog(a.cfg.Workspace, node.Tag, "OK", fmt.Sprintf("%s: %s", node.ToolName, Text.TruncateLog(comp.Result, 100)))
+					if strings.HasPrefix(node.Tag, "verify_") || strings.HasPrefix(node.Tag, "revalidate_") {
+						// Catch false positives: bash exited 0 but output indicates failure.
+						if looksLikeFailure(comp.Result) {
+							log.Printf("[dag] node %s validator false positive (exit 0 but output indicates failure): %s", comp.NodeID, Text.TruncateLog(comp.Result, 200))
+							fakeErr := fmt.Errorf("validator output indicates failure: %s", Text.TruncateLog(comp.Result, 200))
+							graph.SetError(comp.NodeID, fakeErr)
+							node.Error = fakeErr
+							appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_FAIL", comp.Result)
+							// No micro-planner — the reflector will catch this
+							launchReady()
+							continue
+						}
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_PASS", Text.TruncateLog(comp.Result, 100))
+					} else {
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "OK", fmt.Sprintf("%s: %s", node.ToolName, Text.TruncateLog(comp.Result, 100)))
+					}
 				}
 				log.Printf("[dag] node %s (%s) resolved (%d bytes): %s",
 					comp.NodeID, node.ToolName, len(comp.Result), Text.TruncateLog(comp.Result, 500))
 
+				// ── Auto-graft health check after service start ──
+				// When a service starts, graft a delayed curl check so the
+				// reflector has real evidence of whether it's actually listening.
+				if node.ToolName == "service" {
+					var svcResult struct {
+						Status string `json:"status"`
+						Name   string `json:"name"`
+						PID    int    `json:"pid"`
+						Port   int    `json:"port"`
+					}
+					if json.Unmarshal([]byte(comp.Result), &svcResult) == nil && svcResult.Status == "started" {
+						// Determine port: prefer explicit port from service result,
+						// then try to extract from the original service command,
+						// then fall back to name-based heuristic.
+						port := ""
+						if svcResult.Port > 0 {
+							port = fmt.Sprintf("%d", svcResult.Port)
+						}
+						if port == "" {
+							// Try to extract port from the node's params (planner may have set it)
+							if p, ok := node.Params["port"].(float64); ok && p > 0 {
+								port = fmt.Sprintf("%d", int(p))
+							}
+						}
+						if port == "" {
+							// Heuristic from service name
+							if strings.Contains(svcResult.Name, "backend") || strings.Contains(svcResult.Name, "api") {
+								port = "4000"
+							} else {
+								port = "3000"
+							}
+						}
+						// Health check: wait for service to initialize, then retry curl
+						// with backoff. On failure, dump the error log for diagnosis.
+						checkCmd := fmt.Sprintf(
+							"for i in 1 2 3; do sleep 5; BODY=$(curl -sf http://localhost:%s/ 2>/dev/null || curl -sf http://localhost:%s/health 2>/dev/null); if [ -n \"$BODY\" ]; then echo \"$BODY\" | head -5; exit 0; fi; done; echo '--- SERVICE ERROR LOG ---' && cat .services/%s.err.log 2>/dev/null | tail -30 && exit 1",
+							port, port, svcResult.Name)
+						if budget.TrySpawnNode("bash", false) {
+							healthNode := &Node{
+								Type:      NodeTool,
+								ToolName:  "bash",
+								Params:    map[string]any{"command": checkCmd, "timeout_sec": 30},
+								DependsOn: []string{comp.NodeID},
+								SpawnedBy: comp.NodeID,
+								Tag:       "verify_" + svcResult.Name + "_health",
+								Source:    "builtin",
+							}
+							hID := graph.AddNode(healthNode)
+							graph.AddChild(comp.NodeID, hID)
+							log.Printf("[dag] auto-grafted health check %s for service %s (port %s)", hID, svcResult.Name, port)
+							appendWorklog(a.cfg.MetadataDir, graph.SessionID, svcResult.Name, "SERVICE_START", fmt.Sprintf("pid %d, health check grafted on port %s", svcResult.PID, port))
+							a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: hID, Node: graph.SnapshotNode(hID)})
+						}
+					}
+				}
+
 				// ── Compute plan follow-up graft ──
 				if node.Type == NodeCompute {
 					var cr struct {
-						Type       string          `json:"type"`
-						Setup      []string        `json:"setup,omitempty"`
-						FollowUp   json.RawMessage `json:"follow_up,omitempty"`
-						Execute    string          `json:"execute,omitempty"`
+						Type     string          `json:"type"`
+						Setup    []string        `json:"setup,omitempty"`
+						FollowUp json.RawMessage `json:"follow_up,omitempty"`
+						Execute  string          `json:"execute,omitempty"`
+						Services []struct {
+							Name    string `json:"name"`
+							Command string `json:"command"`
+							Workdir string `json:"workdir,omitempty"`
+							Port    int    `json:"port,omitempty"`
+						} `json:"services,omitempty"`
 						Validation []struct {
 							Name   string `json:"name"`
 							Check  string `json:"check"`
@@ -679,10 +1198,9 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						computeIDs := make([]string, len(followUps))
 
 						for i, fu := range followUps {
-							if !budget.TrySpawnNode("compute", true) {
-								log.Printf("[dag] budget exhausted, grafted %d of %d tasks", i, len(followUps))
-								break
-							}
+							// Always graft all architect tasks — never cut.
+							// Partial builds are worse than no build.
+							budget.TrySpawnNode("compute", true) // charge budget but don't block
 							fuTag := fu.Tag
 							if fuTag == "" {
 								fuTag = fmt.Sprintf("%s_%d", node.Tag, i)
@@ -727,41 +1245,59 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							}
 						}
 						for i, fu := range followUps {
-							if computeIDs[i] == "" {
-								continue
-							}
-							// One-shot execute command (e.g. "npm run build")
-							if execCmd, ok := fu.Params["execute"].(string); ok && execCmd != "" {
-								if budget.TrySpawnNode("bash", false) {
-									execNode := &Node{
-										Type:      NodeTool,
-										ToolName:  "bash",
-										Params:    map[string]any{"command": execCmd},
-										DependsOn: append([]string{}, allCoderIDs...),
-										SpawnedBy: comp.NodeID,
-										Tag:       computeNodes[i].Tag + "_exec",
-										Source:    "builtin",
+							// One-shot execute — only for grafted coders
+							if computeIDs[i] != "" {
+								if execCmd, ok := fu.Params["execute"].(string); ok && execCmd != "" {
+									svcCmd := ""
+									if svc, ok := fu.Params["service"].(map[string]any); ok {
+										svcCmd, _ = svc["command"].(string)
 									}
-									eID := graph.AddNode(execNode)
-									allGraftedNodes = append(allGraftedNodes, execNode)
-									graph.AddChild(comp.NodeID, eID)
-									a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: eID, Node: graph.SnapshotNode(eID)})
-									log.Printf("[dag] compute plan → grafted execute node %s: %s", eID, execCmd)
+									if execCmd == svcCmd {
+										log.Printf("[dag] skipping execute node for %s — same command declared as service", computeNodes[i].Tag)
+									} else if budget.TrySpawnNode("bash", false) {
+										execNode := &Node{
+											Type:      NodeTool,
+											ToolName:  "bash",
+											Params:    map[string]any{"command": execCmd},
+											DependsOn: append([]string{}, allCoderIDs...),
+											SpawnedBy: comp.NodeID,
+											Tag:       computeNodes[i].Tag + "_exec",
+											Source:    "builtin",
+										}
+										eID := graph.AddNode(execNode)
+										allGraftedNodes = append(allGraftedNodes, execNode)
+										graph.AddChild(comp.NodeID, eID)
+										a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: eID, Node: graph.SnapshotNode(eID)})
+										log.Printf("[dag] compute plan → grafted execute node %s: %s", eID, execCmd)
+									}
 								}
-							}
-							// Long-running service (e.g. "node server.js")
+							} // end computeIDs[i] != "" (execute only for grafted coders)
+							// Long-running service — ALWAYS graft, even if coder was budget-cut.
+							// Services are infrastructure, not per-coder tasks.
 							if svc, ok := fu.Params["service"].(map[string]any); ok {
 								svcCmd, _ := svc["command"].(string)
 								svcName, _ := svc["name"].(string)
+								svcWorkdir, _ := svc["workdir"].(string)
+								svcPort := 0
+								if p, ok := svc["port"].(float64); ok {
+									svcPort = int(p)
+								}
 								if svcCmd != "" {
 									if svcName == "" {
 										svcName = computeNodes[i].Tag + "_svc"
 									}
 									if budget.TrySpawnNode("service", false) {
+										svcParams := map[string]any{"action": "start", "command": svcCmd, "name": svcName}
+										if svcWorkdir != "" {
+											svcParams["workdir"] = svcWorkdir
+										}
+										if svcPort > 0 {
+											svcParams["port"] = float64(svcPort)
+										}
 										svcNode := &Node{
 											Type:      NodeTool,
 											ToolName:  "service",
-											Params:    map[string]any{"action": "start", "command": svcCmd, "name": svcName},
+											Params:    svcParams,
 											DependsOn: append([]string{}, allCoderIDs...),
 											SpawnedBy: comp.NodeID,
 											Tag:       svcName,
@@ -777,6 +1313,56 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							}
 						}
 
+						// Phase 3.5: top-level services — architect-declared services
+						// that aren't tied to any specific task. These are always grafted
+						// (no budget gate) because services are infrastructure.
+						for _, svc := range cr.Services {
+							if svc.Command == "" {
+								continue
+							}
+							name := svc.Name
+							if name == "" {
+								name = "service"
+							}
+							// Skip if a per-task service with the same name was already grafted.
+							alreadyGrafted := false
+							for _, gn := range allGraftedNodes {
+								if gn.ToolName == "service" && gn.Tag == name {
+									alreadyGrafted = true
+									break
+								}
+							}
+							if alreadyGrafted {
+								log.Printf("[dag] skipping top-level service %s — already grafted from task", name)
+								continue
+							}
+							if !budget.TrySpawnNode("service", false) {
+								log.Printf("[dag] budget exhausted, skipping remaining top-level services")
+								break
+							}
+							svcParams := map[string]any{"action": "start", "command": svc.Command, "name": name}
+							if svc.Workdir != "" {
+								svcParams["workdir"] = svc.Workdir
+							}
+							if svc.Port > 0 {
+								svcParams["port"] = float64(svc.Port)
+							}
+							svcNode := &Node{
+								Type:      NodeTool,
+								ToolName:  "service",
+								Params:    svcParams,
+								DependsOn: append([]string{}, allCoderIDs...),
+								SpawnedBy: comp.NodeID,
+								Tag:       name,
+								Source:    "builtin",
+							}
+							sID := graph.AddNode(svcNode)
+							allGraftedNodes = append(allGraftedNodes, svcNode)
+							graph.AddChild(comp.NodeID, sID)
+							a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
+							log.Printf("[dag] compute plan → grafted top-level service node %s: %s", sID, svc.Command)
+						}
+
 						// Phase 4: validation wave — architect-declared checks.
 						// Each validation entry becomes a bash node running its
 						// check command, depending on all Phase 1-3 grafted
@@ -784,7 +1370,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// Reflector sees pass/fail as structured evidence of
 						// goal achievement.
 						if len(cr.Validation) > 0 {
-							// Store validators on the graph for replay after replans.
+							// Store validators on the graph for replay after investigations.
 							for _, v := range cr.Validation {
 								if v.Check != "" {
 									graph.Validators = append(graph.Validators, ValidatorDef{
@@ -814,7 +1400,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 								verifyNode := &Node{
 									Type:      NodeTool,
 									ToolName:  "bash",
-									Params:    map[string]any{"command": v.Check, "timeout_sec": 15},
+									Params:    map[string]any{"command": "sleep 3 && " + v.Check, "timeout_sec": 20},
 									DependsOn: append([]string{}, priorIDs...),
 									SpawnedBy: comp.NodeID,
 									Tag:       verifyTag,
@@ -840,65 +1426,14 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						}
 					}
 
-					// ── Compute execute/service graft ──
-					if node.Type == NodeCompute {
-						var execResult struct {
-							Type    string `json:"type"`
-							Execute string `json:"execute,omitempty"`
-							Service *struct {
-								Command string `json:"command"`
-								Name    string `json:"name"`
-							} `json:"service,omitempty"`
-						}
-						if json.Unmarshal([]byte(comp.Result), &execResult) == nil && execResult.Type == "result" {
-							// One-shot execute command
-							if execResult.Execute != "" {
-								if budget.TrySpawnNode("bash", false) {
-									execNode := &Node{
-										Type:      NodeTool,
-										ToolName:  "bash",
-										Params:    map[string]any{"command": execResult.Execute},
-										DependsOn: []string{comp.NodeID},
-										SpawnedBy: comp.NodeID,
-										Tag:       node.Tag + "_exec",
-										Source:    "builtin",
-									}
-									eID := graph.AddNode(execNode)
-									graph.AddChild(comp.NodeID, eID)
-									rewriteDependentsExcluding(graph, comp.NodeID, eID, eID)
-									log.Printf("[dag] compute → grafted execute bash node %s: %s", eID, execResult.Execute)
-									a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: eID, Node: graph.SnapshotNode(eID)})
-								}
-							}
-							// Long-running service — start with nohup, log to file, capture PID
-							if execResult.Service != nil && execResult.Service.Command != "" {
-								svcName := execResult.Service.Name
-								if svcName == "" {
-									svcName = node.Tag
-								}
-								logFile := fmt.Sprintf("%s.log", svcName)
-								svcCmd := fmt.Sprintf("nohup %s > %s 2>&1 & echo $!", execResult.Service.Command, logFile)
-								if budget.TrySpawnNode("bash", false) {
-									svcNode := &Node{
-										Type:      NodeTool,
-										ToolName:  "bash",
-										Params:    map[string]any{"command": svcCmd},
-										DependsOn: []string{comp.NodeID},
-										SpawnedBy: comp.NodeID,
-										Tag:       node.Tag + "_svc",
-										Source:    "builtin",
-									}
-									sID := graph.AddNode(svcNode)
-									graph.AddChild(comp.NodeID, sID)
-									rewriteDependentsExcluding(graph, comp.NodeID, sID, sID)
-									log.Printf("[dag] compute → grafted service bash node %s: %s (log: %s)", sID, execResult.Service.Command, logFile)
-									a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
-									// Log to worklog so Kaiju remembers the service
-									appendWorklog(a.cfg.Workspace, svcName, "SERVICE", fmt.Sprintf("started: %s (log: %s)", execResult.Service.Command, logFile))
-								}
-							}
-						}
-					}
+					// NOTE: Phase 4 coder-result execute/service grafting was removed
+					// (2026-04-07). The architect (Phase 3) is the sole authority on
+					// what execute/service nodes get grafted. Coder results still
+					// contain execute/service fields for the reflector and aggregator
+					// to read as context, but the scheduler does not act on them.
+					// This eliminates duplicate nodes (two backends, two frontends,
+					// two seeds) that caused port conflicts and UNIQUE constraint
+					// errors when both Phase 3 and Phase 4 grafted the same command.
 				}
 
 				// ── Mode-specific post-completion logic ──
@@ -919,7 +1454,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						}
 					}
 
-				// DAGModeReflect: reflection is already injected structurally by injectReflectionNodes
+					// DAGModeReflect: reflection is already injected structurally by injectReflectionNodes
 				}
 			}
 
@@ -928,162 +1463,6 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			// the interjection reflection completes.
 			injectInterjection()
 			launchReady()
-		}
-	}
-
-	// ── Ensure final reflection ──
-	// If tool work completed since the last reflection, inject one now.
-	// This loops: reflect → if replan → new nodes fire → loop back → reflect again.
-	// Exits when reflection says "conclude", "continue", budget exhausted, or max replans hit.
-	maxReplans := a.cfg.MaxReplans
-	if maxReplans <= 0 {
-		maxReplans = 3
-	}
-	replanCount := 0
-	for workSinceReflection > 0 && !reflectionConcluded && budget.LLMRemaining() > 2 && ctx.Err() == nil {
-		if !budget.TrySpawnNode("", true) {
-			break
-		}
-		if replanCount >= maxReplans {
-			log.Printf("[dag] max replans (%d) reached, forcing conclude", maxReplans)
-			break
-		}
-		log.Printf("[dag] injecting final reflection (%d tool completions since last reflect, replan %d/%d)", workSinceReflection, replanCount, maxReplans)
-		rNode := &Node{
-			Type: NodeReflection,
-			Tag:  "final_reflect",
-		}
-		rID := graph.AddNode(rNode)
-		graph.SetState(rID, StateRunning)
-		rNode.StartedAt = time.Now()
-		inflight = 1
-		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
-		go a.fireReflection(ctx, rNode, graph, budget, completionCh, trigger, intent)
-
-		// Re-enter the main loop — handles reflection completion, replans, new nodes, everything
-		for inflight > 0 {
-			select {
-			case <-ctx.Done():
-				log.Printf("[dag] wall clock expired during final reflection")
-				inflight = 0
-			case comp := <-completionCh:
-				inflight--
-				node := graph.Get(comp.NodeID)
-				if node == nil {
-					continue
-				}
-				a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: node.ID, Node: graph.SnapshotNode(node.ID)})
-
-				if node.Type == NodeReflection || node.Type == NodeInterjection {
-					reflectionInflight = false
-					workSinceReflection = 0
-					ref, parseErr := parseReflectionOutput(comp.Result)
-					if parseErr != nil {
-						log.Printf("[dag] final reflection parse failed: %v", parseErr)
-						graph.SetResult(comp.NodeID, comp.Result)
-					} else {
-						switch ref.Decision {
-						case "conclude":
-							graph.SetResult(comp.NodeID, ref.Verdict)
-							reflectionConcluded = true
-							reflectionVerdict = ref.Verdict
-							reflectionAggregate = ref.Aggregate
-							log.Printf("[dag] final reflection: conclude (%s)", ref.Reason)
-						case "replan":
-							replanCount++
-							graph.SetResult(comp.NodeID, comp.Result)
-							skipped := graph.SkipAllPending()
-							budget.ResetWaveCounters()
-							log.Printf("[dag] final reflection: replan #%d, skipped %d pending (%s)", replanCount, skipped, ref.Reason)
-							grafted := 0
-							var replanNodeIDs []string
-							if len(ref.Nodes) > 0 {
-								newNodes, graftErr := planStepsToNodes(ref.Nodes, graph, budget, a.registry, dagMode)
-								if graftErr != nil {
-									log.Printf("[dag] final reflection replan graft failed: %v", graftErr)
-								} else {
-									for _, nn := range newNodes {
-										if nn != nil {
-											graph.AddChild(comp.NodeID, nn.ID)
-											replanNodeIDs = append(replanNodeIDs, nn.ID)
-											grafted++
-										}
-									}
-								}
-							}
-							// Re-graft stored validators after replan nodes so the
-							// original architect checks run again to verify the fix.
-							if grafted > 0 && len(graph.Validators) > 0 {
-								revalidated := 0
-								for _, v := range graph.Validators {
-									if !budget.TrySpawnNode("bash", false) {
-										break
-									}
-									vTag := "revalidate_" + sanitizeTag(v.Name)
-									vNode := &Node{
-										Type:      NodeTool,
-										ToolName:  "bash",
-										Params:    map[string]any{"command": v.Check, "timeout_sec": 15},
-										DependsOn: append([]string{}, replanNodeIDs...),
-										SpawnedBy: comp.NodeID,
-										Tag:       vTag,
-										Source:    "builtin",
-									}
-									vID := graph.AddNode(vNode)
-									graph.AddChild(comp.NodeID, vID)
-									a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
-									revalidated++
-								}
-								if revalidated > 0 {
-									log.Printf("[dag] re-grafted %d validators after replan", revalidated)
-								}
-							}
-
-							// If replan produced no new nodes (budget exhausted), force conclude
-							// to prevent spinning on the same pending nodes.
-							if grafted == 0 {
-								log.Printf("[dag] replan produced 0 nodes (budget exhausted), forcing conclude")
-								reflectionConcluded = true
-							}
-						default:
-							graph.SetResult(comp.NodeID, comp.Result)
-							log.Printf("[dag] final reflection: continue (%s)", ref.Reason)
-						}
-					}
-				} else if comp.Err != nil {
-					graph.SetError(comp.NodeID, comp.Err)
-					log.Printf("[dag] final node %s failed: %v", comp.NodeID, comp.Err)
-					if node.Type != NodeMicroPlanner && budget.LLMRemaining() > 2 {
-						if a.spawnMicroPlannerNode(ctx, node, comp, graph, budget, completionCh, trigger) {
-							inflight++
-						}
-					}
-				} else {
-					graph.SetResult(comp.NodeID, comp.Result)
-
-					// Detect bash errors in final loop
-					if bashErr, isBash := isBashError(comp.Result); isBash && node.Type == NodeTool && node.ToolName == "bash" {
-						log.Printf("[dag] final node %s (bash) completed with error: %s", comp.NodeID, Text.TruncateLog(comp.Result, 500))
-						graph.SetError(comp.NodeID, bashErr)
-						node.Error = bashErr
-						if !hasCircuitBroken(node) && budget.LLMRemaining() > 2 {
-							if a.spawnMicroPlannerNode(ctx, node, comp, graph, budget, completionCh, trigger) {
-								inflight++
-							}
-						}
-						continue
-					}
-
-					if node.Type == NodeTool || node.Type == NodeCompute || node.Type == NodeActuator {
-						workSinceReflection++
-					}
-					log.Printf("[dag] final node %s (%s) resolved (%d bytes): %s",
-						comp.NodeID, node.ToolName, len(comp.Result), Text.TruncateLog(comp.Result, 500))
-				}
-
-				injectInterjection()
-				launchReady()
-			}
 		}
 	}
 
@@ -1112,7 +1491,8 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 	graph, budget, cleanup := a.setupDAGPipeline(trigger)
 	defer cleanup()
 
-	dagCtx, cancel := context.WithTimeout(ctx, budget.WallClock)
+	// No hard wall clock — the kernel's heartbeat module manages soft timeouts.
+	dagCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	pr, err := a.runPlanAndSchedule(dagCtx, trigger, graph, budget)
@@ -1134,7 +1514,18 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 		return
 	}
 	var aggErr error
-	verdict, actions, aggErr = a.runAggregatorWithIntent(dagCtx, trigger, graph, resolvedIntent, trigger.History)
+	aggCtxResp, actxErr := graph.Context.Get(dagCtx, ContextRequest{
+		ReturnSources: Sources(
+			NodeReturns("all"),
+			Worklog(30, "all"),
+		),
+		MaxBudget: 12000,
+	})
+	if actxErr != nil {
+		log.Printf("[dag] aggregator context build failed: %v", actxErr)
+		aggCtxResp = &ContextResponse{Sources: map[string]string{}}
+	}
+	verdict, actions, aggErr = a.runAggregatorWithIntent(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggCtxResp)
 	if aggErr != nil {
 		log.Printf("[dag] aggregator failed: %v", aggErr)
 		return
@@ -1165,7 +1556,7 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 		if trigger.DAGMode != "" {
 			mode = trigger.DAGMode
 		}
-		refCount, replanCount := graph.ReflectionStats()
+		refCount, investigationCount := graph.ReflectionStats()
 		a.eventStore.InsertInvestigation(store.Investigation{
 			ID:              trigger.AlertID,
 			NodeID:          a.cfg.NodeID,
@@ -1179,7 +1570,7 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 			NodesCount:      graph.NodeCount(),
 			LLMCalls:        int(budget.LLMCount()),
 			ReflectionCount: refCount,
-			ReplanCount:     replanCount,
+			ReplanCount:     investigationCount, // legacy field name; persisted as `replan_count` in the audit DB schema. Same semantic as investigation count.
 			Verdict:         verdict,
 			Status:          "completed",
 		})
@@ -1203,7 +1594,7 @@ type SyncResult struct {
  * RunDAGSync runs the full DAG pipeline synchronously and returns the result.
  * desc: Used by the API to route queries through the parallel investigation
  *       engine. Actions are returned to the caller — not auto-executed.
- *       Handles PlannerConversationalError by falling back to direct LLM chat
+ *       Handles ExecutiveConversationalError by falling back to direct LLM chat
  *       or returning the planner's conversational text.
  * param: ctx - context for the investigation.
  * param: trigger - the investigation trigger.
@@ -1217,6 +1608,10 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 
 	log.Printf("[dag] sync investigation: type=%s alert=%s source=%s",
 		trigger.Type, trigger.AlertID, trigger.Source)
+
+	// Start with clean state so the reflector doesn't see stale errors from previous runs.
+	resetWorklog(a.cfg.MetadataDir, trigger.SessionID)
+	rotateServiceLogs(a.cfg.Workspace)
 
 	a.investigating.Store(true)
 	defer func() {
@@ -1235,14 +1630,15 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	graph, budget, cleanup := a.setupDAGPipeline(trigger)
 	defer cleanup()
 
-	dagCtx, cancel := context.WithTimeout(ctx, budget.WallClock)
+	// No hard wall clock — the kernel's heartbeat module manages soft timeouts.
+	dagCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	pr, err := a.runPlanAndSchedule(dagCtx, trigger, graph, budget)
 	if err != nil {
 		// If planner returned conversational text, surface it as the verdict
 		// instead of failing the whole pipeline. This handles vague queries.
-		var convErr *PlannerConversationalError
+		var convErr *ExecutiveConversationalError
 		if errors.As(err, &convErr) {
 			if convErr.Text != "" {
 				return &SyncResult{Verdict: convErr.Text}, nil
@@ -1294,9 +1690,13 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	var verdict string
 	var actions []ActuatorAction
 
-	// Auto mode: let the reflector decide
+	// Auto mode: let the reflector decide — but always aggregate when compute nodes are involved
+	hasCompute := graph.HasNodeOfType(NodeCompute)
 	if aggMode == -1 && pr.ReflectionVerdict != "" {
-		if pr.ReflectionAggregate != nil && *pr.ReflectionAggregate {
+		if hasCompute {
+			aggMode = 1 // compute runs always need the aggregator for a proper formatted response
+			log.Printf("[dag] auto agg: compute nodes present, forcing aggregator")
+		} else if pr.ReflectionAggregate != nil && *pr.ReflectionAggregate {
 			aggMode = 2 // reflector says aggregate needed — use reasoning model
 			log.Printf("[dag] auto agg: reflector requested aggregation (reasoning model)")
 		} else {
@@ -1319,18 +1719,29 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		budget.TrySpawnNode("", true) // charge if possible, but don't block
 
 		// Select LLM client based on agg_mode
-		aggClient := a.executor // default: executor model (agg_mode=1)
-		aggLabel := "executor"
-		if aggMode == 2 {
-			aggClient = a.llm // reasoning model
-			aggLabel = "reasoning"
+		aggClient := a.llm // default: reasoning model
+		aggLabel := "reasoning"
+		if aggMode == 1 {
+			aggClient = a.executor // executor model only when explicitly requested
+			aggLabel = "executor"
 		}
 		log.Printf("[dag] aggregator using %s model (agg_mode=%d)", aggLabel, aggMode)
 
 		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "running", Tag: "synthesize"}})
 
 		var aggErr error
-		verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient)
+		aggCtxResp2, actxErr2 := graph.Context.Get(dagCtx, ContextRequest{
+			ReturnSources: Sources(
+				NodeReturns("all"),
+				Worklog(30, "all"),
+			),
+			MaxBudget: 12000,
+		})
+		if actxErr2 != nil {
+			log.Printf("[dag] aggregator2 context build failed: %v", actxErr2)
+			aggCtxResp2 = &ContextResponse{Sources: map[string]string{}}
+		}
+		verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggCtxResp2)
 		if aggErr != nil {
 			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
 			return nil, fmt.Errorf("aggregator failed: %w", aggErr)
@@ -1348,7 +1759,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		if trigger.DAGMode != "" {
 			mode = trigger.DAGMode
 		}
-		refCount, replanCount := graph.ReflectionStats()
+		refCount, investigationCount := graph.ReflectionStats()
 		a.eventStore.InsertInvestigation(store.Investigation{
 			ID:              trigger.AlertID,
 			NodeID:          a.cfg.NodeID,
@@ -1362,7 +1773,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 			NodesCount:      graph.NodeCount(),
 			LLMCalls:        int(budget.LLMCount()),
 			ReflectionCount: refCount,
-			ReplanCount:     replanCount,
+			ReplanCount:     investigationCount, // legacy field name; persisted as `replan_count` in the audit DB schema. Same semantic.
 			Verdict:         verdict,
 			Status:          "completed",
 		})
@@ -1378,32 +1789,6 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 }
 
 /*
- * spawnMicroPlannerNode creates and fires a microplanner for a failed node.
- * desc: Shared helper to avoid duplicating the microplanner spawn block.
- *       Returns true if spawned, false if budget exhausted.
- */
-func (a *Agent) spawnMicroPlannerNode(ctx context.Context, failedNode *Node, comp nodeCompletion,
-	graph *Graph, budget *Budget, completionCh chan nodeCompletion, trigger Trigger) bool {
-	if !budget.TrySpawnNode("", true) {
-		log.Printf("[dag] no LLM budget for micro-planner, cascading skip from %s", comp.NodeID)
-		graph.CascadeSkip(comp.NodeID)
-		return false
-	}
-	mpNode := &Node{
-		Type:      NodeMicroPlanner,
-		SpawnedBy: comp.NodeID,
-		Tag:       "repair_" + failedNode.Tag,
-	}
-	mpID := graph.AddNode(mpNode)
-	graph.SetState(mpID, StateRunning)
-	mpNode.StartedAt = time.Now()
-	graph.AddChild(comp.NodeID, mpID)
-	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: mpID, Node: graph.SnapshotNode(mpID)})
-	go a.fireMicroPlanner(ctx, mpNode, failedNode, graph, budget, completionCh, trigger)
-	return true
-}
-
-/*
  * isBashError checks if a resolved bash result contains a structured error.
  * desc: Returns the error and true if the result has bash_error:true.
  */
@@ -1414,15 +1799,119 @@ func isBashError(result string) (error, bool) {
 	return fmt.Errorf("bash failed: %s", Text.TruncateLog(result, 300)), true
 }
 
-/*
- * hasCircuitBroken checks if a node has exceeded the retry limit.
- * desc: Returns true if the node has 5+ accumulated hints.
- */
-func hasCircuitBroken(node *Node) bool {
-	if hints, ok := node.Params["hints"].([]any); ok && len(hints) >= 5 {
-		return true
+// classifyRetryTier determines what kind of retry (if any) is appropriate.
+// Returns "skip" (no retry), "blind" (rerun same command), or "oneshot" (LLM fix).
+func classifyRetryTier(errMsg string) string {
+	lower := strings.ToLower(errMsg)
+
+	// Tier 1: skip — structural errors, no retry will help
+	skipPatterns := []string{
+		"ejsonparse", "enoent", "no such file or directory", "syntaxerror", "syntax error",
+		"gate:", "permission denied", "eacces",
+		"module not found", "cannot find module",
+		"command not found",
+		"splice", "edit out of bounds",
 	}
-	return false
+	for _, p := range skipPatterns {
+		if strings.Contains(lower, p) {
+			return "skip"
+		}
+	}
+
+	// Tier 2: blind — transient errors, just rerun
+	blindPatterns := []string{
+		"connection refused", "econnrefused", "econnreset",
+		"timed out", "timeout", "etimedout",
+		"exit status 7", // curl: couldn't connect
+		"npm err! network", "fetch failed",
+		"rate limit", "http 429", "http 503",
+	}
+	for _, p := range blindPatterns {
+		if strings.Contains(lower, p) {
+			return "blind"
+		}
+	}
+
+	// Tier 3: oneshot — everything else gets a cheap LLM fix attempt
+	return "oneshot"
+}
+
+// oneshotRetry fires a tiny executor LLM call to fix a failed command.
+// Context: just the command + error. No worklog, no blueprint, no evidence.
+// The LLM returns a fixed command which is gate-checked and re-executed.
+func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletion,
+	graph *Graph, budget *Budget, ch chan nodeCompletion, errMsg string,
+	intent gates.Intent, scope *ResolvedScope) {
+
+	command, _ := node.Params["command"].(string)
+	if command == "" {
+		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}
+		return
+	}
+
+	prompt := fmt.Sprintf("Command failed:\n%s\n\nError:\n%s\n\nReturn ONLY the fixed command, nothing else.", command, Text.TruncateLog(errMsg, 300))
+
+	resp, err := a.executor.Complete(ctx, &llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: "system", Content: "Fix the shell command based on the error. Return ONLY the corrected command, no explanation."},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.0,
+		MaxTokens:   256,
+	})
+	if err != nil || len(resp.Choices) == 0 {
+		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}
+		return
+	}
+
+	fixed := strings.TrimSpace(resp.Choices[0].Message.Content)
+	fixed = strings.Trim(fixed, "`")
+	if strings.HasPrefix(fixed, "```") {
+		lines := strings.SplitN(fixed, "\n", 2)
+		if len(lines) > 1 {
+			fixed = strings.TrimSuffix(strings.TrimSpace(lines[1]), "```")
+		}
+	}
+
+	if fixed == "" || fixed == command {
+		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}
+		return
+	}
+
+	log.Printf("[dag] oneshot fix: %q → %q", Text.TruncateLog(command, 80), Text.TruncateLog(fixed, 80))
+
+	// Gate-check the fixed command through normal IGX path
+	node.Params["command"] = fixed
+	fixedImpact := a.intentRegistry.ResolveToolIntent("bash", nil, node.Params)
+	scopeCap := -1
+	if scope != nil {
+		if cap, ok := scope.MaxImpact["bash"]; ok {
+			scopeCap = cap
+		}
+	}
+	if gateErr := a.gate.CheckTriadWithScope(intent, "bash", fixedImpact, scopeCap); gateErr != nil {
+		log.Printf("[dag] oneshot fix blocked by gate: %v", gateErr)
+		node.Params["command"] = command // restore original
+		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}
+		return
+	}
+
+	appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "ONESHOT_FIX", fmt.Sprintf("%s → %s", Text.TruncateLog(command, 60), Text.TruncateLog(fixed, 60)))
+
+	// Execute through the registry (same as normal dispatch)
+	sk, ok := a.registry.Get("bash")
+	if !ok {
+		ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("bash tool not found")}
+		return
+	}
+	result, execErr := sk.(interface {
+		Execute(context.Context, map[string]any) (string, error)
+	}).Execute(ctx, node.Params)
+	if execErr != nil {
+		ch <- nodeCompletion{NodeID: comp.NodeID, Err: execErr}
+	} else {
+		ch <- nodeCompletion{NodeID: comp.NodeID, Result: result}
+	}
 }
 
 // Dispatcher functions (fireNode, resolveInjections, extractJSONField,

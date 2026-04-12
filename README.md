@@ -1,3 +1,18 @@
+<p>
+  <img src="docs/kaiju-logo.svg" width="100" align="left" alt="Kaiju logo"/>
+</p>
+
+```
+ ____  __.  _____  .___     ____.____ ___
+|    |/ _| /  _  \ |   |   |    |    |   \
+|      <  /  /_\  \|   |   |    |    |   /
+|    |  \/    |    \   /\__|    |    |  /
+|____|__ \____|__  /___\________|______/
+        \/       \/
+```
+
+<br clear="left"/>
+
 # Kaiju
 
 A general-purpose AI assistant and agent framework with a web UI, file/media browser, DAG-based parallel execution, intent-gated safety, and a modular skill system inspired by OpenClaw. Kaiju separates reasoning from execution, enabling parallel tool dispatch, structural safety enforcement, and adaptive replanning — while remaining a practical, everyday assistant.
@@ -10,7 +25,7 @@ Kaiju is two things: a **conversational AI assistant** with a modern web interfa
 
 As an assistant, it provides a chat UI with session history, a composable side panel (file browser, media viewer, code preview, canvas), configurable execution modes, and support for custom skills that extend its capabilities.
 
-As an execution kernel, it separates planning from execution. The LLM produces a dependency graph of tool calls upfront, then the execution layer schedules, gates, and adapts the graph independently. Tools fire in parallel where dependencies allow. Reflection checkpoints evaluate intermediate results and replan when needed. An intent-based execution gate (IBE) enforces tool authorization at runtime without LLM involvement.
+As an execution kernel, it separates planning from execution. The LLM produces a dependency graph of tool calls upfront, then the execution layer schedules, gates, and adapts the graph independently. Tools fire in parallel where dependencies allow. Reflection checkpoints evaluate intermediate results and replan when needed. An intent-based execution gate (IGX) enforces tool authorization at runtime without LLM involvement.
 
 ## Quick start
 
@@ -36,7 +51,7 @@ The web interface includes:
 - **Media viewer** with floating player (keyboard: Space=play/pause, F=fullscreen, Esc=close)
 - **Code preview** with syntax-aware display
 - **Composable panel** with tabbed plugins (files, media, canvas, code, preview)
-- **Configurable controls** — execution mode, IBE intent level, and aggregator mode selectable from the input bar
+- **Configurable controls** — execution mode, IGX intent level, and aggregator mode selectable from the input bar
 
 ## Configuration
 
@@ -93,7 +108,7 @@ An optional executor model (cheaper, used for reflection/aggregation) can be con
 | **Orchestrator** | Per-node observer evaluates each result | Highest quality, most thorough |
 | **React** | Sequential reason-act-observe loop (for benchmarking) | Baseline comparison |
 
-## Intent-Based Execution (IBE)
+## Intent-Gated Execution (IGX)
 
 Every tool call passes through a four-variable gate before execution. The gate formula `impact ≤ min(intent, clearance, scope_cap)` is enforced at tool execution time in compiled code:
 
@@ -105,6 +120,17 @@ Every tool call passes through a four-variable gate before execution. The gate f
 | **Clearance** | Approved? | External authority (HTTP endpoint) |
 
 The gate runs in compiled code. The LLM does not observe gate decisions — blocked tools appear as generic failures, preventing adversarial probing of the safety policy.
+
+### Setting intent
+
+Intent can be set explicitly or left for automatic inference:
+
+- **CLI**: `/intent operate` sets the level for your next query
+- **Web UI**: intent dropdown in the chat input bar
+- **API**: `{"intent": "operate"}` in the execute request body
+- **Automatic**: when no explicit intent is set, a preflight classifier infers the appropriate level from the query (e.g. "delete all logs" → override, "build a webapp" → operate, "what's in this file" → observe). The inferred level is capped by the user's `max_intent` ceiling.
+
+Each user account has a `max_intent` that acts as a hard ceiling — the effective intent for any query is `min(requested_or_inferred, user_max_intent)`. Managed via `kaiju user` CLI or the Users tab in the web UI.
 
 ### Delegated clearance via API
 
@@ -222,7 +248,7 @@ Reasoning Layer             Execution Layer (Executive Kernel)
          ↕                  ↓     ↓
      SSE Stream         Tools    Reflection (executor model)
                          ↓         ↓
-                     IBE Gate   Micro-Planner
+                     IGX Gate   Micro-Planner
                          ↓         ↓
                      Execute    Replan/Skip
                          ↓
@@ -272,8 +298,8 @@ benchmarks/         GAIA, solar triage, and DAG vs ReAct benchmarks
 - [Architecture](docs/architecture.md)
 - [API Reference](docs/api.md)
 - [Configuration](docs/config.md)
-- [Authorization & IBE](docs/authorization.md)
-- [IBE Examples](docs/examples-igx.md)
+- [Authorization & IGX](docs/authorization.md)
+- [IGX Examples](docs/examples-igx.md)
 - [Memory System](docs/memory.md)
 - [Workspace](docs/workspace.md)
 - [Academic Paper](/paper.html)

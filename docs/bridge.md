@@ -1,11 +1,11 @@
-# Sidecar Module — External Process IPC
+# Bridge Module — External Process IPC
 
 > **Status:** Optional module. Not required for standalone operation.
-> **Package:** `pkg/sidecar`
+> **Package:** `pkg/bridge`
 
 ## Overview
 
-The sidecar module provides a lightweight IPC protocol for integrating kaiju with external processes. Any program that can read/write newline-delimited JSON (NDJSON) over stdin/stdout or a named pipe can communicate with kaiju as a sidecar.
+The bridge module provides a lightweight IPC protocol for integrating kaiju with external processes. Any program that can read/write newline-delimited JSON (NDJSON) over stdin/stdout or a named pipe can communicate with kaiju as a bridge.
 
 Originally built for omamori's C++ security engine bridge, the pattern is extracted here as a generic, language-agnostic integration layer.
 
@@ -147,7 +147,7 @@ Kaiju → Editor:  {"type": "query_response", "data": {"answer": "This function.
 
 ### Plugin System
 
-External tools register as sidecars. Kaiju spawns them and routes tool calls:
+External tools register as bridges. Kaiju spawns them and routes tool calls:
 
 ```
 Kaiju → Plugin:  {"type": "tool_call", "data": {"name": "docker_ps", "params": {}}, "req_id": "..."}
@@ -175,11 +175,11 @@ Kaiju → CI:  {"type": "query_response", "data": {"answer": "Found 2 issues: ..
 
 ## Configuration
 
-Sidecar is opt-in:
+Bridge is opt-in:
 
 ```json
 {
-  "sidecar": {
+  "bridge": {
     "enabled": true,
     "transport": "stdio",
     "status_interval_sec": 10

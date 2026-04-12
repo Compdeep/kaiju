@@ -94,7 +94,7 @@ export async function send(text) {
 
   s.messages.push({ role: 'user', content: text })
   s.loading = true
-  dag.nodes = []
+  dag.archiveAndClear()
   dag.interjectMode = true
   dag.interjections = []
 
@@ -124,7 +124,7 @@ export async function send(text) {
     if (s.sessionId && dag.nodes.length) {
       try { await api.post(`/api/v1/sessions/${s.sessionId}/trace`, { nodes: dag.nodes }) } catch {}
     }
-    dag.nodes = []
+    dag.archiveAndClear()
     loadSessions()
   }
 }
@@ -141,7 +141,13 @@ export async function interject(text) {
     if (data.sent) {
       const truncated = text.length > 40 ? text.slice(0, 40) + '\u2026' : text
       dag.interjections.push({ text, truncated })
-      dag.nodes.push({ id: 'interject-' + Date.now(), type: 'interjection', state: 'running', tag: truncated, tool: '' })
+      // Assign an ID that sorts after all current nodes so the interjection
+      // stays at its chronological position as later nodes arrive.
+      const maxNum = dag.nodes.reduce((m, n) => {
+        const num = parseInt((n.id || '').replace(/\D/g, '')) || 0
+        return num > m ? num : m
+      }, 0)
+      dag.nodes.push({ id: `inj${maxNum + 1}`, type: 'interjection', state: 'running', tag: truncated, tool: '' })
     } else {
       dag.interjections.push({ text, truncated: '(not delivered \u2014 no active query)' })
     }

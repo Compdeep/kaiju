@@ -21,7 +21,7 @@
           <div class="form-group"><label>rank</label><input v-model.number="form.rank" type="number" placeholder="50" :disabled="editingBuiltin" /></div>
         </div>
         <div class="form-group"><label>description (UI)</label><input v-model="form.description" placeholder="short human-readable summary" /></div>
-        <div class="form-group"><label>prompt description (shown to LLM)</label><textarea v-model="form.prompt_description" rows="3" placeholder="what this intent level allows — shown to the planner to help it pick the right level" /></div>
+        <div class="form-group"><label>prompt description (shown to LLM)</label><textarea v-model="form.prompt_description" rows="3" placeholder="what this intent level allows — shown to the executive to help it pick the right level" /></div>
         <button class="btn btn-sm btn-primary" @click="saveIntent">{{ editing ? 'update' : 'create' }}</button>
       </div>
     </transition>
@@ -75,7 +75,7 @@
 <script setup>
 /**
  * desc: Intents management tab for creating, editing, and deleting configurable
- *       IBE levels plus per-tool intent overrides. Changes require kaiju restart.
+ *       IGX levels plus per-tool intent overrides. Changes require kaiju restart.
  */
 import { ref, onMounted } from 'vue'
 import api from '../../api/client'

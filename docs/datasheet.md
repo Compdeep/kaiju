@@ -32,7 +32,7 @@ This structure allows it to handle workflows that are difficult for purely seque
 
 All actions are checked at execution time.
 
-Kaiju's security is powered by IBE (Intent-Based Execution), which takes intent as an input and enforces that intent as a policy on every action. The system evaluates each operation against what the user is allowed to do, what they intended, and how impactful the action is. If it exceeds those limits, it is blocked. If it doesn't, it proceeds — automatically, without human interaction, in seconds.
+Kaiju's security is powered by IGX (Intent-Gated Execution), which takes intent as an input and enforces that intent as a policy on every action. The system evaluates each operation against what the user is allowed to do, what they intended, and how impactful the action is. If it exceeds those limits, it is blocked. If it doesn't, it proceeds — automatically, without human interaction, in seconds.
 
 This enforcement is built into the execution engine itself, not controlled by prompts, so it cannot be bypassed by the AI regardless of how it is prompted. This is what makes autonomous operation possible — Kaiju can be given broad authority to act because the security boundary provides a mathematical guarantee that it will not exceed its authorized scope. It will not go rogue.
 
@@ -50,7 +50,7 @@ No external dependencies. No container orchestration. One binary, one config fil
 
 ## Analyst Assistant
 
-Parallel information gathering and structured analysis. Kaiju searches multiple sources simultaneously, cross-references findings, and synthesizes results with citations. Set intent to observe and the agent can access everything but modify nothing — guaranteed by IBE.
+Parallel information gathering and structured analysis. Kaiju searches multiple sources simultaneously, cross-references findings, and synthesizes results with citations. Set intent to observe and the agent can access everything but modify nothing — guaranteed by IGX.
 
 **Example**: "Investigate the Log4Shell vulnerability — what systems are affected, what patches exist, and what is our exposure." Kaiju searches CVE databases, vendor advisories, and internal asset inventories in parallel, correlates the findings, and delivers a structured risk assessment.
 
@@ -68,6 +68,6 @@ Continuous monitoring with autonomous response within strict security bounds. Ka
 
 ## Edge Compute Agent
 
-Local execution of structured workflows on constrained hardware. Single binary deployment, 30MB runtime memory, local LLM support for air-gapped environments. Processes sensor data, makes decisions, and executes actions within strict IBE bounds.
+Local execution of structured workflows on constrained hardware. Single binary deployment, 30MB runtime memory, local LLM support for air-gapped environments. Processes sensor data, makes decisions, and executes actions within strict IGX bounds.
 
-**Example**: A Raspberry Pi on a drone running Kaiju with a local model. It processes camera feeds, plans survey routes, and triggers alerts — all within observe intent. It cannot modify flight controls or access external networks because IBE enforces the boundary at every action, every time, without exception.
+**Example**: A Raspberry Pi on a drone running Kaiju with a local model. It processes camera feeds, plans survey routes, and triggers alerts — all within observe intent. It cannot modify flight controls or access external networks because IGX enforces the boundary at every action, every time, without exception.

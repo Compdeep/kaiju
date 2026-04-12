@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/user/kaiju/internal/auth"
-	"github.com/user/kaiju/internal/db"
-	"github.com/user/kaiju/internal/gateway"
+	"github.com/Compdeep/kaiju/internal/auth"
+	"github.com/Compdeep/kaiju/internal/db"
+	"github.com/Compdeep/kaiju/internal/gateway"
 )
 
 /*

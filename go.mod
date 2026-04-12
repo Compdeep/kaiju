@@ -1,4 +1,4 @@
-module github.com/user/kaiju
+module github.com/Compdeep/kaiju
 
 go 1.25.0
 

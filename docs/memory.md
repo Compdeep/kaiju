@@ -2,6 +2,34 @@
 
 Kaiju implements a multi-layered memory system following LangChain's memory framework. Memory is fully multi-tenant — every operation is scoped by user ID, with no cross-user data leakage.
 
+## Architectural Boundary (Security)
+
+**Memory lives at the chat boundary, never inside the execution layer.** This is a deliberate architectural rule, not a coincidence — it's an anti-prompt-injection security boundary.
+
+The two and only legitimate access points are:
+
+1. **Chat input** — `internal/api/api.go` `handleChat`. Loads conversation history into `Trigger.History`, prepends long-term semantic and episodic memories as a system message, and stores the user's incoming message.
+2. **Chat output** — same handler, after the aggregator runs. Stores the assistant's verdict as the next message and may extract new facts.
+
+The agent's **execution layer** (ContextGate, source implementations, graph nodes — executive, compute, reflector, debugger, observer, aggregator) **must never query or write memory directly**. ContextGate has no `memory` source by design, and graph node code must not import the `memory` package.
+
+### Why this matters
+
+The execution layer runs untrusted tool output through reasoning steps: bash command output, web fetches, compute/coder LLM responses, debugger plans. Any of those can contain adversarial content trying to manipulate the agent. If memory were reachable from execution-layer code, a malicious tool result could:
+
+- **Exfiltrate** stored facts by causing them to be quoted in a subsequent LLM call that goes to a logging or network sink.
+- **Rewrite** the user's memory by inducing the agent to call a hidden memory_store path with attacker-supplied content.
+
+By keeping memory at the chat boundary, both reads and writes are attested by the authenticated user request itself. Untrusted tool content cannot reach memory because there is no code path from the execution layer to the memory package.
+
+### The one exception: explicit memory tools
+
+The LLM tools `memory_store`, `memory_recall`, and `memory_search` exist as deliberate, auditable actions the LLM can take, the same way it can call `bash` or `file_write`. They appear in the worklog as explicit tool calls. This is allowed because it requires the LLM to make an active decision rather than memory being injected automatically by code processing untrusted input.
+
+### How to know if you're crossing the boundary
+
+If you're adding code that reads or writes memory, ask: **"is this triggered by an authenticated user request, or is it triggered automatically by code that might be processing untrusted input?"** If the latter, do not add it. The right place is at the chat boundary in `api.go`, attested by the user's HTTP request itself.
+
 ## Memory Types
 
 | Type | Scope | What it stores | Storage |

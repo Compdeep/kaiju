@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/user/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 // ─── FileRead ───────────────────────────────────────────────────────────────
@@ -197,6 +197,10 @@ func (f *FileWrite) Execute(_ context.Context, params map[string]any) (string, e
 	content, _ := params["content"].(string)
 	if path == "" {
 		return "", fmt.Errorf("file_write: path is required")
+	}
+	// Reject unresolved placeholder content — param_refs failed or weren't used
+	if strings.HasPrefix(content, "${") || strings.HasPrefix(content, "{{") {
+		return "", fmt.Errorf("file_write: content is an unresolved placeholder %q — use param_refs or compute instead", content)
 	}
 	// Resolve relative paths against workspace
 	if !filepath.IsAbs(path) && f.workspace != "" {

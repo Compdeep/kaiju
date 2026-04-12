@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 )
 
-// Impact tiers for tool classification (IBE Triad Gate). Values are ranks
+// Impact tiers for tool classification (IGX Triad Gate). Values are ranks
 // on the same scale as the intent registry's builtin ranks — the gate
 // compares impact and intent directly. These ranks are locked by invariant
 // (UpdateIntent rejects rank changes on builtins), so tool authors can
@@ -21,7 +21,7 @@ const (
 
 /*
  * Tool is the interface for agent capabilities (compiled builtins and SKILL.md wrappers).
- * desc: Core abstraction that every tool must implement; declares its IBE impact level at compile time.
+ * desc: Core abstraction that every tool must implement; declares its IGX impact level at compile time.
  */
 type Tool interface {
 	/*
@@ -46,7 +46,7 @@ type Tool interface {
 	Parameters() json.RawMessage
 
 	/*
-	 * Impact returns the IBE impact tier for the given params.
+	 * Impact returns the IGX impact tier for the given params.
 	 * desc: Classifies the tool invocation's side-effect severity so the gate can enforce policy
 	 * param: params - the parameters that will be passed to Execute
 	 * return: impact tier integer (0, 1, or 2; the intent registry maps
@@ -69,7 +69,7 @@ type Tool interface {
  * desc: Convenience wrapper that calls Impact on the tool
  * param: t - the tool to query
  * param: params - the parameters to evaluate impact for
- * return: the IBE impact tier integer
+ * return: the IGX impact tier integer
  */
 func GetImpact(t Tool, params map[string]any) int {
 	return t.Impact(params)
@@ -77,7 +77,7 @@ func GetImpact(t Tool, params map[string]any) int {
 
 /*
  * Outputter is an optional interface for tools that return structured JSON.
- * desc: Declares output fields so the planner can build valid param_refs chains and the scheduler can validate field paths; tools returning plain text do not implement this
+ * desc: Declares output fields so the executive can build valid param_refs chains and the scheduler can validate field paths; tools returning plain text do not implement this
  */
 type Outputter interface {
 	/*

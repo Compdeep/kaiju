@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/user/kaiju/internal/agent"
-	"github.com/user/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 // ─── MemoryStore ────────────────────────────────────────────────────────────

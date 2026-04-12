@@ -7,10 +7,11 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/user/kaiju/internal/agent/gates"
-	"github.com/user/kaiju/internal/agent/llm"
-	"github.com/user/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 /*
@@ -45,58 +46,6 @@ func prefixAssistantHistory(history []llm.Message) []llm.Message {
  * param: names - tool names to include
  * return: compiled tool index string
  */
-/*
- * fixComputeStepParams fixes a common LLM mistake where compute tool params
- * (goal, mode, query) are placed at the step level instead of inside params.
- * desc: Parses the raw JSON, checks each step for misplaced fields, moves them
- *       into params, and re-serializes. Returns original string if no fix needed.
- */
-func fixComputeStepParams(raw string) string {
-	var obj map[string]any
-	if json.Unmarshal([]byte(raw), &obj) != nil {
-		return raw
-	}
-	steps, ok := obj["steps"].([]any)
-	if !ok {
-		return raw
-	}
-	changed := false
-	computeFields := []string{"goal", "mode", "query", "context", "hints", "language"}
-	for _, s := range steps {
-		step, ok := s.(map[string]any)
-		if !ok {
-			continue
-		}
-		toolName, _ := step["tool"].(string)
-		if toolName != "compute" {
-			continue
-		}
-		params, _ := step["params"].(map[string]any)
-		if params == nil {
-			params = make(map[string]any)
-		}
-		for _, field := range computeFields {
-			if val, exists := step[field]; exists {
-				if _, inParams := params[field]; !inParams {
-					params[field] = val
-				}
-				delete(step, field)
-				changed = true
-			}
-		}
-		step["params"] = params
-	}
-	if !changed {
-		return raw
-	}
-	fixed, err := json.Marshal(obj)
-	if err != nil {
-		return raw
-	}
-	log.Printf("[dag] planner: fixed misplaced compute params in plan() call")
-	return string(fixed)
-}
-
 func compileToolIndex(registry *tools.Registry, names []string) string {
 	var sb strings.Builder
 	sb.WriteString("## Tools (* = required param)\n")
@@ -155,6 +104,27 @@ type ParamInjection struct {
 	Step     int    `json:"step"`               // index of dependency step (0-based)
 	Field    string `json:"field"`              // dot-path into dependency's JSON result (e.g. "user", "host.name")
 	Template string `json:"template,omitempty"` // optional: "C:\\Users\\{{value}}\\Downloads" — {{value}} replaced with extracted field
+}
+
+// UnmarshalJSON handles LLMs returning step as string ("0") instead of int (0).
+func (p *ParamInjection) UnmarshalJSON(data []byte) error {
+	type raw struct {
+		Step     json.RawMessage `json:"step"`
+		Field    string          `json:"field"`
+		Template string          `json:"template,omitempty"`
+	}
+	var r raw
+	if err := json.Unmarshal(data, &r); err != nil {
+		return err
+	}
+	p.Field = r.Field
+	p.Template = r.Template
+	n, err := flexParseInt(r.Step)
+	if err != nil {
+		return fmt.Errorf("param_ref step: %w", err)
+	}
+	p.Step = n
+	return nil
 }
 
 /*
@@ -219,39 +189,48 @@ func (f *FlexInts) UnmarshalJSON(data []byte) error {
  *       human-readable tag, and an optional capability gap declaration.
  */
 type PlanStep struct {
-	Type      string                      `json:"type,omitempty"`      // "tool" (default) or "compute"
-	Tool      string                      `json:"tool"`
-	Params    map[string]any              `json:"params"`
-	ParamRefs map[string]ParamInjection   `json:"param_refs,omitempty"` // dependency injection: param values from upstream outputs
-	DependsOn FlexInts                    `json:"depends_on"`          // index-based references
-	Tag       string                      `json:"tag"`
-	Gap       string                      `json:"gap,omitempty"`       // capability gap: what's needed but unavailable
+	Type      string                    `json:"type,omitempty"` // "tool" (default) or "compute"
+	Tool      string                    `json:"tool"`
+	Params    map[string]any            `json:"params"`
+	ParamRefs map[string]ParamInjection `json:"param_refs,omitempty"` // dependency injection: param values from upstream outputs
+	DependsOn FlexInts                  `json:"depends_on"`           // index-based references
+	Tag       string                    `json:"tag"`
+	Gap       string                    `json:"gap,omitempty"` // capability gap: what's needed but unavailable
 }
 
 /*
- * plannerOutput wraps the planner's JSON when intent is auto-inferred.
+ * executiveOutput wraps the planner's JSON when intent is auto-inferred.
  * desc: When intent is explicit, the planner returns just []PlanStep.
  *       When auto, it may wrap them in {"intent":"...", "steps":[...]}.
  */
-type plannerOutput struct {
+type executiveOutput struct {
 	Intent string     `json:"intent"`
 	Steps  []PlanStep `json:"steps"`
 }
 
 /*
- * plannerSystemPrompt returns the system prompt for the initial planner LLM call.
+ * executiveSystemPrompt returns the system prompt for the initial planner LLM call.
  * desc: Builds the complete planner system prompt including role description,
  *       planning guidance from capability cards and skills, tool definitions
- *       with parameter and output schemas, IBE section, budget limits, and
+ *       with parameter and output schemas, IGX section, budget limits, and
  *       expanded planner rules. Only the provided tool names are included.
  * param: relevant - slice of tool names visible to the planner.
  * param: dagMode - the DAG execution mode string.
  * param: intent - the intent level string ("auto" or a specific level).
  * return: the fully composed planner system prompt.
  */
-func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) string {
+func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevant []string, dagMode, intent string) string {
 	var sb strings.Builder
-	isNative := a.cfg.PlannerMode == "native"
+	isNative := a.cfg.ExecutiveMode == "native"
+
+	// Per-investigation skill cards now live on the graph. Fall back to
+	// the legacy agent field if no graph is provided (defensive).
+	cards := []string{}
+	if graph != nil && len(graph.ActiveCards) > 0 {
+		cards = graph.ActiveCards
+	} else {
+		cards = a.activeCards
+	}
 
 	if isNative {
 		sb.WriteString("You are the Executive Kernel of this computer. You serve a dual purpose:\n")
@@ -279,8 +258,8 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 		// must follow that, not substitute file_list/file_read.
 		var nativeGuidance []string
 		plannerHeadings := []string{"## Planning Guidance", "## RULES"}
-		nativeActiveSet := make(map[string]bool, len(a.activeCards))
-		for _, k := range a.activeCards {
+		nativeActiveSet := make(map[string]bool, len(cards))
+		for _, k := range cards {
 			nativeActiveSet[k] = true
 		}
 		nativeGated := len(nativeActiveSet) > 0
@@ -307,19 +286,19 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 			sb.WriteString("Skill guidance is authoritative. If a skill says \"use compute deep\", use compute deep. Don't inspect — build.\n\n")
 			sb.WriteString(strings.Join(nativeGuidance, "\n\n"))
 			sb.WriteString("\n\n")
-			log.Printf("[dag] planner (native) injected %d skill guidance sections", len(nativeGuidance))
+			log.Printf("[dag] executive (native) injected %d skill guidance sections", len(nativeGuidance))
 		} else {
-			log.Printf("[dag] planner (native) no skill guidance matched (activeCards=%v, skillGuidance=%d)", a.activeCards, len(a.skillGuidance))
+			log.Printf("[dag] executive (native) no skill guidance matched (activeCards=%v, skillGuidance=%d)", cards, len(a.skillGuidance))
 		}
 	} else {
 		// Structured mode: full guidance from capability cards + SkillMD skills.
 		// Two sources, cleanly separated:
-		//   1. capability cards from a.activeCards → Planning Guidance section
+		//   1. capability cards from cards → Planning Guidance section
 		//   2. guidance SkillMDs from a.skillGuidance → Planning Guidance sections
 		// Neither comes from the tool list — tools are tools, skills are skills.
 		var guidance []string
-		if len(a.activeCards) > 0 {
-			for _, key := range a.activeCards {
+		if len(cards) > 0 {
+			for _, key := range cards {
 				card, ok := a.capabilities[key]
 				if !ok {
 					continue
@@ -330,11 +309,11 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 			}
 		}
 		// Iterate guidance SkillMDs directly. If preflight is active and picked
-		// a subset (a.activeCards may also name skills), honor it; otherwise
+		// a subset (cards may also name skills), honor it; otherwise
 		// include all loaded guidance skills.
 		plannerSections := []string{"## Planning Guidance", "## When to Use", "## Approach Selection"}
-		activeSet := make(map[string]bool, len(a.activeCards))
-		for _, k := range a.activeCards {
+		activeSet := make(map[string]bool, len(cards))
+		for _, k := range cards {
 			activeSet[k] = true
 		}
 		gateActive := len(activeSet) > 0
@@ -365,16 +344,16 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 		}
 	}
 
-	// IBE section
-	var ibeSection string
+	// IGX section
+	var igxSection string
 	if intent == "auto" {
-		ibeSection = `Intent is auto-determined. Tools exceeding intent are blocked at execution time.`
+		igxSection = `Intent is auto-determined. Tools exceeding intent are blocked at execution time.`
 	} else {
-		ibeSection = fmt.Sprintf(`Intent: **%s**. Tools exceeding intent are blocked at execution time.`, intent)
+		igxSection = fmt.Sprintf(`Intent: **%s**. Tools exceeding intent are blocked at execution time.`, intent)
 	}
 
 	if isNative {
-		sb.WriteString(fmt.Sprintf("%s\n", ibeSection))
+		sb.WriteString(fmt.Sprintf("%s\n", igxSection))
 		sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time.\n")
 		sb.WriteString(compileToolIndex(a.registry, relevant))
 		sb.WriteString("\n")
@@ -389,7 +368,9 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 			sb.WriteString(fmt.Sprintf("Parameters: %s\n", string(skill.Parameters())))
 			if outSchema := tools.GetOutputSchema(skill); outSchema != nil {
 				sb.WriteString(fmt.Sprintf("Output (JSON): %s\n", string(outSchema)))
-				var schemaMeta struct{ Description string `json:"description"` }
+				var schemaMeta struct {
+					Description string `json:"description"`
+				}
 				if json.Unmarshal(outSchema, &schemaMeta) == nil && schemaMeta.Description != "" {
 					sb.WriteString(fmt.Sprintf("Chaining: %s\n\n", schemaMeta.Description))
 				} else {
@@ -402,7 +383,25 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 	}
 
 	if isNative {
+		// Compute Nodes section — mirrors executive.md so native mode has the
+		// same compute guidance as structured mode. Without this block the
+		// model has no example showing the required `goal` and `mode` fields,
+		// and no "ONE compute(deep) node" rule, so it tends to plan multiple
+		// compute steps and forget the params on the second one.
+		sb.WriteString("## Compute Nodes\n")
+		sb.WriteString("Use `compute` (type:\"compute\") for ALL implementation work: building projects, writing multi-file code, scaffolding apps, data processing, calculations, or any task requiring writing and executing code. Provide the GOAL — never write code in bash params or file_write content.\n\n")
+		sb.WriteString("The compute architect handles ALL implementation details internally: directory creation, dependency installation, file generation, service startup, and validation. Do NOT plan these as separate bash/service steps — they will conflict with what the architect plans.\n\n")
+		sb.WriteString("Plan broadly in 1-3 compute steps, not 15 fine-grained bash/file_write steps. For any project that needs scaffolding (web app, CLI tool, library, service), ONE compute(deep) node is almost always correct — the architect inside handles everything.\n\n")
+		sb.WriteString("Required params on EVERY compute step: `goal` (string, what to build) and `mode` (\"deep\" or \"shallow\"). Never omit params, even on chained compute steps. If a follow-up compute step needs data from a prior step, wire it via `param_refs` AND still provide `goal` and `mode` in `params`.\n\n")
+		sb.WriteString("Example — \"build a web app with auth\":\n")
+		sb.WriteString("```json\n")
+		sb.WriteString("[\n")
+		sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"build a Vue 3 + Express webapp with JWT auth and SQLite database\",\"mode\":\"deep\",\"query\":\"build a Vue 3 webapp with auth\"},\"depends_on\":[],\"tag\":\"build_webapp\"}\n")
+		sb.WriteString("]\n")
+		sb.WriteString("```\n")
+		sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
 		sb.WriteString("## Rules\n")
+		sb.WriteString("NEVER guess values you don't know. Only use names, paths, and parameters that are visible in the evidence (workspace files, blueprint, conversation). If you don't know the exact service name, file path, or port — plan a diagnostic step first (file_read, service list, bash ls) to discover it.\n")
 		sb.WriteString("NEVER interpret, judge, or refuse requests.\n")
 		sb.WriteString("NEVER put template strings, placeholders, or step/field references in params — use param_refs.\n")
 		sb.WriteString("NEVER write code in bash params.\n")
@@ -410,31 +409,80 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 		sb.WriteString("NEVER use interactive commands.\n")
 		sb.WriteString("ALWAYS use compute (type:\"compute\") for coding, development, and analytics. Provide the GOAL, not the code.\n")
 		sb.WriteString("ALWAYS use mode=\"deep\" for webapps, full-stack projects, frameworks, multi-file work, or anything needing more than one file. Use mode=\"shallow\" only for single-file scripts, one-off calculations, or trivial analytics.\n")
-		sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\") spawns in the background and returns immediately.\n")
+		sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\", port=NNNN) spawns in the background and returns immediately. ALWAYS include the port parameter so health checks know which port to verify.\n")
 		sb.WriteString("ALWAYS use bash only for commands that terminate: ls, grep, git, npm install, curl, node script.js, etc.\n")
 		sb.WriteString("ALWAYS use web_search for questions needing current data.\n")
 		sb.WriteString("ALWAYS complete the full task from start to finish. Never stop partway and ask for permission.\n")
 		sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
 		sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
+		sb.WriteString("\n## Workspace Layout\n")
+		sb.WriteString("- project/ — source code, application files\n")
+		sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
+		sb.WriteString("- blueprints/ — architecture blueprints (auto-managed by compute)\n")
+		sb.WriteString("- canvas/ — user-facing visual content\n")
+		// Workspace tree and blueprint via ContextGate. This is the single
+		// place project context flows in for the executive — auditable and
+		// gateable. ContextGate's WorkspaceTree returns a fenced tree string.
+		if graph != nil && graph.Context != nil {
+			gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
+				ReturnSources: Sources(
+					WorkspaceTree(3),
+					Blueprint(),
+				),
+				MaxBudget: 10000,
+			})
+			if gerr != nil {
+				log.Printf("[dag] executive context build failed: %v", gerr)
+			} else {
+				if tree := gateResp.Sources[SourceWorkspaceTree]; tree != "" {
+					sb.WriteString("\n### Current files\n")
+					sb.WriteString(tree)
+					sb.WriteString("\n")
+				}
+				if bp := gateResp.Sources[SourceBlueprint]; bp != "" {
+					sb.WriteString("\n## Existing Project\n")
+					sb.WriteString("An architecture blueprint already exists. Before planning, decide:\n")
+					sb.WriteString("1. Is the user asking to FIX or DEBUG the existing project? → Do NOT create a new blueprint. Plan diagnostic and repair steps using existing files.\n")
+					sb.WriteString("2. Is the user asking to ADD or EXTEND? → Use compute(mode=\"deep\") ONLY for the new feature. Reference the existing blueprint.\n")
+					sb.WriteString("3. Is the user asking to BUILD something completely new and unrelated? → Create a fresh blueprint from scratch.\n")
+					sb.WriteString("Most requests about an existing project are case 1 or 2. Only choose case 3 if the user explicitly wants something NEW.\n")
+					sb.WriteString("\n### Existing Blueprint Summary\n")
+					// Inject just the Goal + Architecture + Directory Structure sections, not the full blueprint
+					goalSection := Text.ExtractSection(bp, "## Goal")
+					archSection := Text.ExtractSection(bp, "## Architecture")
+					dirSection := Text.ExtractSection(bp, "## Directory Structure")
+					if goalSection != "" {
+						sb.WriteString("**Goal**: " + goalSection + "\n")
+					}
+					if archSection != "" {
+						sb.WriteString("**Architecture**: " + archSection + "\n")
+					}
+					if dirSection != "" {
+						sb.WriteString("**Structure**:\n" + dirSection + "\n")
+					}
+				}
+			}
+		}
+
 		sb.WriteString(fmt.Sprintf("\nBudget: max %d steps, %d LLM calls.\n", a.cfg.MaxNodes, a.cfg.MaxLLMCalls))
 	} else {
 		// Structured mode: full planner.md with format rules, examples, etc.
 		// Intent descriptions come from the configurable registry.
 		intentBlock := a.intentRegistry.PromptBlock(-1)
-		ibeFullSection := ""
+		igxFullSection := ""
 		if intent == "auto" {
-			ibeFullSection = "## Intent-Based Execution (IBE)\n\n" +
+			igxFullSection = "## Intent-Gated Execution (IGX)\n\n" +
 				"Intent is auto-determined from your plan. Choose tools matching the query's needs:\n" +
 				intentBlock +
 				"\nThe system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED."
 		} else {
-			ibeFullSection = fmt.Sprintf("## Intent-Based Execution (IBE)\n\n"+
+			igxFullSection = fmt.Sprintf("## Intent-Gated Execution (IGX)\n\n"+
 				"This investigation runs at **%s** intent (operator-enforced, do not override).\n\n"+
 				"Available intent levels:\n%s\n"+
 				"The system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED.", intent, intentBlock)
 		}
 
-		rules := expandPlannerTemplate(a.plannerPrompt, map[string]string{
+		rules := expandPlannerTemplate(a.executivePrompt, map[string]string{
 			"node_id":       a.cfg.NodeID,
 			"max_nodes":     fmt.Sprintf("%d", a.cfg.MaxNodes),
 			"max_per_skill": fmt.Sprintf("%d", a.cfg.MaxPerSkill),
@@ -442,7 +490,7 @@ func (a *Agent) plannerSystemPrompt(relevant []string, dagMode, intent string) s
 			"dag_mode":      dagMode,
 			"batch_size":    fmt.Sprintf("%d", a.cfg.BatchSize),
 			"intent":        intent,
-			"ibe_section":   ibeFullSection,
+			"igx_section":   igxFullSection,
 		})
 		sb.WriteString(rules)
 	}
@@ -478,26 +526,26 @@ type PlanResult struct {
 }
 
 /*
- * PlannerConversationalError is returned when the planner responds with
+ * ExecutiveConversationalError is returned when the planner responds with
  * conversational text instead of a JSON plan.
  * desc: The Text field contains the planner's response which can be returned
  *       directly to the user as a chat response.
  */
-type PlannerConversationalError struct {
+type ExecutiveConversationalError struct {
 	Text string
 }
 
 /*
- * Error returns the error message for PlannerConversationalError.
+ * Error returns the error message for ExecutiveConversationalError.
  * desc: Implements the error interface.
  * return: fixed error string.
  */
-func (e *PlannerConversationalError) Error() string {
+func (e *ExecutiveConversationalError) Error() string {
 	return "planner returned conversational text instead of JSON plan"
 }
 
 /*
- * runPlanner makes a single LLM call to produce the initial investigation plan.
+ * runExecutive makes a single LLM call to produce the initial investigation plan.
  * desc: When the trigger intent is Auto, the planner also infers the appropriate
  *       intent. Filters relevant skills, builds the planner prompt, sends the
  *       LLM call (with optional retry on prose output), then validates, filters,
@@ -507,33 +555,33 @@ func (e *PlannerConversationalError) Error() string {
  * return: PlanResult pointer with steps and intent, or error.
  */
 /*
- * runPlanner dispatches to the appropriate planner mode.
+ * runExecutive dispatches to the appropriate planner mode.
  * desc: Routes to structured (text JSON) or native (function calling) planner
  *       based on agent config. Both return the same PlanResult.
  * param: ctx - context for the LLM call.
  * param: trigger - the investigation trigger.
  * return: PlanResult pointer with steps and intent, or error.
  */
-func (a *Agent) runPlanner(ctx context.Context, trigger Trigger) (*PlanResult, error) {
-	if a.cfg.PlannerMode == "native" {
-		return a.runPlannerNative(ctx, trigger)
+func (a *Agent) runExecutive(ctx context.Context, trigger Trigger, graph *Graph) (*PlanResult, error) {
+	if a.cfg.ExecutiveMode == "native" {
+		return a.runExecutiveNative(ctx, trigger, graph)
 	}
-	return a.runPlannerStructured(ctx, trigger)
+	return a.runExecutiveStructured(ctx, trigger, graph)
 }
 
 /*
- * runPlannerStructured makes a single LLM call to produce a plan via text JSON output.
+ * runExecutiveStructured makes a single LLM call to produce a plan via text JSON output.
  * desc: The original planner mode. Sends a prompt asking the LLM to respond with a JSON
  *       array. Parses the text output, handles markdown fences, retries on prose.
  * param: ctx - context for the LLM call.
  * param: trigger - the investigation trigger.
  * return: PlanResult pointer with steps and intent, or error.
  */
-func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*PlanResult, error) {
+func (a *Agent) runExecutiveStructured(ctx context.Context, trigger Trigger, graph *Graph) (*PlanResult, error) {
 	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
-	log.Printf("[dag] planner sees %d tools: %v", len(relevant), relevant)
+	log.Printf("[dag] executive sees %d tools: %v", len(relevant), relevant)
 	if len(a.skillGuidance) > 0 {
-		log.Printf("[dag] planner has %d guidance skills loaded", len(a.skillGuidance))
+		log.Printf("[dag] executive has %d guidance skills loaded", len(a.skillGuidance))
 	}
 
 	// Resolve DAG mode and intent for planner prompt
@@ -546,7 +594,7 @@ func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*Pla
 	// use the preflight-classified intent instead of forcing the planner to infer.
 	if trigger.Intent() == gates.IntentAuto && a.preflight != nil {
 		intent = a.preflight.Intent.String()
-		log.Printf("[dag] planner intent from preflight: %s", intent)
+		log.Printf("[dag] executive intent from preflight: %s", intent)
 	}
 
 	// Planner gets conversation history with assistant messages prefixed
@@ -554,37 +602,61 @@ func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*Pla
 	// ("the tools you mentioned") while preventing the planner from
 	// mimicking the aggregator's prose style — the prefix signals
 	// "this wasn't my output" so the planner continues using plan().
-	plannerHistory := prefixAssistantHistory(trigger.History)
-	messages := BuildMessagesWithHistory(
-		a.plannerSystemPrompt(relevant, dagMode, intent),
-		formatTrigger(trigger),
-		plannerHistory,
-	)
+	executiveHistory := prefixAssistantHistory(trigger.History)
+	sysPrompt := a.executiveSystemPrompt(ctx, graph, relevant, dagMode, intent)
+	userQuery := formatTrigger(trigger)
+	messages := BuildMessagesWithHistory(sysPrompt, userQuery, executiveHistory)
 
+	started := time.Now()
 	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
 		Messages:    messages,
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.cfg.MaxTokens,
 	})
+
+	trace := LLMTrace{
+		AlertID:  trigger.AlertID,
+		NodeID:   "executive",
+		NodeType: "executive_structured",
+		Tag:      "plan",
+		Started:  started,
+		Input: map[string]string{
+			"dag_mode": dagMode,
+			"intent":   intent,
+		},
+		System:    sysPrompt,
+		User:      userQuery,
+		LatencyMS: time.Since(started).Milliseconds(),
+	}
+
 	if err != nil {
+		trace.Err = err.Error()
+		WriteLLMTrace(trace)
 		return nil, fmt.Errorf("planner LLM call: %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
+		trace.Err = "no choices"
+		WriteLLMTrace(trace)
 		return nil, fmt.Errorf("planner LLM returned no choices")
 	}
 
 	raw := resp.Choices[0].Message.Content
-	log.Printf("[dag] planner output: %s", Text.TruncateLog(raw, 300))
-	log.Printf("[dag] planner full output length: %d bytes", len(raw))
+	trace.Output = raw
+	trace.TokensIn = resp.Usage.PromptTokens
+	trace.TokensOut = resp.Usage.CompletionTokens
+	WriteLLMTrace(trace)
+
+	log.Printf("[dag] executive output: %s", Text.TruncateLog(raw, 300))
+	log.Printf("[dag] executive full output length: %d bytes", len(raw))
 
 	isAuto := trigger.Intent() == gates.IntentAuto
-	steps, inferredIntent, err := a.parsePlannerOutput(raw, isAuto)
+	steps, inferredIntent, err := a.parseExecutiveOutput(raw, isAuto)
 	if err != nil {
 		// If planner returned prose, retry once with a forceful nudge
 		cleaned := strings.TrimSpace(raw)
 		if len(cleaned) > 0 && cleaned[0] != '[' && cleaned[0] != '{' {
-			log.Printf("[dag] planner returned prose, retrying with JSON nudge")
+			log.Printf("[dag] executive returned prose, retrying with JSON nudge")
 
 			// Append the prose response + a nudge as follow-up messages
 			retryMessages := append(messages,
@@ -599,8 +671,8 @@ func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*Pla
 			})
 			if retryErr == nil && len(retryResp.Choices) > 0 {
 				retryRaw := retryResp.Choices[0].Message.Content
-				log.Printf("[dag] planner retry output: %s", Text.TruncateLog(retryRaw, 300))
-				retrySteps, retryIntent, retryParseErr := a.parsePlannerOutput(retryRaw, isAuto)
+				log.Printf("[dag] executive retry output: %s", Text.TruncateLog(retryRaw, 300))
+				retrySteps, retryIntent, retryParseErr := a.parseExecutiveOutput(retryRaw, isAuto)
 				if retryParseErr == nil {
 					steps = retrySteps
 					inferredIntent = retryIntent
@@ -610,8 +682,8 @@ func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*Pla
 
 			// If retry also failed, surface as conversational
 			if err != nil {
-				log.Printf("[dag] planner retry also failed, surfacing as reply")
-				return nil, &PlannerConversationalError{Text: cleaned}
+				log.Printf("[dag] executive retry also failed, surfacing as reply")
+				return nil, &ExecutiveConversationalError{Text: cleaned}
 			}
 		} else {
 			return nil, fmt.Errorf("parse planner output: %w", err)
@@ -624,11 +696,11 @@ func (a *Agent) runPlannerStructured(ctx context.Context, trigger Trigger) (*Pla
 
 // ── Plan tool schema for native function calling mode ──────────────────────
 
-// planToolSchemaTemplate is the plan meta-tool schema with a %s placeholder
+// executiveToolSchemaTemplate is the plan meta-tool schema with a %s placeholder
 // where the intent enum goes. The enum is built at call time from the
 // registry so custom intent names (admin-created via the UI) show up as
 // valid values to the model.
-var planToolSchemaTemplate = `{
+var executiveToolSchemaTemplate = `{
 	"type": "object",
 	"properties": {
 		"answer": {
@@ -673,14 +745,14 @@ var planToolSchemaTemplate = `{
 }`
 
 /*
- * planToolDef returns the meta-tool definition for native function calling mode.
+ * executiveToolDef returns the meta-tool definition for native function calling mode.
  * desc: Defines a single "plan" tool whose input schema matches the PlanStep array format.
  *       The model "calls" this tool with the entire DAG as its argument. The intent
  *       enum is built at call time from the registry so admin-created custom intents
  *       are presented as valid values to the model.
  * return: llm.ToolDef for the plan meta-tool.
  */
-func (a *Agent) planToolDef() llm.ToolDef {
+func (a *Agent) executiveToolDef() llm.ToolDef {
 	// Build the intent enum dynamically from the registry. If the registry
 	// hasn't been loaded the enum is omitted entirely — Go has no knowledge
 	// of specific intent names to fall back on.
@@ -689,7 +761,7 @@ func (a *Agent) planToolDef() llm.ToolDef {
 		names = a.intentRegistry.AllowedNames(-1)
 	}
 	enumJSON, _ := json.Marshal(names)
-	schema := json.RawMessage(fmt.Sprintf(planToolSchemaTemplate, string(enumJSON)))
+	schema := json.RawMessage(fmt.Sprintf(executiveToolSchemaTemplate, string(enumJSON)))
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -701,17 +773,45 @@ func (a *Agent) planToolDef() llm.ToolDef {
 }
 
 /*
- * planCallPayload is the parsed argument from a native plan() tool call.
+ * executiveCallPayload is the parsed argument from a native plan() tool call.
  * desc: Matches the planToolSchema — contains optional intent and the steps array.
  */
-type planCallPayload struct {
+type executiveCallPayload struct {
 	Intent string     `json:"intent"`
 	Answer string     `json:"answer"`
 	Steps  []PlanStep `json:"steps"`
 }
 
+// parseExecutivePayload handles LLMs returning steps as a JSON string instead of an array.
+func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
+	if err := json.Unmarshal([]byte(raw), payload); err != nil {
+		// Try parsing with steps as a string (double-encoded JSON)
+		var flex struct {
+			Intent string          `json:"intent"`
+			Answer string          `json:"answer"`
+			Steps  json.RawMessage `json:"steps"`
+		}
+		if err2 := json.Unmarshal([]byte(raw), &flex); err2 != nil {
+			return err
+		}
+		payload.Intent = flex.Intent
+		payload.Answer = flex.Answer
+		// Try unwrapping string-encoded steps
+		var stepsStr string
+		if json.Unmarshal(flex.Steps, &stepsStr) == nil {
+			if err3 := ParseLLMJSON(stepsStr, &payload.Steps); err3 != nil {
+				return fmt.Errorf("steps is a string but not valid JSON: %w", err3)
+			}
+			log.Printf("[dag] executive: unwrapped string-encoded steps (%d steps)", len(payload.Steps))
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 /*
- * runPlannerNative makes a single LLM call using native function calling.
+ * runExecutiveNative makes a single LLM call using native function calling.
  * desc: Sends the plan meta-tool to the LLM. The model calls plan() with the
  *       entire DAG as the argument. No text parsing, no markdown fences.
  *       Falls back to text parsing if the model responds with text instead of a tool call.
@@ -719,11 +819,11 @@ type planCallPayload struct {
  * param: trigger - the investigation trigger.
  * return: PlanResult pointer with steps and intent, or error.
  */
-func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanResult, error) {
+func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *Graph) (*PlanResult, error) {
 	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
-	log.Printf("[dag] planner (native) sees %d tools: %v", len(relevant), relevant)
+	log.Printf("[dag] executive (native) sees %d tools: %v", len(relevant), relevant)
 	if len(a.skillGuidance) > 0 {
-		log.Printf("[dag] planner (native) has %d guidance skills loaded", len(a.skillGuidance))
+		log.Printf("[dag] executive (native) has %d guidance skills loaded", len(a.skillGuidance))
 	}
 
 	dagMode := a.cfg.DAGMode
@@ -734,38 +834,76 @@ func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanRes
 	// Preflight override: same logic as structured planner.
 	if trigger.Intent() == gates.IntentAuto && a.preflight != nil {
 		intent = a.preflight.Intent.String()
-		log.Printf("[dag] planner (native) intent from preflight: %s", intent)
+		log.Printf("[dag] executive (native) intent from preflight: %s", intent)
 	}
 
-	plannerHistory := prefixAssistantHistory(trigger.History)
+	executiveHistory := prefixAssistantHistory(trigger.History)
 
-	// Include worklog so planner knows system state from previous runs
+	// Include worklog so planner knows system state from previous runs.
+	// Pulled through ContextGate for centralization.
 	userQuery := formatTrigger(trigger)
-	worklog := readWorklog(a.cfg.Workspace, 20)
-	if worklog != "" {
-		userQuery += "\n\n## System State (worklog)\n```\n" + worklog + "\n```"
+	if graph != nil && graph.Context != nil {
+		gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
+			ReturnSources: Sources(
+				Worklog(20, "all"),
+			),
+			MaxBudget: 4000,
+		})
+		if gerr != nil {
+			log.Printf("[dag] executive (native) context build failed: %v", gerr)
+		} else if wl := gateResp.Sources[SourceWorklog]; wl != "" {
+			userQuery += "\n\n## System State (worklog)\n```\n" + wl + "\n```"
+		}
 	}
 
-	messages := BuildMessagesWithHistory(
-		a.plannerSystemPrompt(relevant, dagMode, intent),
-		userQuery,
-		plannerHistory,
-	)
+	sysPromptN := a.executiveSystemPrompt(ctx, graph, relevant, dagMode, intent)
+	messages := BuildMessagesWithHistory(sysPromptN, userQuery, executiveHistory)
 
+	startedN := time.Now()
 	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
 		Messages:    messages,
-		Tools:       []llm.ToolDef{a.planToolDef()},
+		Tools:       []llm.ToolDef{a.executiveToolDef()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.cfg.MaxTokens,
 	})
+
+	traceN := LLMTrace{
+		AlertID:  trigger.AlertID,
+		NodeID:   "executive",
+		NodeType: "executive_native",
+		Tag:      "plan",
+		Started:  startedN,
+		Input: map[string]string{
+			"dag_mode": dagMode,
+			"intent":   intent,
+		},
+		System:    sysPromptN,
+		User:      userQuery,
+		LatencyMS: time.Since(startedN).Milliseconds(),
+	}
+
 	if err != nil {
+		traceN.Err = err.Error()
+		WriteLLMTrace(traceN)
 		return nil, fmt.Errorf("planner LLM call (native): %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
+		traceN.Err = "no choices"
+		WriteLLMTrace(traceN)
 		return nil, fmt.Errorf("planner LLM returned no choices")
 	}
+
+	// Capture output text or tool call args for the trace.
+	if len(resp.Choices[0].Message.ToolCalls) > 0 {
+		traceN.Output = resp.Choices[0].Message.ToolCalls[0].Function.Arguments
+	} else {
+		traceN.Output = resp.Choices[0].Message.Content
+	}
+	traceN.TokensIn = resp.Usage.PromptTokens
+	traceN.TokensOut = resp.Usage.CompletionTokens
+	WriteLLMTrace(traceN)
 
 	choice := resp.Choices[0]
 
@@ -776,23 +914,23 @@ func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanRes
 			return nil, fmt.Errorf("planner called unexpected tool %q (expected plan)", tc.Function.Name)
 		}
 
-		log.Printf("[dag] planner (native) received plan() call, %d bytes: %s", len(tc.Function.Arguments), Text.TruncateLog(tc.Function.Arguments, 500))
+		log.Printf("[dag] executive (native) received plan() call, %d bytes: %s", len(tc.Function.Arguments), Text.TruncateLog(tc.Function.Arguments, 500))
 
 		// Try parsing, with fixup for malformed compute steps
 		raw := tc.Function.Arguments
 		fixedRaw := fixComputeStepParams(raw)
 
-		var payload planCallPayload
-		if err := json.Unmarshal([]byte(fixedRaw), &payload); err != nil {
+		var payload executiveCallPayload
+		if err := parseExecutivePayload(fixedRaw, &payload); err != nil {
 			// Retry: send the error back and ask the planner to fix
-			log.Printf("[dag] planner (native) plan() parse failed, retrying: %v", err)
+			log.Printf("[dag] executive (native) plan() parse failed, retrying: %v", err)
 			retryMessages := append(messages,
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
 				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: fmt.Sprintf("Error: %v. Fix the JSON and call plan() again. Remember: goal, mode, query go INSIDE params, not at the step level.", err)},
 			)
 			retryResp, retryErr := a.llm.Complete(ctx, &llm.ChatRequest{
 				Messages:    retryMessages,
-				Tools:       []llm.ToolDef{a.planToolDef()},
+				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  "required",
 				Temperature: 0.1,
 				MaxTokens:   a.cfg.MaxTokens,
@@ -803,8 +941,8 @@ func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanRes
 			if len(retryResp.Choices) > 0 && len(retryResp.Choices[0].Message.ToolCalls) > 0 {
 				retryTC := retryResp.Choices[0].Message.ToolCalls[0]
 				retryFixed := fixComputeStepParams(retryTC.Function.Arguments)
-				log.Printf("[dag] planner (native) retry plan() call: %s", Text.TruncateLog(retryFixed, 500))
-				if retryErr2 := json.Unmarshal([]byte(retryFixed), &payload); retryErr2 != nil {
+				log.Printf("[dag] executive (native) retry plan() call: %s", Text.TruncateLog(retryFixed, 500))
+				if retryErr2 := parseExecutivePayload(retryFixed, &payload); retryErr2 != nil {
 					return nil, fmt.Errorf("parse plan() arguments after retry: %w", retryErr2)
 				}
 			} else {
@@ -817,11 +955,11 @@ func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanRes
 		// Empty steps = trivial query, planner answered directly
 		if len(steps) == 0 {
 			if payload.Answer != "" {
-				log.Printf("[dag] planner answered directly (no tools needed): %s", Text.TruncateLog(payload.Answer, 200))
-				return nil, &PlannerConversationalError{Text: payload.Answer}
+				log.Printf("[dag] executive answered directly (no tools needed): %s", Text.TruncateLog(payload.Answer, 200))
+				return nil, &ExecutiveConversationalError{Text: payload.Answer}
 			}
 			// Empty steps with no answer — fallback to direct LLM response
-			return nil, &PlannerConversationalError{}
+			return nil, &ExecutiveConversationalError{}
 		}
 
 		isAuto := trigger.Intent() == gates.IntentAuto
@@ -842,17 +980,17 @@ func (a *Agent) runPlannerNative(ctx context.Context, trigger Trigger) (*PlanRes
 	// Fallback: model returned text instead of a tool call.
 	// Try parsing as JSON (some models ignore tool calling and write text).
 	raw := choice.Message.Content
-	log.Printf("[dag] planner (native) returned text instead of tool call: %s", Text.TruncateLog(raw, 200))
+	log.Printf("[dag] executive (native) returned text instead of tool call: %s", Text.TruncateLog(raw, 200))
 
 	if len(raw) > 0 && (raw[0] == '[' || raw[0] == '{') {
 		isAuto := trigger.Intent() == gates.IntentAuto
-		steps, inferredIntent, parseErr := a.parsePlannerOutput(raw, isAuto)
+		steps, inferredIntent, parseErr := a.parseExecutiveOutput(raw, isAuto)
 		if parseErr == nil {
 			return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger)
 		}
 	}
 
-	return nil, &PlannerConversationalError{Text: strings.TrimSpace(raw)}
+	return nil, &ExecutiveConversationalError{Text: strings.TrimSpace(raw)}
 }
 
 /*
@@ -873,21 +1011,21 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 		if s.Tool == "gap" {
 			if s.Gap != "" {
 				gaps = append(gaps, s.Gap)
-				log.Printf("[dag] planner declared gap: %s", s.Gap)
+				log.Printf("[dag] executive declared gap: %s", s.Gap)
 			}
 			continue
 		}
 		if _, ok := a.registry.Get(s.Tool); ok {
 			valid = append(valid, s)
 		} else {
-			log.Printf("[dag] planner hallucinated unknown tool %q, dropping step", s.Tool)
+			log.Printf("[dag] executive hallucinated unknown tool %q, dropping step", s.Tool)
 		}
 	}
 	if len(valid) == 0 && len(gaps) == 0 {
 		return nil, fmt.Errorf("planner produced no valid tools (all hallucinated)")
 	}
 	if len(valid) == 0 && len(gaps) > 0 {
-		return nil, &PlannerConversationalError{
+		return nil, &ExecutiveConversationalError{
 			Text: "Cannot fulfill this request. Missing capabilities: " + strings.Join(gaps, "; "),
 		}
 	}
@@ -931,7 +1069,7 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 }
 
 /*
- * parsePlannerOutput extracts PlanSteps from the LLM's raw text output.
+ * parseExecutiveOutput extracts PlanSteps from the LLM's raw text output.
  * desc: Always expects a JSON array of steps. If the LLM wraps it in an object
  *       (e.g. {"intent":"...", "steps":[...]}), extracts the array from it.
  *       Validates deps and param_refs ranges, auto-adds missing dep edges,
@@ -940,17 +1078,16 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
  * param: isAuto - true if intent should be extracted from the response.
  * return: parsed PlanStep slice, inferred intent, or error.
  */
-func (a *Agent) parsePlannerOutput(raw string, isAuto bool) ([]PlanStep, gates.Intent, error) {
-	cleaned := Text.StripCodeFence(raw)
+func (a *Agent) parseExecutiveOutput(raw string, isAuto bool) ([]PlanStep, gates.Intent, error) {
 	inferredIntent := gates.Intent(0) // safe default
 
 	var steps []PlanStep
 
 	// Primary path: parse as JSON array
-	if err := json.Unmarshal([]byte(cleaned), &steps); err != nil {
+	if err := ParseLLMJSON(raw, &steps); err != nil {
 		// Fallback: LLM may have wrapped in an object despite being told array-only
-		var out plannerOutput
-		if err2 := json.Unmarshal([]byte(cleaned), &out); err2 == nil && len(out.Steps) > 0 {
+		var out executiveOutput
+		if TryParseLLMJSON(raw, &out) && len(out.Steps) > 0 {
 			steps = out.Steps
 			if isAuto {
 				// Resolve via the registry. Unknown names leave inferredIntent
@@ -960,7 +1097,7 @@ func (a *Agent) parsePlannerOutput(raw string, isAuto bool) ([]PlanStep, gates.I
 					inferredIntent = gates.Intent(i.Rank)
 				}
 			}
-			log.Printf("[dag] planner returned object instead of array, extracted %d steps", len(steps))
+			log.Printf("[dag] executive returned object instead of array, extracted %d steps", len(steps))
 		} else {
 			return nil, inferredIntent, fmt.Errorf("invalid JSON: %w", err)
 		}
@@ -969,7 +1106,7 @@ func (a *Agent) parsePlannerOutput(raw string, isAuto bool) ([]PlanStep, gates.I
 	if len(steps) == 0 {
 		// Empty plan means no tools needed — this is a conversational query.
 		// Return as conversational error so the caller can handle it.
-		return nil, inferredIntent, &PlannerConversationalError{Text: ""}
+		return nil, inferredIntent, &ExecutiveConversationalError{Text: ""}
 	}
 
 	// Debug: log parsed param_refs to diagnose injection failures
@@ -1106,7 +1243,7 @@ func breakCycles(steps []PlanStep) (bool, []PlanStep) {
  */
 func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
 	type refKey struct {
-		tool string
+		tool  string
 		step  int
 		field string
 	}
@@ -1190,24 +1327,11 @@ func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
  * return: slice of created Node pointers, or error.
  */
 func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *tools.Registry, dagMode ...string) ([]*Node, error) {
-	// Filter duplicate tool+params against already-executed nodes.
-	// Only applies to replan grafts (graph already has nodes), not the
-	// initial plan (graph is empty). Prevents reflection replan loops.
-	executedSet := graph.ExecutedSet()
-
 	// Pass 1: create nodes and collect their graph IDs
 	nodeIDs := make([]string, len(steps))
 	nodes := make([]*Node, len(steps))
 
 	for i, s := range steps {
-		// Drop duplicate tool+params — only if the graph already has executions
-		if len(executedSet) > 0 {
-			key := toolParamKey(s.Tool, s.Params)
-			if executedSet[key] {
-				log.Printf("[dag] dropping duplicate step %q (%s) — already executed", s.Tag, key)
-				continue
-			}
-		}
 
 		// At plan time, only check total node count — not per-tool wave limits.
 		// Per-tool limits are for execution batching, not planning.
@@ -1216,6 +1340,15 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 			log.Printf("[dag] budget exhausted at step %d, truncating plan", i)
 			nodes = nodes[:i]
 			break
+		}
+
+		// Validate tool exists — reject hallucinated tool names at graft time
+		// instead of failing at execution time with "unknown tool"
+		if s.Tool != "compute" && s.Tool != "" && registry != nil {
+			if _, ok := registry.Get(s.Tool); !ok {
+				log.Printf("[dag] dropping step %q — unknown tool %q (hallucinated)", s.Tag, s.Tool)
+				continue
+			}
 		}
 
 		nodeType := NodeTool
@@ -1249,7 +1382,7 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 		}
 
 		// Resolve param_refs step indices → node IDs (dependency injection).
-		// parsePlannerOutput already validated step ranges; skip invalid as safety net.
+		// parseExecutiveOutput already validated step ranges; skip invalid as safety net.
 		if len(s.ParamRefs) > 0 {
 			resolved := make(map[string]ResolvedInjection, len(s.ParamRefs))
 			for paramName, ref := range s.ParamRefs {
@@ -1302,14 +1435,9 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 		}
 	}
 
-	// Inject reflection checkpoints between wave boundaries (reflect mode only)
-	mode := DAGModeReflect
-	if len(dagMode) > 0 && dagMode[0] != "" {
-		mode = dagMode[0]
-	}
-	if mode == DAGModeReflect {
-		injectReflectionNodes(nodes, graph, budget)
-	}
+	// Wave reflections removed — the scheduler handles reflection timing.
+	// Injecting reflections at plan time caused cascading debugger spawns
+	// when early waves failed and all reflection nodes became ready at once.
 
 	return nodes, nil
 }
@@ -1388,137 +1516,4 @@ func isNumericPathSegment(s string) bool {
 		}
 	}
 	return true
-}
-
-/*
- * injectReflectionNodes inserts reflection checkpoint nodes between
- * depth waves in the DAG.
- * desc: Automatic post-processing — the planner doesn't know about reflection
- *       nodes. Computes depth for each node, groups by depth, then inserts a
- *       reflection node between each pair of adjacent depth levels. Next-wave
- *       nodes have their deps rewritten through the reflection barrier.
- * param: nodes - the plan nodes to process.
- * param: graph - the investigation graph.
- * param: budget - the execution budget.
- */
-func injectReflectionNodes(nodes []*Node, graph *Graph, budget *Budget) {
-	if len(nodes) == 0 {
-		return
-	}
-
-	// Build set of node IDs from this plan for quick lookup
-	planIDs := make(map[string]bool, len(nodes))
-	for _, n := range nodes {
-		if n != nil {
-			planIDs[n.ID] = true
-		}
-	}
-
-	// Compute depth of each node: depth(n) = max(depth(dep)) + 1, roots at 0
-	depths := make(map[string]int, len(nodes))
-	visiting := make(map[string]bool) // cycle detection
-	var computeDepth func(n *Node) int
-	computeDepth = func(n *Node) int {
-		if d, ok := depths[n.ID]; ok {
-			return d
-		}
-		if visiting[n.ID] {
-			// Cycle detected — treat as root to break the loop
-			log.Printf("[dag] cycle detected at node %s, breaking", n.ID)
-			depths[n.ID] = 0
-			return 0
-		}
-		visiting[n.ID] = true
-		maxDep := -1
-		for _, depID := range n.DependsOn {
-			if !planIDs[depID] {
-				continue // skip deps outside this plan (e.g., from prior phases)
-			}
-			dep := graph.Get(depID)
-			if dep != nil {
-				d := computeDepth(dep)
-				if d > maxDep {
-					maxDep = d
-				}
-			}
-		}
-		delete(visiting, n.ID)
-		depths[n.ID] = maxDep + 1
-		return maxDep + 1
-	}
-
-	for _, n := range nodes {
-		if n != nil {
-			computeDepth(n)
-		}
-	}
-
-	// Group nodes by depth
-	maxDepth := 0
-	byDepth := make(map[int][]*Node)
-	for _, n := range nodes {
-		if n == nil {
-			continue
-		}
-		d := depths[n.ID]
-		byDepth[d] = append(byDepth[d], n)
-		if d > maxDepth {
-			maxDepth = d
-		}
-	}
-
-	// Single depth level → no wave boundary → skip
-	if maxDepth == 0 {
-		return
-	}
-
-	// For each pair of adjacent depths, inject a reflection node
-	for d := 0; d < maxDepth; d++ {
-		waveNodes := byDepth[d]
-		nextWaveNodes := byDepth[d+1]
-		if len(waveNodes) == 0 || len(nextWaveNodes) == 0 {
-			continue
-		}
-
-		// Budget check: reflection costs 1 node + 1 LLM call
-		if !budget.TrySpawnNode("", true) {
-			log.Printf("[dag] budget exhausted, skipping reflection injection at depth %d", d)
-			return
-		}
-
-		// Create reflection node depending on all depth-d nodes
-		depIDs := make([]string, 0, len(waveNodes))
-		for _, n := range waveNodes {
-			depIDs = append(depIDs, n.ID)
-		}
-
-		rNode := &Node{
-			Type:      NodeReflection,
-			DependsOn: depIDs,
-			Tag:       fmt.Sprintf("reflect_w%d", d),
-		}
-		rID := graph.AddNode(rNode)
-
-		// Rewrite depth d+1 nodes: replace their depth-d dependencies with the reflection node
-		for _, n := range nextWaveNodes {
-			newDeps := make([]string, 0, len(n.DependsOn))
-			addedReflect := false
-			for _, dep := range n.DependsOn {
-				if planIDs[dep] && depths[dep] == d {
-					// Replace this dep with the reflection node (once)
-					if !addedReflect {
-						newDeps = append(newDeps, rID)
-						addedReflect = true
-					}
-				} else {
-					newDeps = append(newDeps, dep)
-				}
-			}
-			if !addedReflect {
-				// Next-wave node had no depth-d deps, still add reflection
-				newDeps = append(newDeps, rID)
-			}
-			n.DependsOn = newDeps
-		}
-	}
 }

@@ -143,7 +143,7 @@ func (c *Client) setAuthHeaders(req *http.Request) {
 	}
 	// OpenRouter requires HTTP-Referer and X-Title for ranking/attribution
 	if c.provider == ProviderOpenRouter {
-		req.Header.Set("HTTP-Referer", "https://github.com/user/kaiju")
+		req.Header.Set("HTTP-Referer", "https://github.com/Compdeep/kaiju")
 		req.Header.Set("X-Title", "Kaiju")
 	}
 }

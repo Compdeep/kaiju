@@ -1,6 +1,6 @@
-# IBE Examples — Intent-Based Execution in Practice
+# IGX Examples — Intent-Gated Execution in Practice
 
-## How IBE Works
+## How IGX Works
 
 Every tool declares an **impact rank** per invocation. Every request carries an **intent rank**. A system-wide **clearance** caps what's possible. The gate enforces:
 
@@ -168,7 +168,7 @@ func (d *Database) Impact(params map[string]any) int {
        strings.Contains(upper, "ALTER") {
         return tools.ImpactOperate   // 100 — data modification
     }
-    return tools.ImpactObserve       // 0   — SELECT, SHOW, DESCRIBE
+    return tools.ImpactObserve       // 0   — SELECT, SHOW, DESCRIGX
 }
 ```
 
@@ -213,7 +213,7 @@ Problems with approval prompts:
 3. **Reactive** — the check happens after the LLM has already decided to act
 4. **Binary** — yes or no, no graduated levels
 
-IBE advantages:
+IGX advantages:
 1. **Mathematical** — `impact ≤ min(intent, clearance)`, no judgment call
 2. **Pre-emptive** — intent is set before the conversation, not during
 3. **Graduated** — any number of ranks (three builtins plus admin-defined customs) allow nuanced access control

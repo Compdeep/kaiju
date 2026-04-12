@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/kaiju/internal/agent"
-	"github.com/user/kaiju/internal/agent/llm"
-	"github.com/user/kaiju/internal/clearance"
-	"github.com/user/kaiju/internal/db"
-	"github.com/user/kaiju/internal/gateway"
-	"github.com/user/kaiju/internal/memory"
+	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/clearance"
+	"github.com/Compdeep/kaiju/internal/db"
+	"github.com/Compdeep/kaiju/internal/gateway"
+	"github.com/Compdeep/kaiju/internal/memory"
 )
 
 /*
@@ -140,7 +140,26 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		Scope:   scope,
 	}
 
-	// Memory integration: load conversation history + long-term context
+	// ── Memory boundary (chat input) ──────────────────────────────────────
+	//
+	// THIS IS THE ONLY PLACE memory enters the agent's reasoning context.
+	// Memory loading happens HERE at the chat input boundary, NOT inside
+	// the execution layer (ContextGate, sources, graph nodes). The execution
+	// layer must remain unaware of memory — see the architectural doc at the
+	// top of internal/agent/contextgate.go for the rationale.
+	//
+	// Why this boundary matters (anti-prompt-injection security):
+	//   The agent runs untrusted tool output (bash results, web fetches,
+	//   compute LLM responses, etc.) through reflectors and debuggers. If
+	//   any of those code paths could query or write memory, a malicious
+	//   tool output could exfiltrate or rewrite a user's stored facts.
+	//   Keeping memory out of the execution layer means the only memory
+	//   reads are at the chat input (here, attested by the authenticated
+	//   user) and the only memory writes are at the chat output (the
+	//   aggregator's verdict, also a single attested step).
+	//
+	// If you need memory inside a node, you are doing something wrong.
+	// Reach out to the architecture before adding any memory access path.
 	var memMgr *memory.Manager
 	if req.SessionID != "" && userID != "" && a.db != nil {
 		memMgr = memory.New(a.db, a.llmClient, userID)
@@ -151,7 +170,10 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			trigger.History = history
 		}
 
-		// Inject long-term memory context
+		// Inject long-term memory context as a system message at the head
+		// of the history slice. From here on, memory is opaque conversation
+		// data — execution-layer code may READ trigger.History but never
+		// distinguishes "real history" from "injected memory."
 		if ltCtx, err := memMgr.InjectLongTermContext(r.Context()); err == nil && ltCtx != "" {
 			trigger.History = append(
 				[]llm.Message{{Role: "system", Content: ltCtx}},
@@ -159,7 +181,9 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 
-		// Store the user message
+		// Store the user message immediately (chat output boundary for the
+		// user-side turn). The assistant turn is stored after the aggregator
+		// runs, also outside the execution layer.
 		memMgr.StoreMessage(req.SessionID, "user", req.Query)
 	}
 	if req.Mode != "" {
@@ -183,10 +207,12 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
-	defer cancel()
+	// No HTTP-level timeout — the DAG's own wall clock (budget.WallClock) is
+	// the authority. A separate HTTP timeout caused connection resets and
+	// ghost retries when the DAG outlived the HTTP deadline.
+	ctx := r.Context()
 
-	result, err := a.agent.RunDAGSync(ctx, trigger)
+	result, err := a.agent.Kernel().SubmitSync(ctx, trigger)
 	elapsed := time.Since(start)
 
 	if err != nil {

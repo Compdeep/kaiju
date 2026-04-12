@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	agenttools "github.com/user/kaiju/internal/agent/tools"
-	"github.com/user/kaiju/internal/db"
+	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/db"
 )
 
 /*

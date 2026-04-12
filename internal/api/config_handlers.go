@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/user/kaiju/internal/agent"
-	"github.com/user/kaiju/internal/config"
+	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/internal/config"
 )
 
 /*
@@ -83,9 +83,9 @@ type configPatch struct {
 	Agent *struct {
 		DAGEnabled  *bool   `json:"dag_enabled,omitempty"`
 		DAGMode     *string `json:"dag_mode,omitempty"`
-		PlannerMode *string `json:"planner_mode,omitempty"`
+		ExecutiveMode *string `json:"executive_mode,omitempty"`
 		SafetyLevel *int    `json:"safety_level,omitempty"`
-		MaxReplans  *int    `json:"max_replans,omitempty"`
+		MaxInvestigations *int `json:"max_investigations,omitempty"`
 	} `json:"agent,omitempty"`
 }
 
@@ -133,14 +133,14 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		if patch.Agent.DAGMode != nil {
 			c.cfg.Agent.DAGMode = *patch.Agent.DAGMode
 		}
-		if patch.Agent.PlannerMode != nil {
-			c.cfg.Agent.PlannerMode = *patch.Agent.PlannerMode
+		if patch.Agent.ExecutiveMode != nil {
+			c.cfg.Agent.ExecutiveMode = *patch.Agent.ExecutiveMode
 		}
 		if patch.Agent.SafetyLevel != nil {
 			c.cfg.Agent.SafetyLevel = *patch.Agent.SafetyLevel
 		}
-		if patch.Agent.MaxReplans != nil {
-			c.cfg.Agent.MaxReplans = *patch.Agent.MaxReplans
+		if patch.Agent.MaxInvestigations != nil {
+			c.cfg.Agent.MaxInvestigations = *patch.Agent.MaxInvestigations
 		}
 	}
 
@@ -263,6 +263,9 @@ var allModels = []modelInfo{
 	{ID: "anthropic/claude-haiku-4", Name: "Claude Haiku 4", Provider: "openrouter", Context: "200K"},
 	{ID: "openai/gpt-4o", Name: "GPT-4o", Provider: "openrouter", Context: "128K"},
 	{ID: "openai/gpt-4.1", Name: "GPT-4.1", Provider: "openrouter", Context: "1M"},
+	{ID: "openai/gpt-4.1-mini", Name: "GPT-4.1 Mini", Provider: "openrouter", Context: "1M"},
+	{ID: "openai/gpt-4.1-nano", Name: "GPT-4.1 Nano", Provider: "openrouter", Context: "1M"},
+	{ID: "openai/gpt-4o-mini", Name: "GPT-4o Mini", Provider: "openrouter", Context: "128K"},
 	{ID: "openai/o3", Name: "o3", Provider: "openrouter", Context: "200K"},
 	{ID: "openai/o4-mini", Name: "o4 Mini", Provider: "openrouter", Context: "200K"},
 	{ID: "openai/codex-mini", Name: "Codex Mini", Provider: "openrouter", Context: "1M"},

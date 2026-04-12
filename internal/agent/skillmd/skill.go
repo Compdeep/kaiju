@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/tools" // for Registry type
+	"github.com/Compdeep/kaiju/internal/agent/tools" // for Registry type
 )
 
 var placeholderRe = regexp.MustCompile(`\{\{(\w+)\}\}`)
@@ -73,7 +73,7 @@ func (s *SkillMD) HasCommandDispatch() bool {
 	return s.fm.CommandDispatch != ""
 }
 
-// Impact returns the IBE impact tier. For command-dispatch skills, delegates
+// Impact returns the IGX impact tier. For command-dispatch skills, delegates
 // to the target tool. For guidance-only skills, returns 0 (lowest tier).
 func (s *SkillMD) Impact(params map[string]any) int {
 	if s.fm.CommandDispatch != "" && s.registry != nil {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/gates"
-	"github.com/user/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 )
 
 const maxToolResultLen = 4096
@@ -66,7 +66,7 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
 		return
 	}
 
-	// IBE: derive intent once for the entire investigation. The ReAct path
+	// IGX: derive intent once for the entire investigation. The ReAct path
 	// has no planner to infer from, so auto falls back to the registry's
 	// default rank.
 	intent := trigger.Intent()
@@ -166,7 +166,7 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
  * RunReActSync runs the ReAct loop synchronously and returns a SyncResult.
  * desc: Same as investigateReAct but returns the verdict instead of fire-and-forget.
  *       Used by the API when mode=react. Goes through the same pipeline as DAG
- *       (IBE gate, scope checks, audit, tool execution) but with sequential
+ *       (IGX gate, scope checks, audit, tool execution) but with sequential
  *       reason-act-observe dispatch instead of parallel DAG execution.
  * param: ctx - context for the investigation.
  * param: trigger - the investigation trigger.
@@ -208,7 +208,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 		return &SyncResult{Verdict: "No tools available."}, nil
 	}
 
-	// IBE: derive intent. Auto falls back to the registry's default rank.
+	// IGX: derive intent. Auto falls back to the registry's default rank.
 	intent := trigger.Intent()
 	if intent == gates.IntentAuto {
 		intent = gates.Intent(a.intentRegistry.DefaultRank())
@@ -344,14 +344,14 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 }
 
 /*
- * executeToolCall runs a single tool call through the IBE gate pipeline.
+ * executeToolCall runs a single tool call through the IGX gate pipeline.
  * desc: Performs scope check, tool lookup, rate limit check, parameter parsing,
- *       IBE triad check, optional external clearance check, execution, audit,
+ *       IGX triad check, optional external clearance check, execution, audit,
  *       and result truncation.
  * param: ctx - context for execution.
  * param: tc - the LLM tool call to execute.
  * param: alertID - the investigation alert ID.
- * param: intent - the IBE intent level.
+ * param: intent - the IGX intent level.
  * param: scope - resolved tool access scope (nil for full access).
  * return: result string and error.
  */
@@ -392,7 +392,7 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 	// Resolve the tool's effective impact via the intent registry.
 	impact := a.intentRegistry.ResolveToolIntent(toolName, skill, params)
 
-	// Gate: IBE triad check with scope — impact <= min(intent, clearance, scope_cap)
+	// Gate: IGX triad check with scope — impact <= min(intent, clearance, scope_cap)
 	scopeCap := -1
 	if scope != nil {
 		if cap, ok := scope.MaxImpact[toolName]; ok {

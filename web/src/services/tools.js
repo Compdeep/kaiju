@@ -51,8 +51,7 @@ export function connect() {
 
       switch (ev.type) {
         case 'start':
-          dag.nodes = []
-          dag.streamingVerdict = ''
+          dag.archiveAndClear()
           dag.running = true
           dag.interjectMode = true
           dag.interjections = []
@@ -64,7 +63,11 @@ export function connect() {
 
         case 'node':
           if (ev.node) {
-            const idx = dag.nodes.findIndex(n => n.id === ev.node.id)
+            let idx = dag.nodes.findIndex(n => n.id === ev.node.id)
+            // If backend sends a real interjection node, replace the synthetic client-side one
+            if (idx < 0 && ev.node.type === 'interjection') {
+              idx = dag.nodes.findIndex(n => n.id.startsWith('inj') && n.type === 'interjection')
+            }
             if (idx >= 0) dag.nodes[idx] = { ...ev.node }
             else dag.nodes.push({ ...ev.node })
             // Route any actions attached to this node

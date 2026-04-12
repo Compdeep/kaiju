@@ -1,5 +1,5 @@
 // Package skillhub provides a client for the ClawHub skill registry.
-// Skills are markdown-based instruction packages that teach the planner
+// Skills are markdown-based instruction packages that teach the executive
 // how to use tools for specific domains (research, browser automation, etc).
 // Compatible with OpenClaw's ClawHub format.
 package skillhub

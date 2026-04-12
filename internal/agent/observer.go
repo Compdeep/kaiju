@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
-	"github.com/user/kaiju/internal/agent/gates"
-	"github.com/user/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 )
 
 /*
@@ -59,7 +60,7 @@ Rules:
  * param: budget - the execution budget.
  * param: ch - channel to send the observer's completion result.
  * param: trigger - the investigation trigger.
- * param: intent - optional IBE intent level(s).
+ * param: intent - optional IGX intent level(s).
  */
 func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	graph *Graph, budget *Budget, ch chan<- nodeCompletion, trigger Trigger, intent ...gates.Intent) {
@@ -100,6 +101,24 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		}
 	}
 
+	// Recent execution history via ContextGate. The observer is per-node and
+	// per-call inputs (completed node, pending steps) stay inline above, but
+	// the worklog gives the observer context about what came before so it can
+	// spot patterns like "this failure was caused by something we did 3 steps ago".
+	if graph.Context != nil {
+		gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
+			ReturnSources: Sources(Worklog(10, "all")),
+			MaxBudget:     4000,
+		})
+		if gerr != nil {
+			log.Printf("[dag] observer context build failed for %s: %v", completedNode.Tag, gerr)
+		} else if wl := gateResp.Sources[SourceWorklog]; wl != "" {
+			sb.WriteString("\n## Recent Activity\n```\n")
+			sb.WriteString(wl)
+			sb.WriteString("\n```\n")
+		}
+	}
+
 	// Create a graph node for tracking
 	obsNode := &Node{
 		Type: NodeObserver,
@@ -126,30 +145,60 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
 	}
 
+	sysPrompt := defaultObserverRolePrompt + toolSection.String() + a.fleetSection()
+	userPrompt := sb.String()
 	messages := []llm.Message{
-		{Role: "system", Content: defaultObserverRolePrompt + toolSection.String() + a.fleetSection()},
-		{Role: "user", Content: sb.String()},
+		{Role: "system", Content: sysPrompt},
+		{Role: "user", Content: userPrompt},
 	}
 
+	startedObs := time.Now()
 	resp, err := a.executor.Complete(ctx, &llm.ChatRequest{
 		Messages:    messages,
+		Tools:       []llm.ToolDef{observerToolDef()},
+		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   1024,
 	})
+
+	traceObs := LLMTrace{
+		AlertID:  trigger.AlertID,
+		NodeID:   obsID,
+		NodeType: "observer",
+		Tag:      "observer_" + completedNode.Tag,
+		Started:  startedObs,
+		Input: map[string]string{
+			"completed_node":     completedNode.ID,
+			"completed_node_tag": completedNode.Tag,
+			"completed_tool":     completedNode.ToolName,
+		},
+		System:    sysPrompt,
+		User:      userPrompt,
+		LatencyMS: time.Since(startedObs).Milliseconds(),
+	}
+
 	if err != nil {
+		traceObs.Err = err.Error()
+		WriteLLMTrace(traceObs)
 		log.Printf("[dag] observer failed for %s: %v", completedNode.Tag, err)
 		graph.SetResult(obsID, "observer error: "+err.Error())
 		ch <- nodeCompletion{NodeID: obsID, Result: ""}
 		return
 	}
 
-	if len(resp.Choices) == 0 {
+	raw, err := extractToolArgs(resp)
+	if err != nil {
+		traceObs.Err = err.Error()
+		WriteLLMTrace(traceObs)
 		graph.SetResult(obsID, "no response")
 		ch <- nodeCompletion{NodeID: obsID, Result: ""}
 		return
 	}
+	traceObs.Output = raw
+	traceObs.TokensIn = resp.Usage.PromptTokens
+	traceObs.TokensOut = resp.Usage.CompletionTokens
+	WriteLLMTrace(traceObs)
 
-	raw := resp.Choices[0].Message.Content
 	log.Printf("[dag] observer for %s: %s", completedNode.Tag, Text.TruncateLog(raw, 150))
 	graph.SetResult(obsID, raw)
 
@@ -164,13 +213,12 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
  * return: parsed observerOutput pointer, or error if JSON is invalid.
  */
 func parseObserverOutput(raw string) (*observerOutput, error) {
-	cleaned := Text.StripCodeFence(raw)
-	if cleaned == "" {
+	if strings.TrimSpace(raw) == "" {
 		return &observerOutput{Action: "continue"}, nil
 	}
 
 	var output observerOutput
-	if err := json.Unmarshal([]byte(cleaned), &output); err != nil {
+	if err := ParseLLMJSON(raw, &output); err != nil {
 		return nil, fmt.Errorf("invalid observer JSON: %w", err)
 	}
 

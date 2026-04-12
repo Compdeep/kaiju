@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 // Watcher polls skill directories for changes and hot-reloads SKILL.md files.
@@ -83,7 +83,10 @@ func (w *Watcher) poll() {
 			if err != nil {
 				continue
 			}
-			// Later dirs override earlier (last wins)
+			// First wins — home dir skills take priority over bundled/repo.
+			if _, exists := found[fm.Name]; exists {
+				continue
+			}
 			found[fm.Name] = &discoveredSkill{
 				fm:      fm,
 				body:    body,

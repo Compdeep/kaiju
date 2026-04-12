@@ -3,7 +3,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 const routes = [
   { path: '/login', name: 'login', component: () => import('../views/LoginPage.vue') },
   { path: '/', redirect: '/chat' },
-  { path: '/chat', name: 'chat', component: () => import('../views/ChatPage.vue'), meta: { auth: true } },
+  { path: '/chat/:id?', name: 'chat', component: () => import('../views/ChatPage.vue'), meta: { auth: true } },
 ]
 
 const router = createRouter({

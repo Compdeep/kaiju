@@ -7,7 +7,7 @@ import (
 
 /*
  * ClearanceEndpoint is the DB representation of an external authorization endpoint.
- * desc: Stores the URL, timeout, and headers for a per-tool external clearance service used by the IBE gate
+ * desc: Stores the URL, timeout, and headers for a per-tool external clearance service used by the IGX gate
  */
 type ClearanceEndpoint struct {
 	ToolName  string            `json:"tool_name"`

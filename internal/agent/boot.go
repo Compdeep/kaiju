@@ -31,7 +31,7 @@ type BootEmbConfig struct {
 type BootGatesConfig struct {
 	RateLimit *int `json:"rate_limit"`
 	MaxTurns  *int `json:"max_turns"`
-	Clearance *int `json:"clearance"` // IBE clearance override
+	Clearance *int `json:"clearance"` // IGX clearance override
 }
 
 // BootDAGConfig holds DAG engine settings from BOOT.md frontmatter.

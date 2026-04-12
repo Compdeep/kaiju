@@ -44,17 +44,37 @@ func (textNS) TruncateLog(s string, n int) string {
 }
 
 /*
+ * TailTruncate keeps the LAST n characters of a string with a leading marker.
+ * desc: Use for log-shaped content where the most recent entries are at the
+ *       bottom (stderr dumps, error logs, worklog tails). Newlines are
+ *       preserved so multi-line errors stay readable.
+ * param: s - the string to truncate
+ * param: n - maximum length to keep from the tail
+ * return: the original or tail-truncated string
+ */
+func (textNS) TailTruncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "...(earlier output truncated)\n" + s[len(s)-n:]
+}
+
+/*
  * TruncateEvidence caps a result string for LLM synthesis input.
  * desc: Truncates to 2048 chars with a synthesis-specific suffix. Full results are preserved on the Node.
  * param: s - the evidence string to truncate
  * return: the original or truncated string
  */
 func (textNS) TruncateEvidence(s string) string {
-	const maxEvidenceLen = 2048
-	if len(s) <= maxEvidenceLen {
+	const maxLen = 2048
+	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxEvidenceLen] + "\n... (truncated for synthesis)"
+	// Show head + tail so both the beginning and end are visible.
+	// Avoids cutting mid-JSON or mid-sentence.
+	headLen := maxLen * 2 / 3
+	tailLen := maxLen / 3
+	return s[:headLen] + "\n\n... (middle truncated) ...\n\n" + s[len(s)-tailLen:]
 }
 
 /*

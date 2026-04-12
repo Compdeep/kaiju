@@ -27,7 +27,7 @@ Kaiju is a general-purpose AI assistant built in Go. It combines a battle-tested
      └─────────────┬─────────────┘
                    │
      ┌─────────────▼─────────────┐
-     │    IBE Gate (Safety)      │
+     │    IGX Gate (Safety)      │
      │ observe│operate│override  │
      └──────────────────────────-┘
 ```
@@ -40,7 +40,7 @@ Kaiju is a general-purpose AI assistant built in Go. It combines a battle-tested
 | `internal/agent` | DAG agent engine — planner, preflight, scheduler, reflection, compute, contextual executor |
 | `internal/agent/llm` | OpenAI/Anthropic-compatible HTTP client |
 | `internal/agent/tools` | Tool interface + thread-safe registry |
-| `internal/agent/gates` | Intent-Based Execution (IBE) safety gate |
+| `internal/agent/gates` | Intent-Gated Execution (IGX) safety gate |
 | `internal/agent/skillmd` | SKILL.md hot-reload loader for user-defined guidance skills |
 | `internal/db` | SQLite persistence for users, scopes, intents, sessions, memories, audit |
 | `internal/channels` | Channel plugin interface + registry |
@@ -50,7 +50,7 @@ Kaiju is a general-purpose AI assistant built in Go. It combines a battle-tested
 | `internal/config` | JSON config loader with env var expansion |
 | `internal/compat` | Shim layer for omamori dependencies (store, protocol, ipc) |
 | `pkg/gossip` | Optional P2P mesh networking module |
-| `pkg/sidecar` | Optional IPC sidecar protocol for external integrations |
+| `pkg/bridge` | Optional IPC bridge protocol for external integrations |
 
 ## Agent Execution Flow
 
@@ -64,7 +64,7 @@ Kaiju is a general-purpose AI assistant built in Go. It combines a battle-tested
 5. **Reflection** checkpoints decide: continue, conclude early, or replan. Reflector requires direct evidence of goal achievement to conclude — writing files is not achievement, only verified working behavior counts.
 6. **Micro-planner** handles individual node failures (skip, retry, or replace)
 7. **Aggregator** synthesizes all tool results into a final verdict
-8. **Actuator** executes any follow-up actions (gated by IBE)
+8. **Actuator** executes any follow-up actions (gated by IGX)
 
 ## Preflight
 
@@ -127,7 +127,7 @@ The web_fetch nodes can't fire until their dependency completes, so they don't a
 pressure. Enforcing per-skill limits at plan time would truncate mid-chain, breaking
 dependency injection (`param_refs`) and causing nodes to fire without their dependencies.
 
-## Intent-Based Execution (IBE)
+## Intent-Gated Execution (IGX)
 
 Every tool declares an impact rank. Every request carries an intent rank.
 The gate enforces: `tool.Impact(params) ≤ min(intent, clearance, scope_cap)`.
@@ -148,4 +148,4 @@ See `docs/config.md` for the full config reference.
 ## Optional Modules
 
 - **Gossip mesh** (`pkg/gossip`): P2P agent coordination via libp2p. See `docs/gossip.md`.
-- **Sidecar IPC** (`pkg/sidecar`): External process integration via NDJSON pipes. See `docs/sidecar.md`.
+- **Bridge IPC** (`pkg/bridge`): External process integration via NDJSON pipes. See `docs/bridge.md`.

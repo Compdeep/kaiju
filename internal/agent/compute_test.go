@@ -52,7 +52,7 @@ func TestComputePlanOutputWithSetup(t *testing.T) {
 }
 
 func TestBuildComputeUserPrompt(t *testing.T) {
-	prompt := buildComputeUserPrompt("compute pi", "what is pi?", nil, nil, "")
+	prompt := buildComputeUserPrompt("compute pi", "what is pi?", nil, nil, "", "")
 	if prompt == "" {
 		t.Error("buildComputeUserPrompt returned empty")
 	}
@@ -67,7 +67,7 @@ func TestBuildComputeUserPrompt(t *testing.T) {
 	}
 
 	// With hints
-	prompt = buildComputeUserPrompt("compute pi", "", nil, []any{"NameError: math not defined"}, "")
+	prompt = buildComputeUserPrompt("compute pi", "", nil, []any{"NameError: math not defined"}, "", "")
 	if !contains(prompt, "Previous Attempts") {
 		t.Error("missing hints section")
 	}
@@ -76,7 +76,7 @@ func TestBuildComputeUserPrompt(t *testing.T) {
 	}
 
 	// With plan
-	prompt = buildComputeUserPrompt("compute pi", "", nil, nil, "Use math.pi from stdlib")
+	prompt = buildComputeUserPrompt("compute pi", "", nil, nil, "Use math.pi from stdlib", "")
 	if !contains(prompt, "Blueprint") {
 		t.Error("missing plan section")
 	}
@@ -262,7 +262,7 @@ func TestScanWorkspaceDeep(t *testing.T) {
 }
 
 func TestBuildComputeUserPromptWithOwnership(t *testing.T) {
-	prompt := buildComputeUserPrompt("create backend", "build webapp", nil, nil, "Use Express 4")
+	prompt := buildComputeUserPrompt("create backend", "build webapp", nil, nil, "Use Express 4", "")
 	if !contains(prompt, "create backend") {
 		t.Error("missing goal")
 	}

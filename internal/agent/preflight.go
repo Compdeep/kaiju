@@ -2,13 +2,12 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 
-	"github.com/user/kaiju/internal/agent/gates"
-	"github.com/user/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 )
 
 /*
@@ -30,7 +29,15 @@ type PreflightResult struct {
 // specific tools that satisfy the named categories.
 var preflightCategories = []string{"network", "filesystem", "compute", "process", "info"}
 
-const preflightSystemPrompt = `You are a query preflight analyst. Analyze the user's query and return structured metadata that downstream components will use to plan and execute the work. Output ONLY JSON, no commentary.
+const preflightSystemPrompt = `You are a query preflight analyst. Analyze the user's CURRENT query (the user message at the bottom of this conversation) and return structured metadata that downstream components will use to plan and execute the work. Output ONLY JSON, no commentary.
+
+## What to classify vs. what is context
+
+**The user message at the bottom of the conversation IS the query you classify.** That message is the only thing that drives the mode/intent decisions below.
+
+**The "Prior Context" section in this system prompt (if present) is for PROJECT AWARENESS ONLY.** It contains the previous response this system gave the user — use it to understand what KIND of project is being worked on (web app, Python script, Go service, data analysis, etc.) so you can pick relevant skills. **Do NOT classify based on the prior context.** A short follow-up like "fix it" or "try again" still gets the SAME intent and mode as if there were no prior context — but the prior context tells you what skills the work touches.
+
+If the user's query is "get this site working" and the prior context mentions a React + Vite webapp, the skills should include the webdeveloper skill (because the project is a webapp), but the mode/intent classification should be based only on the literal query "get this site working".
 
 ## Output schema
 
@@ -43,15 +50,15 @@ const preflightSystemPrompt = `You are a query preflight analyst. Analyze the us
 
 ## Field meanings
 
-**skills** — Select the guidance skills whose domain matches the query. Zero or more from:
+**skills** — Select the guidance skills whose domain matches the work being done. Use BOTH the user's query AND the prior context (if any) to pick. Zero or more from:
 %s
 
-**mode** — Your job is to help the user. Classify:
-- "chat": greetings, thanks, small talk. Nothing to do.
-- "meta": questions about what you can do.
-- "investigate": the user wants something done. Build it, fix it, find it, run it. If they're asking for anything — investigate.
+**mode** — Based on the user's CURRENT query only, classify:
+- "chat": ONLY greetings, thanks, small talk, or purely conversational messages with no actionable request. Examples: "hello", "thanks", "how are you".
+- "meta": questions about your own capabilities. Examples: "what can you do", "what tools do you have".
+- "investigate": the user wants ANYTHING done or answered. Download, build, fix, find, run, search, explain, create, analyze, install, deploy, check, test — if there is a verb asking you to act or produce information, it is investigate. When in doubt, choose investigate.
 
-**intent** — Safety level the plan will need. Pick one:
+**intent** — Safety level the plan will need. Pick based on what ACTIONS the query implies, not how it's phrased. A user reporting a problem ("X isn't working", "I can't access Y") after prior work implicitly wants it fixed — that requires operate, not observe. Pick one:
 %s
 
 **required_categories** — Tool categories the plan MUST include. Pick from:
@@ -62,6 +69,19 @@ const preflightSystemPrompt = `You are a query preflight analyst. Analyze the us
 - "info": system state, env vars, disk, network info
 
 Return ONLY the raw JSON object.`
+
+// preflightSystemPromptWithContext is built at call time when prior context
+// is available — appended after the base prompt. Kept separate so the base
+// prompt const stays clean.
+const preflightPriorContextTemplate = `
+
+## Prior Context (project awareness only — do NOT classify based on this)
+
+The previous response this system gave to the user was:
+
+%s
+
+Use this context to identify what KIND of project is being worked on and pick appropriate skills. The project type tells you which skills are relevant. Do NOT use this to decide mode or intent — only the user's current query (the user message below) drives those decisions.`
 
 /*
  * preflightRaw mirrors the JSON shape emitted by the LLM. Parsed into PreflightResult.
@@ -91,20 +111,42 @@ type preflightRaw struct {
  */
 func (a *Agent) preflightQuery(ctx context.Context, query string, history []llm.Message) *PreflightResult {
 	manifest := a.buildSkillManifest()
+	log.Printf("[dag] preflight: manifest has %d capabilities + %d guidance skills", len(a.capabilities), len(a.skillGuidance))
 	// Build dynamic intent list from the registry: enum for schema + descriptions.
 	intentNames := a.intentRegistry.AllowedNames(-1)
 	intentEnum := `"` + strings.Join(intentNames, `" | "`) + `"`
 	intentDescriptions := a.intentRegistry.PromptBlock(-1)
 	sysPrompt := fmt.Sprintf(preflightSystemPrompt, intentEnum, manifest, intentDescriptions)
 
-	// Build message list: system, then last N turns of history (assistant
-	// replies truncated), then the current query.
-	msgs := []llm.Message{{Role: "system", Content: sysPrompt}}
-	msgs = append(msgs, truncatedHistory(history, 5, 500)...)
-	msgs = append(msgs, llm.Message{Role: "user", Content: query})
+	// Project-awareness pass: pull the most recent assistant message from
+	// history (that's the previous aggregator response) and inject it into
+	// the system prompt as a clearly-labeled Prior Context block. This lets
+	// the LLM know what KIND of project is being worked on without
+	// confusing the classification target. The current user query stays as
+	// the only user-role message — so the LLM has an unambiguous "this is
+	// what to classify" signal.
+	if priorContext := lastAssistantMessage(history); priorContext != "" {
+		// Generous truncation — 1500 chars is enough to fit a typical
+		// aggregator verdict including its project-type description.
+		sysPrompt += fmt.Sprintf(preflightPriorContextTemplate, Text.TruncateLog(priorContext, 1500))
+		log.Printf("[dag] preflight: injected prior context (%d chars truncated to 1500)", len(priorContext))
+	}
+
+	// Build message list: system prompt (with optional prior context) then
+	// the current user query as the ONLY user message. We deliberately do
+	// not pass the older history-as-messages anymore — the prior context
+	// in the system prompt is the structured replacement, and the strict
+	// "what to classify" signal is now unambiguous.
+	msgs := []llm.Message{
+		{Role: "system", Content: sysPrompt},
+		{Role: "user", Content: query},
+	}
+	log.Printf("[dag] preflight: query=%q, history=%d turns (last assistant injected as context)", query, len(history))
 
 	resp, err := a.executor.Complete(ctx, &llm.ChatRequest{
 		Messages:    msgs,
+		Tools:       []llm.ToolDef{preflightToolDef()},
+		ToolChoice:  "required",
 		Temperature: 0.0,
 		MaxTokens:   256,
 	})
@@ -112,16 +154,14 @@ func (a *Agent) preflightQuery(ctx context.Context, query string, history []llm.
 		log.Printf("[dag] preflight failed, using defaults: %v", err)
 		return defaultPreflight()
 	}
-	if len(resp.Choices) == 0 {
+
+	raw, err := extractToolArgs(resp)
+	if err != nil {
 		log.Printf("[dag] preflight returned no choices, using defaults")
 		return defaultPreflight()
 	}
-
-	raw := resp.Choices[0].Message.Content
-	cleaned := Text.StripCodeFence(raw)
-
 	var out preflightRaw
-	if err := json.Unmarshal([]byte(cleaned), &out); err != nil {
+	if err := ParseLLMJSON(raw, &out); err != nil {
 		log.Printf("[dag] preflight parse failed (%v), using defaults", err)
 		return defaultPreflight()
 	}
@@ -233,6 +273,25 @@ func defaultPreflight() *PreflightResult {
 		Mode:   "investigate",
 		Intent: gates.Intent(0),
 	}
+}
+
+/*
+ * lastAssistantMessage returns the content of the most recent assistant
+ * message in the history, or empty string if none exists. Used by the
+ * preflight to surface the previous aggregator response as project context.
+ * desc: Walks the history slice from the end and returns the first message
+ *       with role "assistant". Returns empty if the history is empty or
+ *       contains no assistant messages.
+ * param: history - the full conversation history.
+ * return: assistant message content, or empty string.
+ */
+func lastAssistantMessage(history []llm.Message) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" && history[i].Content != "" {
+			return history[i].Content
+		}
+	}
+	return ""
 }
 
 /*

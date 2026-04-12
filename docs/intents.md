@@ -1,6 +1,6 @@
 # Intents
 
-Intents are the IBE (Intent-Based Execution) safety levels. Kaiju starts with three built-ins and lets admins add more.
+Intents are the IGX (Intent-Gated Execution) safety levels. Kaiju starts with three built-ins and lets admins add more.
 
 ## Built-in intents
 
@@ -34,7 +34,7 @@ Example custom intents:
 These show up in:
 - The chat intent dropdown (fetched from `/api/v1/intents`)
 - The preflight classifier's output schema (as valid enum values)
-- The planner's IBE prompt section (descriptions injected dynamically)
+- The planner's IGX prompt section (descriptions injected dynamically)
 
 ## Tool intent assignment
 
@@ -69,14 +69,26 @@ but never raise it. Per-invocation granularity from `tool.Impact(params)` is
 always preserved. For example, `bash("ls")` returns rank 0 regardless of
 whether bash is assigned to a high intent.
 
-The resolved rank is what the IBE gate compares against the request intent, scope caps, and clearance.
+The resolved rank is what the IGX gate compares against the request intent, scope caps, and clearance.
+
+## Automatic intent inference
+
+When no explicit intent is provided (no `/intent` command, no UI dropdown selection, no `intent` field in the API request), the preflight classifier infers the intent from the query. This is an LLM call using the executor model (cheap/fast) that reads the query and picks the most appropriate intent name from the registry.
+
+The inference considers:
+- The query text itself ("delete all logs" → override, "build a webapp" → operate)
+- Prior conversation context — a follow-up like "it's not working" after a fix attempt implies the user wants action (operate), not just observation
+
+The inferred intent is then capped by `min(inferred, user_max_intent, scope_cap)`. The LLM's inference can never escalate beyond the user's ceiling.
+
+When an explicit intent IS set (via CLI, UI, or API), the preflight inference is skipped entirely — the explicit value is used directly (still capped by user max and scope).
 
 ## How prompts see intents
 
 Both preflight and planner pull intent descriptions from the registry at call time:
 
 - **Preflight prompt**: the `intent` field in its output schema lists all registered intent names as an enum, and the description section under `**intent**` is generated from `registry.PromptBlock()`.
-- **Planner prompt (structured mode)**: the `## Intent-Based Execution` section is generated from the registry. Shows allowed levels (filtered by scope cap) and the gate enforcement rule.
+- **Planner prompt (structured mode)**: the `## Intent-Gated Execution` section is generated from the registry. Shows allowed levels (filtered by scope cap) and the gate enforcement rule.
 
 Adding a custom intent and restarting kaiju makes it immediately visible to the LLM. No prompt edits required.
 

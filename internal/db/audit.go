@@ -5,8 +5,8 @@ import (
 )
 
 /*
- * AuditEntry represents an IBE gate decision log entry.
- * desc: Records the outcome of an Intent-Based Enforcement gate check including tool, impact level, and result
+ * AuditEntry represents an IGX gate decision log entry.
+ * desc: Records the outcome of an Intent-Gated Enforcement gate check including tool, impact level, and result
  */
 type AuditEntry struct {
 	ID        int64  `json:"id"`

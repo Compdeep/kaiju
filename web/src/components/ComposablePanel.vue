@@ -60,7 +60,7 @@
         <div v-if="mediaLoading" class="files-loading">Loading media...</div>
         <div v-else class="media-grid">
           <div v-for="m in mediaFiles" :key="m.path" class="media-thumb" @click="openViewer(m)">
-            <img v-if="m.type === 'image'" :src="serveUrl(m.path)" :alt="m.name" loading="lazy"/>
+            <img v-if="m.type === 'image'" :src="serveUrl(m.path)" :alt="m.name" loading="lazy" @load="onThumbLoad"/>
             <div v-else class="media-video-thumb">
               <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             </div>
@@ -507,6 +507,10 @@ function openViewer(m) {
   nextTick(() => { viewerEl.value?.focus() })
 }
 
+function onThumbLoad(e) {
+  e.target.classList.add('loaded')
+}
+
 function onViewerKey(e) {
   if (e.key === 'Escape') { viewerFile.value = null; return }
   if (e.key === 'f' || e.key === 'F') { toggleFullscreen(); return }
@@ -722,29 +726,65 @@ watch(() => panel.activeTab, (tab) => {
 .file-size { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
 .files-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px; font-style: italic; }
 
-/* Media grid */
+/* Media grid — masonry column layout */
 .media-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 8px; padding: 8px; overflow-y: auto; flex: 1;
+  columns: 2;
+  column-gap: 6px;
+  padding: 6px;
+  overflow-y: auto;
+  flex: 1;
+}
+/* Bump to 3 columns when panel is wide enough */
+@media (min-width: 480px) {
+  .media-grid { columns: 3; }
 }
 .media-thumb {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  cursor: pointer; padding: 6px; border-radius: 6px;
-  transition: background 0.1s ease;
-}
-.media-thumb:hover { background: var(--surface-hover); }
-.media-thumb img {
-  width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px;
+  break-inside: avoid;
+  display: inline-flex;
+  flex-direction: column;
+  width: 100%;
+  margin-bottom: 6px;
+  cursor: pointer;
+  border-radius: 6px;
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
   background: var(--bg-soft);
 }
+.media-thumb:hover {
+  transform: scale(1.02);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.media-thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 4px 4px 0 0;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.media-thumb img.loaded {
+  opacity: 1;
+}
 .media-video-thumb {
-  width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
-  background: var(--bg-soft); border-radius: 4px; color: var(--text-muted);
+  width: 100%;
+  aspect-ratio: 16/9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-soft);
+  border-radius: 4px 4px 0 0;
+  color: var(--text-muted);
 }
 .media-name {
-  font-size: 9px; font-family: var(--mono); color: var(--text-muted);
-  text-align: center; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; width: 100%;
+  font-size: 9px;
+  font-family: var(--mono);
+  color: var(--text-muted);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  padding: 4px 6px;
 }
 
 /* Footer section bar */

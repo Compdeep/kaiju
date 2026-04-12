@@ -16,7 +16,7 @@ package gossip
 import (
 	"context"
 
-	"github.com/user/kaiju/internal/compat/protocol"
+	"github.com/Compdeep/kaiju/internal/compat/protocol"
 )
 
 // Publisher is the interface the agent uses to publish messages to the mesh.

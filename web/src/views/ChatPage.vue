@@ -39,7 +39,17 @@
     <div class="chat-panel">
       <div class="chat-messages" ref="messagesEl">
         <div v-if="!sessions.messages.length" class="empty-state">
-          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-muted);margin-bottom:12px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <svg viewBox="0 0 100 100" width="40" height="40" fill="none" stroke="var(--text-muted)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:12px;opacity:0.5">
+            <g>
+              <g transform="translate(50,44) rotate(180)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+              <g transform="translate(29,57) rotate(90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+              <g transform="translate(71,57) rotate(-90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+              <g transform="translate(50,68)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+              <g transform="translate(50,79)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+            </g>
+            <line x1="42" y1="52" x2="42" y2="60" stroke-width="2.5"/>
+            <line x1="58" y1="52" x2="58" y2="60" stroke-width="2.5"/>
+          </svg>
           <p>Start a conversation</p>
         </div>
 
@@ -71,9 +81,11 @@
         </div>
 
         <div v-if="sessions.loading" class="msg assistant">
-          <div class="msg-meta"><span class="msg-author">kaiju</span></div>
+          <div class="msg-meta">
+            <span class="msg-author">kaiju</span>
+            <span v-if="!dag.streamingVerdict" class="thinking-scan"></span>
+          </div>
           <div v-if="dag.streamingVerdict" class="msg-content md" v-html="renderMd(dag.streamingVerdict)"></div>
-          <div v-else class="msg-content thinking"><span></span><span></span><span></span></div>
         </div>
 
         <!-- Breathing room: pushes content up so agent response starts visible -->
@@ -103,7 +115,7 @@
               <div class="ctl-btn" :class="{ active: openMenu === 'intent' }">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L3 7v4c0 7 9 11 9 11s9-4 9-11V7z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
               </div>
-              <span class="ctl-tip">IBE: {{ sessions.intent || 'auto' }}</span>
+              <span class="ctl-tip">IGX: {{ sessions.intent || 'auto' }}</span>
               <Transition name="menu">
                 <div v-if="openMenu === 'intent'" class="ctl-menu">
                   <div v-for="i in availableIntents" :key="i.name"
@@ -185,6 +197,7 @@
  * desc: Main chat page with resizable sidebar, message thread, DAG trace display, composable panel, and interjection support
  */
 import { ref, nextTick, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useSessionsStore } from '../stores/sessions'
 import { useDagStore } from '../stores/dag'
 import { usePanelStore } from '../stores/panel'
@@ -225,9 +238,16 @@ hljs.registerLanguage('cpp', hljsCpp)
 hljs.registerLanguage('typescript', hljsTypescript)
 hljs.registerLanguage('ts', hljsTypescript)
 
+const renderer = new marked.Renderer()
+renderer.link = function ({ href, title, text }) {
+  const t = title ? ` title="${title}"` : ''
+  return `<a href="${href}"${t} target="_blank" rel="noopener">${text}</a>`
+}
+
 marked.setOptions({
   breaks: true,
   gfm: true,
+  renderer,
   highlight: (code, lang) => {
     if (lang && hljs.getLanguage(lang)) {
       try { return hljs.highlight(code, { language: lang }).value } catch {}
@@ -237,6 +257,8 @@ marked.setOptions({
   },
 })
 
+const route = useRoute()
+const router = useRouter()
 const sessions = useSessionsStore()
 const dag = useDagStore()
 const panel = usePanelStore()
@@ -269,10 +291,18 @@ async function loadIntents() {
 onMounted(async () => {
   await loadIntents()
   await chat.loadSessions()
-  if (sessions.sessionId && sessions.sessions.find(s => s.id === sessions.sessionId)) {
+
+  // Session from URL takes priority, then localStorage, then most recent
+  const urlSessionId = route.params.id
+  if (urlSessionId && sessions.sessions.find(s => s.id === urlSessionId)) {
+    await chat.switchSession(urlSessionId)
+  } else if (sessions.sessionId && sessions.sessions.find(s => s.id === sessions.sessionId)) {
     await chat.switchSession(sessions.sessionId)
+    // Sync URL to match the loaded session
+    if (sessions.sessionId) router.replace({ name: 'chat', params: { id: sessions.sessionId } })
   } else if (sessions.sessions.length > 0) {
     await chat.switchSession(sessions.sessions[0].id)
+    router.replace({ name: 'chat', params: { id: sessions.sessions[0].id } })
   }
   tools.connect()
 })
@@ -364,13 +394,19 @@ async function send() {
   if (!text) return
   input.value = ''
 
-  const isInterject = dag.interjectMode && dag.running
+  const isInterject = sessions.loading && (dag.interjectMode || dag.running)
 
   if (isInterject) {
     await chat.interject(text)
   } else {
     // Don't await — send starts loading, spacer expands via CSS
     chat.send(text)
+    // Scroll down once after spacer expands so the thinking indicator is visible
+    nextTick(() => {
+      setTimeout(() => {
+        if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+      }, 260) // after spacer CSS transition (240ms)
+    })
   }
 
 }
@@ -387,12 +423,18 @@ function renderMd(text) {
   return marked.parse(text)
 }
 
-onMounted(async () => {
-  await chat.loadSessions()
-  if (sessions.sessionId) {
-    await chat.switchSession(sessions.sessionId)
+// Watch for route changes (e.g. clicking a session in sidebar or browser back/forward)
+watch(() => route.params.id, async (newId) => {
+  if (newId && newId !== sessions.sessionId) {
+    await chat.switchSession(newId)
   }
-  tools.connect()
+})
+
+// Sync URL when session changes (new session created, sidebar click, etc.)
+watch(() => sessions.sessionId, (newId) => {
+  if (newId && route.params.id !== newId) {
+    router.replace({ name: 'chat', params: { id: newId } })
+  }
 })
 </script>
 
@@ -497,18 +539,27 @@ onMounted(async () => {
   color: var(--text-muted);
 }
 .msg.user .msg-author { color: var(--accent-warm); }
-.msg.assistant .msg-author { color: var(--accent); }
+.msg.assistant .msg-author { color: var(--accent); font-family: var(--display); letter-spacing: 0.12em; }
 .msg-content { font-size: 14px; line-height: 1.7; color: var(--text); }
 .msg.user .msg-content { color: var(--text-secondary); }
 
-.thinking { display: flex; gap: 4px; padding: 4px 0; }
-.thinking span {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--accent); opacity: 0.3;
-  animation: blink 1.4s infinite both;
+.thinking-scan {
+  display: inline-block;
+  width: 48px;
+  height: 2px;
+  margin-left: 8px;
+  vertical-align: middle;
+  background: linear-gradient(90deg, transparent, var(--accent), #f472b6, var(--accent), transparent);
+  background-size: 200% 100%;
+  border-radius: 1px;
+  animation: scan-sweep 1.4s ease-in-out infinite;
+  box-shadow: 0 0 6px var(--accent), 0 0 12px rgba(129, 140, 248, 0.3);
 }
-.thinking span:nth-child(2) { animation-delay: 0.2s; }
-.thinking span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes scan-sweep {
+  0% { background-position: 100% 0; opacity: 0.4; }
+  50% { background-position: 0% 0; opacity: 1; }
+  100% { background-position: 100% 0; opacity: 0.4; }
+}
 
 /* Spacer: creates breathing room below the last message when loading */
 .msg-spacer {

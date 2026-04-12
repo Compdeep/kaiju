@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/user/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 )
 
 /*
@@ -156,7 +156,7 @@ func (r *Registry) List() []string {
 type ToolInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Impact      int    `json:"impact"` // IBE impact tier index (0/1/2); registry maps to ranks on the configured ladder
+	Impact      int    `json:"impact"` // IGX impact tier index (0/1/2); registry maps to ranks on the configured ladder
 	IsBuiltin   bool   `json:"isBuiltin"`
 	Enabled     bool   `json:"enabled"`
 	Source      string `json:"source"`

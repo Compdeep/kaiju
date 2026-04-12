@@ -11,8 +11,8 @@ import (
 	"time"
 
 	readability "github.com/go-shiori/go-readability"
-	"github.com/user/kaiju/internal/agent/llm"
-	agenttools "github.com/user/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
+	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 /*

@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/user/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 /*

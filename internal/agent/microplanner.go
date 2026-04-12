@@ -5,441 +5,242 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/user/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 )
 
 /*
- * microPlannerOutput is the LLM's response to a node failure.
- * desc: Contains the recovery action (retry, skip, replace) and optional
- *       replacement plan steps.
+ * microPlannerOutput is the clean-room debugger's response.
+ * desc: Contains a diagnosis summary and a plan of steps to fix the problem.
  */
 type microPlannerOutput struct {
-	Action string     `json:"action"` // "retry", "skip", "replace"
-	Nodes  []PlanStep `json:"nodes"`  // replacement/retry steps (empty for skip)
+	Summary string     `json:"summary"` // diagnosis of root cause
+	Nodes   []PlanStep `json:"nodes"`   // fix plan steps
 }
 
 /*
- * fireMicroPlanner runs a scoped repair LLM call for a failed node.
- * desc: Builds a prompt with the failed step's details (error, params, schema),
- *       sibling results for context, and available tools for replacement.
- *       Sends the result back on the completion channel as a nodeCompletion
- *       for the micro-planner node itself.
- * param: ctx - context for the LLM call.
- * param: mpNode - the micro-planner node in the graph.
- * param: failedNode - the node that failed and needs repair.
- * param: graph - the investigation graph.
- * param: budget - the execution budget.
- * param: ch - channel to send the micro-planner's completion result.
+ * extractDebugSummary parses a debugger node's stored Result and returns the
+ * diagnosis summary, head-truncated for worklog use.
+ * desc: Used to write FIXED markers to the worklog after a debug cycle's
+ *       grafted nodes complete successfully. Returns "" if the result can't
+ *       be parsed.
+ * param: raw - the debugger node's Result string.
+ * return: truncated summary or empty string.
  */
-func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, failedNode *Node,
-	graph *Graph, budget *Budget, ch chan<- nodeCompletion, trigger ...Trigger) {
-
-	// List available tools for "replace" option
-	var toolList string
-	for _, name := range a.registry.List() {
-		if sk, ok := a.registry.Get(name); ok {
-			toolList += fmt.Sprintf("- %s: %s\n", name, sk.Description())
-		}
+func extractDebugSummary(raw string) string {
+	if raw == "" {
+		return ""
 	}
-
-	var prompt string
-
-	if failedNode.Type == NodeCompute {
-		// Enhanced context for compute node failures — show goal, not raw params
-		prompt = fmt.Sprintf("A compute step failed.\n\nGoal: %v\nMode: %v\nError: %v\n",
-			failedNode.Params["goal"], failedNode.Params["mode"], failedNode.Error)
-		if blueprintRef, ok := failedNode.Params["blueprint_ref"].(string); ok {
-			prompt += fmt.Sprintf("Plan reference: %s\n", blueprintRef)
-		}
-		if hints, ok := failedNode.Params["hints"].([]any); ok && len(hints) > 0 {
-			prompt += "Previous attempts:\n"
-			for i, h := range hints {
-				prompt += fmt.Sprintf("  %d. %v\n", i+1, h)
-			}
-		}
-		prompt += fmt.Sprintf("\nAvailable tools for replacement:\n%s\nResults from other steps at the same stage:\n", toolList)
-	} else {
-		// Standard prompt for tool nodes — show params without hints to avoid bloat
-		paramSchema := ""
-		if sk, ok := a.registry.Get(failedNode.ToolName); ok {
-			paramSchema = fmt.Sprintf("\nTool %q parameters: %s\n", failedNode.ToolName, string(sk.Parameters()))
-		}
-		cleanParams := make(map[string]any)
-		for k, v := range failedNode.Params {
-			if k != "hints" {
-				cleanParams[k] = v
-			}
-		}
-		prompt = fmt.Sprintf("A step failed during the investigation.\n\nFailed step: %s (tool: %s)\nError: %v\nParameters: %v\n%s\n",
-			failedNode.Tag, failedNode.ToolName, failedNode.Error, cleanParams, paramSchema)
-		if hints, ok := failedNode.Params["hints"].([]any); ok && len(hints) > 0 {
-			prompt += "Previous attempts that also failed:\n"
-			for i, h := range hints {
-				prompt += fmt.Sprintf("  %d. %v\n", i+1, h)
-			}
-			prompt += "Try a DIFFERENT approach.\n"
-		}
-		prompt += fmt.Sprintf("\nAvailable tools for replacement:\n%s\nResults from other steps at the same stage:\n", toolList)
+	var out microPlannerOutput
+	if err := ParseLLMJSON(raw, &out); err != nil {
+		return ""
 	}
-
-	siblings := graph.SiblingResults(failedNode.ID)
-	if len(siblings) == 0 {
-		prompt += "(none)\n"
-	} else {
-		for label, result := range siblings {
-			prompt += fmt.Sprintf("- %s: %s\n", label, Text.TruncateLog(result, 500))
-		}
-	}
-
-	// Include user context (truncated to avoid token burn on retries)
-	if len(trigger) > 0 {
-		query := formatTrigger(trigger[0])
-		if query != "" {
-			prompt += fmt.Sprintf("\nOriginal request: %s\n", Text.TruncateLog(query, 200))
-		}
-		// Include all user messages for context (truncated to keep prompt reasonable)
-		var userMsgs []llm.Message
-		for _, m := range trigger[0].History {
-			if m.Role == "user" {
-				userMsgs = append(userMsgs, m)
-			}
-		}
-		for _, m := range userMsgs {
-			prompt += fmt.Sprintf("User context: %s\n", Text.TruncateLog(m.Content, 100))
-		}
-		log.Printf("[dag] micro-planner context: query=%q, history=%d user msgs (showing all)",
-			Text.TruncateLog(query, 80), len(userMsgs))
-		for i, m := range userMsgs {
-			log.Printf("[dag] micro-planner user msg %d: %s", i, Text.TruncateLog(m.Content, 100))
-		}
-	} else {
-		log.Printf("[dag] micro-planner: no trigger context available")
-	}
-
-	// Log hints count
-	if hints, ok := failedNode.Params["hints"].([]any); ok {
-		log.Printf("[dag] micro-planner hints: %d accumulated failures for %s", len(hints), failedNode.Tag)
-	}
-
-	prompt += `
-Decide how to recover. Output JSON:
-{
-  "action": "retry|skip|replace",
-  "nodes": [{"tool": "...", "params": {...}, "depends_on": [], "tag": "..."}]
+	return Text.TruncateLog(out.Summary, 240)
 }
 
-- "skip": abandon this node, let dependents proceed without its data. nodes=[]
-- "retry": try the same tool with CORRECT parameters (see schema above). nodes=[one entry]
-- "replace": use alternative tool(s) from the available list. nodes=[one or more]
-- If the same tool already failed, prefer "skip" or "replace" over another retry.
-- NEVER use "compute" as a replacement tool. Compute is for code generation, not repairs. Use bash, file_read, file_write, net_info, web_fetch, or service instead.
+/*
+ * fireMicroPlanner runs the clean-room debugger.
+ * desc: Called by the scheduler after Holmes concludes an investigation.
+ *       Receives a curated context from ContextGate: a curator-built summary
+ *       (worklog + failures filtered to the problem query) plus verbatim
+ *       blueprint, workspace tree, and debug guidance. NO global worklog
+ *       leakage — the curator only sees what relates to the query.
+ *       Uses the reasoning model for deep analysis.
+ * param: ctx - context for the LLM call.
+ * param: mpNode - the micro-planner node in the graph.
+ * param: graph - the investigation graph (used for budget tracking only).
+ * param: budget - the execution budget.
+ * param: ch - channel to send the completion result.
+ * param: gateCtx - the assembled context from ContextGate (Summary + Sources).
+ * param: trigger - the investigation trigger (used for original request text).
+ * param: intent - the resolved investigation intent (post-auto-inference;
+ *                 used for tool list filtering — must NOT be trigger.Intent()
+ *                 which returns IntentAuto for chat queries and would filter
+ *                 every tool out of the prompt).
+ */
+func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph,
+	budget *Budget, ch chan<- nodeCompletion, gateCtx *ContextResponse, trigger Trigger, intent gates.Intent) {
 
-Output ONLY the JSON, no commentary.`
+	sysPrompt := debuggerPrompt + a.fleetSection()
+	userPrompt := assembleDebuggerPrompt(mpNode, gateCtx, trigger, a, intent)
 
-	log.Printf("[dag] micro-planner prompt for %s (%d bytes): %s", failedNode.Tag, len(prompt), Text.TruncateLog(prompt, 800))
+	log.Printf("[dag] debugger prompt for %s (%d bytes): %s", mpNode.Tag, len(userPrompt), Text.TruncateLog(userPrompt, 800))
 
 	messages := []llm.Message{
-		{Role: "system", Content: defaultMicroPlannerRolePrompt},
-		{Role: "user", Content: prompt},
+		{Role: "system", Content: sysPrompt},
+		{Role: "user", Content: userPrompt},
 	}
 
-	// Escalate to reasoning model after 3 failures — executor model is stuck
-	client := a.executor
-	modelLabel := "executor"
-	if hints, ok := failedNode.Params["hints"].([]any); ok && len(hints) >= 3 {
-		client = a.llm
-		modelLabel = "reasoning"
-		log.Printf("[dag] micro-planner escalating to reasoning model after %d failures on %s", len(hints), failedNode.Tag)
-		a.broadcastDAGEvent(DAGEvent{Type: "escalation", NodeID: mpNode.ID, Node: &NodeInfo{
-			ID: mpNode.ID, Type: "micro_planner", Tag: fmt.Sprintf("escalated after %d failures", len(hints)),
-		}})
-	}
+	log.Printf("[dag] debugger calling reasoning model for %s", mpNode.Tag)
+	started := time.Now()
 
-	log.Printf("[dag] micro-planner calling %s model for %s", modelLabel, failedNode.Tag)
-
-	resp, err := client.Complete(ctx, &llm.ChatRequest{
+	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
 		Messages:    messages,
+		Tools:       []llm.ToolDef{debuggerToolDef()},
+		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   1024,
+		MaxTokens:   4096,
 	})
+
+	// Build trace entry for the debug log.
+	trace := LLMTrace{
+		AlertID:  trigger.AlertID,
+		NodeID:   mpNode.ID,
+		NodeType: "debugger",
+		Tag:      mpNode.Tag,
+		Model:    "reasoning",
+		Started:  started,
+		Input: map[string]string{
+			"problem": fmt.Sprintf("%v", mpNode.Params["problem"]),
+		},
+		System:    sysPrompt,
+		User:      userPrompt,
+		LatencyMS: time.Since(started).Milliseconds(),
+	}
+	if gateCtx != nil {
+		trace.GateSummary = gateCtx.Summary
+		trace.GateReturned = gateCtx.Sources
+	}
+
 	if err != nil {
-		ch <- nodeCompletion{NodeID: mpNode.ID, Err: fmt.Errorf("micro-planner LLM (%s): %w", modelLabel, err)}
+		trace.Err = err.Error()
+		WriteLLMTrace(trace)
+		ch <- nodeCompletion{NodeID: mpNode.ID, Err: fmt.Errorf("debugger LLM: %w", err)}
 		return
 	}
 
-	if len(resp.Choices) == 0 {
-		ch <- nodeCompletion{NodeID: mpNode.ID, Err: fmt.Errorf("micro-planner: no choices")}
+	raw, err := extractToolArgs(resp)
+	if err != nil {
+		trace.Err = err.Error()
+		WriteLLMTrace(trace)
+		ch <- nodeCompletion{NodeID: mpNode.ID, Err: fmt.Errorf("debugger: %w", err)}
 		return
 	}
+	trace.Output = raw
+	trace.TokensIn = resp.Usage.PromptTokens
+	trace.TokensOut = resp.Usage.CompletionTokens
+	WriteLLMTrace(trace)
 
-	raw := resp.Choices[0].Message.Content
-	log.Printf("[dag] micro-planner output: %s", Text.TruncateLog(raw, 200))
+	log.Printf("[dag] debugger output: %s", Text.TruncateLog(raw, 300))
+
+	// Write debug blueprint to disk for observability (session-scoped).
+	writeDebugBlueprint(a.cfg.MetadataDir, trigger.SessionID, mpNode.Tag, raw)
 
 	ch <- nodeCompletion{NodeID: mpNode.ID, Result: raw}
 }
 
-/*
- * parseMicroPlannerOutput interprets the micro-planner's response and
- * creates replacement nodes in the graph.
- * desc: Parses the JSON response, then handles each action type: skip marks
- *       the failed node as skipped, retry creates a single replacement node
- *       with the same deps, replace creates one or more alternative nodes.
- *       Dependents of the failed node are rewritten to point to replacements.
- * param: raw - the raw LLM output string.
- * param: failedNode - the original failed node.
- * param: graph - the investigation graph.
- * param: budget - the execution budget.
- * return: slice of created replacement Node pointers, or error.
- */
-func parseMicroPlannerOutput(raw string, failedNode *Node, graph *Graph, budget *Budget) ([]*Node, error) {
-	cleaned := Text.StripCodeFence(raw)
+// assembleDebuggerPrompt formats the gate response into the debugger's user
+// message. Order: original request → problem → Holmes RCA (if any) →
+// curator summary → verbatim sources (blueprint, workspace_tree,
+// skill_guidance) → available tools.
+//
+// When a Holmes RCA is present in mpNode.Params["rca"] it is rendered
+// prominently as the authoritative diagnosis — the debugger is told (in the
+// system prompt) to plan the fix from the RCA rather than re-diagnosing.
+//
+// intent must be the resolved investigation intent (NOT trigger.Intent() —
+// for chat queries trigger.Intent() returns IntentAuto and would filter every
+// tool out of the prompt, leaving the debugger with an empty list).
+func assembleDebuggerPrompt(mpNode *Node, gateCtx *ContextResponse, trigger Trigger, a *Agent, intent gates.Intent) string {
+	var sb strings.Builder
 
-	var output microPlannerOutput
-	if err := json.Unmarshal([]byte(cleaned), &output); err != nil {
-		return nil, fmt.Errorf("invalid micro-planner JSON: %w", err)
+	sb.WriteString("## Original Request\n\n")
+	sb.WriteString(formatTrigger(trigger))
+	sb.WriteString("\n\n")
+
+	if problem, ok := mpNode.Params["problem"].(string); ok && problem != "" {
+		sb.WriteString("## Problem (as seen in the logs)\n\n")
+		sb.WriteString(problem)
+		sb.WriteString("\n\n")
 	}
 
-	switch output.Action {
-	case "skip":
-		// Mark failed node as skipped so dependents can proceed
-		graph.SetState(failedNode.ID, StateSkipped)
-		log.Printf("[dag] micro-planner: skipping failed node %s", failedNode.ID)
-		return nil, nil
-
-	case "retry":
-		if len(output.Nodes) == 0 {
-			return nil, fmt.Errorf("retry action with no nodes")
-		}
-		step := output.Nodes[0]
-		if !budget.TrySpawnNode(step.Tool, false) {
-			return nil, fmt.Errorf("budget exhausted for retry")
-		}
-		nodeType := NodeTool
-		if step.Tool == "compute" {
-			nodeType = NodeCompute
-		}
-		n := &Node{
-			Type:      nodeType,
-			ToolName: step.Tool,
-			Params:    step.Params,
-			DependsOn: failedNode.DependsOn, // inherit parent's deps
-			SpawnedBy: failedNode.ID,
-			Tag:       step.Tag,
-		}
-		if n.Tag == "" {
-			n.Tag = failedNode.Tag + "_retry"
-		}
-		propagateRetryState(n, failedNode)
-		graph.AddNode(n)
-		// Rewrite dependents of the failed node to depend on the retry instead
-		rewriteDependents(graph, failedNode.ID, n.ID)
-		return []*Node{n}, nil
-
-	case "replace":
-		if len(output.Nodes) == 0 {
-			return nil, fmt.Errorf("replace action with no nodes")
-		}
-		var created []*Node
-		for _, step := range output.Nodes {
-			if !budget.TrySpawnNode(step.Tool, false) {
-				log.Printf("[dag] budget exhausted during replace, created %d of %d",
-					len(created), len(output.Nodes))
-				break
-			}
-			nodeType := NodeTool
-			if step.Tool == "compute" {
-				nodeType = NodeCompute
-			}
-			n := &Node{
-				Type:      nodeType,
-				ToolName: step.Tool,
-				Params:    step.Params,
-				DependsOn: failedNode.DependsOn,
-				SpawnedBy: failedNode.ID,
-				Tag:       step.Tag,
-			}
-			propagateRetryState(n, failedNode)
-			graph.AddNode(n)
-			created = append(created, n)
-		}
-		// Rewrite dependents to depend on all replacement nodes
-		if len(created) > 0 {
-			rewriteDependentsMulti(graph, failedNode.ID, created)
-		}
-		return created, nil
-
-	default:
-		return nil, fmt.Errorf("unknown micro-planner action: %q", output.Action)
-	}
-}
-
-/*
- * rewriteDependents changes all nodes that depended on oldID to depend on newID instead.
- * desc: Scans all pending nodes and replaces oldID in their DependsOn slices.
- *       Acquires the graph write lock.
- * param: graph - the investigation graph.
- * param: oldID - the failed node's ID to replace.
- * param: newID - the replacement node's ID.
- */
-func rewriteDependents(graph *Graph, oldID, newID string) {
-	graph.mu.Lock()
-	defer graph.mu.Unlock()
-
-	for _, n := range graph.nodes {
-		if n.State != StatePending {
-			continue
-		}
-		for i, dep := range n.DependsOn {
-			if dep == oldID {
-				n.DependsOn[i] = newID
-			}
-		}
-	}
-}
-
-/*
- * rewriteDependentsMulti changes all nodes that depended on oldID to depend
- * on all replacement node IDs instead.
- * desc: Scans all pending nodes and expands oldID references into the full
- *       set of replacement IDs. Acquires the graph write lock.
- * param: graph - the investigation graph.
- * param: oldID - the failed node's ID to replace.
- * param: replacements - slice of replacement nodes whose IDs will be used.
- */
-func rewriteDependentsMulti(graph *Graph, oldID string, replacements []*Node) {
-	graph.mu.Lock()
-	defer graph.mu.Unlock()
-
-	replIDs := make([]string, len(replacements))
-	for i, r := range replacements {
-		replIDs[i] = r.ID
-	}
-
-	for _, n := range graph.nodes {
-		if n.State != StatePending {
-			continue
-		}
-		for i, dep := range n.DependsOn {
-			if dep == oldID {
-				// Replace oldID with all replacement IDs
-				newDeps := make([]string, 0, len(n.DependsOn)-1+len(replIDs))
-				newDeps = append(newDeps, n.DependsOn[:i]...)
-				newDeps = append(newDeps, replIDs...)
-				newDeps = append(newDeps, n.DependsOn[i+1:]...)
-				n.DependsOn = newDeps
-				break // only one occurrence of oldID per dep list
-			}
-		}
-	}
-}
-
-/*
- * rewriteDependentsExcluding changes deps from oldID to newID, skipping excludeID.
- * desc: Used by compute plan grafting — the follow-up node depends on the plan
- *       node and must not be rewritten to depend on itself.
- */
-func rewriteDependentsExcluding(graph *Graph, oldID, newID, excludeID string) {
-	graph.mu.Lock()
-	defer graph.mu.Unlock()
-
-	for _, n := range graph.nodes {
-		if n.State != StatePending || n.ID == excludeID {
-			continue
-		}
-		for i, dep := range n.DependsOn {
-			if dep == oldID {
-				n.DependsOn[i] = newID
-			}
-		}
-	}
-}
-
-/*
- * rewriteDependentsMultiExcluding replaces oldID with all replacement node IDs,
- * skipping the replacement nodes themselves.
- * desc: Used when compute plan grafts multiple child nodes. Downstream nodes that
- *       depended on the plan node now depend on ALL children (must wait for all
- *       work items to complete). The children themselves are excluded because they
- *       correctly depend on the plan node for the blueprint_ref.
- */
-func rewriteDependentsMultiExcluding(graph *Graph, oldID string, replacements []*Node) {
-	graph.mu.Lock()
-	defer graph.mu.Unlock()
-
-	// Build ID sets
-	replIDs := make([]string, len(replacements))
-	excludeSet := make(map[string]bool, len(replacements))
-	for i, r := range replacements {
-		replIDs[i] = r.ID
-		excludeSet[r.ID] = true
-	}
-
-	for _, n := range graph.nodes {
-		if n.State != StatePending || excludeSet[n.ID] {
-			continue
-		}
-		for i, dep := range n.DependsOn {
-			if dep == oldID {
-				newDeps := make([]string, 0, len(n.DependsOn)-1+len(replIDs))
-				newDeps = append(newDeps, n.DependsOn[:i]...)
-				newDeps = append(newDeps, replIDs...)
-				newDeps = append(newDeps, n.DependsOn[i+1:]...)
-				n.DependsOn = newDeps
-				break
-			}
-		}
-	}
-}
-
-/*
- * propagateComputeState preserves NodeCompute type and carries forward
- * hints, blueprint_ref, query, goal, mode, and context when retrying compute nodes.
- */
-/*
- * propagateRetryState accumulates error hints across retries for ALL node types.
- * desc: Every retry gets the full history of what failed before so the
- *       microplanner and tools can try different approaches.
- */
-func propagateRetryState(replacement *Node, failed *Node) {
-	if replacement.Params == nil {
-		replacement.Params = make(map[string]any)
-	}
-
-	// Accumulate hints — only the short error summary, not full params/nested hints
-	var hints []any
-	if prev, ok := failed.Params["hints"].([]any); ok {
-		hints = append(hints, prev...)
-	}
-	if failed.Error != nil {
-		// Extract just the key error info, not the full nested params
-		errStr := failed.Error.Error()
-		// If it's a bash_error JSON, extract just command + stderr
-		var bashErr struct {
-			Command string `json:"command"`
-			Stderr  string `json:"stderr"`
-			Error   string `json:"error"`
-		}
-		if json.Unmarshal([]byte(strings.TrimPrefix(errStr, "bash failed: ")), &bashErr) == nil && bashErr.Command != "" {
-			errStr = fmt.Sprintf("%s: %s", bashErr.Command, strings.TrimSpace(bashErr.Stderr))
-		}
-		hint := Text.TruncateLog(errStr, 150)
-		hints = append(hints, hint)
-	}
-	if len(hints) > 0 {
-		replacement.Params["hints"] = hints
-	}
-
-	// Compute-specific: preserve type and carry forward essential params
-	if failed.Type == NodeCompute {
-		replacement.Type = NodeCompute
-		for _, key := range []string{"blueprint_ref", "query", "goal", "mode", "context", "task_files", "brief", "structure", "interfaces", "execute", "service"} {
-			if v, ok := failed.Params[key]; ok {
-				if _, exists := replacement.Params[key]; !exists {
-					replacement.Params[key] = v
+	// Holmes RCA — authoritative diagnosis from the investigator phase.
+	// Stored as a JSON-marshaled string so it survives the params round-trip.
+	if rcaRaw, ok := mpNode.Params["rca"].(string); ok && rcaRaw != "" {
+		var rca RCAReport
+		if err := json.Unmarshal([]byte(rcaRaw), &rca); err == nil {
+			sb.WriteString("## Holmes's Root-Cause Analysis (authoritative)\n\n")
+			sb.WriteString(fmt.Sprintf("**Root cause:** %s\n\n", rca.RootCause))
+			if len(rca.Evidence) > 0 {
+				sb.WriteString("**Evidence:**\n")
+				for _, ev := range rca.Evidence {
+					sb.WriteString("- ")
+					sb.WriteString(ev)
+					sb.WriteString("\n")
 				}
+				sb.WriteString("\n")
 			}
+			sb.WriteString(fmt.Sprintf("**Confidence:** %s\n\n", rca.Confidence))
+			if rca.SuggestedStrategy != "" {
+				sb.WriteString(fmt.Sprintf("**Suggested fix strategy:** %s\n\n", rca.SuggestedStrategy))
+			}
+			sb.WriteString("Plan a fix that directly addresses the named root cause. Do NOT re-diagnose.\n\n")
 		}
+	}
+
+	if gateCtx != nil && gateCtx.Summary != "" {
+		sb.WriteString("## Relevant Evidence (curated)\n\n")
+		sb.WriteString(gateCtx.Summary)
+		sb.WriteString("\n\n")
+	}
+
+	if gateCtx != nil {
+		if bp := gateCtx.Sources[SourceBlueprint]; bp != "" {
+			sb.WriteString("## Blueprint\n\n")
+			sb.WriteString(bp)
+			sb.WriteString("\n\n")
+		}
+		if tree := gateCtx.Sources[SourceWorkspaceTree]; tree != "" {
+			sb.WriteString("## Workspace Files\n\n")
+			sb.WriteString(tree)
+			sb.WriteString("\n\n")
+		}
+		if dg := gateCtx.Sources[SourceSkillGuidance]; dg != "" {
+			sb.WriteString("## Debug Guidance\n\n")
+			sb.WriteString(dg)
+			sb.WriteString("\n\n")
+		}
+	}
+
+	// Available tools — filtered against the resolved investigation intent
+	// (NOT trigger.Intent() — see func doc above). Tool parameter schemas
+	// are included so the debugger emits correct param names instead of
+	// hallucinating from training memory (no more `cmd` vs `command` drift).
+	if a != nil {
+		var toolSection strings.Builder
+		toolSection.WriteString("## Available Tools\n\n")
+		for _, name := range a.registry.List() {
+			sk, ok := a.registry.Get(name)
+			if !ok {
+				continue
+			}
+			rank := a.intentRegistry.ResolveToolIntent(name, sk, nil)
+			if rank > int(intent) {
+				continue
+			}
+			toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, sk.Description(), string(sk.Parameters())))
+		}
+		sb.WriteString(toolSection.String())
+	}
+
+	return sb.String()
+}
+
+// writeDebugBlueprint saves the debugger's plan to a _debug_ blueprint file
+// within the session's blueprint directory.
+func writeDebugBlueprint(metadataDir, sessionID, tag, content string) {
+	dir := blueprintsDir(metadataDir, sessionID)
+	os.MkdirAll(dir, 0755)
+	name := fmt.Sprintf("_debug_%s_%d.blueprint.md", sanitizeTag(tag), time.Now().Unix())
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		log.Printf("[dag] failed to write debug blueprint: %v", err)
+	} else {
+		log.Printf("[dag] debug blueprint written: %s", path)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	agenttools "github.com/user/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 // ─── ProcessList ────────────────────────────────────────────────────────────
@@ -208,6 +208,9 @@ func (p *ProcessKill) Execute(ctx context.Context, params map[string]any) (strin
 		return "", fmt.Errorf("process_kill: pid is required")
 	}
 	pid := int(pidFloat)
+	if pid <= 1 {
+		return "", fmt.Errorf("process_kill: refusing to kill pid %d (unsafe — use process_list to find the correct PID first)", pid)
+	}
 	force, _ := params["force"].(bool)
 
 	var cmd *exec.Cmd

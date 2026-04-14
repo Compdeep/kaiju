@@ -379,6 +379,16 @@ func (g *ContextGate) Get(ctx context.Context, req ContextRequest) (*ContextResp
 	}
 	resp.Trimmed = trimmedNames
 
+	// Inject "Current time:" into the first non-empty source so every LLM
+	// that receives gate context knows "now" for timestamp comparison.
+	tsLine := "Current time: " + time.Now().UTC().Format(llmTimeFormat) + "\n\n"
+	for _, spec := range req.ReturnSources {
+		if v := resp.Sources[spec.Name]; v != "" {
+			resp.Sources[spec.Name] = tsLine + v
+			break
+		}
+	}
+
 	if len(resp.Trimmed) > 0 {
 		log.Printf("[ctx] gate: budget %d, fair-share trimmed/dropped %v (used %d of %d)",
 			req.MaxBudget, resp.Trimmed, used, req.MaxBudget)

@@ -1,19 +1,18 @@
 import { useDagStore } from '../stores/dag'
+import { useSessionsStore } from '../stores/sessions'
 import { usePanelStore } from '../stores/panel'
+import api from '../api/client'
 
 /**
  * Tools service — SSE connection and event routing.
- * Owns the EventSource. Writes DAG events to dag store, panel events to panel store.
- * Reads node.actions to route tool side-effects (panel_show, notify, etc).
+ * Owns the EventSource. Routes events to the correct per-session state slot.
  */
 
 let eventSource = null
 
-/**
- * desc: Process actions attached to a DAG node (panel_show, notify, etc) and dispatch them to the panel store
- * @param {Array<Object>} actions - List of action objects with type and payload fields
- * @returns {void}
- */
+// AlertID -> SessionID mapping for events that may lack session_id
+const alertToSession = new Map()
+
 function handleActions(actions) {
   if (!actions || !actions.length) return
   const panel = usePanelStore()
@@ -30,15 +29,23 @@ function handleActions(actions) {
           line: action.line || 0,
         })
         break
-      // Future: case 'notify', case 'navigate', etc.
     }
   }
 }
 
 /**
- * desc: Establish an SSE connection to /events and route incoming events to the DAG store
- * @returns {void}
+ * Resolve which session an SSE event belongs to.
+ * Priority: event.session_id > alertToSession mapping > active session (fallback).
  */
+function resolveSession(ev) {
+  if (ev.session_id) return ev.session_id
+  if (ev.alert) {
+    const mapped = alertToSession.get(ev.alert)
+    if (mapped) return mapped
+  }
+  return useSessionsStore().sessionId
+}
+
 export function connect() {
   if (eventSource) return
 
@@ -48,44 +55,74 @@ export function connect() {
     try {
       const ev = JSON.parse(e.data)
       const dag = useDagStore()
+      const sessions = useSessionsStore()
+      const sid = resolveSession(ev)
 
       switch (ev.type) {
         case 'start':
-          dag.archiveAndClear()
-          dag.running = true
-          dag.interjectMode = true
-          dag.interjections = []
+          if (ev.alert && sid) alertToSession.set(ev.alert, sid)
+          dag.archiveAndClear(sid)
+          {
+            const ds = dag.getSession(sid)
+            if (ds) {
+              ds.running = true
+              ds.interjectMode = true
+              ds.interjections = []
+            }
+          }
           break
 
         case 'verdict':
-          if (ev.text) dag.streamingVerdict += ev.text
+          {
+            const ds = dag.getSession(sid)
+            if (ds && ev.text) ds.streamingVerdict += ev.text
+          }
           break
 
         case 'node':
           if (ev.node) {
-            let idx = dag.nodes.findIndex(n => n.id === ev.node.id)
-            // If backend sends a real interjection node, replace the synthetic client-side one
-            if (idx < 0 && ev.node.type === 'interjection') {
-              idx = dag.nodes.findIndex(n => n.id.startsWith('inj') && n.type === 'interjection')
+            const ds = dag.getSession(sid)
+            if (ds) {
+              let idx = ds.nodes.findIndex(n => n.id === ev.node.id)
+              if (idx < 0 && ev.node.type === 'interjection') {
+                idx = ds.nodes.findIndex(n => n.id.startsWith('inj') && n.type === 'interjection')
+              }
+              if (idx >= 0) ds.nodes[idx] = { ...ev.node }
+              else ds.nodes.push({ ...ev.node })
+              if (ev.node.actions) handleActions(ev.node.actions)
             }
-            if (idx >= 0) dag.nodes[idx] = { ...ev.node }
-            else dag.nodes.push({ ...ev.node })
-            // Route any actions attached to this node
-            if (ev.node.actions) handleActions(ev.node.actions)
           }
           break
 
         case 'done': {
-          const final = (ev.nodes || []).map(n => ({ ...n }))
-          for (const fn of final) {
-            const idx = dag.nodes.findIndex(n => n.id === fn.id)
-            if (idx >= 0) dag.nodes[idx] = fn
-            else dag.nodes.push(fn)
-            // Route actions from final snapshot too
-            if (fn.actions) handleActions(fn.actions)
+          const ds = dag.getSession(sid)
+          if (ds) {
+            const final = (ev.nodes || []).map(n => ({ ...n }))
+            for (const fn of final) {
+              const idx = ds.nodes.findIndex(n => n.id === fn.id)
+              if (idx >= 0) ds.nodes[idx] = fn
+              else ds.nodes.push(fn)
+              if (fn.actions) handleActions(fn.actions)
+            }
+            ds.running = false
+            ds.interjectMode = false
           }
-          dag.running = false
-          dag.interjectMode = false
+          // Reload messages for that session if it was loading
+          const ss = sessions.getSession(sid)
+          if (ss && ss.loading) {
+            ss.loading = false
+            api.get(`/api/v1/sessions/${sid}/messages`).then(msgs => {
+              ss.messages = (msgs || []).map(m => {
+                const msg = { role: m.role, content: m.content }
+                if (m.dag_trace) {
+                  try { msg.trace = JSON.parse(m.dag_trace) } catch {}
+                }
+                return msg
+              })
+            }).catch(() => {})
+          }
+          // Clean up mapping
+          if (ev.alert) alertToSession.delete(ev.alert)
           break
         }
       }
@@ -93,10 +130,6 @@ export function connect() {
   }
 }
 
-/**
- * desc: Close the SSE connection and clean up the EventSource instance
- * @returns {void}
- */
 export function disconnect() {
   if (eventSource) {
     eventSource.close()

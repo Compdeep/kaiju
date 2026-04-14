@@ -131,7 +131,7 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 	// Write debug blueprint to disk for observability (session-scoped).
 	writeDebugBlueprint(a.cfg.MetadataDir, trigger.SessionID, mpNode.Tag, raw)
 
-	ch <- nodeCompletion{NodeID: mpNode.ID, Result: raw}
+	ch <- nodeCompletion{NodeID: mpNode.ID, Result: raw, TokensIn: resp.Usage.PromptTokens, TokensOut: resp.Usage.CompletionTokens}
 }
 
 // assembleDebuggerPrompt formats the gate response into the debugger's user

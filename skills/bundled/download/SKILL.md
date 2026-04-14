@@ -15,11 +15,13 @@ Do NOT use for reading web page content — use `web_fetch` for that.
 
 ## Planning Guidance
 
+**When the user wants files downloaded (download, get, grab, save, fetch, "more", "again", "try again"), they mean SAVE FILES TO DISK.** web_search and web_fetch find links — they do NOT download files. You MUST plan bash commands with yt-dlp or curl to actually download. A plan with only web_search/web_fetch steps is WRONG for a download request.
+
 ### Video download (TikTok, YouTube, Instagram, etc.)
 
-Use `yt-dlp` via bash — it supports 1000+ sites including TikTok, YouTube, Instagram, Twitter, Vimeo, Reddit, and more.
+Use `yt-dlp` via bash — it supports 1000+ sites including TikTok, YouTube, Instagram, Twitter, Vimeo, Reddit, and more. Downloads auto-detect a 5-minute timeout. For very large files, set `timeout_sec: 0` (no timeout).
 
-1. `bash` — `yt-dlp -o '%(title)s.%(ext)s' '<URL>'`
+1. `bash` — `yt-dlp -o 'media/%(title)s.%(ext)s' '<URL>'`
 
 For multiple videos in parallel:
 
@@ -31,6 +33,8 @@ If yt-dlp is not installed, install it first:
 
 1. `bash` — `pip install yt-dlp`
 2. `bash` — download command (depends on step 0)
+
+**Never download full playlists unless the user explicitly asks for a playlist.** If a search returns a playlist URL, either extract individual video URLs from it or use `--no-playlist --max-downloads 1` to get a single video. Playlists can contain hundreds of videos and will time out.
 
 Common yt-dlp options:
 - Best quality: `yt-dlp -f best '<URL>'`
@@ -83,14 +87,27 @@ If unsure whether yt-dlp, curl, or wget are available:
 
 ### After downloading
 
-Push the downloaded file to the composable panel if it's viewable:
+Open the media panel so the user can see what was downloaded:
 
-1. `bash` — download the file
-2. `panel_push` — display it if it's HTML, SVG, or an image (depends on step 0)
+1. `panel_push` with `{"plugin": "media", "title": "Media"}` — opens the media browser showing all downloaded files
 
-### What NOT to do
+### When downloads fail
 
-- Don't use `web_fetch` to download binary files — it's for reading web pages
-- Don't plan sequential downloads for independent URLs — parallelize them
-- Don't search for "how to download" — use yt-dlp for media, curl for files
-- Don't declare a gap for downloads — bash with yt-dlp or curl can handle it
+If yt-dlp fails, try alternatives in this order:
+1. Try different yt-dlp flags: `--extractor-args "youtube:player-client=mediaconnect"`
+2. Try a different platform — search for the same content on Dailymotion, Vimeo, or other sites
+3. Try `gallery-dl`, `curl`, or `wget` for direct URLs
+4. If everything fails, return to the user honestly: explain what was tried and what blocked it
+
+**Do NOT attempt to upgrade Python, install system packages, compile from source, or use sudo.** These are system admin tasks, not download tasks. If the tools on the system can't do it, say so.
+
+**Never hardcode or guess URLs.** Always web_search first, then extract real URLs from the results.
+
+### RULES
+
+- Always web_search for real URLs before downloading. Never fabricate video IDs.
+- Never download full playlists unless explicitly asked. Use `--no-playlist --max-downloads 1`.
+- Do NOT upgrade system Python, install compilers, or build from source. Use what's available.
+- If all attempts fail, tell the user what's wrong and what they'd need to fix (e.g. "yt-dlp needs Python 3.10+").
+- Don't use `web_fetch` to download binary files — it's for reading web pages.
+- Don't plan sequential downloads for independent URLs — parallelize them.

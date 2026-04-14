@@ -78,6 +78,18 @@ func (textNS) TruncateEvidence(s string) string {
 }
 
 /*
+ * HeadTail keeps the first headN chars and last tailN chars of a string,
+ * joining them with a separator. If the string fits within headN+tailN,
+ * returns it unchanged. Generic version of TruncateEvidence.
+ */
+func (textNS) HeadTail(s string, headN, tailN int) string {
+	if len(s) <= headN+tailN {
+		return s
+	}
+	return s[:headN] + "\n...\n" + s[len(s)-tailN:]
+}
+
+/*
  * StripCodeFence removes markdown code fences and extracts JSON content.
  * desc: Strips opening/closing ``` fences and locates the first JSON array or object in the string.
  * param: s - the string potentially wrapped in code fences

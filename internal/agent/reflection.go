@@ -97,7 +97,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 
 	log.Printf("[dag] reflection output: %s", Text.TruncateLog(raw, 200))
 
-	ch <- nodeCompletion{NodeID: rNode.ID, Result: raw}
+	ch <- nodeCompletion{NodeID: rNode.ID, Result: raw, TokensIn: resp.Usage.PromptTokens, TokensOut: resp.Usage.CompletionTokens}
 }
 
 // assembleReflectorPrompt builds the reflector's user message from a gate

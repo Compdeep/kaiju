@@ -7,10 +7,13 @@ html, body {
 }
 body {
   font-family: var(--font);
-  background: var(--bg);
+  background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(120,160,220,0.1) 0%, transparent 60%), var(--bg);
   color: var(--text);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+[data-theme="dark"] body {
+  background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(60,30,80,0.05) 0%, transparent 60%), var(--bg);
 }
 
 /* ─── Scrollbar ───────────────────────────────────────── */
@@ -57,13 +60,16 @@ input, select, textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: var(--text);
   font-size: 13px;
   font-family: var(--font);
   outline: none;
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.04) inset;
 }
-input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(56,189,248,0.15); }
 
 /* ─── Tables ──────────────────────────────────────────── */
 table { width: 100%; border-collapse: collapse; }
@@ -84,7 +90,9 @@ tr:hover td { background: var(--surface-hover); }
   backdrop-filter: blur(4px);
 }
 .modal-panel {
-  background: var(--surface);
+  background: #FFFFFF;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -92,6 +100,9 @@ tr:hover td { background: var(--surface-hover); }
   height: 80vh;
   display: flex; flex-direction: column;
   overflow: hidden;
+}
+[data-theme="dark"] .modal-panel {
+  background: #0A0A0D;
 }
 .modal-header {
   display: flex; align-items: center; justify-content: space-between;

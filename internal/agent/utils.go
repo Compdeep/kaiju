@@ -409,15 +409,26 @@ func rotateServiceLogs(workspace string) {
 	}
 }
 
-// resetWorklog truncates the session's worklog so each investigation starts clean.
-// Empty sessionID truncates the legacy global worklog.
-func resetWorklog(workspace, sessionID string) {
+// llmTimeFormat is the timestamp format used everywhere LLMs see timestamps.
+// Compact, human-readable, includes date. Same format in worklog, gate context,
+// blueprints, and prompts.
+const llmTimeFormat = "Jan 02 15:04:05"
+
+// markRunStart appends a run separator to the worklog instead of truncating.
+// The reflector sees the marker and knows everything above it is from a prior run.
+func markRunStart(workspace, sessionID string) {
 	path := worklogPath(workspace, sessionID)
 	if sessionID != "" {
-		// Make sure the session directory exists.
 		_ = os.MkdirAll(filepath.Dir(path), 0755)
 	}
-	_ = os.Truncate(path, 0)
+	ts := time.Now().UTC().Format(llmTimeFormat)
+	marker := fmt.Sprintf("--- RUN %s ---\n", ts)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(marker)
 }
 
 // errorStatuses are worklog statuses that carry stack traces, stderr dumps,
@@ -461,7 +472,7 @@ func appendWorklog(workspace, sessionID, tag, status, details string) {
 	// survives but readWorklog's line-based tail still works.
 	details = strings.ReplaceAll(details, "\n", " ↩ ")
 
-	ts := time.Now().UTC().Format("15:04:05")
+	ts := time.Now().UTC().Format(llmTimeFormat)
 	entry := fmt.Sprintf("[%s] %s — %s: %s\n", ts, tag, status, details)
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)

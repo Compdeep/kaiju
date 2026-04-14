@@ -2,18 +2,18 @@ import api from '../api/client'
 import { useSessionsStore } from '../stores/sessions'
 import { useDagStore } from '../stores/dag'
 
-/** Chat service — session CRUD, send, interject. Writes to stores. */
+/** Chat service — session CRUD, send, interject. Writes to per-session stores. */
 
 /**
- * desc: Create a new chat session on the server and reset local state
+ * desc: Create a new chat session on the server and switch to it
  * @returns {Promise<string>} The new session ID
  */
 export async function createSession() {
   const s = useSessionsStore()
+  const dag = useDagStore()
   const data = await api.post('/api/v1/sessions', { channel: 'web' })
   s.setSessionId(data.id)
-  s.messages = []
-  useDagStore().reset()
+  dag.setActiveSession(data.id)
   await loadSessions()
   return data.id
 }
@@ -28,31 +28,47 @@ export async function loadSessions() {
 }
 
 /**
- * desc: Switch to an existing session by loading its messages and parsing any stored DAG traces
+ * desc: Switch to an existing session. Loads messages from server if not cached.
+ *       Does NOT clear the old session's state — it stays in the per-session map.
  * @param {string} id - The session ID to switch to
  * @returns {Promise<void>}
  */
 export async function switchSession(id) {
   const s = useSessionsStore()
   const dag = useDagStore()
+
   s.setSessionId(id)
-  dag.reset()
-  try {
-    const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
-    s.messages = (msgs || []).map(m => {
-      const msg = { role: m.role, content: m.content }
-      if (m.dag_trace) {
-        try { msg.trace = JSON.parse(m.dag_trace) } catch {}
+  dag.setActiveSession(id)
+
+  // Load from server if this session hasn't been loaded yet
+  const ss = s.getSession(id)
+  if (ss.messages.length === 0) {
+    try {
+      const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
+      ss.messages = (msgs || []).map(m => {
+        const msg = { role: m.role, content: m.content }
+        if (m.dag_trace) {
+          try { msg.trace = JSON.parse(m.dag_trace) } catch {}
+        }
+        return msg
+      })
+      // Detect inflight query: last message is user with no assistant reply
+      if (ss.messages.length > 0 && ss.messages[ss.messages.length - 1].role === 'user') {
+        ss.loading = true
+        const ds = dag.getSession(id)
+        if (ds) {
+          ds.running = true
+          ds.interjectMode = true
+        }
       }
-      return msg
-    })
-  } catch {
-    s.messages = []
+    } catch {
+      ss.messages = []
+    }
   }
 }
 
 /**
- * desc: Delete a session from the server and clear local state if it was the active session
+ * desc: Delete a session from the server and clean up per-session state
  * @param {string} id - The session ID to delete
  * @returns {Promise<void>}
  */
@@ -60,10 +76,11 @@ export async function deleteSession(id) {
   const s = useSessionsStore()
   const dag = useDagStore()
   try { await api.del(`/api/v1/sessions/${id}`) } catch {}
+  s.dropSession(id)
+  dag.dropSession(id)
   if (s.sessionId === id) {
     s.setSessionId(null)
-    s.messages = []
-    dag.reset()
+    dag.setActiveSession(null)
   }
   await loadSessions()
 }
@@ -77,12 +94,15 @@ export async function compactSession() {
   if (!s.sessionId) return
   try {
     await api.post(`/api/v1/sessions/${s.sessionId}/compact`)
+    // Force reload from server by clearing cached messages first
+    const ss = s.getSession(s.sessionId)
+    if (ss) ss.messages = []
     await switchSession(s.sessionId)
   } catch (err) { console.error('compact failed:', err) }
 }
 
 /**
- * desc: Send a user message to the DAG execution engine, creating a session if needed, and append the assistant response
+ * desc: Send a user message to the DAG execution engine
  * @param {string} text - The user's message text
  * @returns {Promise<void>}
  */
@@ -141,8 +161,6 @@ export async function interject(text) {
     if (data.sent) {
       const truncated = text.length > 40 ? text.slice(0, 40) + '\u2026' : text
       dag.interjections.push({ text, truncated })
-      // Assign an ID that sorts after all current nodes so the interjection
-      // stays at its chronological position as later nodes arrive.
       const maxNum = dag.nodes.reduce((m, n) => {
         const num = parseInt((n.id || '').replace(/\D/g, '')) || 0
         return num > m ? num : m

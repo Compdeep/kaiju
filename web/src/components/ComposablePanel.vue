@@ -59,12 +59,17 @@
       <div v-else-if="activeSection === 'media'" class="plugin-slot files-browser">
         <div v-if="mediaLoading" class="files-loading">Loading media...</div>
         <div v-else class="media-grid">
-          <div v-for="m in mediaFiles" :key="m.path" class="media-thumb" @click="openViewer(m)">
-            <img v-if="m.type === 'image'" :src="serveUrl(m.path)" :alt="m.name" loading="lazy" @load="onThumbLoad"/>
-            <div v-else class="media-video-thumb">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <div v-for="(row, ri) in mediaRows" :key="ri" class="media-row">
+            <div v-for="m in row" :key="m.path" class="media-thumb" :style="{ flex: m.ratio || 1.5 }" @click="openViewer(m)">
+              <img v-if="m.type === 'image'" :src="serveUrl(m.path)" :alt="m.name" loading="lazy" @load="onThumbLoad"/>
+              <div v-else class="media-video-thumb">
+                <video :src="serveUrl(m.path)" preload="metadata" muted @loadeddata="onVideoMeta($event, m)" class="video-preview"></video>
+                <div class="video-play-overlay">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="white" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                </div>
+              </div>
+              <span class="media-name">{{ m.name }}</span>
             </div>
-            <span class="media-name">{{ m.name }}</span>
           </div>
           <div v-if="!mediaFiles.length" class="files-empty">No media files found</div>
         </div>
@@ -278,6 +283,32 @@ const filesLoading = ref(false)
 const mediaFiles = ref([])
 const mediaLoading = ref(false)
 const mediaExts = { image: ['jpg','jpeg','png','gif','webp','svg','bmp','ico'], video: ['mp4','webm','mov','avi','mkv','m4v','ogv'] }
+
+/**
+ * Pack media files into rows based on aspect ratios. Each row's items
+ * fill the full width with proportional flex. Target: ~2.5 total ratio
+ * per row (gives 2-3 items per row depending on aspect ratios).
+ */
+const mediaRows = computed(() => {
+  const items = mediaFiles.value
+  if (!items.length) return []
+  const targetRowRatio = 3.0 // sum of aspect ratios per row
+  const rows = []
+  let row = []
+  let rowRatio = 0
+  for (const m of items) {
+    const r = m.ratio || 1.5 // default 16:10-ish for unloaded videos
+    row.push(m)
+    rowRatio += r
+    if (rowRatio >= targetRowRatio) {
+      rows.push(row)
+      row = []
+      rowRatio = 0
+    }
+  }
+  if (row.length) rows.push(row) // last partial row
+  return rows
+})
 
 // Viewer state
 const viewerFile = ref(null)
@@ -511,6 +542,14 @@ function onThumbLoad(e) {
   e.target.classList.add('loaded')
 }
 
+function onVideoMeta(e, m) {
+  const v = e.target
+  v.currentTime = 1
+  if (v.videoWidth && v.videoHeight) {
+    m.ratio = v.videoWidth / v.videoHeight
+  }
+}
+
 function onViewerKey(e) {
   if (e.key === 'Escape') { viewerFile.value = null; return }
   if (e.key === 'f' || e.key === 'F') { toggleFullscreen(); return }
@@ -726,39 +765,37 @@ watch(() => panel.activeTab, (tab) => {
 .file-size { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
 .files-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px; font-style: italic; }
 
-/* Media grid — masonry column layout */
+/* Media grid — row-packed Tetris layout */
 .media-grid {
-  columns: 2;
-  column-gap: 6px;
-  padding: 6px;
+  padding: 2px;
   overflow-y: auto;
   flex: 1;
 }
-/* Bump to 3 columns when panel is wide enough */
-@media (min-width: 480px) {
-  .media-grid { columns: 3; }
+.media-row {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 2px;
 }
 .media-thumb {
-  break-inside: avoid;
-  display: inline-flex;
+  position: relative;
+  display: flex;
   flex-direction: column;
-  width: 100%;
-  margin-bottom: 6px;
+  min-width: 0;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 3px;
   overflow: hidden;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
-  background: var(--bg-soft);
+  background: #000;
 }
 .media-thumb:hover {
   transform: scale(1.02);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
 }
 .media-thumb img {
   width: 100%;
   height: auto;
   display: block;
-  border-radius: 4px 4px 0 0;
+  object-fit: cover;
   opacity: 0;
   transition: opacity 0.2s ease;
 }
@@ -767,24 +804,39 @@ watch(() => panel.activeTab, (tab) => {
 }
 .media-video-thumb {
   width: 100%;
-  aspect-ratio: 16/9;
+  position: relative;
+  background: #000;
+}
+.video-preview {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+}
+.video-play-overlay {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-soft);
-  border-radius: 4px 4px 0 0;
-  color: var(--text-muted);
+  background: rgba(0,0,0,0.25);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.media-thumb:hover .video-play-overlay {
+  opacity: 1;
 }
 .media-name {
-  font-size: 9px;
+  font-size: 8px;
   font-family: var(--mono);
-  color: var(--text-muted);
+  color: rgba(255,255,255,0.7);
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   width: 100%;
-  padding: 4px 6px;
+  padding: 2px 4px;
+  background: rgba(0,0,0,0.6);
 }
 
 /* Footer section bar */

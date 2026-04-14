@@ -252,7 +252,8 @@ type Agent struct {
 	dagSubs    map[int]chan DAGEvent // subscriber ID → channel
 	dagSubID   int
 	dagGraph   *Graph  // current active graph (nil when idle)
-	dagAlertID string
+	dagAlertID    string
+	dagSessionID  string
 }
 
 /*
@@ -642,6 +643,11 @@ func (a *Agent) dagFanOut(src <-chan DAGEvent) {
 func (a *Agent) broadcastDAGEvent(evt DAGEvent) {
 	a.dagMu.RLock()
 	defer a.dagMu.RUnlock()
+
+	// Auto-stamp session ID so individual callsites don't need to pass it.
+	if evt.SessionID == "" && a.dagSessionID != "" {
+		evt.SessionID = a.dagSessionID
+	}
 
 	for _, ch := range a.dagSubs {
 		select {

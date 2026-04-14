@@ -321,16 +321,13 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 		return
 	}
 
-	// Holmes gets TWO things from the gate, both surface-level:
-	//   1. Worklog tail — the "crime scene": last few timestamped events
-	//      so Holmes can see what just happened. Bounded, line-formatted.
-	//      NOT node_returns / NOT raw stderr / NOT blueprint — Holmes has
-	//      to call tools to read those.
+	// Holmes gets THREE things from the gate:
+	//   1. Worklog tail — the "crime scene": last few timestamped events.
 	//   2. Skill guidance — the "detective's notebook": domain-specific
-	//      investigation procedures (e.g. webdeveloper Debug Guidance).
-	//      Methodology, not evidence — preserves clean-room.
-	// Gate failure is fail-open: Holmes proceeds with no crime scene and
-	// no notebook, falling back to pure exploration.
+	//      investigation procedures.
+	//   3. Workspace tree — the "floor plan": project directory structure
+	//      so Holmes knows where to look instead of guessing paths.
+	// Gate failure is fail-open: Holmes proceeds without context.
 	var gateCtx *ContextResponse
 	if graph != nil && graph.Context != nil {
 		var gerr error
@@ -338,8 +335,9 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 			ReturnSources: Sources(
 				Worklog(10, "all"),
 				SkillGuidance([]string{"Debug"}),
+				WorkspaceTree(3),
 			),
-			MaxBudget: 8000,
+			MaxBudget: 12000,
 		})
 		if gerr != nil {
 			log.Printf("[dag] holmes gate fetch failed (continuing without crime scene): %v", gerr)
@@ -406,7 +404,7 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 
 	log.Printf("[dag] holmes iter %d output: %s", state.Iter, Text.TruncateLog(raw, 240))
 
-	ch <- nodeCompletion{NodeID: sNode.ID, Result: raw}
+	ch <- nodeCompletion{NodeID: sNode.ID, Result: raw, TokensIn: resp.Usage.PromptTokens, TokensOut: resp.Usage.CompletionTokens}
 }
 
 /*
@@ -563,14 +561,13 @@ func extractMultiToolActions(params map[string]any) []holmesAction {
  *         5. Crime Scene — surface-level worklog tail (the most recent
  *            timestamped events). Bounded, summarised. Holmes has to call
  *            tools to read deeper than what the worklog already records.
- *         6. Detective's Notebook — domain skill guidance (e.g. webdeveloper
- *            Debug Guidance). Methodology, not evidence. Preserves clean-room.
- *         7. Available Tools — full intent-allowed tool list with schemas
- *       The blueprint is NOT auto-loaded. If Holmes wants the blueprint, he
- *       can call file_read on the latest blueprint path himself — he is in a
- *       clean room and pulls evidence in only when his deduction calls for it.
- *       Same for raw stderr / file contents / process state — surface scene
- *       only, depth requires tool use.
+ *         6. Floor Plan — workspace file tree (3 levels) so Holmes knows
+ *            where to look instead of guessing paths.
+ *         7. Blueprint path — just the file path, not the content. Holmes
+ *            can file_read it if the investigation needs it.
+ *         8. Detective's Notebook — domain skill guidance (e.g. webdeveloper
+ *            Debug Guidance). Methodology, not evidence.
+ *         9. Available Tools — full intent-allowed tool list with schemas
  *
  *       NOTE on the intent parameter: this MUST be the resolved investigation
  *       intent (post-auto-inference), not trigger.Intent(). For chat queries
@@ -646,6 +643,31 @@ func assembleHolmesPrompt(state *HolmesState, trigger Trigger, a *Agent, intent 
 			sb.WriteString("*\"You know my methods, Watson. There is nothing like first-hand evidence.\"* What follows is the surface of the scene as the system recorded it over the last few minutes — the immediate sights and sounds, the timestamped events, the surface signals. The reflector's problem statement above is one witness's interpretation; THIS is the raw scene. Cross-check the witness against the scene, and pull out your tools to dig beneath the surface — read the files, query the processes, fetch the logs. The crime scene tells you WHERE to look. Your tools tell you WHAT IS THERE.\n\n```\n")
 			sb.WriteString(wl)
 			sb.WriteString("\n```\n\n")
+		}
+	}
+
+	// The floor plan — workspace file tree so Holmes knows where to look
+	// instead of guessing paths. Shallow (3 levels) to orient, not to
+	// replace tool-based exploration.
+	if gateCtx != nil {
+		if tree := gateCtx.Sources[SourceWorkspaceTree]; tree != "" {
+			sb.WriteString("## The Floor Plan\n\n")
+			sb.WriteString("Project directory structure:\n\n```\n")
+			sb.WriteString(tree)
+			sb.WriteString("\n```\n\n")
+		}
+	}
+
+	// Blueprint path — Holmes can file_read it if needed.
+	if a != nil && a.cfg.MetadataDir != "" {
+		sid := ""
+		if trigger.SessionID != "" {
+			sid = trigger.SessionID
+		}
+		if bpPath := latestBlueprintPath(a.cfg.MetadataDir, sid); bpPath != "" {
+			sb.WriteString("## Blueprint\n\n")
+			sb.WriteString(fmt.Sprintf("The project blueprint is at: `%s`\n", bpPath))
+			sb.WriteString("Use file_read to examine it if you need to understand the intended project structure.\n\n")
 		}
 	}
 

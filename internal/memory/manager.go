@@ -162,9 +162,26 @@ func (m *Manager) LoadHistory(ctx context.Context, sessionID string, maxMessages
 		default:
 			continue
 		}
+		// Truncate history messages to avoid flooding the executive with
+		// full aggregator verdicts and long user messages from prior turns.
+		content := dm.Content
+		switch dm.Role {
+		case "assistant":
+			if len(content) > 700 {
+				head := content[:500]
+				tail := content[len(content)-200:]
+				content = head + "\n...\n" + tail
+			}
+		case "user":
+			if len(content) > 1300 {
+				head := content[:1000]
+				tail := content[len(content)-300:]
+				content = head + "\n...\n" + tail
+			}
+		}
 		msgs = append(msgs, llm.Message{
 			Role:    dm.Role,
-			Content: dm.Content,
+			Content: content,
 		})
 	}
 	return msgs, nil

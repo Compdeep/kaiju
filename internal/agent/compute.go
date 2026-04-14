@@ -115,13 +115,14 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
  * computePlanOutput is the expected JSON structure from the plan LLM.
  */
 type computePlanOutput struct {
-	Plan       string            `json:"blueprint"`
-	Interfaces json.RawMessage   `json:"interfaces,omitempty"`
-	Schema     json.RawMessage   `json:"schema,omitempty"`
-	Setup      []string          `json:"setup,omitempty"`
-	Tasks      []computeWorkItem `json:"tasks"`
-	Services   []computeService  `json:"services,omitempty"`
-	Validation []computeCheck    `json:"validation,omitempty"`
+	Plan        string            `json:"blueprint"`
+	ProjectRoot string            `json:"project_root,omitempty"` // e.g. "project/kaiju_webapp"
+	Interfaces  json.RawMessage   `json:"interfaces,omitempty"`
+	Schema      json.RawMessage   `json:"schema,omitempty"`
+	Setup       []string          `json:"setup,omitempty"`
+	Tasks       []computeWorkItem `json:"tasks"`
+	Services    []computeService  `json:"services,omitempty"`
+	Validation  []computeCheck    `json:"validation,omitempty"`
 }
 
 type computeWorkItem struct {
@@ -162,27 +163,6 @@ type computeService struct {
 	Port    int    `json:"port,omitempty"`
 }
 
-// UnmarshalJSON accepts either an object {command, name, ...} or a bare
-// string (interpreted as the command). LLMs frequently return the bare string
-// form when they only have one piece of info to convey.
-func (s *computeService) UnmarshalJSON(data []byte) error {
-	// Try object form first.
-	type alias computeService
-	var obj alias
-	if err := json.Unmarshal(data, &obj); err == nil && (obj.Command != "" || obj.Name != "") {
-		*s = computeService(obj)
-		return nil
-	}
-	// Fall back to bare string (just the command).
-	var str string
-	if err := json.Unmarshal(data, &str); err == nil {
-		*s = computeService{Command: str}
-		return nil
-	}
-	// Empty fallback — don't fail the whole parse.
-	*s = computeService{}
-	return nil
-}
 
 /*
  * computeCheck is one validation entry emitted by the architect.
@@ -204,6 +184,48 @@ func computeSessionID(g *Graph) string {
 		return ""
 	}
 	return g.SessionID
+}
+
+// projectPrefix returns the project root path, resolved in order:
+//   1. graph.ProjectRoot (set by architect)
+//   2. common prefix of taskFiles (e.g. "project/kaiju_webapp/" from task_files paths)
+//   3. "project/" (legacy fallback)
+func projectPrefix(g *Graph, taskFiles []string) string {
+	if g != nil && g.ProjectRoot != "" {
+		root := g.ProjectRoot
+		if !strings.HasSuffix(root, "/") {
+			root += "/"
+		}
+		return root
+	}
+	if root := rootFromTaskFiles(taskFiles); root != "" {
+		return root
+	}
+	return "project/"
+}
+
+// rootFromTaskFiles extracts the project root from task_files paths.
+// If all paths share a common prefix deeper than "project/" (e.g.
+// "project/kaiju_webapp/"), returns that prefix. Returns "" if no
+// consistent root can be determined.
+func rootFromTaskFiles(taskFiles []string) string {
+	if len(taskFiles) == 0 {
+		return ""
+	}
+	// Split first path: "project/kaiju_webapp/src/main.jsx" → ["project", "kaiju_webapp", "src", "main.jsx"]
+	parts := strings.Split(taskFiles[0], "/")
+	if len(parts) < 3 || parts[0] != "project" {
+		return ""
+	}
+	// Candidate root is "project/<name>/"
+	candidate := parts[0] + "/" + parts[1] + "/"
+	// Verify all task_files share this prefix
+	for _, tf := range taskFiles[1:] {
+		if !strings.HasPrefix(tf, candidate) {
+			return ""
+		}
+	}
+	return candidate
 }
 
 // graphAlertID safely extracts the trigger AlertID via the graph's gate.
@@ -347,7 +369,8 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 	bpDir := blueprintsDir(a.cfg.MetadataDir, sessionID)
 	os.MkdirAll(bpDir, 0755)
 	blueprintPath := filepath.Join(bpDir, fmt.Sprintf("%s.blueprint.md", tag))
-	if err := os.WriteFile(blueprintPath, []byte(planOutput.Plan), 0644); err != nil {
+	bpContent := fmt.Sprintf("<!-- Created: %s -->\n\n%s", time.Now().UTC().Format(llmTimeFormat), planOutput.Plan)
+	if err := os.WriteFile(blueprintPath, []byte(bpContent), 0644); err != nil {
 		return "", fmt.Errorf("write blueprint: %w", err)
 	}
 	log.Printf("[dag] blueprint written: %s (%d bytes, %d work items)", blueprintPath, len(planOutput.Plan), len(planOutput.Tasks))
@@ -460,6 +483,7 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 		"type":          "blueprint",
 		"blueprint_ref": planPath,
 		"blueprint":     planOutput.Plan,
+		"project_root":  planOutput.ProjectRoot,
 		"setup":         planOutput.Setup,
 		"follow_up":     followUps,
 		"validation":    planOutput.Validation,
@@ -590,8 +614,8 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		// Edit mode: if the file exists, show content for text-match edits.
 		for _, f := range codeCtx.taskFiles {
 			targetPath := f
-			if !a.cfg.CLIMode && !strings.HasPrefix(targetPath, "project/") {
-				targetPath = "project/" + targetPath
+			if !a.cfg.CLIMode && !strings.HasPrefix(targetPath, projectPrefix(graph, codeCtx.taskFiles)) {
+				targetPath = projectPrefix(graph, codeCtx.taskFiles) + targetPath
 			}
 			fullPath := filepath.Join(a.cfg.Workspace, targetPath)
 			data, readErr := os.ReadFile(fullPath)
@@ -687,8 +711,8 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
 			destPath = codeCtx.taskFiles[0]
 		}
-		if !a.cfg.CLIMode && !strings.HasPrefix(destPath, "project/") {
-			destPath = "project/" + destPath
+		if !a.cfg.CLIMode && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
+			destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
 		}
 		codePath := filepath.Join(a.cfg.Workspace, destPath)
 
@@ -757,8 +781,8 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
 		destPath = codeCtx.taskFiles[0]
 	}
-	if !a.cfg.CLIMode && !strings.HasPrefix(destPath, "project/") {
-		destPath = "project/" + destPath
+	if !a.cfg.CLIMode && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
+		destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
 	}
 	codePath := filepath.Join(a.cfg.Workspace, destPath)
 	os.MkdirAll(filepath.Dir(codePath), 0755)
@@ -787,8 +811,8 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			for _, prefix := range []string{"node ", "python ", "python3 ", "sh ", "bash "} {
 				if strings.HasPrefix(execCmd, prefix) {
 					rest := strings.TrimPrefix(execCmd, prefix)
-					if rest != "" && !strings.HasPrefix(rest, "project/") && !strings.HasPrefix(rest, "/") && !strings.HasPrefix(rest, "-") {
-						execCmd = prefix + "project/" + rest
+					if rest != "" && !strings.HasPrefix(rest, projectPrefix(graph, codeCtx.taskFiles)) && !strings.HasPrefix(rest, "/") && !strings.HasPrefix(rest, "-") {
+						execCmd = prefix + projectPrefix(graph, codeCtx.taskFiles) + rest
 						log.Printf("[dag] compute: rewriting execute path → %s", execCmd)
 					}
 					break

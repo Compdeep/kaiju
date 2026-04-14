@@ -23,7 +23,7 @@ func Default() *Config {
 			MaxLLMCalls:      20,
 			MaxObserverCalls: 50,
 			BatchSize:        5,
-			MaxInvestigations: 1,
+			MaxInvestigations: 5,
 			ExecutionMode:    "interactive",
 			WallClockSec:     180,
 			MaxTurns:         15,

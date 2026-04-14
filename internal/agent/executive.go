@@ -192,10 +192,52 @@ type PlanStep struct {
 	Type      string                    `json:"type,omitempty"` // "tool" (default) or "compute"
 	Tool      string                    `json:"tool"`
 	Params    map[string]any            `json:"params"`
-	ParamRefs map[string]ParamInjection `json:"param_refs,omitempty"` // dependency injection: param values from upstream outputs
+	ParamRefs map[string]ParamInjection `json:"-"` // dependency injection — populated by custom unmarshal
 	DependsOn FlexInts                  `json:"depends_on"`           // index-based references
 	Tag       string                    `json:"tag"`
 	Gap       string                    `json:"gap,omitempty"` // capability gap: what's needed but unavailable
+}
+
+// UnmarshalJSON handles LLMs putting plain values (e.g. timeout_sec: 15) in
+// param_refs alongside real injection objects. Plain values are moved to Params.
+func (s *PlanStep) UnmarshalJSON(data []byte) error {
+	type raw struct {
+		Type      string                       `json:"type,omitempty"`
+		Tool      string                       `json:"tool"`
+		Params    map[string]any               `json:"params"`
+		ParamRefs map[string]json.RawMessage   `json:"param_refs,omitempty"`
+		DependsOn FlexInts                     `json:"depends_on"`
+		Tag       string                       `json:"tag"`
+		Gap       string                       `json:"gap,omitempty"`
+	}
+	var r raw
+	if err := json.Unmarshal(data, &r); err != nil {
+		return err
+	}
+	s.Type = r.Type
+	s.Tool = r.Tool
+	s.Params = r.Params
+	s.DependsOn = r.DependsOn
+	s.Tag = r.Tag
+	s.Gap = r.Gap
+	if s.Params == nil {
+		s.Params = make(map[string]any)
+	}
+	s.ParamRefs = make(map[string]ParamInjection)
+	for k, v := range r.ParamRefs {
+		var pi ParamInjection
+		if err := json.Unmarshal(v, &pi); err == nil && pi.Field != "" {
+			s.ParamRefs[k] = pi
+		} else {
+			// Not a valid ParamInjection — move to Params as a plain value.
+			var plain any
+			if json.Unmarshal(v, &plain) == nil {
+				s.Params[k] = plain
+				log.Printf("[dag] plan: moved misplaced param_ref %q to params (not an injection)", k)
+			}
+		}
+	}
+	return nil
 }
 
 /*
@@ -240,6 +282,9 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("    Wire data between waves using param_refs.\n\n")
 		sb.WriteString("param_refs example: step 0 is web_search, step 1 needs the URL →\n")
 		sb.WriteString("  {\"params\":{},\"param_refs\":{\"url\":{\"step\":0,\"field\":\"results.0.url\"}},\"depends_on\":[0]}\n")
+		sb.WriteString("param_refs example: step 0 is web_search, step 1 is bash and needs the URL INSIDE a command string → use template:\n")
+		sb.WriteString("  {\"params\":{},\"param_refs\":{\"command\":{\"step\":0,\"field\":\"results.0.url\",\"template\":\"yt-dlp -o 'media/%(title)s.%(ext)s' '{{value}}'\"}},\"depends_on\":[0]}\n")
+		sb.WriteString("The template field is REQUIRED when injecting a value into the middle of a string. {{value}} is replaced with the extracted field. Without template, the entire param is replaced by the raw value.\n")
 		sb.WriteString("param_refs example: step 0 is sysinfo, step 1 is compute →\n")
 		sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"...\",\"mode\":\"shallow\"},\"param_refs\":{\"context.time\":{\"step\":0,\"field\":\"time\"}},\"depends_on\":[0]}\n\n")
 		sb.WriteString("Make good use of tools to gather real data and help the user. If no suitable tool exists, declare a gap.\n\n")
@@ -391,7 +436,12 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("## Compute Nodes\n")
 		sb.WriteString("Use `compute` (type:\"compute\") for ALL implementation work: building projects, writing multi-file code, scaffolding apps, data processing, calculations, or any task requiring writing and executing code. Provide the GOAL — never write code in bash params or file_write content.\n\n")
 		sb.WriteString("The compute architect handles ALL implementation details internally: directory creation, dependency installation, file generation, service startup, and validation. Do NOT plan these as separate bash/service steps — they will conflict with what the architect plans.\n\n")
-		sb.WriteString("Plan broadly in 1-3 compute steps, not 15 fine-grained bash/file_write steps. For any project that needs scaffolding (web app, CLI tool, library, service), ONE compute(deep) node is almost always correct — the architect inside handles everything.\n\n")
+		sb.WriteString("**Use tools directly when they can do the job. compute is for WRITING code — not for wrapping existing tools in scripts.** If yt-dlp can download a video, use bash. If curl can fetch a file, use bash. If a service needs restarting, use service. Only use compute when you need to CREATE new code that doesn't exist yet.\n\n")
+		sb.WriteString("Choose the right level:\n")
+		sb.WriteString("- **Direct tools** (bash, service, file_write, web_search): the task can be done with existing commands. Downloads, searches, restarts, config edits. This is the DEFAULT — try this first.\n")
+		sb.WriteString("- **compute(shallow)**: single-file code changes to existing files. Set task_files.\n")
+		sb.WriteString("- **compute(deep)**: new projects, major restructures, building multiple files from scratch. ONE deep node.\n")
+		sb.WriteString("If the workspace already has a working project and the user asks to change something specific, do NOT use compute(deep). Use shallow or direct tools.\n\n")
 		sb.WriteString("Required params on EVERY compute step: `goal` (string, what to build) and `mode` (\"deep\" or \"shallow\"). Never omit params, even on chained compute steps. If a follow-up compute step needs data from a prior step, wire it via `param_refs` AND still provide `goal` and `mode` in `params`.\n\n")
 		sb.WriteString("Example — \"build a web app with auth\":\n")
 		sb.WriteString("```json\n")
@@ -424,12 +474,31 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		// place project context flows in for the executive — auditable and
 		// gateable. ContextGate's WorkspaceTree returns a fenced tree string.
 		if graph != nil && graph.Context != nil {
+			// Determine if the current query relates to an existing project.
+			// Project-building skills (webdeveloper, data_science) indicate the
+			// query is about development work that would reference a blueprint.
+			// Utility skills (download, web_research, etc.) are unrelated — don't
+			// inject the blueprint or it will bias the executive.
+			projectSkillActive := false
+			projectSkills := map[string]bool{"webdeveloper": true, "data_science": true}
+			for _, card := range cards {
+				if projectSkills[card] {
+					projectSkillActive = true
+					break
+				}
+			}
+
+			// Always load the workspace tree (orientation). Only load the
+			// blueprint when a project-building skill is active.
+			var gateSources []SourceSpec
+			gateSources = append(gateSources, WorkspaceTree(3))
+			if projectSkillActive {
+				gateSources = append(gateSources, Blueprint())
+			}
+
 			gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
-				ReturnSources: Sources(
-					WorkspaceTree(3),
-					Blueprint(),
-				),
-				MaxBudget: 10000,
+				ReturnSources: gateSources,
+				MaxBudget:     10000,
 			})
 			if gerr != nil {
 				log.Printf("[dag] executive context build failed: %v", gerr)
@@ -439,26 +508,27 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 					sb.WriteString(tree)
 					sb.WriteString("\n")
 				}
-				if bp := gateResp.Sources[SourceBlueprint]; bp != "" {
-					sb.WriteString("\n## Existing Project\n")
-					sb.WriteString("An architecture blueprint already exists. Before planning, decide:\n")
-					sb.WriteString("1. Is the user asking to FIX or DEBUG the existing project? → Do NOT create a new blueprint. Plan diagnostic and repair steps using existing files.\n")
-					sb.WriteString("2. Is the user asking to ADD or EXTEND? → Use compute(mode=\"deep\") ONLY for the new feature. Reference the existing blueprint.\n")
-					sb.WriteString("3. Is the user asking to BUILD something completely new and unrelated? → Create a fresh blueprint from scratch.\n")
-					sb.WriteString("Most requests about an existing project are case 1 or 2. Only choose case 3 if the user explicitly wants something NEW.\n")
-					sb.WriteString("\n### Existing Blueprint Summary\n")
-					// Inject just the Goal + Architecture + Directory Structure sections, not the full blueprint
-					goalSection := Text.ExtractSection(bp, "## Goal")
-					archSection := Text.ExtractSection(bp, "## Architecture")
-					dirSection := Text.ExtractSection(bp, "## Directory Structure")
-					if goalSection != "" {
-						sb.WriteString("**Goal**: " + goalSection + "\n")
-					}
-					if archSection != "" {
-						sb.WriteString("**Architecture**: " + archSection + "\n")
-					}
-					if dirSection != "" {
-						sb.WriteString("**Structure**:\n" + dirSection + "\n")
+				if projectSkillActive {
+					if bp := gateResp.Sources[SourceBlueprint]; bp != "" {
+						sb.WriteString("\n## Existing Project\n")
+						sb.WriteString("An architecture blueprint already exists. Before planning, decide:\n")
+						sb.WriteString("1. Is the user asking to FIX or DEBUG the existing project? → Do NOT create a new blueprint. Plan diagnostic and repair steps using existing files.\n")
+						sb.WriteString("2. Is the user asking to ADD or EXTEND? → Use compute(mode=\"deep\") ONLY for the new feature. Reference the existing blueprint.\n")
+						sb.WriteString("3. Is the user asking to BUILD something completely new and unrelated? → Create a fresh blueprint from scratch.\n")
+						sb.WriteString("Most requests about an existing project are case 1 or 2. Only choose case 3 if the user explicitly wants something NEW.\n")
+						sb.WriteString("\n### Existing Blueprint Summary\n")
+						goalSection := Text.ExtractSection(bp, "## Goal")
+						archSection := Text.ExtractSection(bp, "## Architecture")
+						dirSection := Text.ExtractSection(bp, "## Directory Structure")
+						if goalSection != "" {
+							sb.WriteString("**Goal**: " + goalSection + "\n")
+						}
+						if archSection != "" {
+							sb.WriteString("**Architecture**: " + archSection + "\n")
+						}
+						if dirSection != "" {
+							sb.WriteString("**Structure**:\n" + dirSection + "\n")
+						}
 					}
 				}
 			}
@@ -605,6 +675,11 @@ func (a *Agent) runExecutiveStructured(ctx context.Context, trigger Trigger, gra
 	executiveHistory := prefixAssistantHistory(trigger.History)
 	sysPrompt := a.executiveSystemPrompt(ctx, graph, relevant, dagMode, intent)
 	userQuery := formatTrigger(trigger)
+	// Inject preflight context framing right after the query so the executive
+	// understands vague follow-ups like "get more" or "try again."
+	if a.preflight != nil && a.preflight.Context != "" {
+		userQuery += "\n\n## Context\n" + a.preflight.Context
+	}
 	messages := BuildMessagesWithHistory(sysPrompt, userQuery, executiveHistory)
 
 	started := time.Now()
@@ -842,6 +917,10 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// Include worklog so planner knows system state from previous runs.
 	// Pulled through ContextGate for centralization.
 	userQuery := formatTrigger(trigger)
+	// Inject preflight context framing right after the query.
+	if a.preflight != nil && a.preflight.Context != "" {
+		userQuery += "\n\n## Context\n" + a.preflight.Context
+	}
 	if graph != nil && graph.Context != nil {
 		gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
 			ReturnSources: Sources(

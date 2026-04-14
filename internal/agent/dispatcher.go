@@ -108,6 +108,13 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	budget *Budget, ch chan<- nodeCompletion, alertID string,
 	throttle *toolThrottle, intent gates.Intent, scope *ResolvedScope) {
 
+	// Tag every node with the investigation's active skills so the
+	// frontend can show which skills guided this run. Skills are
+	// investigation-wide (set by preflight), not tool-specific.
+	if n.Skills == nil && graph != nil && len(graph.ActiveCards) > 0 {
+		n.Skills = graph.ActiveCards
+	}
+
 	// Resolve param_refs from dependency outputs before execution.
 	// Fails fast if dep not resolved, field missing, or value empty.
 	if len(n.ParamRefs) > 0 {

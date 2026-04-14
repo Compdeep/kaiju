@@ -22,6 +22,7 @@ type PreflightResult struct {
 	Mode               string       // "chat" | "meta" | "investigate"
 	Intent             gates.Intent // inferred intent rank from the registry (used when trigger intent is Auto)
 	RequiredCategories []string     // tool categories the plan must include (network/filesystem/compute/process/info)
+	Context            string       // one-line framing of the user's intent based on conversation history
 }
 
 // preflightCategories is the fixed set of tool categories the preflight
@@ -45,7 +46,8 @@ If the user's query is "get this site working" and the prior context mentions a 
   "skills": ["skill_key", ...],
   "mode": "chat" | "meta" | "investigate",
   "intent": %s,
-  "required_categories": ["network", "filesystem", "compute", "process", "info"]
+  "required_categories": ["network", "filesystem", "compute", "process", "info"],
+  "context": "one sentence framing the user's intent for the executor"
 }
 
 ## Field meanings
@@ -67,6 +69,8 @@ If the user's query is "get this site working" and the prior context mentions a 
 - "compute": run code, write programs, analyze data (the compute tool)
 - "process": manage system processes, services, daemons
 - "info": system state, env vars, disk, network info
+
+**context** — One sentence summarising what the user wants, using both the current query AND the prior context. This frames vague queries like "do it", "get more", "try again" for the executor. Be specific: "User wants to download more eurodance videos using yt-dlp" not "User wants more." Include the method/tool if the prior context established one.
 
 Return ONLY the raw JSON object.`
 
@@ -91,6 +95,7 @@ type preflightRaw struct {
 	Mode               string   `json:"mode"`
 	Intent             string   `json:"intent"`
 	RequiredCategories []string `json:"required_categories"`
+	Context            string   `json:"context"`
 }
 
 /*
@@ -256,6 +261,9 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 			log.Printf("[dag] preflight: unknown category %q, dropping", c)
 		}
 	}
+
+	// Context — pass through as-is (freeform text).
+	out.Context = strings.TrimSpace(raw.Context)
 
 	return out
 }

@@ -267,9 +267,13 @@ func preflightToolDef() llm.ToolDef {
 						"type": "array",
 						"items": {"type": "string"},
 						"description": "Tool categories the plan MUST include."
+					},
+					"context": {
+						"type": "string",
+						"description": "One sentence framing the user's intent for the executor, based on query + conversation history."
 					}
 				},
-				"required": ["mode", "intent"]
+				"required": ["mode", "intent", "context"]
 			}`),
 		},
 	}
@@ -287,6 +291,10 @@ func architectToolDef() llm.ToolDef {
 					"blueprint": {
 						"type": "string",
 						"description": "Full markdown blueprint document."
+					},
+					"project_root": {
+						"type": "string",
+						"description": "Project root directory path, e.g. project/kaiju_webapp. All file paths, setup commands, service workdirs, and validators use this as their base."
 					},
 					"interfaces": {
 						"type": "object",

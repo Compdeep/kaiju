@@ -71,15 +71,17 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
 	a.dagMu.Lock()
 	a.dagGraph = graph
 	a.dagAlertID = trigger.AlertID
+	a.dagSessionID = trigger.SessionID
 	a.dagMu.Unlock()
 	go a.dagFanOut(observerCh)
-	a.broadcastDAGEvent(DAGEvent{Type: "start", AlertID: trigger.AlertID, Nodes: graph.Snapshot()})
+	a.broadcastDAGEvent(DAGEvent{Type: "start", AlertID: trigger.AlertID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
 
 	cleanup := func() {
-		a.broadcastDAGEvent(DAGEvent{Type: "done", AlertID: trigger.AlertID, Nodes: graph.Snapshot()})
+		a.broadcastDAGEvent(DAGEvent{Type: "done", AlertID: trigger.AlertID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
 		a.dagMu.Lock()
 		a.dagGraph = nil
 		a.dagAlertID = ""
+		a.dagSessionID = ""
 		a.dagMu.Unlock()
 		close(observerCh)
 	}
@@ -156,8 +158,8 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		// — ReAct doesn't use Graph the same way and is still serialized.
 		graph.ActiveCards = a.preflight.Skills
 		a.activeCards = a.preflight.Skills
-		log.Printf("[dag] preflight: mode=%s intent=%s skills=%v categories=%v",
-			a.preflight.Mode, a.preflight.Intent, a.preflight.Skills, a.preflight.RequiredCategories)
+		log.Printf("[dag] preflight: mode=%s intent=%s skills=%v categories=%v context=%q",
+			a.preflight.Mode, a.preflight.Intent, a.preflight.Skills, a.preflight.RequiredCategories, Text.TruncateLog(a.preflight.Context, 120))
 
 		// Autonomous mode: force investigate regardless of preflight classification.
 		// The agent always acts, never chats. Per-request override wins over config.
@@ -533,6 +535,11 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			node := graph.Get(comp.NodeID)
 			if node == nil {
 				continue
+			}
+			// Store token usage on the node for frontend display
+			if comp.TokensIn > 0 || comp.TokensOut > 0 {
+				node.TokensIn = comp.TokensIn
+				node.TokensOut = comp.TokensOut
 			}
 			// Decrement debug-grafted pending counter when one of those nodes
 			// reaches a terminal state. Used to gate reflection injection so
@@ -1126,10 +1133,11 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// ── Compute plan follow-up graft ──
 				if node.Type == NodeCompute {
 					var cr struct {
-						Type     string          `json:"type"`
-						Setup    []string        `json:"setup,omitempty"`
-						FollowUp json.RawMessage `json:"follow_up,omitempty"`
-						Execute  string          `json:"execute,omitempty"`
+						Type        string          `json:"type"`
+						ProjectRoot string          `json:"project_root,omitempty"`
+						Setup       []string        `json:"setup,omitempty"`
+						FollowUp    json.RawMessage `json:"follow_up,omitempty"`
+						Execute     string          `json:"execute,omitempty"`
 						Services []struct {
 							Name    string `json:"name"`
 							Command string `json:"command"`
@@ -1143,6 +1151,12 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						} `json:"validation,omitempty"`
 					}
 					if json.Unmarshal([]byte(comp.Result), &cr) == nil && cr.Type == "blueprint" && len(cr.FollowUp) > 0 {
+						// Store the project root on the graph so all downstream
+						// components (coders, services, Holmes) can find it.
+						if cr.ProjectRoot != "" && graph.ProjectRoot == "" {
+							graph.ProjectRoot = cr.ProjectRoot
+							log.Printf("[dag] project root set: %s", graph.ProjectRoot)
+						}
 						// Parse follow_up as array of work items
 						var followUps []struct {
 							Tool           string         `json:"tool"`
@@ -1609,8 +1623,10 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	log.Printf("[dag] sync investigation: type=%s alert=%s source=%s",
 		trigger.Type, trigger.AlertID, trigger.Source)
 
-	// Start with clean state so the reflector doesn't see stale errors from previous runs.
-	resetWorklog(a.cfg.MetadataDir, trigger.SessionID)
+	// Mark the start of a new run in the worklog. History is preserved so
+	// Holmes can see prior failures, but the separator lets the reflector
+	// distinguish current vs stale evidence.
+	markRunStart(a.cfg.MetadataDir, trigger.SessionID)
 	rotateServiceLogs(a.cfg.Workspace)
 
 	a.investigating.Store(true)
@@ -1811,6 +1827,7 @@ func classifyRetryTier(errMsg string) string {
 		"module not found", "cannot find module",
 		"command not found",
 		"splice", "edit out of bounds",
+		"timed out", "command timed out", // a 60s timeout won't succeed on retry
 	}
 	for _, p := range skipPatterns {
 		if strings.Contains(lower, p) {
@@ -1821,7 +1838,7 @@ func classifyRetryTier(errMsg string) string {
 	// Tier 2: blind — transient errors, just rerun
 	blindPatterns := []string{
 		"connection refused", "econnrefused", "econnreset",
-		"timed out", "timeout", "etimedout",
+		"etimedout", // network timeout (not command timeout)
 		"exit status 7", // curl: couldn't connect
 		"npm err! network", "fetch failed",
 		"rate limit", "http 429", "http 503",

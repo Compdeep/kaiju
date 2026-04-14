@@ -9,7 +9,11 @@
       <span class="h-sep">·</span>
       <span class="h-val">{{ totalMs }}</span>
       <span class="h-dim">ms</span>
+      <span v-if="totalTokens > 0" class="h-sep">·</span>
+      <span v-if="totalTokens > 0" class="h-val">{{ fmtTokens(totalTokens) }}</span>
+      <span v-if="totalTokens > 0" class="h-dim">tok</span>
       <span :class="['h-status', status]">{{ statusLabel }}</span>
+      <span v-if="!expanded && latestTag" class="h-latest">{{ latestTag }}</span>
     </div>
 
     <transition name="expand">
@@ -37,13 +41,20 @@
             <span v-if="item.node.params" class="t-params">[{{ compactParams(item.node.params) }}]</span>
             <span v-if="item.node.summary" class="t-summary">{{ item.node.summary }}</span>
             <span class="t-ms">{{ item.node.ms || 0 }}ms</span>
+            <span v-if="item.node.tokens_in || item.node.tokens_out" class="t-tokens">{{ fmtTokens((item.node.tokens_in || 0) + (item.node.tokens_out || 0)) }}tok</span>
             <span v-if="item.node.result_size" class="t-size">{{ fmtSize(item.node.result_size) }}</span>
             <span :class="['t-st', item.node.state]">{{ stChr(item.node.state) }}</span>
             <span v-if="item.node.result" class="t-expand">{{ expandedResults[item.node.id] ? '−' : '+' }}</span>
           </div>
 
           <div v-if="item.type === 'node' && item.node.result && expandedResults[item.node.id]" class="tl-result">
-            <pre class="t-result-content">{{ item.node.result }}</pre>
+            <div v-if="item.node.type === 'holmes' && parseReasoning(item.node.result)" class="t-rca-content">
+              <div class="t-rca-reasoning">{{ parseReasoning(item.node.result) }}</div>
+              <div v-if="parseRCA(item.node.result)" class="t-rca-conclusion">
+                <span class="t-rca-label">Root cause:</span> {{ parseRCA(item.node.result) }}
+              </div>
+            </div>
+            <pre v-else class="t-result-content">{{ item.node.result }}</pre>
           </div>
 
           <div v-if="item.type === 'dep'" class="tl tl-sub">
@@ -93,6 +104,8 @@
           <span class="t-dim">{{ nodes.length }} nodes</span>
           <span class="t-dim">·</span>
           <span class="t-dim">{{ totalMs }}ms</span>
+          <span v-if="totalTokens > 0" class="t-dim">·</span>
+          <span v-if="totalTokens > 0" class="t-dim">{{ fmtTokens(totalTokens) }} tokens ({{ fmtTokens(totalTokensIn) }}in · {{ fmtTokens(totalTokensOut) }}out)</span>
           <span class="t-dim">·</span>
           <span :class="['t-final', status]">{{ statusLabel }}</span>
         </div>
@@ -112,10 +125,10 @@ const props = defineProps({
   running: { type: Boolean, default: false },
 })
 
-const expanded = ref(true)
+const expanded = ref(false)
 const expandedResults = ref({})
 watch(() => props.running, (val) => { if (!val && props.nodes.length > 0) setTimeout(() => { expanded.value = false }, 2500) })
-watch(() => props.nodes.length, (n, o) => { if (n > 0 && o === 0) expanded.value = true })
+watch(() => props.nodes.length, (n, o) => { if (n > 0 && o === 0) expanded.value = false })
 
 /**
  * desc: Toggle the expanded/collapsed state of a node's result content
@@ -162,6 +175,17 @@ const totalMs = computed(() => props.nodes.reduce((s, n) => s + (n.ms || 0), 0))
  * @returns {number} Count of nodes with state 'failed'
  */
 const failCount = computed(() => props.nodes.filter(n => n.state === 'failed').length)
+
+const totalTokensIn = computed(() => props.nodes.reduce((s, n) => s + (n.tokens_in || 0), 0))
+const totalTokensOut = computed(() => props.nodes.reduce((s, n) => s + (n.tokens_out || 0), 0))
+const totalTokens = computed(() => totalTokensIn.value + totalTokensOut.value)
+
+const latestTag = computed(() => {
+  const active = props.nodes.filter(n => n.state === 'running' || n.state === 'resolved')
+  if (active.length === 0) return ''
+  const last = active[active.length - 1]
+  return last.tag || last.tool || last.id
+})
 
 /**
  * desc: Build the flat layout array from nodes, grouping independent tools into waves and attaching deps/spawns/errors
@@ -265,6 +289,7 @@ function compactParams(p) {
  * @returns {string} Formatted size string
  */
 function fmtSize(b) { return b < 1024 ? b + 'b' : (b / 1024).toFixed(1) + 'kb' }
+function fmtTokens(t) { return t >= 1000 ? (t / 1000).toFixed(1) + 'k' : String(t) }
 
 /**
  * desc: Map an error type to its display label with icon
@@ -292,7 +317,7 @@ function stChr(s) { return { running: '\u25B8', resolved: '\u2713', failed: '\u2
  * @param {string} t - Node type (planner, aggregator, skill, etc.)
  * @returns {string} Three-letter type label
  */
-function tyLabel(t) { return { executive:'EXE', aggregator:'AGG', tool:'TLL', compute:'CMP', reflection:'RFL', observer:'OBS', micro_planner:'MPL', interjection:'INJ', actuator:'ACT', holmes:'RCA' }[t] || '???' }
+function tyLabel(t) { return { executive:'EXE', aggregator:'AGG', tool:'TLL', compute:'CMP', reflection:'RFL', observer:'OBS', micro_planner:'MPL', interjection:'INJ', actuator:'ACT', holmes:'🕵️' }[t] || '???' }
 
 /**
  * desc: Truncate a string to a maximum length, appending an ellipsis if needed
@@ -301,6 +326,20 @@ function tyLabel(t) { return { executive:'EXE', aggregator:'AGG', tool:'TLL', co
  * @returns {string} Truncated string
  */
 function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
+
+function parseReasoning(result) {
+  try {
+    const obj = typeof result === 'string' ? JSON.parse(result) : result
+    return obj.reasoning || null
+  } catch { return null }
+}
+
+function parseRCA(result) {
+  try {
+    const obj = typeof result === 'string' ? JSON.parse(result) : result
+    return obj.rca?.root_cause || null
+  } catch { return null }
+}
 </script>
 
 <style scoped>
@@ -325,6 +364,7 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
 .h-val { color: var(--text); font-weight: 600; }
 .h-dim { color: var(--text-muted); }
 .h-fail { color: var(--signal-red); font-weight: 600; font-size: 10px; } /* kept for compat */
+.h-latest { color: var(--text-secondary); font-size: 10px; margin-left: 4px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; opacity: 0.7; }
 .h-status { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
 .h-status.live { color: var(--accent); }
 .h-status.done { color: var(--signal-green); }
@@ -359,6 +399,7 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
 .t-params { color: var(--text-muted); font-size: 10px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .t-summary { color: var(--text-secondary); font-size: 10px; font-style: italic; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
 .t-ms { color: var(--text-muted); font-size: 10px; }
+.t-tokens { color: var(--accent); font-size: 9px; opacity: 0.6; }
 .t-size { color: var(--text-muted); font-size: 9px; opacity: 0.6; }
 .t-expand { color: var(--accent); font-weight: 700; font-size: 10px; opacity: 0.6; cursor: pointer; }
 .t-expand:hover { opacity: 1; }
@@ -396,16 +437,16 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
    light-pink signal-red they used to share with informational warnings.
    Hardcoded so the contrast holds in both light and dark themes. */
 .t-err-badge { font-size: 9px; font-weight: 700; letter-spacing: 0.05em; padding: 0 4px; border-radius: 2px; }
-.t-err-badge.gate { color: #c0428a; background: var(--signal-red-bg); }
+.t-err-badge.gate { color: #dc2626; background: rgba(220,38,38,0.1); }
 .t-err-badge.clearance { color: var(--signal-amber); background: var(--signal-amber-bg); }
 .t-err-badge.timeout { color: var(--accent-warm); background: var(--accent-warm-subtle); }
-.t-err-badge.exec { color: #c0428a; }
-.t-err-msg { color: #c0428a; font-size: 10px; opacity: 0.85; }
+.t-err-badge.exec { color: #dc2626; background: rgba(220,38,38,0.08); }
+.t-err-msg { color: #dc2626; font-size: 10px; }
 
 /* Footer */
 .tl-footer { margin-top: 3px; }
 .t-dim { color: var(--text-muted); }
-.t-err-count { color: #c0428a; }
+.t-err-count { color: #dc2626; }
 .t-final { font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
 .t-final.done { color: var(--signal-green); }
 .t-final.partial { color: var(--signal-amber); }
@@ -434,6 +475,31 @@ function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '\u2026' : s }
   color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* RCA reasoning display */
+.t-rca-content {
+  font-family: var(--font);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.t-rca-reasoning {
+  margin-bottom: 6px;
+  font-style: italic;
+}
+.t-rca-conclusion {
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text);
+  font-weight: 500;
+}
+.t-rca-label {
+  color: #a78bfa;
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .expand-enter-active { transition: all 0.25s ease; }

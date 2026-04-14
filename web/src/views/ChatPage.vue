@@ -465,6 +465,7 @@ watch(() => sessions.sessionId, (newId) => {
 .sidebar {
   display: flex; flex-direction: column;
   background: var(--surface);
+  border-right: 1px solid var(--border-subtle);
   overflow: hidden;
   position: relative;
   min-width: 40px;
@@ -473,14 +474,16 @@ watch(() => sessions.sessionId, (newId) => {
 .sidebar.collapsed { width: 40px !important; min-width: 40px; }
 
 .sidebar-new {
-  display: flex; align-items: center; gap: 6px;
-  margin: 10px; padding: 8px 12px;
-  border: 1px dashed var(--border); border-radius: var(--radius-sm);
-  background: transparent; color: var(--text-secondary);
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 10px; padding: 6px 12px;
+  border: none; border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
   font-size: 12px; font-family: var(--mono); cursor: pointer;
   transition: all var(--transition);
+  width: auto;
 }
-.sidebar-new:hover { border-color: var(--accent); color: var(--accent); }
+.sidebar-new:hover { color: var(--accent); background: var(--accent-subtle); }
 .session-list { flex: 1; overflow-y: auto; padding: 0 6px 10px; }
 .session-item {
   display: flex; align-items: center; justify-content: space-between;
@@ -518,6 +521,7 @@ watch(() => sessions.sessionId, (newId) => {
   flex: 1; min-width: 400px;
   display: flex; flex-direction: column;
   position: relative;
+  background: var(--surface);
 }
 
 .chat-messages {
@@ -608,16 +612,39 @@ watch(() => sessions.sessionId, (newId) => {
 .ij-x:hover { opacity: 1; }
 
 /* Compose */
-.chat-compose { padding: 12px 32px 16px 36px; border-top: 1px solid var(--border-subtle); }
+.chat-compose {
+  padding: 12px 32px 16px 36px;
+  border-top: 1px solid var(--border-subtle);
+}
 .compose-row {
   display: flex; gap: 4px; align-items: flex-end;
-  background: var(--surface);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 6px 8px; box-shadow: var(--shadow-sm);
-  transition: border-color var(--transition);
+  background:
+    linear-gradient(180deg,
+      rgba(245,245,245,0.90) 0%,
+      rgba(255,255,255,0.98) 49%,
+      rgba(240,240,240,0.85) 50%,
+      rgba(255,255,255,0.95) 100%
+    );
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 1px 0 rgba(255,255,255,0.9) inset;
+  transition: box-shadow var(--transition);
   flex-wrap: wrap;
 }
-.compose-row:focus-within { border-color: var(--accent); }
+.compose-row:focus-within { box-shadow: 0 2px 12px rgba(0,0,0,0.08), 0 1px 0 rgba(255,255,255,0.9) inset; }
+[data-theme="dark"] .compose-row {
+  background:
+    linear-gradient(180deg,
+      rgba(8,8,12,0.95) 0%,
+      rgba(14,14,20,0.98) 49%,
+      rgba(6,6,9,0.90) 50%,
+      rgba(10,10,15,0.95) 100%
+    );
+  border-color: rgba(255,255,255,0.06);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.04) inset;
+}
+[data-theme="dark"] .compose-row:focus-within { box-shadow: 0 2px 12px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.05) inset; }
 .compose-controls {
   display: flex; align-items: center; gap: 1px;
   flex-shrink: 0;
@@ -663,11 +690,16 @@ watch(() => sessions.sessionId, (newId) => {
 .menu-enter-from, .menu-leave-to { opacity: 0; transform: translateY(6px); }
 .menu-enter-to, .menu-leave-from { opacity: 1; transform: translateY(0); }
 .compose-input {
-  flex: 1; border: none; background: transparent;
-  resize: none; font-size: 14px; padding: 6px 4px;
+  flex: 1; border: none;
+  background: rgba(250,250,250,0.95);
+  border-radius: 4px;
+  resize: none; font-size: 14px; padding: 6px 8px;
   min-height: 24px; max-height: 140px;
   font-family: var(--font); color: var(--text);
   min-width: 0;
+}
+[data-theme="dark"] .compose-input {
+  background: rgba(5,5,8,0.9);
 }
 .compose-input:focus { outline: none; }
 .compose-input::placeholder { color: var(--text-muted); }

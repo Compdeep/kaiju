@@ -98,7 +98,7 @@ func (b *Bash) Parameters() json.RawMessage {
 			},
 			"timeout_sec": {
 				"type": "integer",
-				"description": "Timeout in seconds (default 60, max 300)"
+				"description": "Timeout in seconds. Default 60. Auto-extends for downloads (yt-dlp, curl -o) and builds. Set 0 for long-running tasks (no timeout)."
 			}
 		},
 		"required": ["command"],
@@ -207,15 +207,20 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	}
 
 	timeout := b.timeout
-	if ts, ok := params["timeout_sec"].(float64); ok && ts > 0 {
-		if ts > 300 {
-			ts = 300
+	if ts, ok := params["timeout_sec"].(float64); ok {
+		if ts == 0 {
+			timeout = 30 * time.Minute // 0 = long-running (downloads, builds)
+		} else if ts > 0 {
+			timeout = time.Duration(ts) * time.Second // no cap — caller decides
 		}
-		timeout = time.Duration(ts) * time.Second
 	} else {
 		// Auto-detect slow commands and use longer timeout
 		cmdLower := strings.ToLower(command)
-		if strings.Contains(cmdLower, "npm install") ||
+		if strings.Contains(cmdLower, "yt-dlp") ||
+			strings.Contains(cmdLower, "curl -o") ||
+			strings.Contains(cmdLower, "wget ") {
+			timeout = 300 * time.Second // 5 minutes for downloads
+		} else if strings.Contains(cmdLower, "npm install") ||
 			strings.Contains(cmdLower, "pip install") ||
 			strings.Contains(cmdLower, "cargo build") ||
 			strings.Contains(cmdLower, "docker build") ||

@@ -107,19 +107,29 @@ export function connect() {
             ds.running = false
             ds.interjectMode = false
           }
-          // Reload messages for that session if it was loading
+          // If this session was detected as inflight on page reload
+          // (loading=true but no active send() in progress), reload
+          // messages to pick up the stored verdict. We detect "no active
+          // send()" by checking if the POST hasn't added the assistant
+          // message yet — if the last message is still 'user', we're in
+          // the recovery path and should reload.
           const ss = sessions.getSession(sid)
           if (ss && ss.loading) {
-            ss.loading = false
-            api.get(`/api/v1/sessions/${sid}/messages`).then(msgs => {
-              ss.messages = (msgs || []).map(m => {
-                const msg = { role: m.role, content: m.content }
-                if (m.dag_trace) {
-                  try { msg.trace = JSON.parse(m.dag_trace) } catch {}
-                }
-                return msg
-              })
-            }).catch(() => {})
+            const lastMsg = ss.messages.length ? ss.messages[ss.messages.length - 1] : null
+            if (lastMsg && lastMsg.role === 'user') {
+              // Recovery: page was reloaded mid-query. Reload messages from server.
+              ss.loading = false
+              api.get(`/api/v1/sessions/${sid}/messages`).then(msgs => {
+                ss.messages = (msgs || []).map(m => {
+                  const msg = { role: m.role, content: m.content }
+                  if (m.dag_trace) {
+                    try { msg.trace = JSON.parse(m.dag_trace) } catch {}
+                  }
+                  return msg
+                })
+              }).catch(() => {})
+            }
+            // Otherwise send() is still in flight and will handle the message itself.
           }
           // Clean up mapping
           if (ev.alert) alertToSession.delete(ev.alert)

@@ -1,31 +1,32 @@
 <p>
-  <img src="docs/kaiju-logo.svg" width="100" align="left" alt="Kaiju logo"/>
+  <img src="docs/kaiju-logo.svg" width="150" align="left" alt="Kaiju logo"/>
 </p>
 
-```
- ____  __.  _____  .___     ____.____ ___
+<pre style="background:none;border:none"><code style="color:#818cf8;background:none"> ____  __.  _____  .___     ____.____ ___
 |    |/ _| /  _  \ |   |   |    |    |   \
-|      <  /  /_\  \|   |   |    |    |   /
+|      &lt;  /  /_\  \|   |   |    |    |   /
 |    |  \/    |    \   /\__|    |    |  /
 |____|__ \____|__  /___\________|______/
         \/       \/
-```
+</code></pre>
 
 <br clear="left"/>
 
 # Kaiju
 
-A general-purpose AI assistant and agent framework with a web UI, file/media browser, DAG-based parallel execution, intent-gated safety, and a modular skill system inspired by OpenClaw. Kaiju separates reasoning from execution, enabling parallel tool dispatch, structural safety enforcement, and adaptive replanning — while remaining a practical, everyday assistant.
+An enterprise-grade dual-purpose AI agent. Deploy it as a general assistant with a modern web UI, or extend it as an executive kernel to control and manage systems — IT infrastructure, robotic operators, drone fleets, data pipelines, or any domain where an AI needs to plan, execute, and adapt safely.
 
 MIT License
 
 ## What it does
 
-Kaiju is two things: a **conversational AI assistant** with a modern web interface, and an **execution kernel** that manages how the AI uses tools safely and efficiently.
+Kaiju serves two roles: a **conversational assistant** and an **autonomous execution kernel**.
 
-As an assistant, it provides a chat UI with session history, a composable side panel (file browser, media viewer, code preview, canvas), configurable execution modes, and support for custom skills that extend its capabilities.
+As an assistant, it provides a chat interface with session history, a composable side panel (file browser, media viewer, code preview, canvas), configurable execution modes, and a modular skill system inspired by OpenClaw.
 
-As an execution kernel, it separates planning from execution. The LLM produces a dependency graph of tool calls upfront, then the execution layer schedules, gates, and adapts the graph independently. Tools fire in parallel where dependencies allow. Reflection checkpoints evaluate intermediate results and replan when needed. An intent-based execution gate (IGX) enforces tool authorization at runtime without LLM involvement.
+As an execution kernel, it separates reasoning from execution. The LLM produces a dependency graph of tool calls, then the kernel schedules, gates, and adapts the graph independently. Tools fire in parallel where dependencies allow. A ReAct investigator (Holmes) diagnoses failures with structured root-cause analysis. A clean-room debugger plans fixes. Reflection checkpoints evaluate intermediate results and replan when needed. An intent-based execution gate (IGX) enforces tool authorization at runtime — the LLM plans, but compiled code decides what runs.
+
+The same architecture handles a chat query ("download some videos"), a web development task ("build me a website"), and an autonomous system operation ("monitor this service and restart it if it fails"). Skills teach the kernel domain-specific strategies without changing the core engine.
 
 ## Quick start
 

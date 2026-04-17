@@ -1,10 +1,10 @@
 package cli
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"os"
+	"io"
 	"regexp"
 	"strings"
 	"sync"
@@ -106,7 +106,7 @@ func (c *Channel) showPrompt() {
 
 // Start reads lines from stdin and sends them as inbound messages.
 func (c *Channel) Start(ctx context.Context, inbox chan<- channels.InboundMessage) error {
-	scanner := bufio.NewScanner(os.Stdin)
+	rl := NewLineReader(HistoryFilePath(), c.complete)
 
 	// Welcome banner
 	t := c.theme
@@ -120,11 +120,21 @@ func (c *Channel) Start(ctx context.Context, inbox chan<- channels.InboundMessag
 		default:
 		}
 
-		if !scanner.Scan() {
-			return scanner.Err()
+		rl.SetPrompt(c.prompt())
+		text, err := rl.Read()
+		if err != nil {
+			if errors.Is(err, ErrInterrupt) {
+				c.showPrompt()
+				continue
+			}
+			if errors.Is(err, io.EOF) {
+				fmt.Printf("  %s\n", clr(t.Muted, "bye."))
+				return nil
+			}
+			return err
 		}
 
-		text := strings.TrimSpace(scanner.Text())
+		text = strings.TrimSpace(text)
 		if text == "" {
 			c.showPrompt()
 			continue
@@ -529,6 +539,50 @@ func (c *Channel) printBanner() {
 	)
 	fmt.Printf("  %s\n", clr(t.Muted, "/help · /theme dark|light · /quit"))
 	fmt.Println()
+}
+
+// complete returns tab-completion candidates for the current input line.
+// Completes slash commands on the first word, and known argument values
+// (intent names, theme names) on the second word.
+func (c *Channel) complete(line string, pos int) (int, []string) {
+	if pos > len(line) {
+		pos = len(line)
+	}
+	prefix := line[:pos]
+
+	start := strings.LastIndexByte(prefix, ' ') + 1
+	needle := prefix[start:]
+
+	head := strings.TrimSpace(prefix[:start])
+	if head == "" {
+		cmds := []string{"/help", "/quit", "/exit", "/new", "/resume", "/intent", "/theme", "/trace"}
+		var out []string
+		for _, cmd := range cmds {
+			if strings.HasPrefix(cmd, needle) {
+				out = append(out, cmd)
+			}
+		}
+		return start, out
+	}
+
+	fields := strings.Fields(head)
+	var options []string
+	switch fields[0] {
+	case "/intent":
+		options = []string{"auto"}
+		if c.intentLister != nil {
+			options = append(options, c.intentLister()...)
+		}
+	case "/theme":
+		options = []string{"dark", "light"}
+	}
+	var out []string
+	for _, opt := range options {
+		if strings.HasPrefix(opt, needle) {
+			out = append(out, opt)
+		}
+	}
+	return start, out
 }
 
 func (c *Channel) Close() error { return nil }

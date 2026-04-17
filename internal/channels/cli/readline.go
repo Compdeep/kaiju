@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
-	"golang.org/x/term"
 )
 
 // ErrInterrupt is returned by LineReader.Read when the user presses Ctrl+C.
@@ -22,21 +21,40 @@ var ErrInterrupt = errors.New("interrupt")
 // completion. pos is the cursor byte offset within line.
 type CompleteFunc func(line string, pos int) (start int, candidates []string)
 
-// LineReader is a minimal raw-mode stdin reader with history recall (up/down)
-// and tab completion. Safe to call Read from a single goroutine.
+// ReadByteFn returns the next input byte. The implementation is responsible
+// for any filtering (e.g. Ctrl+O interception in the key pump).
+type ReadByteFn func() (byte, error)
+
+// LineReader is a line editor with history and tab completion. Raw-mode
+// terminal state is owned by the caller (see keyPump in cli.go); Read does
+// NOT toggle raw mode itself.
 type LineReader struct {
 	historyFile string
 	history     []string
 	complete    CompleteFunc
+	readByteFn  ReadByteFn
 
 	mu     sync.Mutex
 	prompt string
 }
 
-func NewLineReader(historyFile string, complete CompleteFunc) *LineReader {
-	lr := &LineReader{historyFile: historyFile, complete: complete}
+func NewLineReader(historyFile string, complete CompleteFunc, readByteFn ReadByteFn) *LineReader {
+	if readByteFn == nil {
+		readByteFn = defaultReadByte
+	}
+	lr := &LineReader{
+		historyFile: historyFile,
+		complete:    complete,
+		readByteFn:  readByteFn,
+	}
 	lr.loadHistory()
 	return lr
+}
+
+func defaultReadByte() (byte, error) {
+	var b [1]byte
+	_, err := os.Stdin.Read(b[:])
+	return b[0], err
 }
 
 func (lr *LineReader) SetPrompt(p string) {
@@ -49,23 +67,10 @@ func (lr *LineReader) SetPrompt(p string) {
 // ErrInterrupt), or hits EOF (io.EOF). The caller is expected to have already
 // rendered the prompt on screen; Read uses the stored prompt string only when
 // it needs to redraw the input line (backspace, history, completion).
+//
+// Raw-mode is owned by the caller (key pump). This function never calls
+// MakeRaw/Restore — doing so while the pump owns the fd would race.
 func (lr *LineReader) Read() (string, error) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return readFallback()
-	}
-
-	state, err := term.MakeRaw(fd)
-	if err != nil {
-		return "", err
-	}
-	defer term.Restore(fd, state)
-	// MakeRaw disables OPOST, which breaks \n → \r\n for concurrent writers
-	// (Send, StatusUpdate). Re-enable output processing while we hold raw input.
-	if err := enableOPOST(fd); err != nil {
-		return "", err
-	}
-
 	lr.mu.Lock()
 	prompt := lr.prompt
 	lr.mu.Unlock()
@@ -84,7 +89,7 @@ func (lr *LineReader) Read() (string, error) {
 	}
 
 	for {
-		b, err := readByte()
+		b, err := lr.readByteFn()
 		if err != nil {
 			if err == io.EOF {
 				return "", io.EOF
@@ -122,11 +127,11 @@ func (lr *LineReader) Read() (string, error) {
 			}
 
 		case b == 0x1b:
-			b2, err := readByte()
+			b2, err := lr.readByteFn()
 			if err != nil || b2 != '[' {
 				continue
 			}
-			b3, err := readByte()
+			b3, err := lr.readByteFn()
 			if err != nil {
 				continue
 			}
@@ -165,7 +170,7 @@ func (lr *LineReader) Read() (string, error) {
 			}
 
 		case b >= 0x20:
-			r, err := readRune(b)
+			r, err := readRune(b, lr.readByteFn)
 			if err != nil || r == utf8.RuneError {
 				continue
 			}
@@ -180,13 +185,7 @@ func (lr *LineReader) Read() (string, error) {
 	}
 }
 
-func readByte() (byte, error) {
-	var b [1]byte
-	_, err := os.Stdin.Read(b[:])
-	return b[0], err
-}
-
-func readRune(first byte) (rune, error) {
+func readRune(first byte, next ReadByteFn) (rune, error) {
 	if first < 0x80 {
 		return rune(first), nil
 	}
@@ -204,7 +203,7 @@ func readRune(first byte) (rune, error) {
 	seq := make([]byte, total)
 	seq[0] = first
 	for i := 1; i < total; i++ {
-		b, err := readByte()
+		b, err := next()
 		if err != nil {
 			return utf8.RuneError, err
 		}

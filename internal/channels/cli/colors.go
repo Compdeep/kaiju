@@ -11,10 +11,25 @@ const (
 	underline = "\033[4m"
 
 	// Cursor control
-	clearLine = "\033[2K"
-	cursorUp  = "\033[1A"
-	saveCur   = "\033[s"
-	restorCur = "\033[u"
+	clearLine  = "\033[2K"
+	cursorUp   = "\033[1A"
+	cursorDown = "\033[1B"
+	saveCur    = "\033[s"
+	restorCur  = "\033[u"
+
+	// Alt screen buffer (xterm) — preserves main screen on exit
+	altEnter    = "\033[?1049h"
+	altExit     = "\033[?1049l"
+	clearScreen = "\033[2J"
+	cursorHome  = "\033[H"
+	hideCursor  = "\033[?25l"
+	showCursor  = "\033[?25h"
+
+	// Alternate scroll mode. When ON (default in many terminals during raw
+	// mode), mouse wheel is translated into arrow keys and fed to the app —
+	// which makes wheel-up fire history recall in our line editor. Turn it
+	// OFF so the terminal handles wheel natively for scrollback.
+	altScrollOff = "\033[?1007l"
 )
 
 // Theme holds color codes for a visual theme.
@@ -56,7 +71,7 @@ var darkTheme = Theme{
 	PromptBrand:    "\033[38;5;141m", // purple
 	PromptArrow:    "\033[38;5;245m", // gray
 	PromptIntent:   "\033[38;5;110m", // blue
-	UserLabel:      "\033[38;5;209m", // coral
+	UserLabel:      "\033[38;5;45m", // cyan
 	AssistantLabel: "\033[38;5;141m", // purple
 	UserText:       "\033[38;5;253m", // bright white
 	AssistantText:  "\033[38;5;253m", // bright white
@@ -79,7 +94,7 @@ var lightTheme = Theme{
 	PromptBrand:    "\033[38;5;62m",  // deep purple
 	PromptArrow:    "\033[38;5;245m", // gray
 	PromptIntent:   "\033[38;5;25m",  // deep blue
-	UserLabel:      "\033[38;5;166m", // orange
+	UserLabel:      "\033[38;5;31m", // dark cyan
 	AssistantLabel: "\033[38;5;62m",  // deep purple
 	UserText:       "\033[38;5;235m", // dark
 	AssistantText:  "\033[38;5;235m", // dark

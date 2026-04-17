@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Compdeep/kaiju/internal/channels"
+	"golang.org/x/term"
 )
 
 // SessionInfo is a summary of a session for display.
@@ -20,17 +23,40 @@ type SessionInfo struct {
 	Age   string
 }
 
+// statusEntry is a single annotation (debug / trace line) captured during
+// a query. Kept in a bounded ring so the expanded (Ctrl+O) view can render
+// the full history of the current + prior queries.
+type statusEntry struct {
+	ts   time.Time
+	text string
+}
+
+const statusBufferSize = 500
+
 // Channel implements an interactive CLI channel (stdin/stdout).
 type Channel struct {
 	sessionID      string
 	mu             sync.RWMutex
 	intent         string
 	intentLister   func() []string
-	sessionCreator func() (string, error)               // creates new session, returns ID
+	sessionCreator func() (string, error)                 // creates new session, returns ID
 	sessionLister  func(limit int) ([]SessionInfo, error) // lists recent sessions
-	sessionLoader  func(id string) error                 // switches to a session
+	sessionLoader  func(id string) error                  // switches to a session
 	theme          *Theme
-	traceExpand    bool // Ctrl+O toggles full trace view
+
+	// Rendering. All terminal writes take renderMu to serialize output across
+	// goroutines (Start loop, Send callback, LogWriter from log.SetOutput).
+	renderMu     sync.Mutex
+	inlineRows   int  // rows consumed by the current collapsed status block
+	inlineActive bool // true between user submit and Send — when status may render inline
+	altActive    bool // true while the expanded alt-screen view is on
+
+	// Status buffer (ring). All debug / status lines go here, regardless of
+	// whether they render inline. Not part of LLM context — annotations only.
+	bufMu     sync.Mutex
+	statusBuf []statusEntry
+
+	pump *keyPump
 }
 
 // New creates a CLI channel with the dark theme.
@@ -97,16 +123,25 @@ func (c *Channel) prompt() string {
 	return fmt.Sprintf("  %s %s ", brand, arrow)
 }
 
-// showPrompt prints a blank status line followed by the prompt.
-// The blank line acts as a reserved slot for StatusUpdate to write into
-// without disturbing the user's input on the prompt line.
+// showPrompt prints the prompt on a fresh line. Cursor ends at end of prompt.
 func (c *Channel) showPrompt() {
+	c.renderMu.Lock()
+	defer c.renderMu.Unlock()
 	fmt.Printf("\n%s", c.prompt())
 }
 
 // Start reads lines from stdin and sends them as inbound messages.
 func (c *Channel) Start(ctx context.Context, inbox chan<- channels.InboundMessage) error {
-	rl := NewLineReader(HistoryFilePath(), c.complete)
+	// Key pump owns raw mode for the lifetime of the channel. It intercepts
+	// Ctrl+O (alt-screen toggle) and forwards other bytes to LineReader.
+	pump, err := startKeyPump(c)
+	if err != nil {
+		return fmt.Errorf("cli: init key pump: %w", err)
+	}
+	defer pump.Close()
+	c.pump = pump
+
+	rl := NewLineReader(HistoryFilePath(), c.complete, pump.ReadByte)
 
 	// Welcome banner
 	t := c.theme
@@ -172,20 +207,18 @@ func (c *Channel) Start(ctx context.Context, inbox chan<- channels.InboundMessag
 			continue
 
 		case text == "/trace":
-			c.mu.Lock()
-			c.traceExpand = !c.traceExpand
-			c.mu.Unlock()
-			if c.traceExpand {
-				fmt.Printf("  %s\n", clr(t.Success, "trace: expanded"))
-			} else {
-				fmt.Printf("  %s\n", clr(t.Muted, "trace: inline"))
-			}
-			c.showPrompt()
+			// /trace is a fallback for Ctrl+O — toggles the expanded alt-screen view.
+			c.toggleAltScreen()
 			continue
 		}
 
-		// User message
-		fmt.Printf("  %s %s\n", cb(t.UserLabel, "you"), clr(t.Muted, "·"))
+		// User message — rewrite the just-typed prompt line as "you: <text>"
+		// so the message stays visible in scrollback, then arm inline status.
+		c.renderMu.Lock()
+		c.rewritePromptAsUserLineLocked(text)
+		c.inlineActive = true
+		c.inlineRows = 0
+		c.renderMu.Unlock()
 
 		inbox <- channels.InboundMessage{
 			ChannelID:  "cli",
@@ -207,7 +240,7 @@ func (c *Channel) printHelp() {
 		{"/intent <name>", "set safety level (or 'auto')"},
 		{"/intent", "show current level"},
 		{"/theme dark|light", "switch color theme"},
-		{"/trace", "toggle expanded/inline trace"},
+		{"/trace (Ctrl+O)", "toggle expanded trace view"},
 		{"/quit", "exit"},
 	}
 	fmt.Println()
@@ -367,16 +400,28 @@ func (c *Channel) handleIntentCommand(text string) {
 	fmt.Printf("  %s %s\n", clr(t.Muted, "intent:"), cb(t.Accent, level))
 }
 
-// Send prints the outbound message to stdout with colors.
+// Send prints the outbound message to stdout. If the expanded alt-screen view
+// is currently showing, we leave it first so the response renders on the main
+// screen.
 func (c *Channel) Send(_ context.Context, msg channels.OutboundMessage) error {
 	c.mu.RLock()
 	t := c.theme
 	c.mu.RUnlock()
 
-	// Clear the status line above the prompt before printing response
-	c.StatusUpdate("")
-	fmt.Printf("\n  %s\n", cb(t.AssistantLabel, "kaiju"))
-	// Indent response lines for visual separation
+	c.renderMu.Lock()
+	defer c.renderMu.Unlock()
+
+	// If user was in the expanded view when the response arrived, pop back
+	// to the main screen before rendering the answer.
+	if c.altActive {
+		c.leaveAltScreenLocked()
+	}
+	c.clearInlineLocked()
+	c.inlineActive = false
+
+	// Label on its own line, then each response line. No leading newline —
+	// clearInlineLocked left the cursor at the start of a clean row.
+	fmt.Printf("  %s\n", cb(t.AssistantLabel, "kaiju"))
 	for _, line := range strings.Split(msg.Text, "\n") {
 		if line == "" {
 			fmt.Println()
@@ -384,71 +429,80 @@ func (c *Channel) Send(_ context.Context, msg channels.OutboundMessage) error {
 			fmt.Printf("  %s\n", clr(t.AssistantText, line))
 		}
 	}
-	c.showPrompt()
+	fmt.Printf("\n%s", c.prompt())
 	return nil
 }
 
-// StatusUpdate prints a status line ABOVE the prompt without disturbing user input.
-// Uses cursor save/restore to write on the line above, then return to the prompt.
-// Call with empty string to clear the status line.
+// StatusUpdate appends text to the buffer (always) and renders it inline
+// when a query is in flight. Empty text clears the inline region without
+// touching the buffer.
 func (c *Channel) StatusUpdate(text string) {
-	c.mu.RLock()
-	t := c.theme
-	expand := c.traceExpand
-	c.mu.RUnlock()
-
 	if text == "" {
-		// Clear the status line above the prompt
-		fmt.Printf("%s%s\r%s%s", saveCur, cursorUp, clearLine, restorCur)
+		c.renderMu.Lock()
+		c.clearInlineLocked()
+		c.renderMu.Unlock()
 		return
 	}
 
-	if expand {
-		// Expanded: print each status on its own line (above prompt).
-		// Scroll the prompt down by inserting a line above it.
-		fmt.Printf("%s%s\r%s  %s %s\n%s",
-			saveCur, cursorUp, clearLine,
-			clr(t.TraceTool, "▸"), clr(t.TraceInfo, text),
-			restorCur)
-	} else {
-		// Inline: overwrite the single status line above the prompt
-		fmt.Printf("%s%s\r%s  %s%s",
-			saveCur, cursorUp, clearLine,
-			clr(t.TraceInfo, text),
-			restorCur)
+	c.pushStatus(text)
+
+	c.renderMu.Lock()
+	defer c.renderMu.Unlock()
+
+	// Mirror into the alt screen when it's showing.
+	if c.altActive {
+		c.appendAltLineLocked(text)
+		return
 	}
+	if !c.inlineActive {
+		// Buffered only — no active query, nothing to render.
+		return
+	}
+	c.renderInlineLocked(text)
 }
 
-// TraceNode prints a single node completion in the trace.
+// TraceNode records a node completion as a status line. Same rendering path
+// as StatusUpdate — stored in buffer, shown inline while a query runs.
 func (c *Channel) TraceNode(tool, tag, state string, ms int64) {
 	c.mu.RLock()
 	t := c.theme
-	expand := c.traceExpand
 	c.mu.RUnlock()
 
-	if !expand {
-		// Inline mode: just update the status line
-		icon := clr(t.TraceOK, "✓")
-		if state == "failed" {
-			icon = clr(t.TraceFail, "✗")
-		}
-		fmt.Print(statusLine(t, fmt.Sprintf("%s %s %s %dms", icon, tool, tag, ms)))
+	var icon string
+	switch state {
+	case "failed":
+		icon = clr(t.TraceFail, "✗")
+	case "skipped":
+		icon = clr(t.Muted, "—")
+	default:
+		icon = clr(t.TraceOK, "✓")
+	}
+	line := fmt.Sprintf("%s %s %s %dms", icon, tool, tag, ms)
+	plain := fmt.Sprintf("%s %s %s %dms", stateGlyph(state), tool, tag, ms)
+
+	c.pushStatus(plain)
+
+	c.renderMu.Lock()
+	defer c.renderMu.Unlock()
+	if c.altActive {
+		c.appendAltStyledLocked(line)
 		return
 	}
-
-	// Expanded mode: full line per node
-	icon := clr(t.TraceOK, "✓")
-	if state == "failed" {
-		icon = clr(t.TraceFail, "✗")
-	} else if state == "skipped" {
-		icon = clr(t.Muted, "—")
+	if !c.inlineActive {
+		return
 	}
-	fmt.Printf("  %s %s %s %s\n",
-		icon,
-		clr(t.TraceTool, fmt.Sprintf("%-10s", tool)),
-		clr(t.TraceLabel, tag),
-		clr(t.TraceInfo, fmt.Sprintf("%dms", ms)),
-	)
+	c.renderInlineStyledLocked(line)
+}
+
+func stateGlyph(state string) string {
+	switch state {
+	case "failed":
+		return "x"
+	case "skipped":
+		return "-"
+	default:
+		return "+"
+	}
 }
 
 func (c *Channel) printBanner() {
@@ -586,6 +640,319 @@ func (c *Channel) complete(line string, pos int) (int, []string) {
 }
 
 func (c *Channel) Close() error { return nil }
+
+// --- Status buffer ---------------------------------------------------------
+
+func (c *Channel) pushStatus(text string) {
+	c.bufMu.Lock()
+	c.statusBuf = append(c.statusBuf, statusEntry{ts: time.Now(), text: text})
+	if n := len(c.statusBuf); n > statusBufferSize {
+		c.statusBuf = c.statusBuf[n-statusBufferSize:]
+	}
+	c.bufMu.Unlock()
+}
+
+func (c *Channel) snapshotBuffer() []statusEntry {
+	c.bufMu.Lock()
+	defer c.bufMu.Unlock()
+	out := make([]statusEntry, len(c.statusBuf))
+	copy(out, c.statusBuf)
+	return out
+}
+
+// rewritePromptAsUserLineLocked replaces the "kaiju > <text>" line(s) the
+// user just typed with "you: <text>". LineReader already printed a trailing
+// \n after Enter, so the cursor is one row below the last wrap row. Move up
+// through every wrap row, clear each, and emit the replacement.
+// Caller holds renderMu.
+func (c *Channel) rewritePromptAsUserLineLocked(text string) {
+	t := c.theme
+	cols := termCols()
+
+	promptVis := visibleLen(c.prompt())
+	rowsUsed := (promptVis + utf8.RuneCountInString(text) + cols - 1) / cols
+	if rowsUsed < 1 {
+		rowsUsed = 1
+	}
+
+	var b strings.Builder
+	for i := 0; i < rowsUsed; i++ {
+		b.WriteString(cursorUp)
+		b.WriteString("\r")
+		b.WriteString(clearLine)
+	}
+	fmt.Fprintf(&b, "  %s %s\n",
+		cb(t.UserLabel, "you:"),
+		clr(t.UserText, text))
+	fmt.Fprint(os.Stdout, b.String())
+}
+
+// --- Inline rendering (collapsed mode) ------------------------------------
+
+// renderInlineLocked renders text as the collapsed status block, overwriting
+// the previous block (which may have wrapped to multiple rows). The last-
+// rendered text is shown full size — we do not truncate.
+//
+// Invariant: before the call, the cursor is at the first column of the top
+// row of the previous block (if any); after the call, cursor is at the end
+// of the newly rendered content and inlineRows reflects its row count.
+// Callers hold renderMu.
+func (c *Channel) renderInlineLocked(text string) {
+	t := c.theme
+	styled := "  " + clr(t.TraceInfo, text)
+	plainLen := 2 + utf8.RuneCountInString(text)
+	c.paintInlineLocked(styled, plainLen)
+}
+
+// renderInlineStyledLocked renders pre-styled text (with its own ANSI codes).
+// The visible length is computed by stripping escape sequences.
+func (c *Channel) renderInlineStyledLocked(styled string) {
+	plainLen := visibleLen(styled) + 2
+	c.paintInlineLocked("  "+styled, plainLen)
+}
+
+// paintInlineLocked does the actual write. plainLen is the visible (no ANSI)
+// character count so we can predict wrap rows.
+func (c *Channel) paintInlineLocked(styled string, plainLen int) {
+	cols := termCols()
+	prevRows := c.inlineRows
+
+	var b strings.Builder
+
+	// Move to col 1 of the top row of the previous block, clear each row.
+	b.WriteString("\r")
+	if prevRows > 1 {
+		fmt.Fprintf(&b, "\033[%dA", prevRows-1)
+	}
+	for i := 0; i < prevRows; i++ {
+		b.WriteString(clearLine)
+		if i < prevRows-1 {
+			b.WriteString(cursorDown)
+			b.WriteString("\r")
+		}
+	}
+	if prevRows > 1 {
+		// Back to top of the (now blank) region.
+		fmt.Fprintf(&b, "\033[%dA", prevRows-1)
+		b.WriteString("\r")
+	}
+
+	b.WriteString(styled)
+	fmt.Fprint(os.Stdout, b.String())
+
+	newRows := 1
+	if cols > 0 {
+		newRows = (plainLen + cols - 1) / cols
+		if newRows < 1 {
+			newRows = 1
+		}
+	}
+	c.inlineRows = newRows
+}
+
+// clearInlineLocked clears the collapsed block and leaves the cursor at col 1
+// of the top row of the (now blank) region. Caller holds renderMu.
+func (c *Channel) clearInlineLocked() {
+	prev := c.inlineRows
+	if prev == 0 {
+		// Cursor is already at a fresh column-1 row.
+		fmt.Fprint(os.Stdout, "\r")
+		return
+	}
+
+	var b strings.Builder
+	b.WriteString("\r")
+	if prev > 1 {
+		fmt.Fprintf(&b, "\033[%dA", prev-1)
+	}
+	for i := 0; i < prev; i++ {
+		b.WriteString(clearLine)
+		if i < prev-1 {
+			b.WriteString(cursorDown)
+			b.WriteString("\r")
+		}
+	}
+	if prev > 1 {
+		fmt.Fprintf(&b, "\033[%dA", prev-1)
+		b.WriteString("\r")
+	}
+	fmt.Fprint(os.Stdout, b.String())
+	c.inlineRows = 0
+}
+
+// --- Alt screen (expanded view) -------------------------------------------
+
+func (c *Channel) toggleAltScreen() {
+	c.renderMu.Lock()
+	defer c.renderMu.Unlock()
+	if c.altActive {
+		c.leaveAltScreenLocked()
+	} else {
+		c.enterAltScreenLocked()
+	}
+}
+
+func (c *Channel) enterAltScreenLocked() {
+	if c.altActive {
+		return
+	}
+	c.altActive = true
+	t := c.theme
+	fmt.Fprint(os.Stdout, altEnter, cursorHome, clearScreen)
+	fmt.Fprintf(os.Stdout, "  %s  %s\n",
+		cb(t.Accent, "trace"),
+		clr(t.Muted, "— Ctrl+O or /trace to close"))
+	fmt.Fprintln(os.Stdout)
+
+	for _, e := range c.snapshotBuffer() {
+		c.writeAltEntryLocked(e.text)
+	}
+}
+
+func (c *Channel) leaveAltScreenLocked() {
+	if !c.altActive {
+		return
+	}
+	c.altActive = false
+	// Exiting the alt buffer can flip alternate scroll mode back on in some
+	// terminals — re-assert off so wheel keeps using native scrollback.
+	fmt.Fprint(os.Stdout, altExit, altScrollOff)
+	// Main screen restored to its prior state — inlineRows is still valid
+	// because we never touched main while alt was active.
+}
+
+func (c *Channel) appendAltLineLocked(text string) {
+	t := c.theme
+	fmt.Fprintf(os.Stdout, "  %s %s\n",
+		clr(t.TraceTool, "▸"),
+		clr(t.TraceInfo, text))
+}
+
+func (c *Channel) appendAltStyledLocked(styled string) {
+	fmt.Fprintf(os.Stdout, "  %s\n", styled)
+}
+
+func (c *Channel) writeAltEntryLocked(text string) {
+	t := c.theme
+	fmt.Fprintf(os.Stdout, "  %s %s\n",
+		clr(t.TraceTool, "▸"),
+		clr(t.TraceInfo, text))
+}
+
+// --- Utilities -------------------------------------------------------------
+
+// ansiRe strips CSI escape sequences (color / cursor). We use it to compute
+// visible width for wrap accounting.
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+
+func visibleLen(s string) int {
+	return utf8.RuneCountInString(ansiRe.ReplaceAllString(s, ""))
+}
+
+func termCols() int {
+	cols, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || cols <= 0 {
+		return 80
+	}
+	return cols
+}
+
+// --- Key pump --------------------------------------------------------------
+
+// keyPump owns raw-mode stdin for the lifetime of the CLI channel. It reads
+// bytes one at a time, intercepts Ctrl+O (0x0f) to toggle the expanded view,
+// and forwards everything else to a buffered channel that LineReader drains
+// via ReadByte.
+type keyPump struct {
+	ch    *Channel
+	bytes chan byte
+	stop  chan struct{}
+
+	fd       int
+	rawState *term.State
+}
+
+func startKeyPump(ch *Channel) (*keyPump, error) {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return nil, fmt.Errorf("stdin is not a terminal")
+	}
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+	// MakeRaw disables OPOST; re-enable so \n → \r\n works for concurrent
+	// writers (Send, StatusUpdate).
+	if err := enableOPOST(fd); err != nil {
+		_ = term.Restore(fd, state)
+		return nil, err
+	}
+	// Keep mouse wheel out of our input stream so the terminal can scroll
+	// native scrollback instead of firing history recall.
+	fmt.Fprint(os.Stdout, altScrollOff)
+	p := &keyPump{
+		ch:       ch,
+		bytes:    make(chan byte, 256),
+		stop:     make(chan struct{}),
+		fd:       fd,
+		rawState: state,
+	}
+	go p.run()
+	return p, nil
+}
+
+func (p *keyPump) run() {
+	var buf [1]byte
+	for {
+		n, err := os.Stdin.Read(buf[:])
+		if err != nil {
+			if err == io.EOF {
+				close(p.bytes)
+				return
+			}
+			select {
+			case <-p.stop:
+				return
+			default:
+			}
+			continue
+		}
+		if n == 0 {
+			continue
+		}
+		b := buf[0]
+		if b == 0x0f { // Ctrl+O
+			p.ch.toggleAltScreen()
+			continue
+		}
+		select {
+		case p.bytes <- b:
+		case <-p.stop:
+			return
+		}
+	}
+}
+
+// ReadByte returns the next non-intercepted input byte. Blocks until one
+// is available or the pump is closed.
+func (p *keyPump) ReadByte() (byte, error) {
+	b, ok := <-p.bytes
+	if !ok {
+		return 0, io.EOF
+	}
+	return b, nil
+}
+
+// Close restores terminal state. The reader goroutine itself leaks until
+// the process exits (stdin.Read is uninterruptible), but that is safe.
+func (p *keyPump) Close() error {
+	select {
+	case <-p.stop:
+	default:
+		close(p.stop)
+	}
+	return term.Restore(p.fd, p.rawState)
+}
 
 // logTimestampRe strips Go's default log timestamp prefix (e.g. "2026/04/06 22:50:16 ").
 var logTimestampRe = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)

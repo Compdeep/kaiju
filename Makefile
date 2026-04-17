@@ -29,3 +29,4 @@ clean:
 
 test:
 	go test ./...
+

@@ -112,19 +112,34 @@ func validateDirectParams(tool tools.Tool, params map[string]any, refs map[strin
 	return nil
 }
 
-// validateParamRef checks that the named field is actually present in
-// the dep's resolved Result. Called from resolveInjections between
-// dep-lookup and value-substitution. Replaces the prior silent fallback
-// that used the full dep Result whenever the field was absent — the
-// bug shape that let compute's absent .output land as file_write's
-// content and clobber target files.
+// validateParamRef checks the param_ref against the dep's resolved
+// Result. Two distinct failure shapes are handled differently:
 //
-// Empty ref.Field means "use the whole result as-is" and is a legitimate
-// planner choice (e.g. chaining raw file_read output). Not an error.
+//  1. dep.Result doesn't parse as JSON at all → this is an upstream tool
+//     serialization bug, not a planner error. Returns the sentinel
+//     errResultNotJSON so the caller (resolveInjections) can fall back
+//     to injecting the full result as a string. Preserves legacy
+//     tolerance for tool bugs.
+//
+//  2. dep.Result parses as valid JSON but the named field is missing →
+//     this is a planner error (wired a field that doesn't exist, the
+//     brace_json bug shape). Returns a descriptive error; caller fails
+//     the step loudly.
+//
+// Empty ref.Field means "use the whole result as-is" — legitimate
+// choice (chaining raw file_read output). Always accepted.
 func validateParamRef(paramName string, ref ResolvedInjection, depResult string) error {
 	if ref.Field == "" {
 		return nil
 	}
+	// Try parsing the dep's Result. If it isn't JSON at all, that's a
+	// tool-output bug — surface the sentinel so the caller can degrade
+	// gracefully.
+	var probe any
+	if err := json.Unmarshal([]byte(depResult), &probe); err != nil {
+		return errResultNotJSON
+	}
+	// Valid JSON envelope — now check the specific field.
 	if _, err := extractJSONField(depResult, ref.Field); err != nil {
 		log.Printf("[dispatch:reject] param_ref %q: field %q absent in dep %s (%v)",
 			paramName, ref.Field, ref.NodeID, err)
@@ -133,6 +148,13 @@ func validateParamRef(paramName string, ref ResolvedInjection, depResult string)
 	}
 	return nil
 }
+
+// errResultNotJSON signals that validateParamRef couldn't parse the
+// dep's Result as JSON at all — as opposed to the field being absent
+// from a valid JSON envelope. Callers treat this as a degrade-to-full-
+// result case rather than a hard failure, since it reflects an upstream
+// tool's serialization bug, not a planner mistake.
+var errResultNotJSON = fmt.Errorf("dep result is not JSON")
 
 // validateDataFlow rejects data-consuming tool nodes that declare
 // depends_on dependencies but wire NO param_refs. The planner almost
@@ -157,6 +179,77 @@ func validateDataFlow(toolName string, dependsOn []string, paramRefs map[string]
 		toolName, dependsOn)
 	return fmt.Errorf("tool %s declares depends_on %v but wires no param_refs — if you depend on those steps' data, wire it via param_refs; if you meant pure sequencing, compute/edit_file is the wrong tool for that",
 		toolName, dependsOn)
+}
+
+// truncateToolResult caps an oversized tool Result while preserving
+// JSON structure when the Result is itself JSON. Byte-splicing (old
+// HeadTail) corrupts JSON by cutting mid-string — a downstream
+// param_ref trying to extract a field then fails to parse the envelope
+// at all. This function:
+//
+//  1. If the Result parses as a top-level JSON object, walks its string
+//     fields and truncates the longest one down with a marker until the
+//     total serialised size fits under the cap. The JSON stays valid.
+//  2. Otherwise (plain text, malformed, non-object JSON), falls back to
+//     the original head+tail splice, which is fine for LLM consumption
+//     of unstructured output.
+//
+// Cap is a soft target — we stop truncating fields when we're close
+// enough rather than iterating exactly.
+func truncateToolResult(s string, cap int, headTail func(string, int, int, ...string) string) string {
+	if len(s) <= cap {
+		return s
+	}
+	// Try to parse as a top-level JSON object. Arrays / primitives fall
+	// through to head+tail since they're rare for tool Result shapes.
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(s), &obj); err != nil {
+		return headTail(s, cap*2/3, cap/3,
+			"\n... (middle truncated at cap; use start_line, grep, or tail to read the missing portion) ...\n")
+	}
+	// Shrink the largest string field(s) iteratively until under cap.
+	const marker = "\n... (content truncated to fit result cap; rerun with narrower focus or use file_read on the source) ...\n"
+	for len(mustMarshal(obj)) > cap {
+		biggestKey := ""
+		biggestLen := 0
+		for k, v := range obj {
+			var sv string
+			if json.Unmarshal(v, &sv) != nil {
+				continue // not a string — skip
+			}
+			if len(sv) > biggestLen {
+				biggestLen = len(sv)
+				biggestKey = k
+			}
+		}
+		if biggestKey == "" || biggestLen < 256 {
+			// No more long string fields to cut; fall back.
+			return headTail(s, cap*2/3, cap/3, marker)
+		}
+		var cur string
+		_ = json.Unmarshal(obj[biggestKey], &cur)
+		// Head+tail the content field itself, preserving context from
+		// start (headers, intro) and end (conclusions, errors).
+		shrunk := headTail(cur, biggestLen/2, biggestLen/4, marker)
+		if len(shrunk) >= len(cur) {
+			// Couldn't reduce further with this strategy; bail out.
+			return headTail(s, cap*2/3, cap/3, marker)
+		}
+		re, _ := json.Marshal(shrunk)
+		obj[biggestKey] = re
+	}
+	return mustMarshal(obj)
+}
+
+// mustMarshal serialises a JSON object to a string, returning empty on
+// error. Used inside truncateToolResult where the object was produced
+// by a successful Unmarshal so re-Marshal should not fail.
+func mustMarshal(obj map[string]json.RawMessage) string {
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // sortedKeys returns map keys in sorted order for deterministic error

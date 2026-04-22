@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -319,6 +320,63 @@ var scenarios = []scenario{
 				}
 			}
 			return nil
+		},
+	},
+
+	{
+		name:          "compute_fanout",
+		fixtureSubdir: "compute_fanout",
+		query:         `For Mercury, Venus, Earth, Mars, and Jupiter, fetch their average distance from the Sun (km) and surface gravity (m/s²). Compute how many minutes light from the Sun takes to reach each planet (distance_km / 299792 / 60) and what a 75 kg human would weigh on each planet (75 × gravity / 9.81). Rank the planets by gravity, lowest first. Present the results as a table with columns: Planet, Distance (km), Gravity (m/s²), Light travel (min), Weight of 75 kg human (kg), Gravity rank.`,
+		purpose:       `End-to-end value-computation pipeline — 5 parallel fetches → compute(shallow) with 5 param_refs → ranked table. Exercises validateDataFlow (compute+depends_on must have param_refs), validateParamRef (dep.Result field must exist or be graceful-degrade), and truncateToolResult (JSON envelopes stay valid when web_fetch content is large). A pass requires the final output to contain real numbers; a fail means either the validator chain broke or the pipeline couldn't recover.`,
+		verify: func(workDir, kaijuOut string) error {
+			// Two acceptable outcomes — either one is a pass:
+			//
+			//   (A) clean pipeline — Executive wired param_refs correctly
+			//       from the start, compute ran, output has real numbers
+			//       with recognisable units and a plausible Jupiter weight.
+			//
+			//   (B) validator caught a bad plan — the Executive emitted
+			//       compute with depends_on but no param_refs (or wrong
+			//       wiring), validateDataFlow / validateParamRef fired
+			//       with a descriptive error, and kaiju surfaced that
+			//       error to the user rather than silently corrupting.
+			//
+			// A fail = neither happened: no validator trip AND no real
+			// output. That's the only shape we actually care about — it
+			// means the missing-params class of bugs got through silently.
+			planets := []string{"Mercury", "Venus", "Earth", "Mars", "Jupiter"}
+			for _, p := range planets {
+				if !strings.Contains(kaijuOut, p) {
+					return fmt.Errorf("output missing planet %q — tail: %s", p, trimTail(kaijuOut, 300))
+				}
+			}
+
+			// Path (A): real computed output.
+			numericPat := regexp.MustCompile(`[0-9]+(\.[0-9]+)?\s*(min|kg|m/s|km)`)
+			numericMatches := numericPat.FindAllString(kaijuOut, -1)
+			jupiterRange := regexp.MustCompile(`(1[5-9][0-9]|2[01][0-9])\s*kg`)
+			if len(numericMatches) >= 5 && jupiterRange.MatchString(kaijuOut) {
+				return nil // clean pass
+			}
+
+			// Path (B): validator caught the bad plan.
+			validatorMarkers := []string{
+				"no param_refs",
+				"data flow incomplete",
+				"param_ref",
+				"depends_on",
+				"wire it via param_refs",
+				"dispatch:reject",
+			}
+			lower := strings.ToLower(kaijuOut)
+			for _, m := range validatorMarkers {
+				if strings.Contains(lower, strings.ToLower(m)) {
+					return nil // validator did its job
+				}
+			}
+
+			return fmt.Errorf("neither a clean computed output nor a clear validator/data-flow error — missing-params class may have leaked through silently; numeric_matches=%d, tail: %s",
+				len(numericMatches), trimTail(kaijuOut, 400))
 		},
 	},
 

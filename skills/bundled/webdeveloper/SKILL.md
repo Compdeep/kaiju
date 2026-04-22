@@ -39,16 +39,30 @@ Decompose webapps the way a real engineering team would: deep, layered, with cle
 
 **Default frontend: Vue 3 + Vite.** Unless the user asks for React, Next.js, Svelte, etc., always use Vue 3 with `<script setup>`, Vite, and Tailwind CSS. Vue is lightweight, fast, and the coders handle it reliably. No Server Component confusion, no `'use client'` directives.
 
-**Setup commands** are for `mkdir -p` and `npm install` only:
+**`package.json` is setup-owned and stays that way for the whole run.** No code path — coder, debugger, or bash — may edit `package.json` directly after setup. Add deps with `npm install <name>`, pin with `npm install <name>@<version>`, remove with `npm uninstall <name>`, change scripts/fields with `npm pkg set`. Hand-editing the JSON causes parse errors (stray commas, quoted braces) and bypasses npm's resolver. If a debug fix thinks it needs to edit package.json, it's planning the wrong action — run the equivalent npm command instead.
+
+**Install curated bundles, not arbitrary version lists.** Mutually-incompatible peer-deps (e.g. `vite@8` with `@vitejs/plugin-react@4`) are the single biggest install failure — npm resolves each dep independently and can't guess which group you want. Use one of the bundles below verbatim; each is a known-good set where peer-deps line up. Only deviate when the user explicitly pins a version.
+
 ```
 "setup": [
-  "mkdir -p project/frontend/src/views project/frontend/src/components project/frontend/src/stores project/frontend/src/api project/frontend/src/router project/frontend/public",
-  "mkdir -p project/backend/src/routes project/backend/src/middleware project/backend/src/models project/backend/db",
-  "cd project/frontend && npm init -y && npm install vue vue-router pinia axios",
-  "cd project/frontend && npm install -D vite @vitejs/plugin-vue tailwindcss postcss autoprefixer",
-  "cd project/backend && npm init -y && npm install express better-sqlite3 bcrypt jsonwebtoken cors dotenv"
+  "mkdir -p project/frontend/src project/backend/src",
+  # Vue 3 + Vite frontend (default)
+  "cd project/frontend && npm init -y && npm install vue@^3 vue-router@^4 pinia@^2 axios@^1 && npm install -D vite@^5 @vitejs/plugin-vue@^5 tailwindcss@^3 postcss@^8 autoprefixer@^10",
+  "cd project/frontend && npm pkg set type=module scripts.dev=vite scripts.build='vite build' scripts.preview='vite preview'",
+  "cd project/frontend && npm ls --depth=0",
+  # Express backend
+  "cd project/backend && npm init -y && npm install express@^4 better-sqlite3@^11 bcrypt@^5 jsonwebtoken@^9 cors@^2 dotenv@^16",
+  "cd project/backend && npm pkg set type=module scripts.start='node src/server.js'",
+  "cd project/backend && npm ls --depth=0"
 ]
 ```
+
+Other curated bundles:
+- **React + Vite frontend**: `npm install react@^18 react-dom@^18 react-router-dom@^6 axios@^1 && npm install -D vite@^5 @vitejs/plugin-react@^4 tailwindcss@^3 postcss@^8 autoprefixer@^10`
+- **Fastify backend**: `npm install fastify@^4 @fastify/cors@^9 better-sqlite3@^11 bcrypt@^5 jsonwebtoken@^9 dotenv@^16`
+- **Next.js** (app router): `npm install next@^14 react@^18 react-dom@^18 && npm install -D tailwindcss@^3 postcss@^8 autoprefixer@^10`
+
+The `npm ls --depth=0` line is a tripwire — exits non-zero if any dep didn't resolve, surfacing problems at setup rather than ten cascading failures later. Same pattern for pip (`pip install <names> && pip check`), cargo (`cargo add <names>`), and go (`go get <names>`).
 
 **Separate frontend and backend cleanly.** Typical layout for a full-stack app:
 ```
@@ -100,7 +114,7 @@ project/
 
 **One file per task.** Each task owns exactly one file. Large webapps become many tasks. Don't group `server.js + auth.js + routes.js` into one task — split them.
 
-**Config files are tasks too.** `package.json`, `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `index.html` — each is a task that writes the complete file. The setup command does `npm init -y` to create a skeleton, then a coder task overwrites `package.json` with the correct scripts and config. The `package.json` MUST include scripts: `{"dev": "vite", "build": "vite build", "preview": "vite preview"}`.
+**Config files are tasks too** — `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `index.html` — each is a coder task that writes the complete file. **Exception: `package.json` is NOT a coder task.** Setup creates and owns it; scripts, `type: "module"`, and other fields are added via `npm pkg set` inside setup (see the setup block above). If a coder needs to know which version of a package is actually installed (e.g. to pick the right import path for React 18 vs 19), list `project/<name>/package.json` in that task's `task_files` — the coder reads the resolved versions instead of guessing.
 
 **Execute and service fields.** For the final task that starts the dev servers, use `service`:
 ```
@@ -115,7 +129,7 @@ project/
 3. **Tasks that produce SQL migration/seed files MUST include an `execute` field** to apply them (e.g. `"execute": "node project/backend/db/seed.js"`).
 4. **Never rely on validation checks to start services.** Validation checks only verify. Services must be declared in the task's `service` field.
 5. **Setup commands run BEFORE coders. Execute/service commands run AFTER coders. Validators run AFTER execute/service.** Design your tasks knowing this order.
-6. **Execute fields must install dependencies before building.** Frontend execute: `"cd project/frontend && npm install && npm run build"`. Never just `npm run build` alone.
+6. **Installs only in setup.** Never put `npm install`, `pip install`, or `go mod download` in `execute` or `service` — that races startup against install. `execute` is for post-coder build/seed only.
 7. **Setup commands must be non-interactive.** Always pass `--yes`, `-y` flags.
 8. **Default to SQLite unless the user specifies a different database.**
 9. **ALWAYS emit validation checks for every service.** The `check` field MUST be a shell command (curl, node -e, test). NEVER prose like "Manual test". Use ACTUAL ports from your services. Example:
@@ -128,6 +142,28 @@ project/
 ```
 2-5 checks total. Every check must be a command that exits 0 on success.
 10. **If the workspace already has files, scan them first.** Check existing `package.json`, directory structure, and config before planning. Write the blueprint around what exists — extend, don't overwrite.
+11. **`package.json` is read-only after setup — for every code path, including debug fixes.** Never emit a coder task, `file_write`, or multi-edit compute targeting package.json. To change deps, issue `npm install <name>`, `npm install <name>@<version>`, `npm uninstall <name>`, or `npm pkg set` via bash. If a fix plan wants to edit package.json, it's planning the wrong action.
+
+12. **Closure check on what you're about to emit.** You have no files to walk — you're producing the blueprint in one pass, before any code exists. Before finalizing `tasks`/`setup`/`interfaces`, cross-check these four surfaces against each other:
+
+    - **`interfaces` ↔ `tasks`**: every route declared in `interfaces` has a coder task implementing it (e.g. `POST /api/auth/*` → a `routes/auth.js` task). A declared endpoint with no task means the route will be missing at runtime.
+    - **Route tasks ↔ entrypoint wiring**: every route/handler file you task (e.g. `routes/auth.js`, `routes/agent.js`, `controllers/users.py`) MUST be imported and mounted in the server's entrypoint (`server.js` / `app.py` / `main.go`). The entrypoint task's brief explicitly lists which route files it imports and the paths it mounts them at (`app.use('/api/auth', authRouter)`, `app.include_router(users_router)`, etc.). A route file nobody mounts returns 404 at runtime — the symptom is "endpoint not found", the cause is missing wiring.
+    - **Task `brief` deps ↔ `setup` installs**: every library a task's brief implies (JWT → `jsonwebtoken`, Stripe → `stripe`, celebrate middleware → `celebrate`, bcrypt auth → `bcrypt`, …) appears in the setup's `npm install`. Don't imply a library in a brief that setup doesn't install — coders WILL import it, and it will fail.
+    - **Env refs ↔ `.env` setup step**: every env var your stack reads (Stripe → `STRIPE_SECRET_KEY`, JWT signing → `JWT_SECRET`, SMTP → `SMTP_URL`, …) has a setup step writing a `.env.example` (or `.env`) with placeholder values. No env step means "undefined" at runtime on the first request.
+
+    A gap in any of the four = one Holmes investigation at runtime to diagnose and patch. Four gaps = four investigations. Catch it here instead.
+
+13. **Stack coherence (greenfield scaffolds only).** When you're designing a NEW project (no existing source under `project/<name>/` that defines the stack), make ONE explicit choice on each of these axes and apply it to every task. Mixing paradigms in fresh code is the single biggest source of runtime errors that no fix resolves cleanly.
+
+    - **Frontend framework**: Vue 3 OR React OR Svelte. Pick one.
+    - **Language**: TypeScript OR JavaScript, project-wide. If TS, every component/service/util is `.ts`/`.tsx` with a `tsconfig.json` task. Never mix `.js` with `.ts` under the same `src/` tree.
+    - **JSX (React only)**: every component file is `.jsx` or `.tsx`. Never JSX syntax in a `.js` file. Never a `.js` component alongside `.jsx` components. Vite config must use `@vitejs/plugin-react`.
+    - **Module system**: ESM (`package.json` has `"type":"module"`, `import`/`export`) OR CommonJS (`require` / `module.exports`). Not mixed in one service.
+    - **Database client**: one per service. No `better-sqlite3` + `pg` mix; no ORM + raw-queries mix in the same codebase.
+
+    Pick ONE combination, declare it at the top of the blueprint, enforce it in every task's brief.
+
+    **Extending an existing project** (workspace scan shows existing source): match what's there. Don't "fix" paradigm mixes in code you didn't write — the user owns that decision. Rule 10 already requires scanning workspace files before planning; stack coherence only applies to code THIS run is creating from scratch.
 
 ## Debug Guidance
 
@@ -218,6 +254,33 @@ Every file you write is production code. No stubs, no TODOs, no skeleton functio
 - No commented-out code, no `console.log` left behind, no dead branches.
 - Comments only where the logic needs them, not for obvious code.
 
+**Config templates — copy verbatim, do not compose from memory.** Project uses `"type": "module"`, so every config is ESM.
+
+`vite.config.js` (Vue 3):
+```js
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+export default defineConfig({ plugins: [vue()], server: { host: '0.0.0.0', port: 5173 } })
+```
+
+`vite.config.js` (React):
+```js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+export default defineConfig({ plugins: [react()], server: { host: '0.0.0.0', port: 5173 } })
+```
+
+`tailwind.config.js`:
+```js
+/** @type {import('tailwindcss').Config} */
+export default { content: ['./index.html', './src/**/*.{vue,js,jsx,ts,tsx}'], theme: { extend: {} }, plugins: [] }
+```
+
+`postcss.config.js`:
+```js
+export default { plugins: { tailwindcss: {}, autoprefixer: {} } }
+```
+
 **Never ship:**
 - `TODO` or `FIXME` or `HACK` comments.
 - `throw new Error("not implemented")`.
@@ -225,3 +288,4 @@ Every file you write is production code. No stubs, no TODOs, no skeleton functio
 - `console.log` debug output in production paths.
 - Unused imports or unused variables.
 - Default/placeholder UI text like "Lorem ipsum" — if the user didn't give you a name, make one up that fits the context.
+- A `package.json` file — setup owns it. If the task list includes package.json, emit a gap instead of writing; never guess versions in a dependency manifest.

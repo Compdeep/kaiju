@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 // ContextGate is the SINGLETON context API for an investigation. There is
@@ -142,6 +143,7 @@ func (g *ContextGate) registerDefaultSources() {
 	g.sources[SourceWorkspaceDeep] = &workspaceDeepSource{}
 	g.sources[SourceFunctionMap] = &functionMapSource{}
 	g.sources[SourceExistingBlueprints] = &existingBlueprintsSource{}
+	g.sources[SourceToolIndex] = &toolIndexSource{}
 }
 
 // Source name constants. Use these in SourceSpec rather than string literals
@@ -163,6 +165,7 @@ const (
 	SourceWorkspaceDeep      = "workspace_deep"
 	SourceFunctionMap        = "function_map"
 	SourceExistingBlueprints = "existing_blueprints"
+	SourceToolIndex          = "tool_index"
 )
 
 // ── Per-source filter / focus convention ────────────────────────────────────
@@ -733,6 +736,17 @@ func ExistingBlueprints() SourceSpec {
 	return SourceSpec{Name: SourceExistingBlueprints, Params: map[string]any{}}
 }
 
+// ToolIndex returns a spec for a compact listing of the tools named in
+// `names`. Each entry has the tool signature, description, and (when the
+// tool declares one) a compact view of its output schema so the planner
+// knows what fields downstream param_refs can target.
+//
+// Pass the relevance-filtered list of tool names the caller wants visible.
+// Empty list → no content.
+func ToolIndex(names []string) SourceSpec {
+	return SourceSpec{Name: SourceToolIndex, Params: map[string]any{"names": names}}
+}
+
 // Sources is a tiny convenience to build a slice in call sites:
 //
 //	gate.Get(req, Sources(Blueprint(), Worklog(20, "all")))
@@ -1228,4 +1242,87 @@ func (s *existingBlueprintsSource) Load(g *Graph, t *Trigger, a *Agent, params m
 		sid = t.SessionID
 	}
 	return scanExistingBlueprints(a.cfg.MetadataDir, sid), nil
+}
+
+// toolIndexSource: compact per-tool listing for the planner. Signature +
+// description + compact output shape (property names and their descriptions
+// when declared). Output schemas are the bit the planner needs to write
+// correct param_refs against downstream node results.
+type toolIndexSource struct{}
+
+func (s *toolIndexSource) Name() string { return SourceToolIndex }
+
+func (s *toolIndexSource) Load(g *Graph, t *Trigger, a *Agent, params map[string]any) (string, error) {
+	if a == nil || a.registry == nil {
+		return "", nil
+	}
+	names := paramStringSlice(params, "names")
+	if len(names) == 0 {
+		return "", nil
+	}
+	var sb strings.Builder
+	sb.WriteString("## Tools (* = required param)\n")
+	for _, name := range names {
+		skill, ok := a.registry.Get(name)
+		if !ok {
+			continue
+		}
+		sig := compactParamSignature(skill.Parameters())
+		sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, skill.Description()))
+		if outSchema := tools.GetOutputSchema(skill); outSchema != nil {
+			if shape := compactOutputShape(outSchema); shape != "" {
+				sb.WriteString("  → returns: " + shape + "\n")
+			}
+		}
+	}
+	return sb.String(), nil
+}
+
+// compactOutputShape renders a tool's OutputSchema as a concise one-line(ish)
+// summary for the planner prompt. Returns "" when the schema has no useful
+// shape info.
+//
+// Format: `{prop1: desc, prop2: desc, ...}` optionally preceded by the
+// top-level schema description when it's short and load-bearing (e.g.
+// web_fetch's "CONSUMES URLs — does NOT produce URLs" warning).
+func compactOutputShape(schema json.RawMessage) string {
+	var s struct {
+		Description string `json:"description"`
+		Properties  map[string]struct {
+			Type        string `json:"type"`
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if json.Unmarshal(schema, &s) != nil {
+		return ""
+	}
+	if len(s.Properties) == 0 && s.Description == "" {
+		return ""
+	}
+
+	var parts []string
+	for name, p := range s.Properties {
+		if p.Description != "" {
+			parts = append(parts, fmt.Sprintf("%s: %s", name, p.Description))
+		} else if p.Type != "" {
+			parts = append(parts, fmt.Sprintf("%s (%s)", name, p.Type))
+		} else {
+			parts = append(parts, name)
+		}
+	}
+	sortStrings(parts)
+
+	var sb strings.Builder
+	if len(parts) > 0 {
+		sb.WriteString("{")
+		sb.WriteString(strings.Join(parts, ", "))
+		sb.WriteString("}")
+	}
+	if s.Description != "" {
+		if sb.Len() > 0 {
+			sb.WriteString(" — ")
+		}
+		sb.WriteString(s.Description)
+	}
+	return sb.String()
 }

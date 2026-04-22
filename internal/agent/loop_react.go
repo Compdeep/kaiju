@@ -450,9 +450,12 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 		return "", err
 	}
 
-	// Truncate large results
+	// Truncate large results. Head+tail keeps both the start (context) and
+	// end (error lines, tracebacks) — head-only truncation was dropping the
+	// diagnostic part.
 	if len(result) > maxToolResultLen {
-		result = result[:maxToolResultLen] + "\n... (truncated)"
+		result = Text.HeadTail(result, maxToolResultLen*2/3, maxToolResultLen/3,
+			"\n... (middle truncated at 4KB cap; use start_line, grep, or tail to read the missing portion) ...\n")
 	}
 
 	return result, nil

@@ -439,6 +439,11 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		maxInvestigations = 1
 	}
 	investigationCount := 0
+	// diminishingStreak tracks consecutive reflector passes that reported
+	// progress=diminishing. Two in a row downgrades the current decision
+	// from "investigate" to "conclude" so we don't spawn fresh Holmes
+	// cycles when fixes aren't moving the needle.
+	diminishingStreak := 0
 	// debuggerInflight is declared above (alongside other top-level state)
 	// so injectBatchReflection can close over it.
 
@@ -939,6 +944,31 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					log.Printf("[dag] reflection parse failed, continuing: %v", parseErr)
 					graph.SetResult(comp.NodeID, comp.Result)
 				} else {
+					// Progress classification brake — only "diminishing" has
+					// scheduler-visible effect. Two consecutive diminishing
+					// waves downgrade investigate→conclude so Holmes cycles
+					// stop spawning when fixes aren't moving the validator
+					// set. Empty / unknown / "productive" resets the streak.
+					switch ref.Progress {
+					case "diminishing":
+						diminishingStreak++
+						log.Printf("[reflector:diminishing] streak=%d (decision=%q): %s", diminishingStreak, ref.Decision, Text.TruncateLog(ref.Summary, 160))
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "DIMINISHING", fmt.Sprintf("streak=%d | %s", diminishingStreak, Text.TruncateLog(ref.Summary, 180)))
+						if diminishingStreak >= 2 && ref.Decision == "investigate" {
+							log.Printf("[reflector:diminishing] streak hit 2 — downgrading investigate→conclude")
+							ref.Decision = "conclude"
+							if ref.Aggregate == nil {
+								t := true
+								ref.Aggregate = &t
+							}
+							if ref.Verdict == "" {
+								ref.Verdict = ref.Summary
+							}
+						}
+					default:
+						diminishingStreak = 0
+					}
+
 					switch ref.Decision {
 					case "continue":
 						graph.SetResult(comp.NodeID, comp.Result)
@@ -1056,13 +1086,19 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					workSinceReflection++
 					if strings.HasPrefix(node.Tag, "verify_") || strings.HasPrefix(node.Tag, "revalidate_") {
 						// Catch false positives: bash exited 0 but output indicates failure.
-						if looksLikeFailure(comp.Result) {
-							log.Printf("[dag] node %s validator false positive (exit 0 but output indicates failure): %s", comp.NodeID, Text.TruncateLog(comp.Result, 200))
-							fakeErr := fmt.Errorf("validator output indicates failure: %s", Text.TruncateLog(comp.Result, 200))
+						// LLM classifier is authoritative; falls back to heuristic on error.
+						if failed, reason := a.validatorFailed(ctx, node.Tag, comp.Result); failed {
+							log.Printf("[dag] node %s validator false positive (%s): %s", comp.NodeID, reason, Text.TruncateLog(comp.Result, 200))
+							fakeErr := fmt.Errorf("validator output indicates failure (%s): %s", reason, Text.TruncateLog(comp.Result, 200))
 							graph.SetError(comp.NodeID, fakeErr)
 							node.Error = fakeErr
 							appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_FAIL", comp.Result)
-							// No micro-planner — the reflector will catch this
+							// Prune downstream siblings — this validator proved the
+							// fix didn't work, so service restarts and other nodes
+							// that were going to run AFTER this verify should not
+							// fire on broken code. The reflector still sees the
+							// VALIDATION_FAIL and opens a fresh debug cycle.
+							graph.PruneBranch(comp.NodeID)
 							launchReady()
 							continue
 						}
@@ -1073,6 +1109,30 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				}
 				log.Printf("[dag] node %s (%s) resolved (%d bytes): %s",
 					comp.NodeID, node.ToolName, len(comp.Result), Text.TruncateLog(comp.Result, 500))
+
+				// ── Expose exec stdout on the parent compute's result ──
+				// When a shallow-compute node's auto-grafted exec child
+				// finishes, merge its captured stdout into the compute parent's
+				// Result under an "output" field. Without this, downstream
+				// planner steps that param_ref the compute node have no way to
+				// reach the script's printed output — compute's raw result only
+				// describes the emitted code (code_path, execute, etc.), not
+				// what the code produced when run. One field keeps compute
+				// chainable without the planner needing to know about the
+				// scheduler-internal exec node.
+				if node.ToolName == "bash" && node.SpawnedBy != "" && strings.HasPrefix(node.Tag, "exec_") {
+					parent := graph.Get(node.SpawnedBy)
+					if parent != nil && parent.Type == NodeCompute && parent.Result != "" {
+						stdout := extractBashStdout(comp.Result)
+						if stdout != "" {
+							merged, err := mergeJSONField(parent.Result, "output", stdout)
+							if err == nil {
+								parent.Result = merged
+								log.Printf("[dag] exposed %d bytes of exec stdout on compute parent %s as .output", len(stdout), parent.ID)
+							}
+						}
+					}
+				}
 
 				// ── Auto-graft health check after service start ──
 				// When a service starts, graft a delayed curl check so the
@@ -1150,7 +1210,10 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							Expect string `json:"expect"`
 						} `json:"validation,omitempty"`
 					}
-					if json.Unmarshal([]byte(comp.Result), &cr) == nil && cr.Type == "blueprint" && len(cr.FollowUp) > 0 {
+					unmarshalErr := json.Unmarshal([]byte(comp.Result), &cr)
+					log.Printf("[dag] compute plan post-parse: err=%v type=%q followup_bytes=%d services=%d validation=%d",
+						unmarshalErr, cr.Type, len(cr.FollowUp), len(cr.Services), len(cr.Validation))
+					if unmarshalErr == nil && cr.Type == "blueprint" && len(cr.FollowUp) > 0 {
 						// Store the project root on the graph so all downstream
 						// components (coders, services, Holmes) can find it.
 						if cr.ProjectRoot != "" && graph.ProjectRoot == "" {
@@ -1330,6 +1393,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// Phase 3.5: top-level services — architect-declared services
 						// that aren't tied to any specific task. These are always grafted
 						// (no budget gate) because services are infrastructure.
+						log.Printf("[dag] compute plan → phase 3.5: %d top-level services to graft", len(cr.Services))
 						for _, svc := range cr.Services {
 							if svc.Command == "" {
 								continue
@@ -1441,13 +1505,30 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					}
 
 					// NOTE: Phase 4 coder-result execute/service grafting was removed
-					// (2026-04-07). The architect (Phase 3) is the sole authority on
-					// what execute/service nodes get grafted. Coder results still
-					// contain execute/service fields for the reflector and aggregator
-					// to read as context, but the scheduler does not act on them.
-					// This eliminates duplicate nodes (two backends, two frontends,
-					// two seeds) that caused port conflicts and UNIQUE constraint
-					// errors when both Phase 3 and Phase 4 grafted the same command.
+					// (2026-04-07) for architect-spawned coders — the architect is
+					// the sole authority there. But for TOP-LEVEL (shallow-mode)
+					// compute nodes the planner called directly, there is no
+					// architect: without an execute+validate graft, generated code
+					// is written and never run, and the reflector sees only
+					// metadata and concludes "done" on an empty answer.
+					//
+					// Guarded by SpawnedBy == "" so we only graft for planner-
+					// spawned top-level compute — architect children still route
+					// through Phase 3 above.
+					if node.SpawnedBy == "" {
+						var res struct {
+							Execute    string `json:"execute,omitempty"`
+							Validation string `json:"validation,omitempty"`
+							Type       string `json:"type,omitempty"`
+						}
+						if json.Unmarshal([]byte(comp.Result), &res) == nil && res.Type == "result" && res.Execute != "" {
+							grafted := a.graftComputeExecution(graph, node, comp.NodeID, res.Execute, res.Validation, budget)
+							if len(grafted) > 0 {
+								rewriteDependentsMultiExcluding(graph, comp.NodeID, grafted)
+								log.Printf("[dag] shallow compute → grafted %d exec/verify nodes", len(grafted))
+							}
+						}
+					}
 				}
 
 				// ── Mode-specific post-completion logic ──
@@ -1672,20 +1753,21 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 			}
 			if query != "" {
 				chatPrompt := a.soulPrompt
-				if a.preflight != nil && len(a.preflight.Skills) > 0 {
-					var skillSections strings.Builder
-					skillSections.WriteString("\n\n## Active Skill Guidance\n\n")
-					for _, key := range a.preflight.Skills {
-						if card, ok := a.capabilities[key]; ok {
-							skillSections.WriteString("### " + card.Key + "\n" + card.Body + "\n\n")
+				if graph != nil && graph.Context != nil {
+					gateResp, gerr := graph.Context.Get(dagCtx, ContextRequest{
+						ReturnSources: Sources(SkillGuidance(nil)),
+						MaxBudget:     4000,
+					})
+					if gerr == nil {
+						if sg := gateResp.Sources[SourceSkillGuidance]; sg != "" {
+							chatPrompt += "\n\n## Active Skill Guidance\n\n" + sg
 						}
-						if sk, ok := a.skillGuidance[key]; ok {
-							skillSections.WriteString("### " + sk.Name() + "\n" + sk.Description() + "\n\n")
-						}
+					} else {
+						log.Printf("[dag] chat-mode skill guidance gate fetch failed: %v", gerr)
 					}
-					chatPrompt += skillSections.String()
 				}
 				chatPrompt += "\n\nIMPORTANT: You are in chat-only mode — you cannot execute tools, run commands, or build anything right now. Never say \"I'll do X\" or \"Let me build X\" because you can't follow through. If the user is asking you to do something, answer their question or give information, but do not promise actions you cannot take."
+				chatPrompt += "\n\n## Output format\n" + a.FormatRule()
 				resp, llmErr := a.llm.Complete(dagCtx, &llm.ChatRequest{
 					Messages:    BuildMessagesWithHistory(chatPrompt, query, trigger.History),
 					Temperature: a.cfg.Temperature,
@@ -1815,6 +1897,54 @@ func isBashError(result string) (error, bool) {
 	return fmt.Errorf("bash failed: %s", Text.TruncateLog(result, 300)), true
 }
 
+/*
+ * extractBashStdout pulls the captured stdout out of a bash node's Result.
+ * desc: Bash nodes from non-erroring runs return their combined output as a
+ *       plain string (not JSON). Error runs return the JSON blob with
+ *       stdout/stderr fields. This helper normalises both.
+ */
+func extractBashStdout(result string) string {
+	trimmed := strings.TrimSpace(result)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "{") && strings.Contains(trimmed, `"bash_error"`) {
+		var bashErr struct {
+			Stdout string `json:"stdout"`
+			Stderr string `json:"stderr"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &bashErr); err == nil {
+			if bashErr.Stdout != "" {
+				return bashErr.Stdout
+			}
+			return bashErr.Stderr
+		}
+	}
+	return trimmed
+}
+
+/*
+ * mergeJSONField parses a JSON object string, sets key=value, returns the
+ * reserialised string. Used to graft a field onto an already-stored node
+ * Result after its creation (e.g. folding exec stdout onto a compute's
+ * result so downstream param_refs can reach it).
+ */
+func mergeJSONField(raw, key, value string) (string, error) {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		return "", err
+	}
+	if obj == nil {
+		obj = map[string]any{}
+	}
+	obj[key] = value
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 // classifyRetryTier determines what kind of retry (if any) is appropriate.
 // Returns "skip" (no retry), "blind" (rerun same command), or "oneshot" (LLM fix).
 func classifyRetryTier(errMsg string) string {
@@ -1929,6 +2059,78 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 	} else {
 		ch <- nodeCompletion{NodeID: comp.NodeID, Result: result}
 	}
+}
+
+// graftComputeExecution wires an execute bash node (running the generated
+// code) and a verify bash node (running a content check) downstream of a
+// shallow-mode top-level compute node. Returns the grafted nodes so the
+// caller can rewire downstream deps.
+//
+// The execute node tees its combined output to /tmp/kaiju_<node>.out; the
+// verify command gets that path as $OUT. If the coder did not emit an
+// explicit validation expression, we fall back to a generic check: output
+// non-empty, no bare Python/JS traceback, minimum size.
+func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd, validation string, budget *Budget) []*Node {
+	var grafted []*Node
+	if execCmd == "" {
+		return grafted
+	}
+	if !budget.TrySpawnNode("bash", false) {
+		log.Printf("[dag] shallow compute → budget exhausted, skipping exec graft for %s", comp.ID)
+		return grafted
+	}
+
+	outFile := fmt.Sprintf("/tmp/kaiju_%s.out", comp.ID)
+	wrapped := fmt.Sprintf("( %s ) >%s 2>&1; rc=$?; cat %s; exit $rc", execCmd, outFile, outFile)
+	execTag := "exec_" + sanitizeTag(comp.Tag)
+	if execTag == "exec_" {
+		execTag = "exec_" + comp.ID
+	}
+	execNode := &Node{
+		Type:      NodeTool,
+		ToolName:  "bash",
+		Params:    map[string]any{"command": wrapped, "timeout_sec": 120},
+		DependsOn: []string{compID},
+		SpawnedBy: compID,
+		Tag:       execTag,
+		Source:    "builtin",
+	}
+	execID := graph.AddNode(execNode)
+	graph.AddChild(compID, execID)
+	grafted = append(grafted, execNode)
+	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: execID, Node: graph.SnapshotNode(execID)})
+
+	check := strings.TrimSpace(validation)
+	if check == "" {
+		check = fmt.Sprintf(
+			"[ -s $OUT ] && ! grep -qE '^(Traceback|Error:|SyntaxError)' $OUT && [ $(wc -c < $OUT) -gt 40 ]")
+	}
+	// Expose $OUT to the validator regardless of whether it was coder-declared.
+	wrappedCheck := fmt.Sprintf("OUT=%s; %s", outFile, check)
+
+	if !budget.TrySpawnNode("bash", false) {
+		log.Printf("[dag] shallow compute → budget exhausted, skipping verify graft for %s", comp.ID)
+		return grafted
+	}
+	verifyTag := "verify_" + sanitizeTag(comp.Tag)
+	if verifyTag == "verify_" {
+		verifyTag = "verify_" + comp.ID
+	}
+	verifyNode := &Node{
+		Type:      NodeTool,
+		ToolName:  "bash",
+		Params:    map[string]any{"command": wrappedCheck, "timeout_sec": 30},
+		DependsOn: []string{execID},
+		SpawnedBy: compID,
+		Tag:       verifyTag,
+		Source:    "builtin",
+	}
+	vID := graph.AddNode(verifyNode)
+	graph.AddChild(compID, vID)
+	grafted = append(grafted, verifyNode)
+	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
+
+	return grafted
 }
 
 // Dispatcher functions (fireNode, resolveInjections, extractJSONField,

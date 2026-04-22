@@ -70,6 +70,7 @@ type Trigger struct {
 	History   []llm.Message   `json:"history,omitempty"`    // conversation history
 	AggMode       int    `json:"agg_mode,omitempty"`        // 0=skip aggregator, 1=executor model (default), 2=reasoning model
 	ExecutionMode string `json:"execution_mode,omitempty"` // per-request override: "interactive" or "autonomous"
+	HeartbeatThreshold int `json:"heartbeat_threshold,omitempty"` // consecutive stuck ticks before kernel interjects (0 = default 3; raise for long-running work like downloads)
 }
 
 /*
@@ -133,7 +134,6 @@ type Config struct {
 	Workspace     string    // where files are written (cwd in CLI mode, sandbox in web mode)
 	MetadataDir   string    // where blueprints, worklog, sessions live (.kaiju/ in CLI, same as workspace in web)
 	CLIMode       bool      // true = workspace is cwd, no project/ prefix, .kaiju/ for metadata
-	ExecutiveMode   string // "structured" (text JSON) or "native" (function calling)
 	NodeID        string
 
 	// DAG engine (optimistic parallel investigation)
@@ -228,7 +228,6 @@ type Agent struct {
 	embedClient *llm.Client    // nil if embeddings disabled
 
 	soulPrompt    string // from SOUL.md → BOOT.md body → default
-	executivePrompt string // from executive.md → default
 	skillWatcher  *skillmd.Watcher
 	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
 	fleet         FleetContextProvider // nil on standalone nodes
@@ -324,7 +323,6 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 
 	// Load externalized prompts
 	soul := loadSoulPrompt(cfg.DataDir, cfg.CustomSystemPrompt)
-	executive := loadExecutivePrompt(cfg.DataDir)
 	caps := loadCapabilities(cfg.DataDir)
 
 	// Executor defaults to same client if not configured separately
@@ -346,7 +344,6 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 		dagSubs:           make(map[int]chan DAGEvent),
 		skillGuidance:     make(map[string]*skillmd.SkillMD),
 		soulPrompt:        soul,
-		executivePrompt:     executive,
 		capabilities:      caps,
 		intentRegistry:    NewIntentRegistry(),
 	}, nil
@@ -413,6 +410,21 @@ func (a *Agent) Submit(t Trigger) {
 	}
 }
 
+// InitKernel builds the kernel + its built-in modules and spawns the event
+// loop in a goroutine. Callers that need SubmitSync before Start blocks on
+// its main loop can call InitKernel synchronously first — kernel is non-nil
+// as soon as InitKernel returns. Start calls InitKernel itself, so if you
+// use Start you don't need to call this.
+func (a *Agent) InitKernel(ctx context.Context) {
+	if a.kernel != nil {
+		return
+	}
+	a.kernel = NewKernel(a)
+	a.kernel.Register(NewHeartbeatModule(30 * time.Second))
+	a.kernel.Register(&ExecutiveModule{})
+	go a.kernel.Run(ctx)
+}
+
 /*
  * Start runs the agent loop: dequeue trigger, investigate, repeat.
  * desc: Blocks until ctx is cancelled. Periodically prunes expired memory entries.
@@ -426,11 +438,7 @@ func (a *Agent) Start(ctx context.Context) {
 	log.Printf("[agent] started (model=%s, maxTurns=%d, rateLimit=%d/hr, dag=%s)",
 		a.cfg.LLMModel, a.cfg.MaxTurns, a.cfg.RateLimit, dagLabel)
 
-	// Initialize kernel with built-in modules
-	a.kernel = NewKernel(a)
-	a.kernel.Register(NewHeartbeatModule(90 * time.Second))
-	a.kernel.Register(&ExecutiveModule{})
-	go a.kernel.Run(ctx)
+	a.InitKernel(ctx)
 
 	// Memory prune ticker
 	pruneTicker := time.NewTicker(10 * time.Minute)

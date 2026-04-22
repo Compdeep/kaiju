@@ -1,0 +1,14 @@
+{
+    "name": "kaiju-app",
+    "version": "1.0.0",
+    "servers": {
+        "api": {
+            "host": "localhost",
+            "port": 4000
+        },
+        "web": {
+            "host": "localhost",
+            "port": 3000
+    },
+    "features": ["auth", "api", "metrics"]
+}

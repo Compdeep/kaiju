@@ -29,7 +29,6 @@ func Default() *Config {
 			MaxTurns:         15,
 			RateLimit:        100,
 			SafetyLevel:      100,
-			ExecutiveMode:       "structured",
 			DataDir:           "~/.kaiju",
 			Workspace:         "", // defaults to ~/.kaiju/workspace (resolved in config.resolve)
 			ClassifierEnabled: &classifierOn,

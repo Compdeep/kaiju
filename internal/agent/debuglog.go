@@ -11,8 +11,7 @@ import (
 
 // ── LLM Trace Log ───────────────────────────────────────────────────────────
 //
-// When KAIJU_PROMPT_DEBUG=1 is set, every LLM call in the agent is appended
-// to a single per-investigation log file at:
+// Every LLM call in the agent is appended to a per-investigation log file at:
 //
 //     /tmp/kaiju-prompts/<alertID>.log
 //
@@ -21,15 +20,17 @@ import (
 // human-readable and append-only — read it top-to-bottom to follow the
 // investigation as it unfolded.
 //
-// To enable: export KAIJU_PROMPT_DEBUG=1
+// Default: ON — we want these traces when things break. Flip to OFF with
+// KAIJU_PROMPT_DEBUG=0 (e.g. for CI or privacy-sensitive runs).
+//
 // To read:   tail -f /tmp/kaiju-prompts/<alertID>.log
 
 const debugLogDir = "/tmp/kaiju-prompts"
 
-// debugLogEnabled returns true when the env var is set. Cheap; called once
-// per LLM call.
+// debugLogEnabled returns true by default. Set KAIJU_PROMPT_DEBUG=0 to
+// disable. Cheap; called once per LLM call.
 func debugLogEnabled() bool {
-	return os.Getenv("KAIJU_PROMPT_DEBUG") != ""
+	return os.Getenv("KAIJU_PROMPT_DEBUG") != "0"
 }
 
 // LLMTrace captures everything we want to record about a single LLM call.

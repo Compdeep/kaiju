@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
 // ErrInterrupt is returned by LineReader.Read when the user presses Ctrl+C.
@@ -21,37 +22,31 @@ var ErrInterrupt = errors.New("interrupt")
 // completion. pos is the cursor byte offset within line.
 type CompleteFunc func(line string, pos int) (start int, candidates []string)
 
-// ReadByteFn returns the next input byte. The implementation is responsible
-// for any filtering (e.g. Ctrl+O interception in the key pump).
-type ReadByteFn func() (byte, error)
-
-// LineReader is a line editor with history and tab completion. Raw-mode
-// terminal state is owned by the caller (see keyPump in cli.go); Read does
-// NOT toggle raw mode itself.
+// LineReader is a line editor with history and tab completion. It owns raw
+// mode ONLY for the duration of Read — between reads the terminal stays in
+// cooked mode so the terminal emulator handles mouse wheel / scrollback
+// natively. Ctrl+O during Read fires onToggleAlt (if set).
 type LineReader struct {
 	historyFile string
 	history     []string
 	complete    CompleteFunc
-	readByteFn  ReadByteFn
+	onToggleAlt func() // optional; called on Ctrl+O inside Read
 
 	mu     sync.Mutex
 	prompt string
 }
 
-func NewLineReader(historyFile string, complete CompleteFunc, readByteFn ReadByteFn) *LineReader {
-	if readByteFn == nil {
-		readByteFn = defaultReadByte
-	}
+func NewLineReader(historyFile string, complete CompleteFunc, onToggleAlt func()) *LineReader {
 	lr := &LineReader{
 		historyFile: historyFile,
 		complete:    complete,
-		readByteFn:  readByteFn,
+		onToggleAlt: onToggleAlt,
 	}
 	lr.loadHistory()
 	return lr
 }
 
-func defaultReadByte() (byte, error) {
+func readByte() (byte, error) {
 	var b [1]byte
 	_, err := os.Stdin.Read(b[:])
 	return b[0], err
@@ -64,13 +59,27 @@ func (lr *LineReader) SetPrompt(p string) {
 }
 
 // Read blocks until the user submits a line (Enter), presses Ctrl+C (returns
-// ErrInterrupt), or hits EOF (io.EOF). The caller is expected to have already
-// rendered the prompt on screen; Read uses the stored prompt string only when
-// it needs to redraw the input line (backspace, history, completion).
-//
-// Raw-mode is owned by the caller (key pump). This function never calls
-// MakeRaw/Restore — doing so while the pump owns the fd would race.
+// ErrInterrupt), or hits EOF (io.EOF). It takes raw mode for the duration
+// and releases it on return, so the terminal handles mouse wheel for native
+// scrollback while we're not actively reading.
 func (lr *LineReader) Read() (string, error) {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return readFallback()
+	}
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return "", err
+	}
+	defer term.Restore(fd, state)
+	if err := enableOPOST(fd); err != nil {
+		return "", err
+	}
+	// Bracketed paste: let the terminal send ESC[200~…ESC[201~ around pasted
+	// content so we can gulp it as one block instead of byte-by-byte.
+	fmt.Fprint(os.Stdout, bracketPasteOn)
+	defer fmt.Fprint(os.Stdout, bracketPasteOff)
+
 	lr.mu.Lock()
 	prompt := lr.prompt
 	lr.mu.Unlock()
@@ -79,22 +88,55 @@ func (lr *LineReader) Read() (string, error) {
 	pos := 0
 	histIdx := len(lr.history)
 	savedBuf := ""
+	prevRows := 1 // rows the previous redraw occupied; clear this many before re-emitting
 
 	redraw := func() {
-		fmt.Fprint(os.Stdout, "\r\x1b[K", prompt, string(buf))
+		cols := termCols()
+		promptVis := visibleLen(prompt)
+		visLen := promptVis + utf8.RuneCountInString(string(buf))
+		curRows := (visLen + cols - 1) / cols
+		if curRows < 1 {
+			curRows = 1
+		}
+		toClear := prevRows
+		if curRows > toClear {
+			toClear = curRows
+		}
+
+		var b strings.Builder
+		// Cursor is somewhere on the bottom row of the previous render
+		// (or one row below if an auto-wrap just happened). Normalise:
+		// clear current row and every row above it within the render.
+		b.WriteString("\r\x1b[K")
+		for i := 1; i < toClear; i++ {
+			b.WriteString("\x1b[A\r\x1b[K")
+		}
+		// Cursor now at col 1 of the top row of the cleared region.
+		b.WriteString(prompt)
+		b.WriteString(string(buf))
 		trailing := len(buf) - pos
 		if trailing > 0 {
-			fmt.Fprintf(os.Stdout, "\x1b[%dD", trailing)
+			fmt.Fprintf(&b, "\x1b[%dD", trailing)
 		}
+		fmt.Fprint(os.Stdout, b.String())
+		prevRows = curRows
 	}
 
 	for {
-		b, err := lr.readByteFn()
+		b, err := readByte()
 		if err != nil {
 			if err == io.EOF {
 				return "", io.EOF
 			}
 			return "", err
+		}
+
+		if b == 0x0f { // Ctrl+O — toggle expanded trace view
+			if lr.onToggleAlt != nil {
+				lr.onToggleAlt()
+				redraw()
+			}
+			continue
 		}
 
 		switch {
@@ -127,16 +169,12 @@ func (lr *LineReader) Read() (string, error) {
 			}
 
 		case b == 0x1b:
-			b2, err := lr.readByteFn()
-			if err != nil || b2 != '[' {
-				continue
-			}
-			b3, err := lr.readByteFn()
+			seq, err := readCSI(readByte)
 			if err != nil {
 				continue
 			}
-			switch b3 {
-			case 'A':
+			switch seq {
+			case "A":
 				if histIdx > 0 {
 					if histIdx == len(lr.history) {
 						savedBuf = string(buf)
@@ -146,7 +184,7 @@ func (lr *LineReader) Read() (string, error) {
 					pos = len(buf)
 					redraw()
 				}
-			case 'B':
+			case "B":
 				if histIdx < len(lr.history) {
 					histIdx++
 					if histIdx == len(lr.history) {
@@ -157,20 +195,36 @@ func (lr *LineReader) Read() (string, error) {
 					pos = len(buf)
 					redraw()
 				}
-			case 'C':
+			case "C":
 				if pos < len(buf) {
 					pos++
 					fmt.Fprint(os.Stdout, "\x1b[C")
 				}
-			case 'D':
+			case "D":
 				if pos > 0 {
 					pos--
 					fmt.Fprint(os.Stdout, "\x1b[D")
 				}
+			case "200~":
+				paste, err := readPaste(readByte)
+				if err != nil {
+					continue
+				}
+				runes := []rune(paste)
+				if len(runes) == 0 {
+					continue
+				}
+				next := make([]rune, 0, len(buf)+len(runes))
+				next = append(next, buf[:pos]...)
+				next = append(next, runes...)
+				next = append(next, buf[pos:]...)
+				buf = next
+				pos += len(runes)
+				redraw()
 			}
 
 		case b >= 0x20:
-			r, err := readRune(b, lr.readByteFn)
+			r, err := readRune(b, readByte)
 			if err != nil || r == utf8.RuneError {
 				continue
 			}
@@ -185,7 +239,66 @@ func (lr *LineReader) Read() (string, error) {
 	}
 }
 
-func readRune(first byte, next ReadByteFn) (rune, error) {
+// readCSI consumes a CSI escape sequence body after the initial ESC. It
+// expects the next byte to be '[' (otherwise returns an error so the caller
+// can ignore the lone ESC). Returns the sequence without the leading "ESC["
+// — e.g. "A", "D", "200~", "1;5D". The terminator (letter or '~') is kept.
+func readCSI(next func() (byte, error)) (string, error) {
+	b, err := next()
+	if err != nil {
+		return "", err
+	}
+	if b != '[' {
+		return "", errors.New("not a CSI sequence")
+	}
+	var seq []byte
+	for i := 0; i < 32; i++ {
+		c, err := next()
+		if err != nil {
+			return "", err
+		}
+		seq = append(seq, c)
+		if c == '~' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			return string(seq), nil
+		}
+	}
+	return "", errors.New("CSI sequence too long")
+}
+
+// readPaste consumes bytes until the bracketed-paste end marker (ESC[201~)
+// and returns the pasted text with newlines and tabs flattened to spaces so
+// the single-line editor stays coherent.
+func readPaste(next func() (byte, error)) (string, error) {
+	var body []byte
+	for {
+		b, err := next()
+		if err != nil {
+			return "", err
+		}
+		if b == 0x1b {
+			seq, err := readCSI(next)
+			if err != nil {
+				// Malformed escape inside paste — drop it and keep going.
+				continue
+			}
+			if seq == "201~" {
+				break
+			}
+			// Any other escape inside the paste is discarded.
+			continue
+		}
+		body = append(body, b)
+	}
+	// Flatten whitespace that would break the single-line editor.
+	s := string(body)
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	return s, nil
+}
+
+func readRune(first byte, next func() (byte, error)) (rune, error) {
 	if first < 0x80 {
 		return rune(first), nil
 	}
@@ -251,6 +364,10 @@ func applyReplacement(line string, startByte, endByte int, replacement string) (
 	return buf, pos
 }
 
+// redrawLine is used by the tab-complete helper. It only handles the
+// single-row case — multi-row redraws go through the closure in Read so
+// prevRows can be tracked. For the completion flow this is acceptable
+// because the completion text insertion happens after a newline break.
 func redrawLine(prompt string, buf []rune, pos int) {
 	fmt.Fprint(os.Stdout, "\r\x1b[K", prompt, string(buf))
 	trailing := len(buf) - pos

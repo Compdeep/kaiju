@@ -33,7 +33,7 @@ func (a *Agent) runAggregatorWithIntent(ctx context.Context, trigger Trigger, gr
 func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, client *llm.Client, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
 
 	// Assemble user prompt from gate context plus capability gaps from graph.
-	userPrompt := assembleAggregatorPrompt(graph, gateCtx)
+	userPrompt := assembleAggregatorPrompt(trigger, graph, gateCtx)
 
 	intentStr := intent.String()
 	// Per-investigation cards live on the graph; fall back to agent field
@@ -48,7 +48,7 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	if len(cards) > 0 {
 		aggGuidance = a.capabilities.ComposeAggregatorGuidance(cards)
 	}
-	rolePrompt := fmt.Sprintf(defaultAggregatorRolePrompt, aggGuidance, intentStr)
+	rolePrompt := fmt.Sprintf(defaultAggregatorRolePrompt, aggGuidance, a.FormatRule(), intentStr)
 
 	messages := BuildMessagesWithHistory(
 		ComposeSystemPrompt(a.soulPrompt, rolePrompt),
@@ -112,8 +112,19 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 // assembleAggregatorPrompt builds the aggregator's user message from a gate
 // response and graph state. Sections: Original Request, Capability Gaps,
 // Failed Steps, Skipped Steps, All Results, Worklog.
-func assembleAggregatorPrompt(graph *Graph, gateCtx *ContextResponse) string {
+func assembleAggregatorPrompt(trigger Trigger, graph *Graph, gateCtx *ContextResponse) string {
 	var sb strings.Builder
+
+	// Original Request — anchor the aggregator to what the user ACTUALLY
+	// asked for. Without this, the aggregator drifts toward whatever narrative
+	// dominates the worklog, which can include entries from prior investigations
+	// in the same session. The worklog stays as secondary context (cross-query
+	// continuity matters), but the query is the primary signal.
+	if q := formatTrigger(trigger); q != "" {
+		sb.WriteString("## Original Request\n\n")
+		sb.WriteString(q)
+		sb.WriteString("\n\n")
+	}
 
 	// Capability gaps from the graph (set by the executive when no tool exists).
 	if graph != nil && len(graph.Gaps) > 0 {

@@ -1,0 +1,1 @@
+{"core": true, "query": "change price(base, target) so it returns `base` if target is AT LEAST 7 days from now (target - now >= 7 days), otherwise returns `base * 2`. Keep the signature.", "check": "tmp=$(mktemp -d) && cp $FILE $tmp/price.py && python3 tests/eval/editor/corpus/python/price_driver.py $tmp"}

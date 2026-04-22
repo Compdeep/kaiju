@@ -55,8 +55,6 @@ type Channel struct {
 	// whether they render inline. Not part of LLM context — annotations only.
 	bufMu     sync.Mutex
 	statusBuf []statusEntry
-
-	pump *keyPump
 }
 
 // New creates a CLI channel with the dark theme.
@@ -130,18 +128,12 @@ func (c *Channel) showPrompt() {
 	fmt.Printf("\n%s", c.prompt())
 }
 
-// Start reads lines from stdin and sends them as inbound messages.
+// Start reads lines from stdin and sends them as inbound messages. Raw mode
+// is owned by LineReader per-Read so the terminal handles mouse wheel for
+// native scrollback between edits. Ctrl+O toggles the expanded trace — only
+// meaningful while the user is at a prompt.
 func (c *Channel) Start(ctx context.Context, inbox chan<- channels.InboundMessage) error {
-	// Key pump owns raw mode for the lifetime of the channel. It intercepts
-	// Ctrl+O (alt-screen toggle) and forwards other bytes to LineReader.
-	pump, err := startKeyPump(c)
-	if err != nil {
-		return fmt.Errorf("cli: init key pump: %w", err)
-	}
-	defer pump.Close()
-	c.pump = pump
-
-	rl := NewLineReader(HistoryFilePath(), c.complete, pump.ReadByte)
+	rl := NewLineReader(HistoryFilePath(), c.complete, c.toggleAltScreen)
 
 	// Welcome banner
 	t := c.theme
@@ -857,102 +849,6 @@ func termCols() int {
 	return cols
 }
 
-// --- Key pump --------------------------------------------------------------
-
-// keyPump owns raw-mode stdin for the lifetime of the CLI channel. It reads
-// bytes one at a time, intercepts Ctrl+O (0x0f) to toggle the expanded view,
-// and forwards everything else to a buffered channel that LineReader drains
-// via ReadByte.
-type keyPump struct {
-	ch    *Channel
-	bytes chan byte
-	stop  chan struct{}
-
-	fd       int
-	rawState *term.State
-}
-
-func startKeyPump(ch *Channel) (*keyPump, error) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return nil, fmt.Errorf("stdin is not a terminal")
-	}
-	state, err := term.MakeRaw(fd)
-	if err != nil {
-		return nil, err
-	}
-	// MakeRaw disables OPOST; re-enable so \n → \r\n works for concurrent
-	// writers (Send, StatusUpdate).
-	if err := enableOPOST(fd); err != nil {
-		_ = term.Restore(fd, state)
-		return nil, err
-	}
-	// Keep mouse wheel out of our input stream so the terminal can scroll
-	// native scrollback instead of firing history recall.
-	fmt.Fprint(os.Stdout, altScrollOff)
-	p := &keyPump{
-		ch:       ch,
-		bytes:    make(chan byte, 256),
-		stop:     make(chan struct{}),
-		fd:       fd,
-		rawState: state,
-	}
-	go p.run()
-	return p, nil
-}
-
-func (p *keyPump) run() {
-	var buf [1]byte
-	for {
-		n, err := os.Stdin.Read(buf[:])
-		if err != nil {
-			if err == io.EOF {
-				close(p.bytes)
-				return
-			}
-			select {
-			case <-p.stop:
-				return
-			default:
-			}
-			continue
-		}
-		if n == 0 {
-			continue
-		}
-		b := buf[0]
-		if b == 0x0f { // Ctrl+O
-			p.ch.toggleAltScreen()
-			continue
-		}
-		select {
-		case p.bytes <- b:
-		case <-p.stop:
-			return
-		}
-	}
-}
-
-// ReadByte returns the next non-intercepted input byte. Blocks until one
-// is available or the pump is closed.
-func (p *keyPump) ReadByte() (byte, error) {
-	b, ok := <-p.bytes
-	if !ok {
-		return 0, io.EOF
-	}
-	return b, nil
-}
-
-// Close restores terminal state. The reader goroutine itself leaks until
-// the process exits (stdin.Read is uninterruptible), but that is safe.
-func (p *keyPump) Close() error {
-	select {
-	case <-p.stop:
-	default:
-		close(p.stop)
-	}
-	return term.Restore(p.fd, p.rawState)
-}
 
 // logTimestampRe strips Go's default log timestamp prefix (e.g. "2026/04/06 22:50:16 ").
 var logTimestampRe = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)

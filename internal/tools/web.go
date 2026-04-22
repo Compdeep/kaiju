@@ -78,7 +78,7 @@ func (w *WebFetch) Impact(map[string]any) int { return agenttools.ImpactObserve 
  * return: JSON schema as raw bytes
  */
 func (w *WebFetch) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","description":"Fetched page content. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"}}}`)
+	return json.RawMessage(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Use param_refs with field=\"content\" to pass extracted text to a compute or search step.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"}}}`)
 }
 
 /*
@@ -169,7 +169,7 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 		if len(body) > 2048 {
 			body = body[:2048] + "..."
 		}
-		return fmt.Sprintf("%s\n\n%s", status, body), nil
+		return marshalFetchResult(fetchResult{Status: status, Content: body, Format: format})
 	}
 
 	// Route to format handler
@@ -186,19 +186,36 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 	}
 }
 
+// fetchResult is the structured JSON return shape of web_fetch. Declared here
+// once so all formatters share it. Matches WebFetch.OutputSchema().
+type fetchResult struct {
+	Status  string `json:"status"`
+	Title   string `json:"title,omitempty"`
+	Content string `json:"content"`
+	Format  string `json:"format,omitempty"`
+}
+
+func marshalFetchResult(r fetchResult) (string, error) {
+	b, err := json.Marshal(r)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 /*
  * formatRaw returns the raw response body truncated to 8KB.
- * desc: Returns the unprocessed HTML body with an HTTP status prefix.
+ * desc: Returns the unprocessed HTML body with an HTTP status.
  * param: status - HTTP status line string
  * param: body - raw response body bytes
- * return: status line followed by raw body (truncated to 8KB)
+ * return: JSON {status, content} with body truncated to 8KB
  */
 func (w *WebFetch) formatRaw(status string, body []byte) (string, error) {
 	s := string(body)
 	if len(s) > 8192 {
 		s = s[:8192] + "\n... (truncated)"
 	}
-	return fmt.Sprintf("%s\n\n%s", status, s), nil
+	return marshalFetchResult(fetchResult{Status: status, Content: s, Format: "raw"})
 }
 
 /*
@@ -233,19 +250,12 @@ func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, bo
 		content = content[:12000] + "\n... (truncated)"
 	}
 
-	var result strings.Builder
-	result.WriteString(status)
-	result.WriteString("\n")
-	if article.Title != "" {
-		result.WriteString(fmt.Sprintf("Title: %s\n", article.Title))
-	}
-	if article.Byline != "" {
-		result.WriteString(fmt.Sprintf("Author: %s\n", article.Byline))
-	}
-	result.WriteString("\n")
-	result.WriteString(content)
-
-	return result.String(), nil
+	return marshalFetchResult(fetchResult{
+		Status:  status,
+		Title:   article.Title,
+		Content: content,
+		Format:  "markdown",
+	})
 }
 
 /*
@@ -262,7 +272,7 @@ func (w *WebFetch) formatText(_ context.Context, status, rawURL string, body []b
 	if len(text) > 8192 {
 		text = text[:8192] + "\n... (truncated)"
 	}
-	return fmt.Sprintf("%s\n\n%s", status, text), nil
+	return marshalFetchResult(fetchResult{Status: status, Content: text, Format: "text"})
 }
 
 /*
@@ -326,15 +336,15 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 		if len(content) > 4096 {
 			content = content[:4096] + "..."
 		}
-		return fmt.Sprintf("%s\nTitle: %s\n\n%s", status, title, content), nil
+		return marshalFetchResult(fetchResult{Status: status, Title: title, Content: content, Format: "summary"})
 	}
 
 	if len(resp.Choices) == 0 {
-		return fmt.Sprintf("%s\nTitle: %s\n\n(summary failed)", status, title), nil
+		return marshalFetchResult(fetchResult{Status: status, Title: title, Content: "(summary failed)", Format: "summary"})
 	}
 
 	summary := resp.Choices[0].Message.Content
-	return fmt.Sprintf("%s\nTitle: %s\n\n%s", status, title, summary), nil
+	return marshalFetchResult(fetchResult{Status: status, Title: title, Content: summary, Format: "summary"})
 }
 
 /*

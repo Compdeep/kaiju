@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // looksLikeFailure checks if a validator's output indicates failure despite exit code 0.
@@ -1103,12 +1105,6 @@ func ApplyEdits(content string, edits []EditOp) (string, error) {
 			continue
 		}
 		if !strings.Contains(content, e.OldContent) {
-			// Try trimmed match — LLMs sometimes add/remove trailing whitespace
-			trimmed := strings.TrimSpace(e.OldContent)
-			if trimmed != "" && strings.Contains(content, trimmed) {
-				content = strings.Replace(content, trimmed, e.NewContent, 1)
-				continue
-			}
 			return "", fmt.Errorf("old_content not found in file (first 60 chars: %q)", e.OldContent[:min(60, len(e.OldContent))])
 		}
 		content = strings.Replace(content, e.OldContent, e.NewContent, 1)
@@ -1381,8 +1377,14 @@ func FormatFileFunctionMap(decls []FuncDecl) string {
 // SpliceFileEdits applies edits to file content. Edits are sorted bottom-to-top
 // (highest start line first) and applied sequentially so line numbers stay valid.
 // Lines are 1-based, inclusive on both ends.
-// ApplyFileEdits reads a file, applies text-match edits, and writes back.
-// Falls back to full rewrite if any edit fails to match.
+// ApplyFileEdits reads a file, applies exact text-match edits, and writes back.
+// Match failure is an error — never silently overwrites the file with new_content
+// (that's how routes/auth.js got reduced to "export default router;" and broke
+// the whole backend). Callers that want to replace the whole file should use
+// OverwriteFile instead.
+//
+// The write itself goes through commitFile, so structured files (.json, .yaml,
+// .yml) are parse-validated before they touch disk.
 func ApplyFileEdits(filePath string, edits []EditOp) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -1390,15 +1392,46 @@ func ApplyFileEdits(filePath string, edits []EditOp) error {
 	}
 	result, err := ApplyEdits(string(data), edits)
 	if err != nil {
-		// If match failed and there's only one edit, fall back to full rewrite
-		if len(edits) == 1 && edits[0].NewContent != "" {
-			log.Printf("[dag] edit match failed for %s, falling back to full rewrite", filePath)
-			result = edits[0].NewContent
-		} else {
-			return fmt.Errorf("edit %s: %w", filePath, err)
+		return fmt.Errorf("edit %s: %w", filePath, err)
+	}
+	return commitFile(filePath, result)
+}
+
+// OverwriteFile writes the full content of a file, replacing whatever is there.
+// Used by the coder's full-rewrite branch and the file_write tool. Goes through
+// commitFile so structured files are parse-validated first; a malformed JSON
+// (stray comma, unclosed brace) is rejected before it reaches disk.
+func OverwriteFile(filePath, content string) error {
+	return commitFile(filePath, content)
+}
+
+// commitFile is the single choke point for user-file writes. It runs the
+// structural parse gate for known-structured extensions, then os.WriteFile.
+// On parse failure, nothing is written — the caller gets a clear error.
+func commitFile(filePath, content string) error {
+	if err := validateStructural(filePath, content); err != nil {
+		return fmt.Errorf("refusing to write %s: %w", filepath.Base(filePath), err)
+	}
+	return os.WriteFile(filePath, []byte(content), 0644)
+}
+
+// validateStructural parses `content` according to filePath's extension for
+// extensions Kaiju can validate in-process. Unknown extensions pass through
+// unchecked — behaviour matches the pre-refactor unvalidated write.
+func validateStructural(filePath, content string) error {
+	switch strings.ToLower(filepath.Ext(filePath)) {
+	case ".json":
+		var any interface{}
+		if err := json.Unmarshal([]byte(content), &any); err != nil {
+			return fmt.Errorf("invalid JSON: %w", err)
+		}
+	case ".yaml", ".yml":
+		var any interface{}
+		if err := yaml.Unmarshal([]byte(content), &any); err != nil {
+			return fmt.Errorf("invalid YAML: %w", err)
 		}
 	}
-	return os.WriteFile(filePath, []byte(result), 0644)
+	return nil
 }
 
 // FindCallSites searches the workspace for references to a function name.

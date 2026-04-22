@@ -1,0 +1,1 @@
+{"core": true, "query": "this file does not compile because it's missing imports — add the minimum imports needed so it builds and runs (it uses `fmt` and `runtime`). Do not change anything else.", "check": "tmp=$(mktemp -d) && cp $FILE $tmp/main.go && (cd $tmp && go build -o b ./main.go) && out=$($tmp/b) && echo \"$out\" | grep -q 'hello from'"}

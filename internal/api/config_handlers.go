@@ -83,7 +83,6 @@ type configPatch struct {
 	Agent *struct {
 		DAGEnabled  *bool   `json:"dag_enabled,omitempty"`
 		DAGMode     *string `json:"dag_mode,omitempty"`
-		ExecutiveMode *string `json:"executive_mode,omitempty"`
 		SafetyLevel *int    `json:"safety_level,omitempty"`
 		MaxInvestigations *int `json:"max_investigations,omitempty"`
 	} `json:"agent,omitempty"`
@@ -132,9 +131,6 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.Agent.DAGMode != nil {
 			c.cfg.Agent.DAGMode = *patch.Agent.DAGMode
-		}
-		if patch.Agent.ExecutiveMode != nil {
-			c.cfg.Agent.ExecutiveMode = *patch.Agent.ExecutiveMode
 		}
 		if patch.Agent.SafetyLevel != nil {
 			c.cfg.Agent.SafetyLevel = *patch.Agent.SafetyLevel

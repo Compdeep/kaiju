@@ -191,3 +191,62 @@ func TestValidateParamRef_RejectsMalformedDepResult(t *testing.T) {
 		t.Fatalf("expected reject when dep result is not JSON and field is specified")
 	}
 }
+
+// ── validateDataFlow ─────────────────────────────────────────────────────
+
+func TestValidateDataFlow_AllowsEmptyDependsOn(t *testing.T) {
+	if err := validateDataFlow("compute", nil, nil); err != nil {
+		t.Fatalf("no deps → should allow, got %v", err)
+	}
+}
+
+func TestValidateDataFlow_AllowsWhenParamRefsPresent(t *testing.T) {
+	refs := map[string]ResolvedInjection{"ctx": {NodeID: "n1", Field: "output"}}
+	if err := validateDataFlow("compute", []string{"n1"}, refs); err != nil {
+		t.Fatalf("deps + refs → should allow, got %v", err)
+	}
+}
+
+func TestValidateDataFlow_AllowsBashWithDepsNoRefs(t *testing.T) {
+	// Pure sequencing without data flow is legitimate for bash/service/etc.
+	if err := validateDataFlow("bash", []string{"n1"}, nil); err != nil {
+		t.Fatalf("bash sequencing should not be rejected, got %v", err)
+	}
+}
+
+func TestValidateDataFlow_AllowsServiceWithDepsNoRefs(t *testing.T) {
+	if err := validateDataFlow("service", []string{"n1", "n2"}, nil); err != nil {
+		t.Fatalf("service sequencing should not be rejected, got %v", err)
+	}
+}
+
+func TestValidateDataFlow_RejectsComputeWithDepsNoRefs(t *testing.T) {
+	err := validateDataFlow("compute", []string{"n1", "n2", "n3"}, nil)
+	if err == nil {
+		t.Fatalf("compute with deps but no refs → should reject")
+	}
+	if !strings.Contains(err.Error(), "compute") {
+		t.Fatalf("error should name the tool, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "param_refs") {
+		t.Fatalf("error should suggest param_refs, got %v", err)
+	}
+}
+
+func TestValidateDataFlow_RejectsEditFileWithDepsNoRefs(t *testing.T) {
+	err := validateDataFlow("edit_file", []string{"n0"}, nil)
+	if err == nil {
+		t.Fatalf("edit_file with deps but no refs → should reject")
+	}
+	if !strings.Contains(err.Error(), "edit_file") {
+		t.Fatalf("error should name the tool, got %v", err)
+	}
+}
+
+func TestValidateDataFlow_RejectsEmptyRefsMap(t *testing.T) {
+	// An explicitly-empty map is the same as nil — both mean "no wiring".
+	err := validateDataFlow("compute", []string{"n1"}, map[string]ResolvedInjection{})
+	if err == nil {
+		t.Fatalf("empty map should be treated the same as nil")
+	}
+}

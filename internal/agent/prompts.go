@@ -393,8 +393,8 @@ const reflectorClassifierPrompt = `You are a status classifier. Read the evidenc
 
 Set every call. Defaults to "productive" when unsure.
 
-- "productive" — new RCA, new failing validators, or the failure set shrank.
-- "diminishing" — fixes landing but the failing-validator set is NOT shrinking, OR two of the last three RCAs touch the same subsystem (same file, same service, same build/bundling chain) regardless of the exact error text.
+- "productive" — genuine forward motion: new failures surfacing, failure set shrinking, or a clearly distinct cause each cycle.
+- "diminishing" — you recognize a repeating pattern: same subsystem, same failure class, or fixes landing without the overall state improving.
 
 One extra retry beats a false stop.
 

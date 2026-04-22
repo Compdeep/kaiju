@@ -115,6 +115,15 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		n.Skills = graph.ActiveCards
 	}
 
+	// Data-flow validation: compute / edit_file with depends_on but no
+	// param_refs is a planner omission — depending on upstream steps but
+	// not wiring their data. Reject before execution; recovery chain
+	// (reflector → Holmes → microplanner) replans with wiring.
+	if err := validateDataFlow(n.ToolName, n.DependsOn, n.ParamRefs); err != nil {
+		ch <- nodeCompletion{NodeID: n.ID, Err: err}
+		return
+	}
+
 	// Resolve param_refs from dependency outputs before execution.
 	// Fails fast if dep not resolved, field missing, or value empty.
 	if len(n.ParamRefs) > 0 {

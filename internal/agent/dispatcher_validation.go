@@ -134,6 +134,31 @@ func validateParamRef(paramName string, ref ResolvedInjection, depResult string)
 	return nil
 }
 
+// validateDataFlow rejects data-consuming tool nodes that declare
+// depends_on dependencies but wire NO param_refs. The planner almost
+// never depends a compute (or edit_file) on upstream steps for pure
+// sequencing — when it sets depends_on, it wants their data. Silence
+// between "declared the dep" and "wired the data" is an omission bug:
+// the compute runs with empty context, hallucinates from the goal text
+// or training memory, and produces garbage or burns Holmes budget
+// chasing symptoms of the missing wiring.
+//
+// Scope: compute + edit_file only. Other tools (bash, service, etc.)
+// legitimately use depends_on for ordering side-effects with no data
+// flow — those aren't caught by this check.
+func validateDataFlow(toolName string, dependsOn []string, paramRefs map[string]ResolvedInjection) error {
+	if len(dependsOn) == 0 || len(paramRefs) > 0 {
+		return nil
+	}
+	if toolName != "compute" && toolName != "edit_file" {
+		return nil
+	}
+	log.Printf("[dispatch:reject] %s: depends_on %v but no param_refs — data flow incomplete",
+		toolName, dependsOn)
+	return fmt.Errorf("tool %s declares depends_on %v but wires no param_refs — if you depend on those steps' data, wire it via param_refs; if you meant pure sequencing, compute/edit_file is the wrong tool for that",
+		toolName, dependsOn)
+}
+
 // sortedKeys returns map keys in sorted order for deterministic error
 // messages and log lines.
 func sortedKeys(m map[string]json.RawMessage) []string {

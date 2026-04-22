@@ -179,6 +179,15 @@ func assembleDebuggerPrompt(mpNode *Node, gateCtx *ContextResponse, trigger Trig
 			if rca.SuggestedStrategy != "" {
 				sb.WriteString(fmt.Sprintf("**Suggested fix strategy:** %s\n\n", rca.SuggestedStrategy))
 			}
+			if len(rca.AffectedFiles) > 0 {
+				sb.WriteString("**Affected files (fan the fix across ALL of these):**\n")
+				for _, f := range rca.AffectedFiles {
+					sb.WriteString("- ")
+					sb.WriteString(f)
+					sb.WriteString("\n")
+				}
+				sb.WriteString("\nEvery file listed here needs its own fix action — do not patch one and hope the others resolve. Choose the appropriate tool per file (compute for code edits, file_write for small configs, bash for renames or deletions).\n\n")
+			}
 			sb.WriteString("Plan a fix that directly addresses the named root cause. Do NOT re-diagnose.\n\n")
 		}
 	}

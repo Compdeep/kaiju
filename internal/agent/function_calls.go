@@ -78,6 +78,11 @@ func reflectorToolDef() llm.ToolDef {
 						"enum": ["continue", "conclude", "investigate"],
 						"description": "What to do next."
 					},
+					"progress": {
+						"type": "string",
+						"enum": ["productive", "diminishing"],
+						"description": "How the recent cycles are trending. Defaults to 'productive' if unsure. Two consecutive 'diminishing' waves downgrade investigate→conclude; see prompt for rules."
+					},
 					"summary": {
 						"type": "string",
 						"description": "What happened, current state, and SPECIFIC error messages from failures (exact module names, paths, error text)."
@@ -271,9 +276,14 @@ func preflightToolDef() llm.ToolDef {
 					"context": {
 						"type": "string",
 						"description": "One sentence framing the user's intent for the executor, based on query + conversation history."
+					},
+					"compute_mode": {
+						"type": "string",
+						"enum": ["", "shallow", "deep"],
+						"description": "Authoritative compute-node depth. 'deep' = build a new codebase. 'shallow' = one-off script / calculation / ranking (even over many inputs). '' = no compute needed. Presence of existing workspace files is NOT a signal."
 					}
 				},
-				"required": ["mode", "intent", "context"]
+				"required": ["mode", "intent", "context", "compute_mode"]
 			}`),
 		},
 	}

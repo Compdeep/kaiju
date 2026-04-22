@@ -857,12 +857,14 @@ func (g *Graph) ResolvedResultsSoFar() map[string]string {
 		if n.State != StateResolved {
 			continue
 		}
-		// Only tool and compute results — skip reflections (circular),
-		// micro-planners, aggregators, and builtin nodes (noise).
+		// Only tool and compute results — skip reflections, micro-planners,
+		// aggregators, observers. The Type check above already excludes
+		// them (they're NodeReflection/NodeObserver/etc., not NodeTool).
+		// The old `n.Source == "builtin"` filter was dead weight that
+		// accidentally excluded web_search / bash / file_read / web_fetch
+		// results — the primary evidence — from every reflector and
+		// aggregator call. Removed 2026-04-18.
 		if n.Type != NodeTool && n.Type != NodeCompute {
-			continue
-		}
-		if n.Source == "builtin" {
 			continue
 		}
 		// Label with tool and key param for clarity

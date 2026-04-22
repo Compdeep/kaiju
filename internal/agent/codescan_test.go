@@ -414,15 +414,15 @@ func TestApplyEdits_NotFound(t *testing.T) {
 	}
 }
 
-func TestApplyEdits_TrimmedMatch(t *testing.T) {
+func TestApplyEdits_WhitespaceMismatchFails(t *testing.T) {
+	// Edits are exact-match only (matching Claude Code's Edit tool).
+	// Whitespace-drifted OldContent must fail — the coder is expected to
+	// quote the file contents exactly as they appear on disk.
 	content := "hello world\nfoo bar\nbaz"
 	edits := []EditOp{{OldContent: "  foo bar  ", NewContent: "FOO"}}
-	result, err := ApplyEdits(content, edits)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result, "FOO") {
-		t.Errorf("trimmed match should work, got %q", result)
+	_, err := ApplyEdits(content, edits)
+	if err == nil {
+		t.Fatal("expected error for whitespace-drifted old_content, got nil")
 	}
 }
 

@@ -23,6 +23,7 @@ type PreflightResult struct {
 	Intent             gates.Intent // inferred intent rank from the registry (used when trigger intent is Auto)
 	RequiredCategories []string     // tool categories the plan must include (network/filesystem/compute/process/info)
 	Context            string       // one-line framing of the user's intent based on conversation history
+	ComputeMode        string       // "" (no compute / no opinion) | "shallow" | "deep" — authoritative for the planner
 }
 
 // preflightCategories is the fixed set of tool categories the preflight
@@ -47,7 +48,8 @@ If the user's query is "get this site working" and the prior context mentions a 
   "mode": "chat" | "meta" | "investigate",
   "intent": %s,
   "required_categories": ["network", "filesystem", "compute", "process", "info"],
-  "context": "one sentence framing the user's intent for the executor"
+  "context": "one sentence framing the user's intent for the executor",
+  "compute_mode": "" | "shallow" | "deep"
 }
 
 ## Field meanings
@@ -71,6 +73,13 @@ If the user's query is "get this site working" and the prior context mentions a 
 - "info": system state, env vars, disk, network info
 
 **context** — One sentence summarising what the user wants, using both the current query AND the prior context. This frames vague queries like "do it", "get more", "try again" for the executor. Be specific: "User wants to download more eurodance videos using yt-dlp" not "User wants more." Include the method/tool if the prior context established one.
+
+**compute_mode** — Whether the plan will need a compute node, and at what depth. This decision is yours alone — the planner treats it as authoritative.
+- "deep": the user is asking to BUILD a new codebase — webapp, CLI tool, service, library, multi-file project from scratch. Example queries: "build me a todo app", "scaffold a Vue project", "create a REST API for X".
+- "shallow": the user wants a one-off script, calculation, data transformation, analysis, or ranking — even across many inputs. Example queries: "rank these ports by idle cost", "parse this CSV and find duplicates", "calculate the total revenue by region".
+- "": the user's query needs no compute at all (pure chat, lookup, web search, file read, system info, etc.).
+
+The presence of an existing project in the workspace is NOT a signal. Only the user's current query + prior context drive this choice. A user asking "what's the weather" after previously building a webapp still gets compute_mode="".
 
 Return ONLY the raw JSON object.`
 
@@ -96,6 +105,7 @@ type preflightRaw struct {
 	Intent             string   `json:"intent"`
 	RequiredCategories []string `json:"required_categories"`
 	Context            string   `json:"context"`
+	ComputeMode        string   `json:"compute_mode"`
 }
 
 /*
@@ -264,6 +274,19 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 
 	// Context — pass through as-is (freeform text).
 	out.Context = strings.TrimSpace(raw.Context)
+
+	// ComputeMode — tri-state: "" | "shallow" | "deep". Unknown values drop
+	// to "" so the planner treats it as "no opinion" rather than guessing.
+	switch strings.ToLower(strings.TrimSpace(raw.ComputeMode)) {
+	case "deep":
+		out.ComputeMode = "deep"
+	case "shallow":
+		out.ComputeMode = "shallow"
+	case "":
+		out.ComputeMode = ""
+	default:
+		log.Printf("[dag] preflight: unknown compute_mode %q, defaulting to none", raw.ComputeMode)
+	}
 
 	return out
 }

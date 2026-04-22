@@ -82,11 +82,15 @@ func (textNS) TruncateEvidence(s string) string {
  * joining them with a separator. If the string fits within headN+tailN,
  * returns it unchanged. Generic version of TruncateEvidence.
  */
-func (textNS) HeadTail(s string, headN, tailN int) string {
+func (textNS) HeadTail(s string, headN, tailN int, sep ...string) string {
 	if len(s) <= headN+tailN {
 		return s
 	}
-	return s[:headN] + "\n...\n" + s[len(s)-tailN:]
+	marker := "\n...\n"
+	if len(sep) > 0 && sep[0] != "" {
+		marker = sep[0]
+	}
+	return s[:headN] + marker + s[len(s)-tailN:]
 }
 
 /*

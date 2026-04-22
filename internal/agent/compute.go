@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/workspace"
 )
 
 /*
@@ -39,14 +40,27 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 	brief, _ := params["brief"].(string)
 	structure, _ := params["structure"].(string)
 
-	// Extract task_files (may be []any from JSON)
+	// Collect any non-reserved params as additional context. The planner
+	// often declares param_refs with arbitrary key names (ports_data,
+	// spot_rate_1, ebs_rate, …) to inject upstream results. The dispatcher
+	// resolves them and lands each as a top-level params[key]. If we only
+	// read params["context"], those injected values are silently dropped.
+	ctxData = mergeParamRefsIntoContext(params, ctxData)
+
+	// Extract task_files. Accept both shapes: []any (how JSON-unmarshalled
+	// DAG params arrive from the Executive/microplanner) and []string (how
+	// programmatic callers like edit_file pass it after their own parsing).
+	// Silently dropping one shape would starve the coder of file content.
 	var taskFiles []string
-	if of, ok := params["task_files"].([]any); ok {
+	switch of := params["task_files"].(type) {
+	case []any:
 		for _, f := range of {
 			if s, ok := f.(string); ok {
 				taskFiles = append(taskFiles, s)
 			}
 		}
+	case []string:
+		taskFiles = append(taskFiles, of...)
 	}
 
 	if goal == "" {
@@ -62,7 +76,22 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 	}
 	ts := time.Now().Unix()
 
-	log.Printf("[dag] compute %s: mode=%s goal=%q", n.ID, mode, Text.TruncateLog(goal, 80))
+	// Debug: report exactly what compute received so test harnesses and
+	// prompt-tuning traces can see whether the planner wired data in
+	// correctly. Big red flag = "context_bytes=0 task_files=0" on an edit
+	// task — the coder will run blind.
+	ctxBytes := 0
+	if ctxData != nil {
+		if b, err := json.Marshal(ctxData); err == nil {
+			ctxBytes = len(b)
+		}
+	}
+	refNames := make([]string, 0, len(n.ParamRefs))
+	for k := range n.ParamRefs {
+		refNames = append(refNames, k)
+	}
+	log.Printf("[dag] compute %s: mode=%s goal=%q ctx_bytes=%d task_files=%d param_refs=%v",
+		n.ID, mode, Text.TruncateLog(goal, 80), ctxBytes, len(taskFiles), refNames)
 
 	execute, _ := params["execute"].(string)
 	codeCtx := &computeCodeContext{
@@ -614,7 +643,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		// Edit mode: if the file exists, show content for text-match edits.
 		for _, f := range codeCtx.taskFiles {
 			targetPath := f
-			if !a.cfg.CLIMode && !strings.HasPrefix(targetPath, projectPrefix(graph, codeCtx.taskFiles)) {
+			if !strings.HasPrefix(targetPath, projectPrefix(graph, codeCtx.taskFiles)) {
 				targetPath = projectPrefix(graph, codeCtx.taskFiles) + targetPath
 			}
 			fullPath := filepath.Join(a.cfg.Workspace, targetPath)
@@ -702,19 +731,24 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 
 	// Try edit format first (text-match replacements)
 	var editResp struct {
-		Language string   `json:"language"`
-		Filename string   `json:"filename"`
-		Edits    []EditOp `json:"edits"`
+		Language   string   `json:"language"`
+		Filename   string   `json:"filename"`
+		Edits      []EditOp `json:"edits"`
+		Execute    string   `json:"execute,omitempty"`
+		Validation string   `json:"validation,omitempty"`
 	}
 	if TryParseLLMJSON(raw, &editResp) && len(editResp.Edits) > 0 {
 		destPath := editResp.Filename
 		if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
 			destPath = codeCtx.taskFiles[0]
 		}
-		if !a.cfg.CLIMode && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
+		if !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
 			destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
 		}
-		codePath := filepath.Join(a.cfg.Workspace, destPath)
+		codePath, safeErr := workspace.SafeJoin(a.cfg.Workspace, destPath)
+		if safeErr != nil {
+			return "", fmt.Errorf("compute edit rejected: %w", safeErr)
+		}
 
 		if err := ApplyFileEdits(codePath, editResp.Edits); err != nil {
 			return "", fmt.Errorf("apply edits to %s: %w", destPath, err)
@@ -738,18 +772,58 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 				result["service"] = codeCtx.service
 			}
 		}
+		// Coder-declared execute wins over the architect default when set —
+		// it has the freshest knowledge of how to run the edited file.
+		if editResp.Execute != "" {
+			result["execute"] = editResp.Execute
+		}
+		if result["execute"] == nil {
+			if guess := defaultExecuteFor(editResp.Language, codePath, tag); guess != "" {
+				result["execute"] = guess
+			}
+		}
+		if editResp.Validation != "" {
+			result["validation"] = editResp.Validation
+		}
 		out, _ := json.Marshal(result)
 		return string(out), nil
 	}
 
 	// Write mode — full file
 	var codeResp struct {
-		Language string          `json:"language"`
-		Filename string          `json:"filename"`
-		Code     json.RawMessage `json:"code"`
+		Language   string          `json:"language"`
+		Filename   string          `json:"filename"`
+		Code       json.RawMessage `json:"code"`
+		Execute    string          `json:"execute,omitempty"`
+		Validation string          `json:"validation,omitempty"`
 	}
 	if err := ParseLLMJSON(raw, &codeResp); err != nil {
 		return "", fmt.Errorf("parse code response: %w (raw: %.300s)", err, raw)
+	}
+
+	// Phase B enforcement — compute(shallow) write-mode invariant.
+	//
+	// When the caller didn't set task_files, this compute step is implicitly
+	// a value-computation intent: the Coder emits a runnable script, the
+	// script runs, stdout is captured on .output for downstream param_refs.
+	// If the Coder returns write-mode output WITHOUT an execute command,
+	// there's no exec graft, no captured stdout, and no .output field on
+	// the result. Downstream steps that param_ref .output then hit the
+	// dispatcher's silent fallback and receive the compute metadata JSON
+	// instead of the intended content — which clobbers target files (the
+	// brace_json bug).
+	//
+	// Reject here so the Executive gets a loud error rather than silent
+	// corruption. For known-path file operations the Executive should be
+	// using edit_file (which always sets task_files and takes this branch
+	// in edit-mode, not write-mode). Architect-spawned coder grafts always
+	// set task_files per sub-task, so they're unaffected.
+	effectiveExecute := codeResp.Execute
+	if effectiveExecute == "" && codeCtx != nil {
+		effectiveExecute = codeCtx.execute
+	}
+	if (codeCtx == nil || len(codeCtx.taskFiles) == 0) && effectiveExecute == "" {
+		return "", fmt.Errorf("compute(shallow) write-mode without task_files requires `execute` on the Coder response so .output can be captured; got a bare file-write with no runnable command. For known-path file edits use the edit_file tool instead (raw: %.200s)", raw)
 	}
 	// Normalize code to string — unwrap JSON string quotes, or re-marshal object to string
 	var codeStr string
@@ -781,12 +855,15 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
 		destPath = codeCtx.taskFiles[0]
 	}
-	if !a.cfg.CLIMode && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
+	if !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
 		destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
 	}
-	codePath := filepath.Join(a.cfg.Workspace, destPath)
+	codePath, safeErr := workspace.SafeJoin(a.cfg.Workspace, destPath)
+	if safeErr != nil {
+		return "", fmt.Errorf("compute write rejected: %w", safeErr)
+	}
 	os.MkdirAll(filepath.Dir(codePath), 0755)
-	if err := os.WriteFile(codePath, []byte(codeStr), 0644); err != nil {
+	if err := OverwriteFile(codePath, codeStr); err != nil {
 		return "", fmt.Errorf("write code to workspace: %w", err)
 	}
 	log.Printf("[dag] compute code written: %s (%s, %d bytes)", codePath, codeResp.Language, len(codeStr))
@@ -801,31 +878,200 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		"code_path":     codePath,
 		"language":      codeResp.Language,
 	}
-	if codeCtx != nil && codeCtx.execute != "" {
-		// Enforce project/ prefix on execute commands that reference file paths.
-		execCmd := codeCtx.execute
-		// Heuristic: if the command references a path without project/ prefix
-		// and it's not a global command (npm, node -e, curl, etc.), prepend it.
-		// Disabled in CLI mode where workspace IS the project directory.
-		if !a.cfg.CLIMode {
-			for _, prefix := range []string{"node ", "python ", "python3 ", "sh ", "bash "} {
-				if strings.HasPrefix(execCmd, prefix) {
-					rest := strings.TrimPrefix(execCmd, prefix)
-					if rest != "" && !strings.HasPrefix(rest, projectPrefix(graph, codeCtx.taskFiles)) && !strings.HasPrefix(rest, "/") && !strings.HasPrefix(rest, "-") {
-						execCmd = prefix + projectPrefix(graph, codeCtx.taskFiles) + rest
-						log.Printf("[dag] compute: rewriting execute path → %s", execCmd)
-					}
-					break
-				}
-			}
+	// Execute resolution, priority order:
+	//   1. architect-declared codeCtx.execute (deep mode)
+	//   2. coder-declared codeResp.Execute    (shallow mode, LLM knows runner)
+	//   3. language-based default              (fallback for common langs)
+	//
+	// All three go through rewriteExecutePath so the file path inside the
+	// command matches where we actually wrote the file (e.g. coder says
+	// "python3 compute.py" but we wrote to "project/compute.py" — the
+	// command needs the same prefix). Runs uniformly in CLI and web modes.
+	var execCmd string
+	switch {
+	case codeCtx != nil && codeCtx.execute != "":
+		execCmd = codeCtx.execute
+	case codeResp.Execute != "":
+		execCmd = codeResp.Execute
+	default:
+		if guess := defaultExecuteFor(codeResp.Language, codePath, tag); guess != "" {
+			log.Printf("[dag] compute %s: coder omitted execute; using language default: %s", tag, guess)
+			execCmd = guess
+		}
+	}
+	if execCmd != "" {
+		execCmd = rewriteExecutePath(execCmd, projectPrefix(graph, codeCtx.taskFiles))
+		// Expose the compute's context to the script at runtime. The coder's
+		// system prompt tells it to read $KAIJU_CONTEXT (path to a JSON file)
+		// instead of baking literals into the script — which was the source of
+		// the "hardcoded stderr blob, then mangled JSON escapes" class of bug.
+		if ctxPath := writeContextFile(a.cfg.MetadataDir, computeSessionID(graph), tag, ctxData); ctxPath != "" {
+			execCmd = "KAIJU_CONTEXT=" + shQuote(ctxPath) + " " + execCmd
 		}
 		result["execute"] = execCmd
 	}
 	if codeCtx != nil && codeCtx.service != nil {
 		result["service"] = codeCtx.service
 	}
+	if codeResp.Validation != "" {
+		result["validation"] = codeResp.Validation
+	}
 
 	out, _ := json.Marshal(result)
 	log.Printf("[dag] compute %s result: %s", tag, Text.TruncateLog(string(out), 200))
 	return string(out), nil
+}
+
+// defaultExecuteFor returns a reasonable run command for common scripting
+// languages when neither the architect nor the coder supplied one. Returns
+// "" for languages without a well-known one-shot runner — in that case the
+// caller should skip grafting execution rather than guess.
+//
+// Coders in the new coder prompt are told to emit `execute` explicitly; this
+// fallback is just a safety net for the shallow path. A log line fires when
+// it triggers so we can audit prompt compliance.
+func defaultExecuteFor(language, codePath, tag string) string {
+	lang := strings.ToLower(language)
+	switch lang {
+	case "python", "py":
+		return "python3 " + codePath
+	case "javascript", "js", "node", "nodejs":
+		return "node " + codePath
+	case "shell", "sh", "bash":
+		return "bash " + codePath
+	}
+	return ""
+}
+
+// writeContextFile serialises the compute's runtime context to a JSON file
+// under the session's metadata dir. The execute command sets
+// KAIJU_CONTEXT=<path> so the coder's script reads inputs from the file
+// instead of hardcoding literals into its source.
+//
+// Files live under <metadataDir>/sessions/<sessionID>/ctx/ — they get
+// cleaned up with the rest of the session state rather than leaking into
+// /tmp.
+func writeContextFile(metadataDir, sessionID, tag string, ctxData any) string {
+	if ctxData == nil {
+		return ""
+	}
+	switch v := ctxData.(type) {
+	case map[string]any:
+		if len(v) == 0 {
+			return ""
+		}
+	case []any:
+		if len(v) == 0 {
+			return ""
+		}
+	}
+	body, err := json.Marshal(ctxData)
+	if err != nil || len(body) == 0 || string(body) == "null" {
+		return ""
+	}
+	dir := filepath.Join(metadataDir, "sessions", sessionID, "ctx")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return ""
+	}
+	fname := fmt.Sprintf("%s_%d.json", sanitizeTag(tag), time.Now().UnixNano())
+	path := filepath.Join(dir, fname)
+	if err := os.WriteFile(path, body, 0644); err != nil {
+		return ""
+	}
+	return path
+}
+
+// shQuote wraps a string in single quotes for safe inclusion in a shell
+// command. Handles embedded single quotes by splitting and rejoining.
+func shQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// reservedComputeParams lists the param names compute.go itself consumes.
+// Anything NOT in this set is treated as upstream data (typically injected
+// via planner param_refs) and folded into the compute context so the coder
+// can see it.
+var reservedComputeParams = map[string]bool{
+	"goal":           true,
+	"mode":           true,
+	"query":          true,
+	"context":        true,
+	"hints":          true,
+	"blueprint_ref":  true,
+	"blueprint_mode": true,
+	"language":       true,
+	"brief":          true,
+	"structure":      true,
+	"execute":        true,
+	"service":        true,
+	"interfaces":     true,
+	"task_files":     true,
+}
+
+// mergeParamRefsIntoContext collects any non-reserved keys from params and
+// merges them into ctxData so the coder's "Available Data" section shows
+// them. Preserves a pre-existing ctxData if one is present.
+func mergeParamRefsIntoContext(params map[string]any, ctxData any) any {
+	var extras map[string]any
+	for k, v := range params {
+		if reservedComputeParams[k] {
+			continue
+		}
+		if v == nil {
+			continue
+		}
+		if extras == nil {
+			extras = make(map[string]any)
+		}
+		extras[k] = v
+	}
+	if extras == nil {
+		return ctxData
+	}
+	switch ctx := ctxData.(type) {
+	case nil:
+		return extras
+	case map[string]any:
+		// Merge without clobbering existing explicit context keys.
+		for k, v := range extras {
+			if _, exists := ctx[k]; !exists {
+				ctx[k] = v
+			}
+		}
+		return ctx
+	default:
+		return map[string]any{
+			"context": ctxData,
+			"inputs":  extras,
+		}
+	}
+}
+
+// rewriteExecutePath prepends prefix to a workspace-relative file path
+// inside an execute command. Handles the common case where the coder writes
+// "python3 compute.py" but the file was actually written to "project/compute.py"
+// — we patch the command so it finds the file.
+//
+// No-op if:
+//   - command doesn't start with a known interpreter (node, python, bash, sh)
+//   - the referenced path is already absolute (/...)
+//   - the referenced path already starts with prefix
+//   - the referenced path is a flag (-v, --help)
+func rewriteExecutePath(cmd, prefix string) string {
+	if prefix == "" || cmd == "" {
+		return cmd
+	}
+	for _, p := range []string{"node ", "python ", "python3 ", "sh ", "bash ", "npx "} {
+		if !strings.HasPrefix(cmd, p) {
+			continue
+		}
+		rest := strings.TrimPrefix(cmd, p)
+		if rest == "" || strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, "-") || strings.HasPrefix(rest, prefix) {
+			return cmd
+		}
+		rewritten := p + prefix + rest
+		log.Printf("[dag] compute: rewriting execute path → %s", rewritten)
+		return rewritten
+	}
+	return cmd
 }

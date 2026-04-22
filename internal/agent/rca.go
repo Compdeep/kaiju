@@ -48,6 +48,11 @@ type RCAReport struct {
 	Evidence          []string `json:"evidence"`
 	Confidence        string   `json:"confidence"` // "high" | "medium" | "low"
 	SuggestedStrategy string   `json:"suggested_strategy"`
+	// AffectedFiles lists every file Holmes believes carries the same pattern
+	// as the root cause. When the RCA is a multi-file pattern (e.g. three
+	// router modules with matching export-style mismatches), the debugger
+	// MUST fan out and plan a compute node per file — not one file per cycle.
+	AffectedFiles []string `json:"affected_files,omitempty"`
 }
 
 /*

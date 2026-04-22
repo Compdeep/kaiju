@@ -30,6 +30,13 @@ const (
 	// which makes wheel-up fire history recall in our line editor. Turn it
 	// OFF so the terminal handles wheel natively for scrollback.
 	altScrollOff = "\033[?1007l"
+
+	// Bracketed paste mode. When ON, the terminal brackets pasted content
+	// with ESC[200~ and ESC[201~ so we can accept it as one chunk instead
+	// of processing every byte (which triggers redraws, Enter handling,
+	// and tab completion per character — i.e. paste goes "mental").
+	bracketPasteOn  = "\033[?2004h"
+	bracketPasteOff = "\033[?2004l"
 )
 
 // Theme holds color codes for a visual theme.

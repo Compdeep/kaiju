@@ -132,6 +132,18 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		}
 	}
 
+	// Direct-param validation: reject keys the tool's schema doesn't
+	// declare (and whose schema forbids extras). Closes the silent-drop
+	// class where the planner invents params like bash(cwd: ...). Keys
+	// injected via ParamRefs are excluded — those get validated at the
+	// injection site by validateParamRef inside resolveInjections.
+	if skill, ok := a.registry.Get(n.ToolName); ok {
+		if err := validateDirectParams(skill, n.Params, n.ParamRefs); err != nil {
+			ch <- nodeCompletion{NodeID: n.ID, Err: err}
+			return
+		}
+	}
+
 	// Enforce per-tool cooldown before executing
 	if skill, ok := a.registry.Get(n.ToolName); ok {
 		cooldown := tools.GetThrottle(skill)
@@ -189,20 +201,30 @@ func resolveInjections(n *Node, graph *Graph) error {
 		if dep == nil {
 			return fmt.Errorf("param_ref %q: dependency node %s not found", paramName, ref.NodeID)
 		}
-		// ReadyNodes() guarantees deps are terminal, but we need StateResolved specifically
-		// (not failed/skipped) because we need the result data.
-		if dep.State != StateResolved {
-			// For context params (file reads), gracefully degrade — inject placeholder
-			// instead of failing the entire node. The coder can work without some context.
+		// A node's Result is the data to inject regardless of whether the node
+		// ended in StateResolved or StateFailed. Bash nodes that exit non-zero
+		// still capture stderr/stdout as Result (a JSON bash_error blob), and
+		// that output is often EXACTLY what the planner wants to chain on —
+		// e.g. running a failing service to harvest its log. Rejecting failed
+		// deps blind-drops the most diagnostically useful data we have.
+		//
+		// We only bail when Result is literally empty (StateSkipped via
+		// cascade-prune, or an unexpected early return).
+		if dep.Result == "" {
+			// Context params (file reads) degrade to a placeholder; required
+			// params fail the node.
 			if strings.HasPrefix(paramName, "context.") {
 				if n.Params == nil {
 					n.Params = make(map[string]any)
 				}
 				n.Params[paramName] = fmt.Sprintf("[file unavailable: %s]", dep.Tag)
-				log.Printf("[dag] param_ref %q: dep %s not resolved (state: %s), injecting placeholder", paramName, ref.NodeID, dep.State)
+				log.Printf("[dag] param_ref %q: dep %s empty (%s), placeholder injected", paramName, ref.NodeID, dep.State)
 				continue
 			}
-			return fmt.Errorf("param_ref %q: dependency node %s not resolved (state: %s)", paramName, ref.NodeID, dep.State)
+			return fmt.Errorf("param_ref %q: dep %s empty (%s)", paramName, ref.NodeID, dep.State)
+		}
+		if dep.State == StateFailed {
+			log.Printf("[dag] param_ref %q: injecting from failed dep %s", paramName, ref.NodeID)
 		}
 
 		var value string
@@ -210,14 +232,15 @@ func resolveInjections(n *Node, graph *Graph) error {
 			// Empty field = use the entire result as-is (e.g., file_read raw text)
 			value = dep.Result
 		} else {
-			var err error
-			value, err = extractJSONField(dep.Result, ref.Field)
-			if err != nil {
-				// Field extraction failed — use the full result as fallback.
-				// This handles: plain text results, malformed JSON, missing fields.
-				value = dep.Result
-				log.Printf("[dag] param_ref %q: field %q extraction failed from %s (%v), using full result", paramName, ref.Field, ref.NodeID, err)
+			// Validate presence of the named field in the dep's Result
+			// before substituting. The prior silent-fallback (using the
+			// full Result when the field was absent) was the brace_json
+			// bug: file_write received compute's metadata blob instead
+			// of a non-existent .output field, clobbering the target.
+			if err := validateParamRef(paramName, ref, dep.Result); err != nil {
+				return err
 			}
+			value, _ = extractJSONField(dep.Result, ref.Field)
 		}
 		// Empty values are rejected — they'd produce invalid tool parameters.
 		if value == "" {
@@ -416,8 +439,13 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// return structured pipeline data that the scheduler unmarshals for
 	// graft instructions — truncating would corrupt the JSON and silently
 	// break the graft.
+	//
+	// Head+tail preserves both the beginning (context, file structure) and
+	// the end (error lines, tracebacks, summaries) — the LLM was losing the
+	// most diagnostic part of every long result before this.
 	if !isContextual && len(result) > maxToolResultLen {
-		result = result[:maxToolResultLen] + "\n... (truncated)"
+		result = Text.HeadTail(result, maxToolResultLen*2/3, maxToolResultLen/3,
+			"\n... (middle truncated at 4KB cap; use start_line, grep, or tail to read the missing portion) ...\n")
 	}
 
 	return result, nil

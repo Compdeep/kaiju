@@ -76,6 +76,8 @@ Modes: shallow (straightforward single-step tasks) or deep (complex work — sca
 
 Plan broadly in 1-3 compute steps, not 15 fine-grained bash/file_write steps. For any project that needs scaffolding (web app, CLI tool, library, service), ONE compute(deep) node is almost always correct — the architect inside handles everything.
 
+When compute should edit specific existing files, set `task_files` to the list of paths. The coder receives each file's current content automatically and emits text-match edits. Without it, the coder hallucinates the file contents from memory and its edits fail. `task_files` is the right tool for "edit this file"; `param_refs` with `context` is the right tool for "compute new content from upstream data."
+
 ## Services (long-running processes)
 
 Any process that does NOT terminate — dev servers, web servers, daemons, watchers, databases — must be managed through the `service` tool. NEVER run these through bash; bash blocks waiting for the command to exit and the entire plan stalls.

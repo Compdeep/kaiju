@@ -1,0 +1,4 @@
+# Captured kaiju prompt traces from failed scenario runs.
+# Retained locally for diagnosis; do not commit.
+*.log
+!.gitignore

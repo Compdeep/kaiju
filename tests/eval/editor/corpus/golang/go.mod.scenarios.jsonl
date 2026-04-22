@@ -1,0 +1,2 @@
+{"core": true, "query": "bump the `go` directive from 1.21 to 1.22. Leave require block intact.", "check": "tmp=$(mktemp -d) && cp $FILE $tmp/go.mod && (cd $tmp && go mod edit -json | jq -e '.Go == \"1.22\"')"}
+{"query": "add `github.com/gorilla/mux v1.8.1` as a required dependency in the require block (keep the existing testify entry).", "check": "tmp=$(mktemp -d) && cp $FILE $tmp/go.mod && (cd $tmp && go mod edit -json | jq -e '.Require | map({(.Path):.Version}) | add | .[\"github.com/gorilla/mux\"] == \"v1.8.1\" and .[\"github.com/stretchr/testify\"] == \"v1.8.4\"')"}

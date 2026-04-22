@@ -19,6 +19,7 @@ import (
  */
 type reflectionOutput struct {
 	Decision   string          `json:"decision"`            // "continue", "conclude", "investigate"
+	Progress   string          `json:"progress,omitempty"`  // "productive", "diminishing", "stuck" — scheduler-consumed; "" defaults to productive
 	Summary    string          `json:"summary"`             // status description
 	Problem    string          `json:"problem,omitempty"`   // only for investigate: what's wrong (passed to Holmes)
 	RawVerdict json.RawMessage `json:"verdict"`             // only for conclude — may be string or object
@@ -44,7 +45,7 @@ type reflectionOutput struct {
 func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	budget *Budget, ch chan<- nodeCompletion, trigger Trigger, gateCtx *ContextResponse, intent ...gates.Intent) {
 
-	sysPrompt := reflectorClassifierPrompt + a.fleetSection()
+	sysPrompt := fmt.Sprintf(reflectorClassifierPrompt, a.FormatRule()) + a.fleetSection()
 	userPrompt := assembleReflectorPrompt(graph, gateCtx, trigger)
 
 	messages := []llm.Message{

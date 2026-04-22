@@ -261,9 +261,8 @@ type executiveOutput struct {
  * param: intent - the intent level string ("auto" or a specific level).
  * return: the fully composed planner system prompt.
  */
-func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevant []string, dagMode, intent string) string {
+func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevant []string, dagMode, intent, toolIndex string) string {
 	var sb strings.Builder
-	isNative := a.cfg.ExecutiveMode == "native"
 
 	// Per-investigation skill cards now live on the graph. Fall back to
 	// the legacy agent field if no graph is provided (defensive).
@@ -274,119 +273,56 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		cards = a.activeCards
 	}
 
-	if isNative {
-		sb.WriteString("You are the Executive Kernel of this computer. You serve a dual purpose:\n")
-		sb.WriteString("(1) Assist the user with questions, research, and conversation.\n")
-		sb.WriteString("(2) Plan and decompose tasks into discrete operations available below.\n")
-		sb.WriteString("    Plan in waves — each wave depends on the previous via depends_on.\n")
-		sb.WriteString("    Wire data between waves using param_refs.\n\n")
-		sb.WriteString("param_refs example: step 0 is web_search, step 1 needs the URL →\n")
-		sb.WriteString("  {\"params\":{},\"param_refs\":{\"url\":{\"step\":0,\"field\":\"results.0.url\"}},\"depends_on\":[0]}\n")
-		sb.WriteString("param_refs example: step 0 is web_search, step 1 is bash and needs the URL INSIDE a command string → use template:\n")
-		sb.WriteString("  {\"params\":{},\"param_refs\":{\"command\":{\"step\":0,\"field\":\"results.0.url\",\"template\":\"yt-dlp -o 'media/%(title)s.%(ext)s' '{{value}}'\"}},\"depends_on\":[0]}\n")
-		sb.WriteString("The template field is REQUIRED when injecting a value into the middle of a string. {{value}} is replaced with the extracted field. Without template, the entire param is replaced by the raw value.\n")
-		sb.WriteString("param_refs example: step 0 is sysinfo, step 1 is compute →\n")
-		sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"...\",\"mode\":\"shallow\"},\"param_refs\":{\"context.time\":{\"step\":0,\"field\":\"time\"}},\"depends_on\":[0]}\n\n")
-		sb.WriteString("Make good use of tools to gather real data and help the user. If no suitable tool exists, declare a gap.\n\n")
-	} else {
-		sb.WriteString("You are the Executive Kernel of this computer. ")
-		sb.WriteString("Plan and decompose tasks into discrete operations using the tools available on this system. ")
-		sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time. ")
-		sb.WriteString("If the available tools can accomplish the request, produce the plan. If no suitable tool exists, declare a gap.\n")
-		sb.WriteString(roleDescription(a.cfg.NodeRole))
-		sb.WriteString("\n\n")
-	}
+	sb.WriteString("You are the Executive Kernel of this computer. You serve a dual purpose:\n")
+	sb.WriteString("(1) Assist the user with questions, research, and conversation.\n")
+	sb.WriteString("(2) Plan and decompose tasks into discrete operations available below.\n")
+	sb.WriteString("    Plan in waves — each wave depends on the previous via depends_on.\n")
+	sb.WriteString("    Wire data between waves using param_refs.\n\n")
+	sb.WriteString("param_refs example: step 0 is web_search, step 1 needs the URL →\n")
+	sb.WriteString("  {\"params\":{},\"param_refs\":{\"url\":{\"step\":0,\"field\":\"results.0.url\"}},\"depends_on\":[0]}\n")
+	sb.WriteString("param_refs example: step 0 is web_search, step 1 is bash and needs the URL INSIDE a command string → use template:\n")
+	sb.WriteString("  {\"params\":{},\"param_refs\":{\"command\":{\"step\":0,\"field\":\"results.0.url\",\"template\":\"yt-dlp -o 'media/%(title)s.%(ext)s' '{{value}}'\"}},\"depends_on\":[0]}\n")
+	sb.WriteString("The template field is REQUIRED when injecting a value into the middle of a string. {{value}} is replaced with the extracted field. Without template, the entire param is replaced by the raw value.\n")
+	sb.WriteString("param_refs example: step 0 is sysinfo, step 1 is compute →\n")
+	sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"...\",\"mode\":\"shallow\"},\"param_refs\":{\"context.time\":{\"step\":0,\"field\":\"time\"}},\"depends_on\":[0]}\n\n")
+	sb.WriteString("Make good use of tools to gather real data and help the user. If no suitable tool exists, declare a gap.\n\n")
 
-	if isNative {
-		// Native mode: inject skill Planning Guidance sections. These are
-		// authoritative — if a skill says "use compute deep", the planner
-		// must follow that, not substitute file_list/file_read.
-		var nativeGuidance []string
-		plannerHeadings := []string{"## Planning Guidance", "## RULES"}
-		nativeActiveSet := make(map[string]bool, len(cards))
-		for _, k := range cards {
-			nativeActiveSet[k] = true
+	// Inject skill Planning Guidance sections. These are authoritative —
+	// if a skill says "use compute deep", the planner must follow that,
+	// not substitute file_list/file_read.
+	var guidance []string
+	plannerHeadings := []string{"## Planning Guidance", "## RULES"}
+	activeSet := make(map[string]bool, len(cards))
+	for _, k := range cards {
+		activeSet[k] = true
+	}
+	gated := len(activeSet) > 0
+	for name, gs := range a.skillGuidance {
+		if gated && !activeSet[name] {
+			continue
 		}
-		nativeGated := len(nativeActiveSet) > 0
-		for name, gs := range a.skillGuidance {
-			if nativeGated && !nativeActiveSet[name] {
-				continue
-			}
-			body := gs.Body()
-			if body == "" {
-				continue
-			}
-			var parts []string
-			for _, heading := range plannerHeadings {
-				if section := Text.ExtractSection(body, heading); section != "" {
-					parts = append(parts, section)
-				}
-			}
-			if len(parts) > 0 {
-				nativeGuidance = append(nativeGuidance, fmt.Sprintf("### %s\n%s", name, strings.Join(parts, "\n\n")))
+		body := gs.Body()
+		if body == "" {
+			continue
+		}
+		var parts []string
+		for _, heading := range plannerHeadings {
+			if section := Text.ExtractSection(body, heading); section != "" {
+				parts = append(parts, section)
 			}
 		}
-		if len(nativeGuidance) > 0 {
-			sb.WriteString("## Skill Guidance (authoritative — follow these instructions)\n\n")
-			sb.WriteString("Skill guidance is authoritative. If a skill says \"use compute deep\", use compute deep. Don't inspect — build.\n\n")
-			sb.WriteString(strings.Join(nativeGuidance, "\n\n"))
-			sb.WriteString("\n\n")
-			log.Printf("[dag] executive (native) injected %d skill guidance sections", len(nativeGuidance))
-		} else {
-			log.Printf("[dag] executive (native) no skill guidance matched (activeCards=%v, skillGuidance=%d)", cards, len(a.skillGuidance))
+		if len(parts) > 0 {
+			guidance = append(guidance, fmt.Sprintf("### %s\n%s", name, strings.Join(parts, "\n\n")))
 		}
+	}
+	if len(guidance) > 0 {
+		sb.WriteString("## Skill Guidance (authoritative — follow these instructions)\n\n")
+		sb.WriteString("Skill guidance is authoritative. If a skill says \"use compute deep\", use compute deep. Don't inspect — build.\n\n")
+		sb.WriteString(strings.Join(guidance, "\n\n"))
+		sb.WriteString("\n\n")
+		log.Printf("[dag] executive injected %d skill guidance sections", len(guidance))
 	} else {
-		// Structured mode: full guidance from capability cards + SkillMD skills.
-		// Two sources, cleanly separated:
-		//   1. capability cards from cards → Planning Guidance section
-		//   2. guidance SkillMDs from a.skillGuidance → Planning Guidance sections
-		// Neither comes from the tool list — tools are tools, skills are skills.
-		var guidance []string
-		if len(cards) > 0 {
-			for _, key := range cards {
-				card, ok := a.capabilities[key]
-				if !ok {
-					continue
-				}
-				if section := Text.ExtractSection(card.Body, "## Planning Guidance"); section != "" {
-					guidance = append(guidance, section)
-				}
-			}
-		}
-		// Iterate guidance SkillMDs directly. If preflight is active and picked
-		// a subset (cards may also name skills), honor it; otherwise
-		// include all loaded guidance skills.
-		plannerSections := []string{"## Planning Guidance", "## When to Use", "## Approach Selection"}
-		activeSet := make(map[string]bool, len(cards))
-		for _, k := range cards {
-			activeSet[k] = true
-		}
-		gateActive := len(activeSet) > 0
-		for name, gs := range a.skillGuidance {
-			if gateActive && !activeSet[name] {
-				continue
-			}
-			body := gs.Body()
-			if body == "" {
-				continue
-			}
-			var parts []string
-			for _, heading := range plannerSections {
-				if section := Text.ExtractSection(body, heading); section != "" {
-					parts = append(parts, section)
-				}
-			}
-			if len(parts) > 0 {
-				guidance = append(guidance, fmt.Sprintf("### %s\n%s", name, strings.Join(parts, "\n\n")))
-			}
-		}
-		if len(guidance) > 0 {
-			sb.WriteString("## Domain & Skill Guidance\n\n")
-			for _, g := range guidance {
-				sb.WriteString(strings.TrimSpace(g))
-				sb.WriteString("\n\n")
-			}
-		}
+		log.Printf("[dag] executive no skill guidance matched (activeCards=%v, skillGuidance=%d)", cards, len(a.skillGuidance))
 	}
 
 	// IGX section
@@ -397,37 +333,15 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		igxSection = fmt.Sprintf(`Intent: **%s**. Tools exceeding intent are blocked at execution time.`, intent)
 	}
 
-	if isNative {
-		sb.WriteString(fmt.Sprintf("%s\n", igxSection))
-		sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time.\n")
-		sb.WriteString(compileToolIndex(a.registry, relevant))
-		sb.WriteString("\n")
-	} else {
-		sb.WriteString("## Available Tools\nTools available for your plan. Use bash/powershell for any task that can be done from the command line.\n\n")
-		for _, name := range relevant {
-			skill, ok := a.registry.Get(name)
-			if !ok {
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("### %s\n%s\n", name, skill.Description()))
-			sb.WriteString(fmt.Sprintf("Parameters: %s\n", string(skill.Parameters())))
-			if outSchema := tools.GetOutputSchema(skill); outSchema != nil {
-				sb.WriteString(fmt.Sprintf("Output (JSON): %s\n", string(outSchema)))
-				var schemaMeta struct {
-					Description string `json:"description"`
-				}
-				if json.Unmarshal(outSchema, &schemaMeta) == nil && schemaMeta.Description != "" {
-					sb.WriteString(fmt.Sprintf("Chaining: %s\n\n", schemaMeta.Description))
-				} else {
-					sb.WriteString("Chainable: use param_refs to extract fields from this tool's output.\n\n")
-				}
-			} else {
-				sb.WriteString("Output: unstructured text. Not chainable via param_refs.\n\n")
-			}
-		}
+	sb.WriteString(fmt.Sprintf("%s\n", igxSection))
+	sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time.\n")
+	if toolIndex == "" {
+		toolIndex = compileToolIndex(a.registry, relevant)
 	}
+	sb.WriteString(toolIndex)
+	sb.WriteString("\n")
 
-	if isNative {
+	{
 		// Compute Nodes section — mirrors executive.md so native mode has the
 		// same compute guidance as structured mode. Without this block the
 		// model has no example showing the required `goal` and `mode` fields,
@@ -437,12 +351,29 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("Use `compute` (type:\"compute\") for ALL implementation work: building projects, writing multi-file code, scaffolding apps, data processing, calculations, or any task requiring writing and executing code. Provide the GOAL — never write code in bash params or file_write content.\n\n")
 		sb.WriteString("The compute architect handles ALL implementation details internally: directory creation, dependency installation, file generation, service startup, and validation. Do NOT plan these as separate bash/service steps — they will conflict with what the architect plans.\n\n")
 		sb.WriteString("**Use tools directly when they can do the job. compute is for WRITING code — not for wrapping existing tools in scripts.** If yt-dlp can download a video, use bash. If curl can fetch a file, use bash. If a service needs restarting, use service. Only use compute when you need to CREATE new code that doesn't exist yet.\n\n")
-		sb.WriteString("Choose the right level:\n")
-		sb.WriteString("- **Direct tools** (bash, service, file_write, web_search): the task can be done with existing commands. Downloads, searches, restarts, config edits. This is the DEFAULT — try this first.\n")
-		sb.WriteString("- **compute(shallow)**: single-file code changes to existing files. Set task_files.\n")
-		sb.WriteString("- **compute(deep)**: new projects, major restructures, building multiple files from scratch. ONE deep node.\n")
-		sb.WriteString("If the workspace already has a working project and the user asks to change something specific, do NOT use compute(deep). Use shallow or direct tools.\n\n")
-		sb.WriteString("Required params on EVERY compute step: `goal` (string, what to build) and `mode` (\"deep\" or \"shallow\"). Never omit params, even on chained compute steps. If a follow-up compute step needs data from a prior step, wire it via `param_refs` AND still provide `goal` and `mode` in `params`.\n\n")
+		sb.WriteString("**Use compute whenever the final answer requires deterministic processing of gathered data** — parsing, combining, filtering, transforming, producing structured output. Compute isn't only for building projects; it's for any task where LLM interpretation of raw tool output would be unreliable or hallucination-prone.\n\n")
+		// Preflight owns the compute-depth decision. Inject it here so the
+		// planner treats it as authoritative rather than re-deriving deep vs
+		// shallow from workspace residue.
+		if a.preflight != nil && a.preflight.ComputeMode != "" {
+			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", a.preflight.ComputeMode))
+		} else {
+			sb.WriteString("**Preflight compute_mode is unset** — prefer direct tools (bash, web_search, web_fetch, file_*). Add a compute step only if the task genuinely needs code execution, and pick `mode=\"shallow\"` unless the user is explicitly asking to build a new codebase.\n\n")
+		}
+		sb.WriteString("Level reference:\n")
+		sb.WriteString("- **Direct tools** (bash, service, file_read, web_search): default for downloads, searches, restarts, reads.\n")
+		sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or injected via param_refs from an upstream step).\n")
+		sb.WriteString("- **edit_file**: LLM-backed edit or create of a specific file. Use whenever you know the path and want the Coder to produce the content. task_files is REQUIRED.\n")
+		sb.WriteString("- **compute(shallow)**: compute a VALUE for downstream use — analytics, rankings, scores, derived constants. The Coder emits a runnable script, the script runs, stdout is captured on `.output` for downstream param_refs. NOT for editing files you already know the path of — use edit_file for that.\n")
+		sb.WriteString("- **compute(deep)**: new codebases (webapp, CLI tool, service, library) built from scratch. ONE deep node per build.\n\n")
+		sb.WriteString("Required params:\n")
+		sb.WriteString("- compute: `goal` + `mode`. If a follow-up compute step needs data from a prior step, wire it via `param_refs` AND still provide `goal` and `mode` in `params`.\n")
+		sb.WriteString("- edit_file: `task_files` (at least one path) + `goal`. Skip the path and the Coder will refuse to guess — the step fails.\n\n")
+		sb.WriteString("**Known-path file operations — pick the right tool:**\n")
+		sb.WriteString("- Need an LLM to EDIT or CREATE a file at a known path? → `edit_file` with `task_files=[\"project/...\"]`.\n")
+		sb.WriteString("- Have the exact bytes already (literal or from upstream) and need them written? → `file_write` with `path` and `content`.\n")
+		sb.WriteString("- Need to COMPUTE a value (not a file) for downstream steps? → `compute(shallow)`, chain its `.output`.\n")
+		sb.WriteString("NEVER use the pattern `compute(shallow) → file_write` to edit a known file — that double-writes and the wiring fails when `.output` isn't produced. Use `edit_file` for edits; `compute` is for computing values, not for producing file content to be written elsewhere.\n\n")
 		sb.WriteString("Example — \"build a web app with auth\":\n")
 		sb.WriteString("```json\n")
 		sb.WriteString("[\n")
@@ -458,11 +389,13 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("NEVER use bash for complex multi-step tasks.\n")
 		sb.WriteString("NEVER use interactive commands.\n")
 		sb.WriteString("ALWAYS use compute (type:\"compute\") for coding, development, and analytics. Provide the GOAL, not the code.\n")
-		sb.WriteString("ALWAYS use mode=\"deep\" for webapps, full-stack projects, frameworks, multi-file work, or anything needing more than one file. Use mode=\"shallow\" only for single-file scripts, one-off calculations, or trivial analytics.\n")
+		sb.WriteString("ALWAYS use the compute mode preflight selected — see the Compute Nodes section above. Workspace contents do NOT influence this choice.\n")
 		sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\", port=NNNN) spawns in the background and returns immediately. ALWAYS include the port parameter so health checks know which port to verify.\n")
 		sb.WriteString("ALWAYS use bash only for commands that terminate: ls, grep, git, npm install, curl, node script.js, etc.\n")
 		sb.WriteString("ALWAYS use web_search for questions needing current data.\n")
+		sb.WriteString("ALWAYS gather required data before grafting compute. Every compute node must have its inputs supplied by prior gathering steps (web_search/web_fetch/file_read/bash) via param_refs — never compute over inputs that don't exist yet.\n")
 		sb.WriteString("ALWAYS complete the full task from start to finish. Never stop partway and ask for permission.\n")
+		sb.WriteString("NEVER plan when context is genuinely incomplete — emit `[{\"tool\":\"gap\",\"gap\":\"<question>\"}]` only for unresolvable references, ambiguous key terms, or information only the user has. Not an escape hatch for tool choice or gatherable data.\n")
 		sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
 		sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
 		sb.WriteString("\n## Workspace Layout\n")
@@ -470,99 +403,31 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
 		sb.WriteString("- blueprints/ — architecture blueprints (auto-managed by compute)\n")
 		sb.WriteString("- canvas/ — user-facing visual content\n")
-		// Workspace tree and blueprint via ContextGate. This is the single
-		// place project context flows in for the executive — auditable and
-		// gateable. ContextGate's WorkspaceTree returns a fenced tree string.
+		// Workspace tree for orientation (what files exist in the workspace).
+		// We do NOT inject existing blueprints here — the mere presence of
+		// a blueprint in the workspace must not bias the planner toward
+		// compute(deep). Whether this query needs architecture is the
+		// preflight's call based on the user's actual request, not workspace
+		// residue from prior runs.
 		if graph != nil && graph.Context != nil {
-			// Determine if the current query relates to an existing project.
-			// Project-building skills (webdeveloper, data_science) indicate the
-			// query is about development work that would reference a blueprint.
-			// Utility skills (download, web_research, etc.) are unrelated — don't
-			// inject the blueprint or it will bias the executive.
-			projectSkillActive := false
-			projectSkills := map[string]bool{"webdeveloper": true, "data_science": true}
-			for _, card := range cards {
-				if projectSkills[card] {
-					projectSkillActive = true
-					break
-				}
-			}
-
-			// Always load the workspace tree (orientation). Only load the
-			// blueprint when a project-building skill is active.
-			var gateSources []SourceSpec
-			gateSources = append(gateSources, WorkspaceTree(3))
-			if projectSkillActive {
-				gateSources = append(gateSources, Blueprint())
-			}
-
 			gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
-				ReturnSources: gateSources,
+				// Depth 5 shows typical nested projects (e.g. workdir/project/<app>/<component>/src/<file>)
+				// up front so the Executive doesn't have to probe for entrypoints. The
+				// scanWorkspaceTree cap at 120 entries (round-robin across buckets) prevents
+				// runaway on monorepo-sized trees; MaxBudget:10000 is the secondary byte cap.
+				ReturnSources: Sources(WorkspaceTree(5)),
 				MaxBudget:     10000,
 			})
 			if gerr != nil {
 				log.Printf("[dag] executive context build failed: %v", gerr)
-			} else {
-				if tree := gateResp.Sources[SourceWorkspaceTree]; tree != "" {
-					sb.WriteString("\n### Current files\n")
-					sb.WriteString(tree)
-					sb.WriteString("\n")
-				}
-				if projectSkillActive {
-					if bp := gateResp.Sources[SourceBlueprint]; bp != "" {
-						sb.WriteString("\n## Existing Project\n")
-						sb.WriteString("An architecture blueprint already exists. Before planning, decide:\n")
-						sb.WriteString("1. Is the user asking to FIX or DEBUG the existing project? → Do NOT create a new blueprint. Plan diagnostic and repair steps using existing files.\n")
-						sb.WriteString("2. Is the user asking to ADD or EXTEND? → Use compute(mode=\"deep\") ONLY for the new feature. Reference the existing blueprint.\n")
-						sb.WriteString("3. Is the user asking to BUILD something completely new and unrelated? → Create a fresh blueprint from scratch.\n")
-						sb.WriteString("Most requests about an existing project are case 1 or 2. Only choose case 3 if the user explicitly wants something NEW.\n")
-						sb.WriteString("\n### Existing Blueprint Summary\n")
-						goalSection := Text.ExtractSection(bp, "## Goal")
-						archSection := Text.ExtractSection(bp, "## Architecture")
-						dirSection := Text.ExtractSection(bp, "## Directory Structure")
-						if goalSection != "" {
-							sb.WriteString("**Goal**: " + goalSection + "\n")
-						}
-						if archSection != "" {
-							sb.WriteString("**Architecture**: " + archSection + "\n")
-						}
-						if dirSection != "" {
-							sb.WriteString("**Structure**:\n" + dirSection + "\n")
-						}
-					}
-				}
+			} else if tree := gateResp.Sources[SourceWorkspaceTree]; tree != "" {
+				sb.WriteString("\n### Current files\n")
+				sb.WriteString(tree)
+				sb.WriteString("\n")
 			}
 		}
 
 		sb.WriteString(fmt.Sprintf("\nBudget: max %d steps, %d LLM calls.\n", a.cfg.MaxNodes, a.cfg.MaxLLMCalls))
-	} else {
-		// Structured mode: full planner.md with format rules, examples, etc.
-		// Intent descriptions come from the configurable registry.
-		intentBlock := a.intentRegistry.PromptBlock(-1)
-		igxFullSection := ""
-		if intent == "auto" {
-			igxFullSection = "## Intent-Gated Execution (IGX)\n\n" +
-				"Intent is auto-determined from your plan. Choose tools matching the query's needs:\n" +
-				intentBlock +
-				"\nThe system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED."
-		} else {
-			igxFullSection = fmt.Sprintf("## Intent-Gated Execution (IGX)\n\n"+
-				"This investigation runs at **%s** intent (operator-enforced, do not override).\n\n"+
-				"Available intent levels:\n%s\n"+
-				"The system enforces: tool.Impact ≤ min(intent, clearance). Tools exceeding intent WILL BE BLOCKED.", intent, intentBlock)
-		}
-
-		rules := expandPlannerTemplate(a.executivePrompt, map[string]string{
-			"node_id":       a.cfg.NodeID,
-			"max_nodes":     fmt.Sprintf("%d", a.cfg.MaxNodes),
-			"max_per_skill": fmt.Sprintf("%d", a.cfg.MaxPerSkill),
-			"max_llm_calls": fmt.Sprintf("%d", a.cfg.MaxLLMCalls),
-			"dag_mode":      dagMode,
-			"batch_size":    fmt.Sprintf("%d", a.cfg.BatchSize),
-			"intent":        intent,
-			"igx_section":   igxFullSection,
-		})
-		sb.WriteString(rules)
 	}
 
 	// Preflight hints: required tool categories the plan MUST include.
@@ -625,148 +490,16 @@ func (e *ExecutiveConversationalError) Error() string {
  * return: PlanResult pointer with steps and intent, or error.
  */
 /*
- * runExecutive dispatches to the appropriate planner mode.
- * desc: Routes to structured (text JSON) or native (function calling) planner
- *       based on agent config. Both return the same PlanResult.
+ * runExecutive runs the planner via native function calling.
+ * desc: The planner returns a PlanResult with steps and intent. Native mode
+ *       is the only mode — modern LLMs all support native tool calling and
+ *       it's more reliable than parsing JSON from text.
  * param: ctx - context for the LLM call.
  * param: trigger - the investigation trigger.
  * return: PlanResult pointer with steps and intent, or error.
  */
 func (a *Agent) runExecutive(ctx context.Context, trigger Trigger, graph *Graph) (*PlanResult, error) {
-	if a.cfg.ExecutiveMode == "native" {
-		return a.runExecutiveNative(ctx, trigger, graph)
-	}
-	return a.runExecutiveStructured(ctx, trigger, graph)
-}
-
-/*
- * runExecutiveStructured makes a single LLM call to produce a plan via text JSON output.
- * desc: The original planner mode. Sends a prompt asking the LLM to respond with a JSON
- *       array. Parses the text output, handles markdown fences, retries on prose.
- * param: ctx - context for the LLM call.
- * param: trigger - the investigation trigger.
- * return: PlanResult pointer with steps and intent, or error.
- */
-func (a *Agent) runExecutiveStructured(ctx context.Context, trigger Trigger, graph *Graph) (*PlanResult, error) {
-	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
-	log.Printf("[dag] executive sees %d tools: %v", len(relevant), relevant)
-	if len(a.skillGuidance) > 0 {
-		log.Printf("[dag] executive has %d guidance skills loaded", len(a.skillGuidance))
-	}
-
-	// Resolve DAG mode and intent for planner prompt
-	dagMode := a.cfg.DAGMode
-	if trigger.DAGMode != "" {
-		dagMode = trigger.DAGMode
-	}
-	intent := trigger.Intent().String()
-	// Preflight override: if trigger intent is Auto and preflight provided an intent,
-	// use the preflight-classified intent instead of forcing the planner to infer.
-	if trigger.Intent() == gates.IntentAuto && a.preflight != nil {
-		intent = a.preflight.Intent.String()
-		log.Printf("[dag] executive intent from preflight: %s", intent)
-	}
-
-	// Planner gets conversation history with assistant messages prefixed
-	// as Executive Kernel output. This preserves multi-turn context
-	// ("the tools you mentioned") while preventing the planner from
-	// mimicking the aggregator's prose style — the prefix signals
-	// "this wasn't my output" so the planner continues using plan().
-	executiveHistory := prefixAssistantHistory(trigger.History)
-	sysPrompt := a.executiveSystemPrompt(ctx, graph, relevant, dagMode, intent)
-	userQuery := formatTrigger(trigger)
-	// Inject preflight context framing right after the query so the executive
-	// understands vague follow-ups like "get more" or "try again."
-	if a.preflight != nil && a.preflight.Context != "" {
-		userQuery += "\n\n## Context\n" + a.preflight.Context
-	}
-	messages := BuildMessagesWithHistory(sysPrompt, userQuery, executiveHistory)
-
-	started := time.Now()
-	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
-		Messages:    messages,
-		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.cfg.MaxTokens,
-	})
-
-	trace := LLMTrace{
-		AlertID:  trigger.AlertID,
-		NodeID:   "executive",
-		NodeType: "executive_structured",
-		Tag:      "plan",
-		Started:  started,
-		Input: map[string]string{
-			"dag_mode": dagMode,
-			"intent":   intent,
-		},
-		System:    sysPrompt,
-		User:      userQuery,
-		LatencyMS: time.Since(started).Milliseconds(),
-	}
-
-	if err != nil {
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
-		return nil, fmt.Errorf("planner LLM call: %w", err)
-	}
-
-	if len(resp.Choices) == 0 {
-		trace.Err = "no choices"
-		WriteLLMTrace(trace)
-		return nil, fmt.Errorf("planner LLM returned no choices")
-	}
-
-	raw := resp.Choices[0].Message.Content
-	trace.Output = raw
-	trace.TokensIn = resp.Usage.PromptTokens
-	trace.TokensOut = resp.Usage.CompletionTokens
-	WriteLLMTrace(trace)
-
-	log.Printf("[dag] executive output: %s", Text.TruncateLog(raw, 300))
-	log.Printf("[dag] executive full output length: %d bytes", len(raw))
-
-	isAuto := trigger.Intent() == gates.IntentAuto
-	steps, inferredIntent, err := a.parseExecutiveOutput(raw, isAuto)
-	if err != nil {
-		// If planner returned prose, retry once with a forceful nudge
-		cleaned := strings.TrimSpace(raw)
-		if len(cleaned) > 0 && cleaned[0] != '[' && cleaned[0] != '{' {
-			log.Printf("[dag] executive returned prose, retrying with JSON nudge")
-
-			// Append the prose response + a nudge as follow-up messages
-			retryMessages := append(messages,
-				llm.Message{Role: "assistant", Content: raw},
-				llm.Message{Role: "user", Content: "That was not valid JSON. You MUST respond with ONLY a JSON array of steps. Start with [ and end with ]. No prose, no explanation. Just the JSON plan."},
-			)
-
-			retryResp, retryErr := a.llm.Complete(ctx, &llm.ChatRequest{
-				Messages:    retryMessages,
-				Temperature: 0.1, // lower temp for more deterministic output
-				MaxTokens:   a.cfg.MaxTokens,
-			})
-			if retryErr == nil && len(retryResp.Choices) > 0 {
-				retryRaw := retryResp.Choices[0].Message.Content
-				log.Printf("[dag] executive retry output: %s", Text.TruncateLog(retryRaw, 300))
-				retrySteps, retryIntent, retryParseErr := a.parseExecutiveOutput(retryRaw, isAuto)
-				if retryParseErr == nil {
-					steps = retrySteps
-					inferredIntent = retryIntent
-					err = nil
-				}
-			}
-
-			// If retry also failed, surface as conversational
-			if err != nil {
-				log.Printf("[dag] executive retry also failed, surfacing as reply")
-				return nil, &ExecutiveConversationalError{Text: cleaned}
-			}
-		} else {
-			return nil, fmt.Errorf("parse planner output: %w", err)
-		}
-	}
-
-	// Shared validation: filter gaps, drop unknown tools, infer intent
-	return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger)
+	return a.runExecutiveNative(ctx, trigger, graph)
 }
 
 // ── Plan tool schema for native function calling mode ──────────────────────
@@ -914,28 +647,38 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 
 	executiveHistory := prefixAssistantHistory(trigger.History)
 
-	// Include worklog so planner knows system state from previous runs.
-	// Pulled through ContextGate for centralization.
+	// One gate call for all runtime context the planner needs: worklog
+	// (system state) plus the tool index (signatures + output schemas so
+	// param_refs can be wired against correct result shapes).
 	userQuery := formatTrigger(trigger)
-	// Inject preflight context framing right after the query.
 	if a.preflight != nil && a.preflight.Context != "" {
 		userQuery += "\n\n## Context\n" + a.preflight.Context
 	}
+	var toolIndex string
 	if graph != nil && graph.Context != nil {
 		gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
 			ReturnSources: Sources(
 				Worklog(20, "all"),
+				ToolIndex(relevant),
 			),
-			MaxBudget: 4000,
+			MaxBudget: 8000,
 		})
 		if gerr != nil {
 			log.Printf("[dag] executive (native) context build failed: %v", gerr)
-		} else if wl := gateResp.Sources[SourceWorklog]; wl != "" {
-			userQuery += "\n\n## System State (worklog)\n```\n" + wl + "\n```"
+		} else {
+			if wl := gateResp.Sources[SourceWorklog]; wl != "" {
+				userQuery += "\n\n## System State (worklog)\n```\n" + wl + "\n```"
+			}
+			toolIndex = gateResp.Sources[SourceToolIndex]
 		}
 	}
+	if toolIndex == "" {
+		// Fallback if the gate is unavailable (defensive; shouldn't happen
+		// in a normal investigation).
+		toolIndex = compileToolIndex(a.registry, relevant)
+	}
 
-	sysPromptN := a.executiveSystemPrompt(ctx, graph, relevant, dagMode, intent)
+	sysPromptN := a.executiveSystemPrompt(ctx, graph, relevant, dagMode, intent, toolIndex)
 	messages := BuildMessagesWithHistory(sysPromptN, userQuery, executiveHistory)
 
 	startedN := time.Now()
@@ -1104,8 +847,13 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 		return nil, fmt.Errorf("planner produced no valid tools (all hallucinated)")
 	}
 	if len(valid) == 0 && len(gaps) > 0 {
+		// Gaps cover two cases: missing capabilities (e.g. "I don't have an
+		// SMS tool") and clarification questions (e.g. "Are you asking about
+		// X or Y?"). Trust the LLM to phrase each correctly and surface it
+		// verbatim — the old "Missing capabilities:" prefix was wrong for
+		// clarification gaps and redundant for capability gaps.
 		return nil, &ExecutiveConversationalError{
-			Text: "Cannot fulfill this request. Missing capabilities: " + strings.Join(gaps, "; "),
+			Text: strings.Join(gaps, "\n\n"),
 		}
 	}
 

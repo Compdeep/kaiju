@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Compdeep/kaiju/internal/agent"
 	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/internal/workspace"
 )
 
 // ─── FileRead ───────────────────────────────────────────────────────────────
@@ -202,11 +204,14 @@ func (f *FileWrite) Execute(_ context.Context, params map[string]any) (string, e
 	if strings.HasPrefix(content, "${") || strings.HasPrefix(content, "{{") {
 		return "", fmt.Errorf("file_write: content is an unresolved placeholder %q — use param_refs or compute instead", content)
 	}
-	// Resolve relative paths against workspace
-	if !filepath.IsAbs(path) && f.workspace != "" {
-		path = filepath.Join(f.workspace, path)
+	// Gate writes to the workspace-relative allowed zones. This blocks the
+	// agent from editing its own source tree (cmd/, internal/, etc.) when
+	// the CLI runs with workspace = cwd inside the Kaiju repo.
+	safePath, safeErr := workspace.SafeJoin(f.workspace, path)
+	if safeErr != nil {
+		return "", fmt.Errorf("file_write: %w", safeErr)
 	}
-	path = filepath.Clean(path)
+	path = safePath
 
 	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -226,7 +231,7 @@ func (f *FileWrite) Execute(_ context.Context, params map[string]any) (string, e
 		return fmt.Sprintf("appended %d bytes to %s", len(content), path), nil
 	}
 
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := agent.OverwriteFile(path, content); err != nil {
 		return "", fmt.Errorf("file_write: %w", err)
 	}
 	return fmt.Sprintf("wrote %d bytes to %s", len(content), path), nil

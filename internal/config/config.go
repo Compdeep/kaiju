@@ -69,7 +69,6 @@ type AgentConfig struct {
 	Workspace         string      `json:"workspace"`
 	MetadataDir       string      `json:"-"` // set at runtime — .kaiju/ in CLI, same as workspace in web
 	CLIMode           bool        `json:"-"` // set at runtime, not from config file
-	ExecutiveMode       string      `json:"executive_mode"`
 	// ClassifierEnabled controls the pre-plan preflight LLM call that selects
 	// skill guidance, infers intent, routes chat/meta queries, and hints
 	// required tool categories. Default true — disabling degrades behavior

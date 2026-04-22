@@ -42,10 +42,12 @@ type invResult struct {
 
 // Investigation is the kernel's view of a running investigation.
 type Investigation struct {
-	Trigger   Trigger
-	StartedAt time.Time
-	Cancel    context.CancelFunc
-	ResultCh  chan invResult // nil for async, set for sync callers
+	Trigger            Trigger
+	StartedAt          time.Time
+	Cancel             context.CancelFunc
+	ResultCh           chan invResult // nil for async, set for sync callers
+	StuckCount         int            // consecutive heartbeat ticks where failure threshold was met
+	HeartbeatThreshold int            // stuck ticks required before the kernel interjects (0 => default 3)
 }
 
 // ── Kernel ──────────────────────────────────────────────────────────────────
@@ -194,10 +196,11 @@ func (k *Kernel) startInvestigation(trigger Trigger, resultCh chan invResult) {
 	invCtx, invCancel := context.WithCancel(k.ctx)
 
 	k.activeInv = &Investigation{
-		Trigger:   trigger,
-		StartedAt: time.Now(),
-		Cancel:    invCancel,
-		ResultCh:  resultCh,
+		Trigger:            trigger,
+		StartedAt:          time.Now(),
+		Cancel:             invCancel,
+		ResultCh:           resultCh,
+		HeartbeatThreshold: trigger.HeartbeatThreshold,
 	}
 	k.mu.Unlock()
 
@@ -240,13 +243,6 @@ func (k *Kernel) handleProgressCheck() {
 		return
 	}
 
-	elapsed := time.Since(inv.StartedAt)
-
-	// Only check after 90 seconds
-	if elapsed < 90*time.Second {
-		return
-	}
-
 	// Read last few worklog entries from the active investigation's session.
 	sid := ""
 	k.agent.dagMu.Lock()
@@ -259,7 +255,7 @@ func (k *Kernel) handleProgressCheck() {
 		return
 	}
 
-	// Check if stuck
+	// Count failures in last 5 entries.
 	lines := strings.Split(strings.TrimSpace(worklog), "\n")
 	failCount := 0
 	for _, l := range lines {
@@ -268,16 +264,34 @@ func (k *Kernel) handleProgressCheck() {
 		}
 	}
 
+	// Update the stuck counter: tick up while failures dominate, reset when progress resumes.
+	k.mu.Lock()
 	if failCount >= 3 {
-		log.Printf("[kernel] heartbeat: investigation stuck (%d failures in last 5 entries, %s elapsed), injecting progress check",
-			failCount, elapsed.Round(time.Second))
-		k.agent.Interject(fmt.Sprintf(
-			"Progress check (%s elapsed): The last several steps have failed with the same errors. "+
-				"Are you making progress or stuck in a loop? "+
-				"If stuck, conclude with current status and explain what failed. "+
-				"If making progress, continue.",
-			elapsed.Round(time.Second)))
+		inv.StuckCount++
+	} else {
+		inv.StuckCount = 0
 	}
+	stuck := inv.StuckCount
+	threshold := inv.HeartbeatThreshold
+	elapsed := time.Since(inv.StartedAt)
+	k.mu.Unlock()
+
+	if threshold <= 0 {
+		threshold = 3 // default ~90s at a 30s tick
+	}
+
+	// Interject on first crossing and every `threshold` ticks thereafter — bounded escalation, not an unbounded loop.
+	if stuck == 0 || stuck%threshold != 0 {
+		return
+	}
+
+	log.Printf("[kernel] heartbeat: stuck for %d consecutive ticks (%s elapsed, threshold=%d), injecting progress check",
+		stuck, elapsed.Round(time.Second), threshold)
+	k.agent.Interject(fmt.Sprintf(
+		"Progress check (%s elapsed, %d consecutive stuck ticks): recent steps keep failing. "+
+			"Investigate the root cause via Holmes — don't keep retrying the same fix. "+
+			"If Holmes has already run multiple times and can't find a fix, conclude honestly.",
+		elapsed.Round(time.Second), stuck))
 }
 
 func (k *Kernel) shutdown() {

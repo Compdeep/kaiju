@@ -193,19 +193,6 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 		return "", fmt.Errorf("bash: command is required")
 	}
 
-	// Reject long-running server commands — these belong in the service tool.
-	if looksLikeServer(command) {
-		return "", fmt.Errorf(
-			"bash: refusing long-running command %q. "+
-				"This is a server/dev process that does not terminate. "+
-				"Use the `service` tool instead: "+
-				`{"action":"start","name":"<short-name>","command":"<command>","workdir":"<dir>","port":<port>}. `+
-				"The service tool spawns the process in a detached session, returns immediately, "+
-				"and tracks the PID for later stop/restart/logs.",
-			command,
-		)
-	}
-
 	timeout := b.timeout
 	if ts, ok := params["timeout_sec"].(float64); ok {
 		if ts == 0 {
@@ -312,33 +299,6 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	}
 
 	return output, nil
-}
-
-// serverPattern matches commands that start long-running servers.
-// serverPattern matches commands that start long-running servers.
-var serverPattern = regexp.MustCompile(`(?i)\b(npm\s+run\s+dev|npm\s+run\s+serve|npm\s+start|yarn\s+dev|yarn\s+start|pnpm\s+dev|pnpm\s+start|npx\s+next\s+(dev|start)|npx\s+nuxt\s+(dev|start)|python\s+-m\s+http\.server|flask\s+run|uvicorn\s|gunicorn\s|rails\s+server|php\s+-S|vite\s+(dev|preview|serve))\b`)
-
-// vitePattern handles npx vite specially: matches "npx vite" only when NOT
-// followed by a terminating subcommand like build/preview-build.
-var vitePattern = regexp.MustCompile(`(?i)\bnpx\s+vite\b`)
-var viteBuildPattern = regexp.MustCompile(`(?i)\bnpx\s+vite\s+(build|optimize)\b`)
-
-// looksLikeServer checks if a command would start a long-running process.
-func looksLikeServer(cmd string) bool {
-	// Strip leading cd/env setup to check the actual command
-	// e.g. "cd project && npm run dev" → check "npm run dev"
-	parts := regexp.MustCompile(`\s*&&\s*|\s*\|\|\s*`).Split(cmd, -1)
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if serverPattern.MatchString(p) {
-			return true
-		}
-		// npx vite is a server UNLESS it's a build/optimize subcommand
-		if vitePattern.MatchString(p) && !viteBuildPattern.MatchString(p) {
-			return true
-		}
-	}
-	return false
 }
 
 var _ tools.Tool = (*Bash)(nil)

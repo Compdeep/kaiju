@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -241,15 +242,21 @@ func resolveInjections(n *Node, graph *Graph) error {
 			// Empty field = use the entire result as-is (e.g., file_read raw text)
 			value = dep.Result
 		} else {
-			// Validate presence of the named field in the dep's Result
-			// before substituting. The prior silent-fallback (using the
-			// full Result when the field was absent) was the brace_json
-			// bug: file_write received compute's metadata blob instead
-			// of a non-existent .output field, clobbering the target.
+			// Validate presence of the named field. Two outcomes:
+			//   - valid JSON but field missing → hard fail (brace_json shape)
+			//   - dep.Result not JSON at all → degrade to full result with a
+			//     warning. That's an upstream tool serialization bug, not a
+			//     planner error; legacy behaviour tolerated it, and so do we.
 			if err := validateParamRef(paramName, ref, dep.Result); err != nil {
-				return err
+				if errors.Is(err, errResultNotJSON) {
+					log.Printf("[dag] param_ref %q: dep %s result is not JSON, injecting full result (upstream tool bug, not rejecting)", paramName, ref.NodeID)
+					value = dep.Result
+				} else {
+					return err
+				}
+			} else {
+				value, _ = extractJSONField(dep.Result, ref.Field)
 			}
-			value, _ = extractJSONField(dep.Result, ref.Field)
 		}
 		// Empty values are rejected — they'd produce invalid tool parameters.
 		if value == "" {
@@ -449,12 +456,14 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// graft instructions — truncating would corrupt the JSON and silently
 	// break the graft.
 	//
-	// Head+tail preserves both the beginning (context, file structure) and
-	// the end (error lines, tracebacks, summaries) — the LLM was losing the
-	// most diagnostic part of every long result before this.
+	// truncateToolResult keeps JSON envelopes valid by shrinking the
+	// longest string field inside rather than byte-splicing. For non-JSON
+	// output it falls back to head+tail (unchanged from before). Byte-
+	// splicing a web_fetch JSON used to corrupt the envelope so downstream
+	// param_refs couldn't parse it — this fixes that without giving up
+	// the LLM-friendly truncation behaviour.
 	if !isContextual && len(result) > maxToolResultLen {
-		result = Text.HeadTail(result, maxToolResultLen*2/3, maxToolResultLen/3,
-			"\n... (middle truncated at 4KB cap; use start_line, grep, or tail to read the missing portion) ...\n")
+		result = truncateToolResult(result, maxToolResultLen, Text.HeadTail)
 	}
 
 	return result, nil

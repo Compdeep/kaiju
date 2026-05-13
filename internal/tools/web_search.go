@@ -90,7 +90,7 @@ func (w *WebSearch) Parameters() json.RawMessage {
 }
 
 func (w *WebSearch) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","description":"Search results with URLs. Use param_refs to pass results.N.url into web_fetch.","properties":{"query":{"type":"string","description":"the search query executed"},"results":{"type":"array","description":"ranked search results","items":{"type":"object","properties":{"title":{"type":"string","description":"page title"},"url":{"type":"string","description":"page URL — chain this into web_fetch via param_refs"},"snippet":{"type":"string","description":"brief excerpt from the page"}}}}}}`)
+	return json.RawMessage(`{"type":"object","description":"Search results with URLs. Chain into web_fetch by referencing ${step.N.results.0.url} (or another index) in its url param.","properties":{"query":{"type":"string","description":"the search query executed"},"results":{"type":"array","description":"ranked search results","items":{"type":"object","properties":{"title":{"type":"string","description":"page title"},"url":{"type":"string","description":"page URL — chain into web_fetch via ${step.N.results.M.url}"},"snippet":{"type":"string","description":"brief excerpt from the page"}}}}}}`)
 }
 
 /*

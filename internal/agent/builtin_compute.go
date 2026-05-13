@@ -40,7 +40,7 @@ func (c *ComputeTool) Name() string { return "compute" }
 func (c *ComputeTool) Description() string {
 	return "Compute a VALUE via a runnable script, or scaffold a whole new project. " +
 		"Shallow mode: the Coder emits a script, the script runs, stdout is captured " +
-		"on `.output` for downstream param_refs — use this for analytics, rankings, " +
+		"on `.output` so downstream steps can read it via ${step.N.output} — use this for analytics, rankings, " +
 		"calculations, derived data. Deep mode: architect plans then multiple coders " +
 		"build — use this ONLY for new-codebase scaffolding. " +
 		"DO NOT use compute to edit a specific known file — use `edit_file` for that. " +
@@ -57,7 +57,7 @@ var computeParamSchema = json.RawMessage(`{
 		"goal":       {"type": "string", "description": "What to compute — describe the desired outcome, not how to implement it"},
 		"mode":       {"type": "string", "enum": ["shallow","deep"], "description": "shallow: fast single pass. deep: plans approach first then implements"},
 		"query":      {"type": "string", "description": "The original user request for full context"},
-		"context":    {"type": "object", "description": "Data from upstream steps (injected via param_refs)"},
+		"context":    {"type": "object", "description": "Data from upstream steps (wire via ${step.N.field} placeholders inside this object)"},
 		"hints":      {"type": "array", "items": {"type": "string"}, "description": "Error messages from previous failed attempts"},
 		"language":   {"type": "string", "description": "Preferred language (auto-detected if omitted)"},
 		"task_files": {"type": "array", "items": {"type": "string"}, "description": "DEPRECATED on compute — use the edit_file tool instead for known-path file edits. Only the architect's internal tasks in deep mode set this meaningfully."}
@@ -70,9 +70,9 @@ func (c *ComputeTool) Parameters() json.RawMessage {
 }
 
 // computeOutputSchema documents what compute returns so the planner can wire
-// param_refs at real field names instead of guessing. `output` is the
-// captured stdout of the executed script — the field downstream steps chain
-// on when they need the computed value.
+// ${step.N.field} placeholders at real field names instead of guessing.
+// `output` is the captured stdout of the executed script — the field
+// downstream steps reference when they need the computed value.
 var computeOutputSchema = json.RawMessage(`{
 	"type": "object",
 	"description": "Structured compute result; 'output' holds the script's captured stdout, other fields describe the emitted code.",

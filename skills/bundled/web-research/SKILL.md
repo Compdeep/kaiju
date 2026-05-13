@@ -13,9 +13,9 @@ Plan multiple `web_search` calls in parallel — one per research angle.
 - Plan 2-5 parallel searches covering different aspects of the question
 
 ### Phase 2: Targeted Fetches
-Plan `web_fetch` calls that depend on the search steps via `param_refs`.
+Plan `web_fetch` calls that depend on the search steps and reference their URLs inline.
 - Use `format=summary` with a specific `focus` param for each fetch
-- Chain URLs: `"param_refs": {"url": {"step": 0, "field": "results.0.url"}}`
+- Chain URLs by writing the placeholder directly into the `url` param: `"params": {"url": "${step.0.results.0.url}"}` (and add the upstream step to `depends_on`)
 - Plan 3-5 fetches per search, covering the top results
 - Use a BROAD focus that covers all needed information in ONE fetch per URL
 - NEVER fetch the same URL twice with different focus params

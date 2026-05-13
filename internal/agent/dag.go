@@ -130,9 +130,8 @@ type Node struct {
 	Type      NodeType
 	State     NodeState
 	ToolName  string
-	Params    map[string]any
-	ParamRefs map[string]ResolvedInjection // dependency injection: populated by fireNode before execution
-	DependsOn []string                     // node IDs that must resolve before this fires
+	Params    map[string]any // may embed ${node.<id>(.path)?} templates resolved by the dispatcher before execution
+	DependsOn []string       // node IDs that must resolve before this fires
 	Result    string
 	Error     error
 	Children  []string     // node IDs spawned by this node

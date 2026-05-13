@@ -66,17 +66,55 @@ Plan aggressively. An observer evaluates every result and can redirect.
 
 ## Compute Nodes
 
-Use `compute` (type:"compute") for ALL implementation work: building projects, writing multi-file code, scaffolding apps, data processing, calculations, or any task requiring writing and executing code. Provide the GOAL — never write code in bash params or file_write content.
+**Default: no compute.** The aggregator at the end of every plan is an LLM call that synthesises gathered evidence — it does small math, ranking, summarisation, and reasoning over the data on its own. Compute is overhead (spawns a coder LLM, writes a script, runs it). Add it only when the LLM genuinely can't do the job.
 
-The compute architect handles ALL implementation details internally: directory creation, dependency installation, file generation, service startup, and validation. Do NOT plan these as separate bash/service steps — they will conflict with what the architect plans.
+**Use compute ONLY when one of these is true:**
+- A library is needed to do the work — numpy, scipy, sgp4, pandas, BeautifulSoup, jq, etc. The LLM can't run code.
+- Data is too large for LLM context — CSVs with thousands of rows, log files, big JSON dumps.
+- Precision matters in a way the LLM is bad at — financial math, exact floating-point, date arithmetic, sgp4, statistical inference.
+- The user explicitly asked for code, a script, or a deliverable file.
+- The output must be a structured value feeding another tool (not prose for the user).
 
-Use shell commands only for simple read-only tasks: listing files, checking versions, reading output. NEVER use shell commands for dependency installation, directory creation, or any setup that a compute node will handle. NEVER use shell commands for long-running processes (servers, dev servers, watchers) — use the `service` tool instead. A shell command that doesn't terminate will block the entire plan.
+**Do NOT use compute when:**
+- Simple arithmetic the aggregator can do (one sum, one percentage, ranking <10 items).
+- Pure information retrieval ("what is X", "current value of Y", "summarise this article").
+- Qualitative analysis or conversational synthesis.
+- Anything where the aggregator can read the evidence and write the answer directly.
 
-Modes: shallow (straightforward single-step tasks) or deep (complex work — scaffolding, multi-file projects, unfamiliar APIs). Always pass the user query in the query param.
+When in doubt, omit compute. A wrongly-omitted compute costs nothing (aggregator handles it). A wrongly-added compute wastes an LLM call and can hallucinate when its inputs aren't real.
 
-Plan broadly in 1-3 compute steps, not 15 fine-grained bash/file_write steps. For any project that needs scaffolding (web app, CLI tool, library, service), ONE compute(deep) node is almost always correct — the architect inside handles everything.
+**When you DO use compute:**
+- Provide the GOAL, never the code. Never write code in bash params or file_write content.
+- Wire every input through `${step.N.field}` placeholders from prior gathering steps. Never plan compute over inputs that don't yet exist — it will hallucinate.
+- The compute architect handles ALL implementation details (dirs, deps, file gen, service start, validation). Do NOT plan these as separate bash/service steps.
+- **Use tools directly when they can do the job** — yt-dlp/curl in bash for downloads, web_fetch for pages, service for daemons. compute is for writing new code, not for wrapping existing tools in scripts.
 
-When compute should edit specific existing files, set `task_files` to the list of paths. The coder receives each file's current content automatically and emits text-match edits. Without it, the coder hallucinates the file contents from memory and its edits fail. `task_files` is the right tool for "edit this file"; `param_refs` with `context` is the right tool for "compute new content from upstream data."
+Modes: `shallow` (compute a value from gathered data, one script) or `deep` (build a new codebase from scratch). For shallow: usually chained from earlier gathering steps. For deep: ONE node per build — the architect inside decomposes everything else.
+
+When compute should edit specific existing files, use `edit_file` instead (it takes `task_files` and a `goal`). Compute is for writing new code, not editing known files.
+
+**Multi-wave example — a compute task that NEEDS real-world data first:**
+query: "estimate the probability that a Starlink satellite passes within 5 km of the ISS in 14 days"
+```json
+[
+  {"tool":"web_search","params":{"query":"current Starlink TLE celestrak"},"depends_on":[],"tag":"search_tle"},
+  {"tool":"web_search","params":{"query":"current solar flux F10.7"},"depends_on":[],"tag":"search_flux"},
+  {"tool":"web_fetch","params":{"url":"${step.0.results.0.url}","format":"text"},"depends_on":[0],"tag":"fetch_tle"},
+  {"tool":"web_fetch","params":{"url":"${step.1.results.0.url}","format":"text"},"depends_on":[1],"tag":"fetch_flux"},
+  {"type":"compute","tool":"compute","params":{"goal":"propagate ISS+Starlink TLEs over 14 days with sgp4, apply drag from given F10.7, count close-approaches within 5km, output probability as JSON","mode":"shallow","context.tle":"${step.2.content}","context.flux":"${step.3.content}"},"depends_on":[2,3],"tag":"compute_probability"}
+]
+```
+Three waves in one plan: search → fetch → compute. Every compute input is wired from real upstream content. **If your plan for a quant task ends at search/fetch with no compute, you under-planned — the user's question requires actual computation that the aggregator can't do.**
+
+**Counter-example — task that does NOT need compute:**
+query: "what's the current ISS altitude?"
+```json
+[
+  {"tool":"web_search","params":{"query":"current ISS altitude"},"depends_on":[],"tag":"search_alt"},
+  {"tool":"web_fetch","params":{"url":"${step.0.results.0.url}","format":"summary","focus":"altitude in km"},"depends_on":[0],"tag":"fetch_alt"}
+]
+```
+The aggregator reads `fetch_alt.content` and reports the altitude. No compute needed.
 
 ## Services (long-running processes)
 

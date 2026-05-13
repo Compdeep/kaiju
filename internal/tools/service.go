@@ -283,6 +283,27 @@ func (s *Service) start(params map[string]any) (string, error) {
 		workdir = filepath.Join(s.workspace, workdir)
 	}
 
+	// Strip a redundant leading `cd <workdir>` when the planner set both
+	// workdir and an inline cd to the same place. The shell would resolve
+	// the cd RELATIVE to workdir (which IS workdir), looking for a
+	// nested duplicate that doesn't exist — `sh: cd: can't cd to project`.
+	if base := filepath.Base(workdir); base != "" && base != "." && base != "/" {
+		trimmed := strings.TrimSpace(command)
+		for _, prefix := range []string{"cd " + workdir, "cd " + base, "cd ./" + base} {
+			rest, ok := strings.CutPrefix(trimmed, prefix)
+			if !ok {
+				continue
+			}
+			rest = strings.TrimLeft(rest, " ")
+			if strings.HasPrefix(rest, "&&") || strings.HasPrefix(rest, ";") {
+				rest = strings.TrimLeft(strings.TrimLeft(rest, "&;"), " ")
+				log.Printf("[service] %s: stripped redundant %q (workdir already %s)", name, prefix, workdir)
+				command = rest
+				break
+			}
+		}
+	}
+
 	existing, recs, idx, err := s.findRecord(name)
 	if err != nil {
 		return "", err

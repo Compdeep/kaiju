@@ -125,7 +125,7 @@ The DAG engine enforces resource limits at two levels:
 This separation matters: a plan like `web_search → 5 × web_fetch` is one logical chain.
 The web_fetch nodes can't fire until their dependency completes, so they don't add parallel
 pressure. Enforcing per-skill limits at plan time would truncate mid-chain, breaking
-dependency injection (`param_refs`) and causing nodes to fire without their dependencies.
+dependency injection (`${step.N.field}` placeholders) and causing nodes to fire without their dependencies.
 
 ## Intent-Gated Execution (IGX)
 

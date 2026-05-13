@@ -71,7 +71,7 @@ func (s *Sysinfo) Parameters() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (s *Sysinfo) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","description":"System information. Chain individual fields into downstream steps via param_refs.","properties":{"hostname":{"type":"string","description":"machine hostname"},"os":{"type":"string","description":"operating system name (e.g. linux, darwin, windows)"},"arch":{"type":"string","description":"CPU architecture"},"cwd":{"type":"string","description":"current working directory path"},"time":{"type":"string","description":"current time"},"cpus":{"type":"integer","description":"number of CPU cores"}}}`)
+	return json.RawMessage(`{"type":"object","description":"System information. Chain individual fields into downstream steps via ${step.N.<field>} placeholders.","properties":{"hostname":{"type":"string","description":"machine hostname"},"os":{"type":"string","description":"operating system name (e.g. linux, darwin, windows)"},"arch":{"type":"string","description":"CPU architecture"},"cwd":{"type":"string","description":"current working directory path"},"time":{"type":"string","description":"current time"},"cpus":{"type":"integer","description":"number of CPU cores"}}}`)
 }
 
 /*

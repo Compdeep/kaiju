@@ -78,7 +78,7 @@ func (w *WebFetch) Impact(map[string]any) int { return agenttools.ImpactObserve 
  * return: JSON schema as raw bytes
  */
 func (w *WebFetch) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Use param_refs with field=\"content\" to pass extracted text to a compute or search step.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"}}}`)
+	return json.RawMessage(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"}}}`)
 }
 
 /*
@@ -90,7 +90,7 @@ func (w *WebFetch) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"url": {"type": "string", "description": "A real HTTP/HTTPS URL to fetch. Must start with http:// or https://. Never use placeholder values — use param_refs to inject URLs from prior steps."},
+			"url": {"type": "string", "description": "A real HTTP/HTTPS URL to fetch. Must start with http:// or https://. Never use placeholder values — wire upstream URLs in via ${step.N.results.M.url} (or similar dot-paths into the upstream JSON)."},
 			"format": {"type": "string", "description": "Extract mode: markdown (default), text, raw, summary", "enum": ["markdown", "text", "raw", "summary"]},
 			"focus": {"type": "string", "description": "For summary mode: what to extract (e.g. 'pricing and shipping policies', 'key competitors')"},
 			"method": {"type": "string", "description": "HTTP method (default: GET)", "enum": ["GET", "POST"]},
@@ -193,6 +193,12 @@ type fetchResult struct {
 	Title   string `json:"title,omitempty"`
 	Content string `json:"content"`
 	Format  string `json:"format,omitempty"`
+	// Note is set when the fetch succeeded structurally but the content
+	// is unusable (JS-rendered widget, login wall, summarizer refusal,
+	// etc.). When Note is set, Content is empty by convention — downstream
+	// callers should treat Note as a clear "no usable data" signal rather
+	// than fall back to fabricated content.
+	Note string `json:"note,omitempty"`
 }
 
 func marshalFetchResult(r fetchResult) (string, error) {
@@ -308,16 +314,37 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 		content = stripHTML(string(body))
 	}
 
+	// If the page yielded essentially nothing extractable (interactive
+	// query widgets, JS-rendered SPAs, login walls, paywalls), bail
+	// early with a clear "no content" signal. Sending such pages to the
+	// summarizer used to yield LLM apologies like "I don't have direct
+	// access to this tool…" which downstream callers happily treated as
+	// the page's actual content. Refuse to fabricate.
+	if len(strings.TrimSpace(content)) < 200 {
+		return marshalFetchResult(fetchResult{
+			Status:  status,
+			Title:   title,
+			Content: "",
+			Format:  "summary",
+			Note:    "no extractable content (likely JS-rendered, login-walled, or an interactive widget). Try a different URL — an API endpoint or a static documentation page.",
+		})
+	}
+
 	// Truncate for LLM context (don't send 256KB to the summarizer)
 	if len(content) > 16000 {
 		content = content[:16000]
 	}
 
-	// Build the summary prompt
-	prompt := "Extract the key information from this web page content."
+	// Build the summary prompt. Be explicit that the summarizer must
+	// extract from the supplied content only — no general-knowledge
+	// fallback. If the page doesn't contain the requested info, return
+	// the exact sentinel below.
+	const noContentSentinel = "__NO_RELEVANT_CONTENT__"
+	prompt := "Extract the key information from this web page content. Use ONLY what is present in the user message; do not draw on outside knowledge."
 	if focus != "" {
-		prompt = fmt.Sprintf("Extract the following from this web page: %s. Be specific — include exact numbers, names, prices, dates where available.", focus)
+		prompt = fmt.Sprintf("Extract the following from this web page: %s. Be specific — include exact numbers, names, prices, dates where available. Use ONLY what is present in the user message; do not draw on outside knowledge.", focus)
 	}
+	prompt += fmt.Sprintf("\n\nIf the supplied content does not contain what was asked for, reply with this single token and nothing else: %s", noContentSentinel)
 
 	if title != "" {
 		prompt += fmt.Sprintf("\n\nPage title: %s", title)
@@ -340,11 +367,65 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 	}
 
 	if len(resp.Choices) == 0 {
-		return marshalFetchResult(fetchResult{Status: status, Title: title, Content: "(summary failed)", Format: "summary"})
+		return marshalFetchResult(fetchResult{Status: status, Title: title, Content: "", Format: "summary", Note: "summary failed (no LLM choices)"})
 	}
 
-	summary := resp.Choices[0].Message.Content
+	summary := strings.TrimSpace(resp.Choices[0].Message.Content)
+
+	// Detect the explicit sentinel.
+	if strings.Contains(summary, noContentSentinel) {
+		return marshalFetchResult(fetchResult{
+			Status:  status,
+			Title:   title,
+			Content: "",
+			Format:  "summary",
+			Note:    "the fetched page did not contain the requested information",
+		})
+	}
+
+	// Detect summarizer refusals / apologies that escape the sentinel
+	// (older models, instruction-following lapses). These are
+	// recognisable as short, first-person, hedging openers; treat them
+	// as "no content" rather than letting them flow downstream as fact.
+	if looksLikeSummarizerRefusal(summary) {
+		return marshalFetchResult(fetchResult{
+			Status:  status,
+			Title:   title,
+			Content: "",
+			Format:  "summary",
+			Note:    "summarizer could not extract the requested information from the page",
+		})
+	}
+
 	return marshalFetchResult(fetchResult{Status: status, Title: title, Content: summary, Format: "summary"})
+}
+
+// looksLikeSummarizerRefusal flags LLM responses that are obviously
+// model meta-commentary ("I don't have access to…", "I'm sorry but…")
+// rather than extracted page content. Heuristic only — cheap, no LLM.
+func looksLikeSummarizerRefusal(s string) bool {
+	t := strings.ToLower(strings.TrimSpace(s))
+	if len(t) > 600 {
+		// Real summaries are usually long. Refusals are short.
+		return false
+	}
+	prefixes := []string{
+		"i don't have", "i do not have",
+		"i can't", "i cannot",
+		"i'm sorry", "i am sorry",
+		"i'm unable", "i am unable",
+		"sorry, ", "as an ai",
+		"i don't see", "i do not see",
+		"the page does not", "the content does not",
+		"there is no", "there isn't",
+		"no information", "no relevant",
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
 }
 
 /*
@@ -404,28 +485,68 @@ func stripHTML(html string) string {
  * stripBetween removes everything between open and close tags.
  * desc: Repeatedly finds and removes content between the specified open and close delimiters.
  * param: s - input string to process
- * param: open - opening delimiter to match (case-insensitive)
- * param: close - closing delimiter to match (case-insensitive)
+ * param: open - opening delimiter to match (case-insensitive ASCII)
+ * param: close - closing delimiter to match (case-insensitive ASCII)
  * return: string with all content between matched delimiters removed
+ *
+ * Case-insensitive search is done directly on s via indexFoldASCII so
+ * indices line up with the original string. An earlier version kept a
+ * parallel `lower := strings.ToLower(s)` and used its indices to slice
+ * s; that panics when the input contains characters whose lowercase
+ * form has a different byte length (İ → i\u0307, some Greek/Turkish
+ * letters, etc.) because the two strings drift in length.
  */
 func stripBetween(s, open, close string) string {
-	lower := strings.ToLower(s)
 	for {
-		start := strings.Index(lower, strings.ToLower(open))
+		start := indexFoldASCII(s, open)
 		if start == -1 {
 			break
 		}
-		end := strings.Index(lower[start:], strings.ToLower(close))
-		if end == -1 {
+		rel := indexFoldASCII(s[start:], close)
+		if rel == -1 {
 			s = s[:start]
-			lower = lower[:start]
 			break
 		}
-		end = start + end + len(close)
+		end := start + rel + len(close)
 		s = s[:start] + s[end:]
-		lower = lower[:start] + lower[end:]
 	}
 	return s
+}
+
+// indexFoldASCII reports the byte index of the first case-insensitive
+// (ASCII-only) match of needle in s, or -1 if absent. Non-ASCII bytes
+// compare exactly. The HTML tags this is used on (script, style, etc.)
+// are ASCII so this is sufficient and avoids the unicode case-folding
+// length drift that broke stripBetween.
+func indexFoldASCII(s, needle string) int {
+	n := len(needle)
+	if n == 0 {
+		return 0
+	}
+	if n > len(s) {
+		return -1
+	}
+	for i := 0; i+n <= len(s); i++ {
+		match := true
+		for j := 0; j < n; j++ {
+			sb := s[i+j]
+			nb := needle[j]
+			if sb >= 'A' && sb <= 'Z' {
+				sb |= 0x20
+			}
+			if nb >= 'A' && nb <= 'Z' {
+				nb |= 0x20
+			}
+			if sb != nb {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
 }
 
 var _ agenttools.Tool = (*WebFetch)(nil)

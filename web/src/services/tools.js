@@ -107,17 +107,19 @@ export function connect() {
             ds.running = false
             ds.interjectMode = false
           }
-          // If this session was detected as inflight on page reload
-          // (loading=true but no active send() in progress), reload
-          // messages to pick up the stored verdict. We detect "no active
-          // send()" by checking if the POST hasn't added the assistant
-          // message yet — if the last message is still 'user', we're in
-          // the recovery path and should reload.
+          // If this session was reloaded mid-query (loading=true, no
+          // active send() in progress), refetch messages so the stored
+          // verdict lands in the UI. The `sendInFlight` flag is set by
+          // chat.js#send() for the lifetime of a normal POST/execute
+          // call, including the follow-up /trace persist. We only
+          // recover when that flag is false — otherwise the in-flight
+          // send() is about to push the assistant message itself, and
+          // a reload here would clobber it (and beat /trace to the
+          // server, dropping the trace from the rendered message).
           const ss = sessions.getSession(sid)
-          if (ss && ss.loading) {
+          if (ss && ss.loading && !ss.sendInFlight) {
             const lastMsg = ss.messages.length ? ss.messages[ss.messages.length - 1] : null
             if (lastMsg && lastMsg.role === 'user') {
-              // Recovery: page was reloaded mid-query. Reload messages from server.
               ss.loading = false
               api.get(`/api/v1/sessions/${sid}/messages`).then(msgs => {
                 ss.messages = (msgs || []).map(m => {
@@ -129,7 +131,6 @@ export function connect() {
                 })
               }).catch(() => {})
             }
-            // Otherwise send() is still in flight and will handle the message itself.
           }
           // Clean up mapping
           if (ev.alert) alertToSession.delete(ev.alert)

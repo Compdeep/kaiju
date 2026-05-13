@@ -31,7 +31,7 @@ Seven actions, one tool, one schema.
 | `stop` | Sends SIGTERM, waits up to 5s, then SIGKILL if still alive. |
 | `restart` | Stop + start using the registry's command and workdir. |
 | `status` | Returns `{pid, alive, uptime_sec, command, log paths}` for a named service. |
-| `logs` | Tails the stdout/stderr log file by line count. Structured output for `param_refs` chaining. |
+| `logs` | Tails the stdout/stderr log file by line count. Structured output for `${step.N.field}` chaining. |
 | `list` | All services in the registry with live status. |
 | `remove` | Deletes a stopped service from the registry (refuses if still running). |
 

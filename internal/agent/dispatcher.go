@@ -3,10 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
-	"strings"
+	"regexp"
 	"sync"
 	"time"
 
@@ -92,9 +91,10 @@ func (st *toolThrottle) waitThrottle(ctx context.Context, toolName string, coold
 
 /*
  * fireNode runs a single tool node and sends the result on ch.
- * desc: Applies per-tool throttle if the tool declares one. If the node
- *       has ParamRefs, dependency injection resolves them first. Attaches
- *       tool display hints as NodeActions before sending completion.
+ * desc: Applies per-tool throttle if the tool declares one. If the node's
+ *       params contain ${node.<id>.field} placeholders, the dispatcher
+ *       substitutes them from upstream node outputs first. Attaches tool
+ *       display hints as NodeActions before sending completion.
  * param: ctx - context for execution.
  * param: n - the Node to execute.
  * param: graph - the investigation graph.
@@ -116,39 +116,32 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		n.Skills = graph.ActiveCards
 	}
 
-	// Data-flow validation: compute / edit_file with depends_on but no
-	// param_refs is a planner omission — depending on upstream steps but
-	// not wiring their data. Reject before execution; recovery chain
-	// (reflector → Holmes → microplanner) replans with wiring.
-	if err := validateDataFlow(n.ToolName, n.DependsOn, n.ParamRefs); err != nil {
-		ch <- nodeCompletion{NodeID: n.ID, Err: err}
-		return
-	}
+	// Data-flow validation lives at the executive-output boundary
+	// (validatePlanSteps in executive.go), not here. Architect-grafted
+	// coder nodes (NodeCompute children of a compute(deep) parent)
+	// legitimately use depends_on for sequencing while communicating via
+	// files on disk — they don't need ${step.N.field} placeholders.
+	// Validating at dispatch time blanket-rejected them; the executive
+	// boundary is the right layer because that's where the validator's
+	// failure mode (planner LLM under-wiring) actually originates.
 
-	// Resolve param_refs from dependency outputs before execution.
-	// Fails fast if dep not resolved, field missing, or value empty.
-	if len(n.ParamRefs) > 0 {
-		for paramName, ref := range n.ParamRefs {
-			log.Printf("[dag] inject %s.%s ← %s.%s", n.ID, paramName, ref.NodeID, ref.Field)
-		}
-		if err := resolveInjections(n, graph); err != nil {
-			log.Printf("[dag] node %s injection failed: %v", n.ID, err)
-			ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf("dependency injection failed: %w", err)}
-			return
-		}
-		// Log resolved values for debugging
-		for paramName := range n.ParamRefs {
-			log.Printf("[dag] inject %s.%s = %v", n.ID, paramName, Text.TruncateLog(fmt.Sprint(n.Params[paramName]), 120))
-		}
+	// Substitute ${node.<id>(.path)?} templates in params from dependency
+	// outputs. planStepsToNodes already rewrote the planner's
+	// ${step.N(.path)?} form to ${node.<id>(.path)?}, so by this point
+	// every reference points at a concrete node id. Fails fast if the
+	// dep hasn't resolved or the named field is absent — same recovery
+	// chain handles that case.
+	if err := substituteTemplates(n, graph); err != nil {
+		log.Printf("[dag] node %s template substitution failed: %v", n.ID, err)
+		ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf("dependency injection failed: %w", err)}
+		return
 	}
 
 	// Direct-param validation: reject keys the tool's schema doesn't
 	// declare (and whose schema forbids extras). Closes the silent-drop
-	// class where the planner invents params like bash(cwd: ...). Keys
-	// injected via ParamRefs are excluded — those get validated at the
-	// injection site by validateParamRef inside resolveInjections.
+	// class where the planner invents params like bash(cwd: ...).
 	if skill, ok := a.registry.Get(n.ToolName); ok {
-		if err := validateDirectParams(skill, n.Params, n.ParamRefs); err != nil {
+		if err := validateDirectParams(skill, n.Params); err != nil {
 			ch <- nodeCompletion{NodeID: n.ID, Err: err}
 			return
 		}
@@ -195,84 +188,154 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 }
 
 /*
- * resolveInjections populates node params from dependency outputs.
- * desc: For each ParamRef, looks up the dependency node, verifies it resolved
- *       successfully, parses its result as JSON, extracts a field by dot-path,
- *       optionally applies a template, and injects the value into n.Params.
- *       Returns error if any step fails (node not found, not resolved, invalid
- *       JSON, missing field, or empty value).
- * param: n - the node whose params to populate.
- * param: graph - the investigation graph for dependency lookup.
- * return: error if injection fails for any param.
+ * substituteTemplates resolves ${node.<id>(.path)?} placeholders in the
+ * node's params from dependency outputs. Walks every string value in
+ * params (including nested maps/arrays), replaces each match by looking
+ * up the named dep node, extracting the named field via dot-path, and
+ * substituting the value. Bare placeholders (the entire string IS the
+ * placeholder) replace the param value with the raw extracted value;
+ * embedded placeholders inside larger strings interpolate as text.
+ *
+ * Returns error if any dep is missing, has empty Result, or the field
+ * is absent from a valid JSON Result. Tool-output that isn't valid JSON
+ * gracefully degrades to the full Result string for non-bare cases.
+ *
+ * Bash failures whose Result is the bash_error JSON blob are treated as
+ * legitimate dep output — the planner often chains on stderr to drive
+ * the next step's diagnosis.
  */
-func resolveInjections(n *Node, graph *Graph) error {
-	for paramName, ref := range n.ParamRefs {
-		dep := graph.Get(ref.NodeID)
-		if dep == nil {
-			return fmt.Errorf("param_ref %q: dependency node %s not found", paramName, ref.NodeID)
-		}
-		// A node's Result is the data to inject regardless of whether the node
-		// ended in StateResolved or StateFailed. Bash nodes that exit non-zero
-		// still capture stderr/stdout as Result (a JSON bash_error blob), and
-		// that output is often EXACTLY what the planner wants to chain on —
-		// e.g. running a failing service to harvest its log. Rejecting failed
-		// deps blind-drops the most diagnostically useful data we have.
-		//
-		// We only bail when Result is literally empty (StateSkipped via
-		// cascade-prune, or an unexpected early return).
-		if dep.Result == "" {
-			// Context params (file reads) degrade to a placeholder; required
-			// params fail the node.
-			if strings.HasPrefix(paramName, "context.") {
-				if n.Params == nil {
-					n.Params = make(map[string]any)
+func substituteTemplates(n *Node, graph *Graph) error {
+	if n.Params == nil {
+		return nil
+	}
+	var firstErr error
+	walkParams(n.Params, func(s string) (any, bool) {
+		// Special case: the WHOLE string is a single bare placeholder.
+		// In that case, replace the param value with the extracted
+		// value as-is (preserving its original type — string, number,
+		// object, etc.) instead of stringifying.
+		if m := nodeTemplateBareRe.FindStringSubmatch(s); m != nil {
+			depID := m[1]
+			field := m[2]
+			val, err := resolveTemplateField(graph, depID, field, n.ID)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
 				}
-				n.Params[paramName] = fmt.Sprintf("[file unavailable: %s]", dep.Tag)
-				log.Printf("[dag] param_ref %q: dep %s empty (%s), placeholder injected", paramName, ref.NodeID, dep.State)
-				continue
+				return s, false
 			}
-			return fmt.Errorf("param_ref %q: dep %s empty (%s)", paramName, ref.NodeID, dep.State)
+			log.Printf("[dag] inject %s ← node %s%s (%d bytes)", n.ID, depID, dotPrefix(field), len(fmt.Sprint(val)))
+			return val, true
 		}
-		if dep.State == StateFailed {
-			log.Printf("[dag] param_ref %q: injecting from failed dep %s", paramName, ref.NodeID)
+		// Embedded placeholders inside a larger string: replace each
+		// match with its string form.
+		out := nodeTemplateRe.ReplaceAllStringFunc(s, func(match string) string {
+			m := nodeTemplateRe.FindStringSubmatch(match)
+			depID := m[1]
+			field := m[2]
+			val, err := resolveTemplateField(graph, depID, field, n.ID)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				return match
+			}
+			return fmt.Sprint(val)
+		})
+		if out != s {
+			return out, true
 		}
+		return s, false
+	})
+	return firstErr
+}
 
-		var value string
-		if ref.Field == "" {
-			// Empty field = use the entire result as-is (e.g., file_read raw text)
-			value = dep.Result
-		} else {
-			// Validate presence of the named field. Two outcomes:
-			//   - valid JSON but field missing → hard fail (brace_json shape)
-			//   - dep.Result not JSON at all → degrade to full result with a
-			//     warning. That's an upstream tool serialization bug, not a
-			//     planner error; legacy behaviour tolerated it, and so do we.
-			if err := validateParamRef(paramName, ref, dep.Result); err != nil {
-				if errors.Is(err, errResultNotJSON) {
-					log.Printf("[dag] param_ref %q: dep %s result is not JSON, injecting full result (upstream tool bug, not rejecting)", paramName, ref.NodeID)
-					value = dep.Result
-				} else {
-					return err
+// resolveTemplateField looks up dep node by ID, verifies it has a
+// non-empty Result, and extracts the named field. Returns the extracted
+// value (any-typed for bare matches) plus an error describing the exact
+// failure mode if anything is wrong.
+//
+// owner is included in error messages so the recovery chain can name
+// which step failed.
+func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error) {
+	dep := graph.Get(depID)
+	if dep == nil {
+		return nil, fmt.Errorf("template on %s: dep node %s not found", owner, depID)
+	}
+	if dep.Result == "" {
+		return nil, fmt.Errorf("template on %s: dep %s has empty result (%s)", owner, depID, dep.State)
+	}
+	if dep.State == StateFailed {
+		log.Printf("[dag] template on %s: injecting from failed dep %s", owner, depID)
+	}
+	if field == "" {
+		return dep.Result, nil
+	}
+	// Tolerant of upstream tool serialization bugs: if the Result is
+	// non-JSON, fall back to returning the raw string so a working
+	// pipeline doesn't break on a malformed envelope (the brace_json
+	// dispatcher silent-fallback fix path). Probe up front so we can
+	// distinguish "envelope is malformed" from "JSON valid but field
+	// missing" — the former is a tool bug and degrades gracefully, the
+	// latter is a planner bug and fails loud.
+	var probe any
+	if json.Unmarshal([]byte(dep.Result), &probe) != nil {
+		log.Printf("[dag] template on %s: dep %s result is not JSON, injecting full result (upstream tool bug, not rejecting)", owner, depID)
+		return dep.Result, nil
+	}
+	val, err := extractJSONFieldAny(dep.Result, field)
+	if err != nil {
+		return nil, fmt.Errorf("template on %s: field %q absent in dep %s (%w)", owner, field, depID, err)
+	}
+	return val, nil
+}
+
+// nodeTemplateRe matches embedded ${node.<id>(.path)?} placeholders
+// anywhere within a string. nodeTemplateBareRe enforces that the WHOLE
+// string is a single placeholder (no surrounding text), used to decide
+// whether to do a value-preserving substitution or a string-form
+// interpolation.
+var (
+	nodeTemplateRe     = regexp.MustCompile(`\$\{node\.([a-zA-Z0-9_-]+)(?:\.([^}]+))?\}`)
+	nodeTemplateBareRe = regexp.MustCompile(`^\$\{node\.([a-zA-Z0-9_-]+)(?:\.([^}]+))?\}$`)
+)
+
+// walkParams recursively visits every string-typed leaf in v and lets
+// fn rewrite it. fn returns (newValue, replaced) — when replaced is
+// true and newValue is not a string, the leaf is replaced with the
+// non-string value as-is (preserving type for bare-placeholder
+// substitution). Maps and slices are walked; other types untouched.
+func walkParams(v any, fn func(string) (any, bool)) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, val := range x {
+			if s, ok := val.(string); ok {
+				if newVal, ok := fn(s); ok {
+					x[k] = newVal
 				}
 			} else {
-				value, _ = extractJSONField(dep.Result, ref.Field)
+				walkParams(val, fn)
 			}
 		}
-		// Empty values are rejected — they'd produce invalid tool parameters.
-		if value == "" {
-			return fmt.Errorf("param_ref %q: field %q from node %s resolved to empty", paramName, ref.Field, ref.NodeID)
+	case []any:
+		for i, val := range x {
+			if s, ok := val.(string); ok {
+				if newVal, ok := fn(s); ok {
+					x[i] = newVal
+				}
+			} else {
+				walkParams(val, fn)
+			}
 		}
-
-		if ref.Template != "" {
-			value = strings.ReplaceAll(ref.Template, "{{value}}", value)
-		}
-
-		if n.Params == nil {
-			n.Params = make(map[string]any)
-		}
-		n.Params[paramName] = value
 	}
-	return nil
+}
+
+// dotPrefix is a one-liner: "" → "", "x" → ".x". Pure log cosmetic.
+func dotPrefix(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "." + s
 }
 
 /*
@@ -460,8 +523,8 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// longest string field inside rather than byte-splicing. For non-JSON
 	// output it falls back to head+tail (unchanged from before). Byte-
 	// splicing a web_fetch JSON used to corrupt the envelope so downstream
-	// param_refs couldn't parse it — this fixes that without giving up
-	// the LLM-friendly truncation behaviour.
+	// ${node.X.field} substitution couldn't parse it — this fixes that
+	// without giving up the LLM-friendly truncation behaviour.
 	if !isContextual && len(result) > maxToolResultLen {
 		result = truncateToolResult(result, maxToolResultLen, Text.HeadTail)
 	}

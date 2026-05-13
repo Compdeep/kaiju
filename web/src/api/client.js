@@ -48,6 +48,27 @@ export const api = {
   del: (path) => request('DELETE', path),
   /** @param {string} path @param {Object} body @returns {Promise<Object>} */
   patch: (path, body) => request('PATCH', path, body),
+  /**
+   * desc: POST a non-JSON body (FormData, Blob, etc) — for multipart
+   * uploads. Browser sets Content-Type with the right boundary.
+   * @param {string} path
+   * @param {FormData|Blob} body
+   * @returns {Promise<Object>}
+   */
+  postRaw: async (path, body) => {
+    const headers = {}
+    const token = getToken()
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const res = await fetch(BASE + path, { method: 'POST', headers, body })
+    if (res.status === 401) {
+      localStorage.removeItem('kaiju_token')
+      window.location.hash = '#/login'
+      throw new Error('Unauthorized')
+    }
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+    return data
+  },
 }
 
 export default api

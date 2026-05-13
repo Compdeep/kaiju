@@ -1,26 +1,26 @@
 // Package agent — dispatcher_validation.go.
 //
-// Pure validation helpers for the dispatcher. Two entry points, both
-// stateless and unit-testable without a graph or dispatcher fixture:
+// Pure validation helpers for the dispatcher. Stateless and
+// unit-testable without a graph or dispatcher fixture.
 //
-//   validateDirectParams — catches planner-invented param names on a tool
-//     call before it runs (e.g. bash({command, cwd}) — bash has no cwd).
-//     Called from fireNode just before executeToolNode.
+//   validateDirectParams — catches planner-invented param names on a
+//     tool call before it runs (e.g. bash({command, cwd}) — bash has
+//     no cwd). Called from fireNode just before executeToolNode.
 //
-//   validateParamRef — catches param_ref wiring that names a field the
-//     dep's Result does not contain (e.g. {step: 1, field: "output"} on
-//     a compute that produced no output). Called from resolveInjections
-//     after the dep has resolved, before the value is substituted.
+//   validateDataFlow — catches the omission case: compute / edit_file
+//     declares depends_on for upstream steps but wires NO ${node...}
+//     templates anywhere in params. Means the planner depended on a
+//     step's data and forgot to interpolate it.
 //
-// Each failure is logged with a [dispatch:reject] prefix so the two
-// classes can be counted in traces without a dedicated metric.
+// Each failure is logged with a [dispatch:reject] prefix so traces can
+// count rejection rates without a dedicated metric.
 //
-// Compute is not special-cased here. It legitimately accepts arbitrary
-// param keys as context via param_refs. Its schema doesn't set
+// Compute is not special-cased here. Its schema doesn't set
 // `additionalProperties: false`, so JSON Schema default (true) applies
-// and validateDirectParams allows extras. Bash explicitly sets
-// `additionalProperties: false`, so extras get rejected. Each tool
-// declares its own strictness via its schema; the validator just reads.
+// and validateDirectParams allows extras (the dotted "context.foo" key
+// pattern compute uses for context injection). Bash explicitly sets
+// `additionalProperties: false`, so its extras get rejected. Each tool
+// declares its own strictness; the validator just reads.
 
 package agent
 
@@ -78,14 +78,14 @@ func parseToolSchema(raw json.RawMessage) (parsedSchema, error) {
 	return out, nil
 }
 
-// validateDirectParams rejects any key in `params` that the tool's schema
-// does not allow. Keys injected via `refs` are excluded from the check —
-// those get their own validation in validateParamRef at the injection
-// site, and the planner legitimately chooses their names.
+// validateDirectParams rejects any key in `params` that the tool's
+// schema does not allow. Templates inline (`${node.X.field}`) are just
+// strings as far as this check is concerned — the schema either lists
+// the param name or it doesn't.
 //
 // Returns nil when every key is allowed. Returns a descriptive error
 // naming the first offending key and the tool's allowed set when not.
-func validateDirectParams(tool tools.Tool, params map[string]any, refs map[string]ResolvedInjection) error {
+func validateDirectParams(tool tools.Tool, params map[string]any) error {
 	schema, err := parseToolSchema(tool.Parameters())
 	if err != nil {
 		return fmt.Errorf("validate %s params: %w", tool.Name(), err)
@@ -97,12 +97,6 @@ func validateDirectParams(tool tools.Tool, params map[string]any, refs map[strin
 		if _, declared := schema.Properties[key]; declared {
 			continue
 		}
-		if _, injected := refs[key]; injected {
-			// Key came from param_refs — the name was the planner's
-			// choice, not meant to match the schema. That class is
-			// checked separately by validateParamRef.
-			continue
-		}
 		allowed := sortedKeys(schema.Properties)
 		log.Printf("[dispatch:reject] %s: unknown param %q (allowed: %s)",
 			tool.Name(), key, strings.Join(allowed, ", "))
@@ -112,73 +106,84 @@ func validateDirectParams(tool tools.Tool, params map[string]any, refs map[strin
 	return nil
 }
 
-// validateParamRef checks the param_ref against the dep's resolved
-// Result. Two distinct failure shapes are handled differently:
-//
-//  1. dep.Result doesn't parse as JSON at all → this is an upstream tool
-//     serialization bug, not a planner error. Returns the sentinel
-//     errResultNotJSON so the caller (resolveInjections) can fall back
-//     to injecting the full result as a string. Preserves legacy
-//     tolerance for tool bugs.
-//
-//  2. dep.Result parses as valid JSON but the named field is missing →
-//     this is a planner error (wired a field that doesn't exist, the
-//     brace_json bug shape). Returns a descriptive error; caller fails
-//     the step loudly.
-//
-// Empty ref.Field means "use the whole result as-is" — legitimate
-// choice (chaining raw file_read output). Always accepted.
-func validateParamRef(paramName string, ref ResolvedInjection, depResult string) error {
-	if ref.Field == "" {
-		return nil
-	}
-	// Try parsing the dep's Result. If it isn't JSON at all, that's a
-	// tool-output bug — surface the sentinel so the caller can degrade
-	// gracefully.
-	var probe any
-	if err := json.Unmarshal([]byte(depResult), &probe); err != nil {
-		return errResultNotJSON
-	}
-	// Valid JSON envelope — now check the specific field.
-	if _, err := extractJSONField(depResult, ref.Field); err != nil {
-		log.Printf("[dispatch:reject] param_ref %q: field %q absent in dep %s (%v)",
-			paramName, ref.Field, ref.NodeID, err)
-		return fmt.Errorf("param_ref %q: field %q absent in dep %s (%w)",
-			paramName, ref.Field, ref.NodeID, err)
-	}
-	return nil
-}
-
-// errResultNotJSON signals that validateParamRef couldn't parse the
-// dep's Result as JSON at all — as opposed to the field being absent
-// from a valid JSON envelope. Callers treat this as a degrade-to-full-
-// result case rather than a hard failure, since it reflects an upstream
-// tool's serialization bug, not a planner mistake.
-var errResultNotJSON = fmt.Errorf("dep result is not JSON")
-
-// validateDataFlow rejects data-consuming tool nodes that declare
-// depends_on dependencies but wire NO param_refs. The planner almost
-// never depends a compute (or edit_file) on upstream steps for pure
-// sequencing — when it sets depends_on, it wants their data. Silence
-// between "declared the dep" and "wired the data" is an omission bug:
-// the compute runs with empty context, hallucinates from the goal text
-// or training memory, and produces garbage or burns Holmes budget
-// chasing symptoms of the missing wiring.
+// validateDataFlow rejects compute / edit_file nodes that declare
+// depends_on but contain NO ${node...} templates anywhere in their
+// params. The planner almost never depends a compute on upstream steps
+// for pure sequencing — when it sets depends_on, it wants their data.
+// Silence between "declared the dep" and "wrote a placeholder for it"
+// is an omission bug: the compute would run without the data and
+// hallucinate from the goal text or training memory.
 //
 // Scope: compute + edit_file only. Other tools (bash, service, etc.)
 // legitimately use depends_on for ordering side-effects with no data
-// flow — those aren't caught by this check.
-func validateDataFlow(toolName string, dependsOn []string, paramRefs map[string]ResolvedInjection) error {
-	if len(dependsOn) == 0 || len(paramRefs) > 0 {
+// flow — those aren't caught by this check. edit_file with task_files
+// is also exempt — task_files IS the data source (the Coder reads each
+// listed file directly), so depends_on against an upstream file_read
+// is just harmless sequencing.
+func validateDataFlow(toolName string, dependsOn []string, params map[string]any) error {
+	if len(dependsOn) == 0 {
 		return nil
 	}
 	if toolName != "compute" && toolName != "edit_file" {
 		return nil
 	}
-	log.Printf("[dispatch:reject] %s: depends_on %v but no param_refs — data flow incomplete",
+	if toolName == "edit_file" && hasNonEmptyTaskFiles(params) {
+		return nil
+	}
+	if paramsContainTemplate(params) {
+		return nil
+	}
+	log.Printf("[dispatch:reject] %s: depends_on %v but no ${node...} templates — data flow incomplete",
 		toolName, dependsOn)
-	return fmt.Errorf("tool %s declares depends_on %v but wires no param_refs — if you depend on those steps' data, wire it via param_refs; if you meant pure sequencing, compute/edit_file is the wrong tool for that",
+	return fmt.Errorf("tool %s declares depends_on %v but no ${step.N.field} placeholder appears anywhere in params — if you depend on those steps' data, reference it inline (e.g. \"context.csv\": \"${step.0.content}\"); if you meant pure sequencing, compute/edit_file is the wrong tool",
 		toolName, dependsOn)
+}
+
+// paramsContainTemplate reports whether any string-typed leaf reachable
+// from v contains a ${node...} placeholder. Mirror of walkParams in
+// dispatcher.go; kept local here so the validator stays a pure helper.
+func paramsContainTemplate(v any) bool {
+	switch x := v.(type) {
+	case map[string]any:
+		for _, val := range x {
+			if s, ok := val.(string); ok {
+				if strings.Contains(s, "${node.") || strings.Contains(s, "${step.") {
+					return true
+				}
+			} else if paramsContainTemplate(val) {
+				return true
+			}
+		}
+	case []any:
+		for _, val := range x {
+			if s, ok := val.(string); ok {
+				if strings.Contains(s, "${node.") || strings.Contains(s, "${step.") {
+					return true
+				}
+			} else if paramsContainTemplate(val) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasNonEmptyTaskFiles reports whether params["task_files"] is a non-empty
+// list. Accepts both []string (programmatic callers) and []any (JSON-decoded
+// LLM output). Used by validateDataFlow to exempt edit_file from the
+// "depends_on requires templates" rule when task_files supplies the data.
+func hasNonEmptyTaskFiles(params map[string]any) bool {
+	tf, ok := params["task_files"]
+	if !ok || tf == nil {
+		return false
+	}
+	switch v := tf.(type) {
+	case []string:
+		return len(v) > 0
+	case []any:
+		return len(v) > 0
+	}
+	return false
 }
 
 // truncateToolResult caps an oversized tool Result while preserving

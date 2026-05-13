@@ -23,7 +23,7 @@ Do NOT use for implicit display — tools like `file_write` automatically push t
 If the user asks to see a file that already exists:
 
 1. `file_read` — read the file
-2. `panel_push` — push content to the appropriate plugin (depends on read, use `param_refs` to chain content)
+2. `panel_push` — push content to the appropriate plugin (depends on read; chain content inline via `"content": "${step.0.content}"` in the panel_push params)
 
 Choose the plugin based on file type:
 - `.html`, `.svg` → `preview`

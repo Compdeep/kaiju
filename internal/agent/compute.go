@@ -41,11 +41,12 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 	structure, _ := params["structure"].(string)
 
 	// Collect any non-reserved params as additional context. The planner
-	// often declares param_refs with arbitrary key names (ports_data,
-	// spot_rate_1, ebs_rate, …) to inject upstream results. The dispatcher
-	// resolves them and lands each as a top-level params[key]. If we only
-	// read params["context"], those injected values are silently dropped.
-	ctxData = mergeParamRefsIntoContext(params, ctxData)
+	// often wires ${step.N.field} placeholders into arbitrary key names
+	// (ports_data, spot_rate_1, ebs_rate, …) to inject upstream results.
+	// The dispatcher substitutes them and lands each as a top-level
+	// params[key]. If we only read params["context"], those injected
+	// values are silently dropped.
+	ctxData = mergeWiredParamsIntoContext(params, ctxData)
 
 	// Extract task_files. Accept both shapes: []any (how JSON-unmarshalled
 	// DAG params arrive from the Executive/microplanner) and []string (how
@@ -86,12 +87,8 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 			ctxBytes = len(b)
 		}
 	}
-	refNames := make([]string, 0, len(n.ParamRefs))
-	for k := range n.ParamRefs {
-		refNames = append(refNames, k)
-	}
-	log.Printf("[dag] compute %s: mode=%s goal=%q ctx_bytes=%d task_files=%d param_refs=%v",
-		n.ID, mode, Text.TruncateLog(goal, 80), ctxBytes, len(taskFiles), refNames)
+	log.Printf("[dag] compute %s: mode=%s goal=%q ctx_bytes=%d task_files=%d deps=%d",
+		n.ID, mode, Text.TruncateLog(goal, 80), ctxBytes, len(taskFiles), len(n.DependsOn))
 
 	execute, _ := params["execute"].(string)
 	codeCtx := &computeCodeContext{
@@ -333,7 +330,7 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 		}
 	}
 
-	systemPrompt := buildComputeArchitectPrompt(architectGuidance)
+	systemPrompt := ComposeSystemPrompt(a.soulPrompt, buildComputeArchitectPrompt(architectGuidance))
 
 	startedArch := time.Now()
 	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
@@ -643,7 +640,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		// Edit mode: if the file exists, show content for text-match edits.
 		for _, f := range codeCtx.taskFiles {
 			targetPath := f
-			if !strings.HasPrefix(targetPath, projectPrefix(graph, codeCtx.taskFiles)) {
+			if !strings.HasPrefix(targetPath, "/") && !strings.HasPrefix(targetPath, projectPrefix(graph, codeCtx.taskFiles)) {
 				targetPath = projectPrefix(graph, codeCtx.taskFiles) + targetPath
 			}
 			fullPath := filepath.Join(a.cfg.Workspace, targetPath)
@@ -742,7 +739,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
 			destPath = codeCtx.taskFiles[0]
 		}
-		if !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
+		if !strings.HasPrefix(destPath, "/") && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
 			destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
 		}
 		codePath, safeErr := workspace.SafeJoin(a.cfg.Workspace, destPath)
@@ -805,11 +802,12 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	//
 	// When the caller didn't set task_files, this compute step is implicitly
 	// a value-computation intent: the Coder emits a runnable script, the
-	// script runs, stdout is captured on .output for downstream param_refs.
-	// If the Coder returns write-mode output WITHOUT an execute command,
-	// there's no exec graft, no captured stdout, and no .output field on
-	// the result. Downstream steps that param_ref .output then hit the
-	// dispatcher's silent fallback and receive the compute metadata JSON
+	// script runs, stdout is captured on .output so downstream steps can
+	// read it via ${step.N.output}. If the Coder returns write-mode output
+	// WITHOUT an execute command, there's no exec graft, no captured stdout,
+	// and no .output field on the result. Downstream steps that reference
+	// .output then hit the dispatcher's silent fallback and receive the
+	// compute metadata JSON
 	// instead of the intended content — which clobbers target files (the
 	// brace_json bug).
 	//
@@ -822,8 +820,28 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	if effectiveExecute == "" && codeCtx != nil {
 		effectiveExecute = codeCtx.execute
 	}
+	// If the Coder forgot `execute`, try the language-based default before
+	// rejecting. This is the same fallback used downstream during result
+	// assembly (line ~897); applying it earlier means the common case where
+	// the LLM emits a Python/JS/Bash script without explicit `execute`
+	// auto-recovers instead of failing the whole step. The Phase-B reject
+	// stays as the last-resort guard for languages we don't know how to run.
+	if effectiveExecute == "" && (codeCtx == nil || len(codeCtx.taskFiles) == 0) {
+		probePath := codeResp.Filename
+		if probePath == "" {
+			probePath = fmt.Sprintf("%s_%d.txt", tag, ts)
+		}
+		if !strings.HasPrefix(probePath, "/") && !strings.HasPrefix(probePath, projectPrefix(graph, nil)) {
+			probePath = projectPrefix(graph, nil) + probePath
+		}
+		if guess := defaultExecuteFor(codeResp.Language, probePath, tag); guess != "" {
+			effectiveExecute = guess
+			codeResp.Execute = guess // surfaces to the result-assembly path below
+			log.Printf("[dag] compute %s: Coder omitted execute; inferred %q from language=%s", tag, guess, codeResp.Language)
+		}
+	}
 	if (codeCtx == nil || len(codeCtx.taskFiles) == 0) && effectiveExecute == "" {
-		return "", fmt.Errorf("compute(shallow) write-mode without task_files requires `execute` on the Coder response so .output can be captured; got a bare file-write with no runnable command. For known-path file edits use the edit_file tool instead (raw: %.200s)", raw)
+		return "", fmt.Errorf("compute(shallow) write-mode without task_files requires `execute` on the Coder response so .output can be captured; the Coder omitted it AND the language %q has no known default runner (raw: %.200s)", codeResp.Language, raw)
 	}
 	// Normalize code to string — unwrap JSON string quotes, or re-marshal object to string
 	var codeStr string
@@ -855,7 +873,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
 		destPath = codeCtx.taskFiles[0]
 	}
-	if !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
+	if !strings.HasPrefix(destPath, "/") && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
 		destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
 	}
 	codePath, safeErr := workspace.SafeJoin(a.cfg.Workspace, destPath)
@@ -988,9 +1006,9 @@ func shQuote(s string) string {
 }
 
 // reservedComputeParams lists the param names compute.go itself consumes.
-// Anything NOT in this set is treated as upstream data (typically injected
-// via planner param_refs) and folded into the compute context so the coder
-// can see it.
+// Anything NOT in this set is treated as upstream data (typically wired in
+// via ${step.N.field} placeholders the dispatcher has already substituted)
+// and folded into the compute context so the coder can see it.
 var reservedComputeParams = map[string]bool{
 	"goal":           true,
 	"mode":           true,
@@ -1008,10 +1026,10 @@ var reservedComputeParams = map[string]bool{
 	"task_files":     true,
 }
 
-// mergeParamRefsIntoContext collects any non-reserved keys from params and
+// mergeWiredParamsIntoContext collects any non-reserved keys from params and
 // merges them into ctxData so the coder's "Available Data" section shows
 // them. Preserves a pre-existing ctxData if one is present.
-func mergeParamRefsIntoContext(params map[string]any, ctxData any) any {
+func mergeWiredParamsIntoContext(params map[string]any, ctxData any) any {
 	var extras map[string]any
 	for k, v := range params {
 		if reservedComputeParams[k] {

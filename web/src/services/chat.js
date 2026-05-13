@@ -5,6 +5,37 @@ import { useDagStore } from '../stores/dag'
 /** Chat service — session CRUD, send, interject. Writes to per-session stores. */
 
 /**
+ * desc: Build the [attached files] preamble that gets prepended to a user
+ * query when uploads are attached. The format mirrors how the agent's
+ * Executive expects to see file references — workspace-relative paths plus
+ * sidecar metadata paths so it can read previews without burning a
+ * file_read on the full original. Tiny files are inlined directly.
+ * @param {Object[]} atts - attachment Result objects
+ * @returns {string} block text, or '' if no attachments
+ */
+function buildAttachmentBlock(atts) {
+  if (!atts || !atts.length) return ''
+  const lines = ['[attached files]']
+  for (const a of atts) {
+    const parts = [`- ${a.path} (${a.type}, ${a.size} bytes`]
+    if (a.lines) parts.push(`, ${a.lines} lines`)
+    parts.push(')')
+    if (a.meta_path) parts.push(`; preview: ${a.meta_path}`)
+    if (a.summary_path) parts.push(`; summary: ${a.summary_path}`)
+    lines.push(parts.join(''))
+    if (a.inline) {
+      lines.push('  inline content:')
+      lines.push('  ```')
+      lines.push(a.inline.split('\n').map(l => '  ' + l).join('\n'))
+      lines.push('  ```')
+    }
+  }
+  lines.push('')
+  lines.push('[query]')
+  return lines.join('\n')
+}
+
+/**
  * desc: Create a new chat session on the server and switch to it
  * @returns {Promise<string>} The new session ID
  */
@@ -39,6 +70,12 @@ export async function switchSession(id) {
 
   s.setSessionId(id)
   dag.setActiveSession(id)
+
+  // Restore the chip strip from any existing uploads on the session
+  // (best-effort — stay silent on failure).
+  api.get(`/api/v1/sessions/${id}/uploads`).then(list => {
+    if (Array.isArray(list)) s.attachments = list.map(a => ({ ...a, pending: false }))
+  }).catch(() => {})
 
   // Load from server if this session hasn't been loaded yet
   const ss = s.getSession(id)
@@ -112,15 +149,31 @@ export async function send(text) {
 
   if (!s.sessionId) await createSession()
 
+  // Snapshot attachments BEFORE we mutate the list — they're cleared
+  // after the user message is built so subsequent queries start fresh.
+  const attached = (s.attachments || []).filter(a => !a.pending && !a.error)
+  const attachBlock = buildAttachmentBlock(attached)
+  const queryWithAttachments = attachBlock ? `${attachBlock}\n${text}` : text
+
   s.messages.push({ role: 'user', content: text })
   s.loading = true
+  // Mark the per-session state as actively sending so the SSE 'done'
+  // handler doesn't fire its page-reload-recovery path during a normal
+  // run (which would refetch messages before /trace lands and clobber
+  // the in-memory msg.trace we're about to set below).
+  const sendingSid = s.sessionId
+  const sendingSess = s.getSession(sendingSid)
+  if (sendingSess) sendingSess.sendInFlight = true
   dag.archiveAndClear()
   dag.interjectMode = true
   dag.interjections = []
 
+  // Clear the chip strip — files stay on disk; the agent has the paths.
+  s.attachments = []
+
   try {
     const data = await api.post('/api/v1/execute', {
-      query: text,
+      query: queryWithAttachments,
       session_id: s.sessionId,
       intent: s.intent,
       mode: s.runMode,
@@ -144,6 +197,10 @@ export async function send(text) {
     if (s.sessionId && dag.nodes.length) {
       try { await api.post(`/api/v1/sessions/${s.sessionId}/trace`, { nodes: dag.nodes }) } catch {}
     }
+    // Trace is now persisted. Clear the in-flight flag *after* /trace
+    // so any late-arriving SSE 'done' for this session sees us still
+    // active and skips the recovery reload.
+    if (sendingSess) sendingSess.sendInFlight = false
     dag.archiveAndClear()
     loadSessions()
   }

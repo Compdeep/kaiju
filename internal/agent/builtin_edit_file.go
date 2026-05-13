@@ -15,9 +15,9 @@
 //     Separating tools turns the path from a hint into a contract.
 //
 //   - The Result schema is stable: {files_edited, code_path, language}.
-//     No conditional .output field. Downstream param_refs cannot ask for
-//     something this tool never produces, so a wire-mismatch becomes a
-//     loud error instead of a silent fallback.
+//     No conditional .output field. Downstream ${step.N.field} placeholders
+//     cannot ask for something this tool never produces, so a wire-mismatch
+//     becomes a loud error instead of a silent fallback.
 //
 //   - The Executive's decision surfaces at tool-choice time, not buried
 //     inside a params-shape heuristic. "I need an LLM to touch this
@@ -38,7 +38,7 @@
 //   task_files []string — REQUIRED, at least one entry.
 //   goal       string   — REQUIRED, what the Coder should do.
 //   language   string   — optional, auto-detected from extension otherwise.
-//   context    object   — optional, upstream data injected via param_refs.
+//   context    object   — optional, upstream data wired in via ${step.N.field} placeholders.
 //   hints      []string — optional, prior failure messages.
 
 package agent
@@ -103,7 +103,7 @@ var editFileParamSchema = json.RawMessage(`{
 		},
 		"goal": {"type": "string", "description": "What the Coder should do to the file (e.g., 'add CORS middleware', 'fix the missing comma on line 11', 'implement the health endpoint')."},
 		"language": {"type": "string", "description": "Optional language hint. Auto-detected from the file extension if omitted."},
-		"context": {"type": "object", "description": "Optional data from upstream steps (injected via param_refs). Handed to the Coder as reference material."},
+		"context": {"type": "object", "description": "Optional data from upstream steps (wire ${step.N.field} placeholders inside this object). Handed to the Coder as reference material."},
 		"hints": {"type": "array", "items": {"type": "string"}, "description": "Optional error messages from previous failed attempts on this file."}
 	},
 	"required": ["task_files", "goal"]

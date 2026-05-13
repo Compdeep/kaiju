@@ -34,7 +34,7 @@ Plan parallel calls when checking multiple repos or filtering by different crite
 ### View CI run logs
 
 1. `bash` — `gh run list --limit 5` to find the run
-2. `bash` — `gh run view <id> --log-failed` (depends on step 0, use `param_refs` for run ID)
+2. `bash` — `gh run view <id> --log-failed` (depends on step 0; reference the run ID inline in the command as `${step.0.<field>}`)
 
 ### Code review workflow
 

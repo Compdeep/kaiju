@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -95,51 +96,6 @@ func compactParamSignature(schema json.RawMessage) string {
 }
 
 /*
- * ParamInjection declares that a parameter value should be resolved from
- * a dependency's JSON output at execution time (dependency injection).
- * desc: The planner outputs these as part of plan steps; the scheduler resolves
- *       them before firing the node.
- */
-type ParamInjection struct {
-	Step     int    `json:"step"`               // index of dependency step (0-based)
-	Field    string `json:"field"`              // dot-path into dependency's JSON result (e.g. "user", "host.name")
-	Template string `json:"template,omitempty"` // optional: "C:\\Users\\{{value}}\\Downloads" — {{value}} replaced with extracted field
-}
-
-// UnmarshalJSON handles LLMs returning step as string ("0") instead of int (0).
-func (p *ParamInjection) UnmarshalJSON(data []byte) error {
-	type raw struct {
-		Step     json.RawMessage `json:"step"`
-		Field    string          `json:"field"`
-		Template string          `json:"template,omitempty"`
-	}
-	var r raw
-	if err := json.Unmarshal(data, &r); err != nil {
-		return err
-	}
-	p.Field = r.Field
-	p.Template = r.Template
-	n, err := flexParseInt(r.Step)
-	if err != nil {
-		return fmt.Errorf("param_ref step: %w", err)
-	}
-	p.Step = n
-	return nil
-}
-
-/*
- * ResolvedInjection is a ParamInjection with the step index replaced by a
- * concrete node ID.
- * desc: Created by planStepsToNodes during DAG construction. Contains the
- *       graph node ID, field path, and optional template.
- */
-type ResolvedInjection struct {
-	NodeID   string // graph node ID resolved from ParamInjection.Step
-	Field    string
-	Template string
-}
-
-/*
  * FlexInts is a JSON type that accepts both []int and []string.
  * desc: LLMs frequently return depends_on as ["0","1"] instead of [0,1].
  *       This type handles both formats by attempting int parse first, then
@@ -184,31 +140,34 @@ func (f *FlexInts) UnmarshalJSON(data []byte) error {
 
 /*
  * PlanStep is one entry in the planner's JSON output.
- * desc: Contains the tool name, parameters, optional param_refs for
- *       dependency injection, index-based depends_on references, a
- *       human-readable tag, and an optional capability gap declaration.
+ * desc: Contains the tool name, parameters (which may embed
+ *       ${step.N.field} templates referencing prior steps),
+ *       index-based depends_on references, a human-readable tag, and
+ *       an optional capability gap declaration.
  */
 type PlanStep struct {
-	Type      string                    `json:"type,omitempty"` // "tool" (default) or "compute"
-	Tool      string                    `json:"tool"`
-	Params    map[string]any            `json:"params"`
-	ParamRefs map[string]ParamInjection `json:"-"` // dependency injection — populated by custom unmarshal
-	DependsOn FlexInts                  `json:"depends_on"`           // index-based references
-	Tag       string                    `json:"tag"`
-	Gap       string                    `json:"gap,omitempty"` // capability gap: what's needed but unavailable
+	Type      string         `json:"type,omitempty"` // "tool" (default) or "compute"
+	Tool      string         `json:"tool"`
+	Params    map[string]any `json:"params"`
+	DependsOn FlexInts       `json:"depends_on"` // index-based references
+	Tag       string         `json:"tag"`
+	Gap       string         `json:"gap,omitempty"` // capability gap: what's needed but unavailable
 }
 
-// UnmarshalJSON handles LLMs putting plain values (e.g. timeout_sec: 15) in
-// param_refs alongside real injection objects. Plain values are moved to Params.
+// UnmarshalJSON tolerates LLMs that still emit a legacy `param_refs`
+// field (the old DI shape) by lifting any string-typed entries into
+// Params under the same key — letting the new `${step.N.field}`
+// template path handle them. Object-typed entries are dropped with a
+// warning since the new format requires placeholders to be strings.
 func (s *PlanStep) UnmarshalJSON(data []byte) error {
 	type raw struct {
-		Type      string                       `json:"type,omitempty"`
-		Tool      string                       `json:"tool"`
-		Params    map[string]any               `json:"params"`
-		ParamRefs map[string]json.RawMessage   `json:"param_refs,omitempty"`
-		DependsOn FlexInts                     `json:"depends_on"`
-		Tag       string                       `json:"tag"`
-		Gap       string                       `json:"gap,omitempty"`
+		Type      string                     `json:"type,omitempty"`
+		Tool      string                     `json:"tool"`
+		Params    map[string]any             `json:"params"`
+		ParamRefs map[string]json.RawMessage `json:"param_refs,omitempty"` // legacy — see below
+		DependsOn FlexInts                   `json:"depends_on"`
+		Tag       string                     `json:"tag"`
+		Gap       string                     `json:"gap,omitempty"`
 	}
 	var r raw
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -223,19 +182,19 @@ func (s *PlanStep) UnmarshalJSON(data []byte) error {
 	if s.Params == nil {
 		s.Params = make(map[string]any)
 	}
-	s.ParamRefs = make(map[string]ParamInjection)
+	// Legacy compatibility — if the LLM still emits param_refs, only
+	// accept string values (which would be ${step.N.field} templates)
+	// and lift them into params. Object-shaped entries are the wrong-
+	// format error this whole refactor was meant to eliminate; warn
+	// and drop them.
 	for k, v := range r.ParamRefs {
-		var pi ParamInjection
-		if err := json.Unmarshal(v, &pi); err == nil && pi.Field != "" {
-			s.ParamRefs[k] = pi
-		} else {
-			// Not a valid ParamInjection — move to Params as a plain value.
-			var plain any
-			if json.Unmarshal(v, &plain) == nil {
-				s.Params[k] = plain
-				log.Printf("[dag] plan: moved misplaced param_ref %q to params (not an injection)", k)
-			}
+		var asStr string
+		if err := json.Unmarshal(v, &asStr); err == nil {
+			s.Params[k] = asStr
+			log.Printf("[dag] plan: lifted legacy string param_ref %q → params (use template inline next time)", k)
+			continue
 		}
+		log.Printf("[dag] plan: dropping legacy object param_ref %q (use ${step.N.field} string templates)", k)
 	}
 	return nil
 }
@@ -273,18 +232,39 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		cards = a.activeCards
 	}
 
+	// SOUL.md leads — identity + persistence litany are authoritative for every
+	// LLM call in the DAG. Without this prepend the planner has no exposure to
+	// the "I do not give up / never advise the user to do it themselves" cluster
+	// and routinely under-plans (search-and-stop instead of search-fetch-compute).
+	if a.soulPrompt != "" {
+		sb.WriteString(a.soulPrompt)
+		sb.WriteString("\n\n")
+	}
+
 	sb.WriteString("You are the Executive Kernel of this computer. You serve a dual purpose:\n")
 	sb.WriteString("(1) Assist the user with questions, research, and conversation.\n")
 	sb.WriteString("(2) Plan and decompose tasks into discrete operations available below.\n")
-	sb.WriteString("    Plan in waves — each wave depends on the previous via depends_on.\n")
-	sb.WriteString("    Wire data between waves using param_refs.\n\n")
-	sb.WriteString("param_refs example: step 0 is web_search, step 1 needs the URL →\n")
-	sb.WriteString("  {\"params\":{},\"param_refs\":{\"url\":{\"step\":0,\"field\":\"results.0.url\"}},\"depends_on\":[0]}\n")
-	sb.WriteString("param_refs example: step 0 is web_search, step 1 is bash and needs the URL INSIDE a command string → use template:\n")
-	sb.WriteString("  {\"params\":{},\"param_refs\":{\"command\":{\"step\":0,\"field\":\"results.0.url\",\"template\":\"yt-dlp -o 'media/%(title)s.%(ext)s' '{{value}}'\"}},\"depends_on\":[0]}\n")
-	sb.WriteString("The template field is REQUIRED when injecting a value into the middle of a string. {{value}} is replaced with the extracted field. Without template, the entire param is replaced by the raw value.\n")
-	sb.WriteString("param_refs example: step 0 is sysinfo, step 1 is compute →\n")
-	sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"...\",\"mode\":\"shallow\"},\"param_refs\":{\"context.time\":{\"step\":0,\"field\":\"time\"}},\"depends_on\":[0]}\n\n")
+	sb.WriteString("    Plan in waves — each wave depends on the previous via depends_on.\n\n")
+	sb.WriteString("## Wiring data between steps\n\n")
+	sb.WriteString("Every input goes in `params`. Each value is one of:\n")
+	sb.WriteString("- a LITERAL — a value you know now. `\"path\": \"uploads/data.csv\"`.\n")
+	sb.WriteString("- a PLACEHOLDER — `${step.N.field}`, which the dispatcher replaces with field `field` from step N's output before your step runs.\n\n")
+	sb.WriteString("`depends_on` is the CLOCK, not the data. It tells the scheduler to wait for step N. Whenever you write `${step.N...}` in params, also list N in `depends_on`.\n\n")
+	sb.WriteString("**Validator rule:** `depends_on:[N]` with no `${step.N...}` anywhere in params is REJECTED. If you only need sequencing without data, use `bash` (or another tool) — `compute`/`edit_file` always need data wired.\n\n")
+	sb.WriteString("## Placeholder syntax\n\n")
+	sb.WriteString("- `${step.N}` — full result of step N.\n")
+	sb.WriteString("- `${step.N.field}` — top-level field. Dot-path for nested: `${step.0.results.0.url}`.\n")
+	sb.WriteString("- Embedded mid-string: `\"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.0.results.0.url}'\"`.\n")
+	sb.WriteString("- Bare (entire value is the placeholder): `\"${step.N.field}\"` — preserves type (string, number, object, array passed through as-is).\n\n")
+	sb.WriteString("## Examples\n\n")
+	sb.WriteString("Step 0 is file_read of a CSV, step 1 is compute that processes it →\n")
+	sb.WriteString("  `{\"tool\":\"compute\",\"params\":{\"goal\":\"clean and rank rows\",\"mode\":\"shallow\",\"context.csv\":\"${step.0.content}\"},\"depends_on\":[0]}`\n\n")
+	sb.WriteString("Step 0 is web_search, step 1 is bash needing the URL inside a command →\n")
+	sb.WriteString("  `{\"tool\":\"bash\",\"params\":{\"command\":\"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.0.results.0.url}'\"},\"depends_on\":[0]}`\n\n")
+	sb.WriteString("## Anti-patterns\n\n")
+	sb.WriteString("- `depends_on:[0]` with no `${step.0...}` placeholder anywhere → REJECTED.\n")
+	sb.WriteString("- Literal placeholders like `<URL>`, `{{url}}`, `__step.0__` → not recognised.\n")
+	sb.WriteString("- Nested `{step, field}` JSON objects → placeholders are STRINGS only.\n\n")
 	sb.WriteString("Make good use of tools to gather real data and help the user. If no suitable tool exists, declare a gap.\n\n")
 
 	// Inject skill Planning Guidance sections. These are authoritative —
@@ -348,26 +328,62 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		// and no "ONE compute(deep) node" rule, so it tends to plan multiple
 		// compute steps and forget the params on the second one.
 		sb.WriteString("## Compute Nodes\n")
-		sb.WriteString("Use `compute` (type:\"compute\") for ALL implementation work: building projects, writing multi-file code, scaffolding apps, data processing, calculations, or any task requiring writing and executing code. Provide the GOAL — never write code in bash params or file_write content.\n\n")
-		sb.WriteString("The compute architect handles ALL implementation details internally: directory creation, dependency installation, file generation, service startup, and validation. Do NOT plan these as separate bash/service steps — they will conflict with what the architect plans.\n\n")
-		sb.WriteString("**Use tools directly when they can do the job. compute is for WRITING code — not for wrapping existing tools in scripts.** If yt-dlp can download a video, use bash. If curl can fetch a file, use bash. If a service needs restarting, use service. Only use compute when you need to CREATE new code that doesn't exist yet.\n\n")
-		sb.WriteString("**Use compute whenever the final answer requires deterministic processing of gathered data** — parsing, combining, filtering, transforming, producing structured output. Compute isn't only for building projects; it's for any task where LLM interpretation of raw tool output would be unreliable or hallucination-prone.\n\n")
+		sb.WriteString("**Compute is the right tool whenever real computation is required.** The aggregator at the end of the plan is an LLM call that can handle small math, summarisation, and qualitative synthesis — but it CANNOT propagate orbits, run sgp4 / skyfield / pandas / scipy, parse thousand-row CSVs, or compute precision floating-point values. When the question needs any of those, **add a compute step.** The Persistence litany in your system prompt is explicit: the way to answer a hard quant question is to compute it, not to recommend an external app.\n\n")
+		sb.WriteString("Only omit compute when the answer truly is a lookup (a static value from a press release, a fact from Wikipedia, a short web summary). \"Looks like a lookup\" is not the same as \"is a lookup\" — *next visible Starlink passes over Tokyo tonight* is NOT pre-computed on any page; it requires sgp4 propagation. If a known web tool exists for it (Heavens-Above, in-the-sky.org), assume the tool is a JS widget that computes on click — not a fetchable answer. Fetch the underlying TLE catalogue from CelesTrak and compute it yourself.\n\n")
+		sb.WriteString("**Use compute ONLY when one of these is true:**\n")
+		sb.WriteString("- A library is needed to do the work — numpy, scipy, sgp4, pandas, BeautifulSoup, jq, etc. The LLM can't run code.\n")
+		sb.WriteString("- Data is too large for LLM context — CSVs with thousands of rows, log files, big JSON dumps.\n")
+		sb.WriteString("- Precision matters in a way the LLM is bad at — financial math, exact floating-point, date arithmetic, sgp4, statistical inference.\n")
+		sb.WriteString("- The user explicitly asked for code, a script, or a deliverable file.\n")
+		sb.WriteString("- The output must be a structured value feeding another tool (not prose for the user).\n\n")
+		sb.WriteString("**Do NOT use compute when:**\n")
+		sb.WriteString("- Simple arithmetic the aggregator can do (one sum, one percentage, ranking <10 items).\n")
+		sb.WriteString("- Pure information retrieval (\"what is X\", \"current value of Y\", \"summarise this article\").\n")
+		sb.WriteString("- Qualitative analysis or conversational synthesis.\n")
+		sb.WriteString("- Anything where the aggregator can read the evidence and write the answer directly.\n\n")
+		sb.WriteString("When in doubt, omit compute. A wrongly-omitted compute costs nothing (aggregator handles it). A wrongly-added compute wastes an LLM call and can hallucinate when its inputs aren't real.\n\n")
+		sb.WriteString("**When you DO use compute:**\n")
+		sb.WriteString("- Provide the GOAL, never the code. Never write code in bash params or file_write content.\n")
+		sb.WriteString("- Wire every input through `${step.N.field}` placeholders from prior gathering steps. Never plan compute over inputs that don't yet exist — it will hallucinate.\n")
+		sb.WriteString("- The compute architect handles ALL implementation details (dirs, deps, file gen, service start, validation). Do NOT plan these as separate bash/service steps.\n")
+		sb.WriteString("- **Use tools directly when they can do the job** — yt-dlp/curl in bash for downloads, web_fetch for pages, service for daemons. compute is for writing new code, not for wrapping existing tools in scripts.\n\n")
+		sb.WriteString("**Multi-wave example — a compute task that NEEDS real-world data first:**\n")
+		sb.WriteString("query: \"estimate the probability that a Starlink satellite passes within 5 km of the ISS in 14 days\"\n")
+		sb.WriteString("```json\n")
+		sb.WriteString("[\n")
+		sb.WriteString("  {\"tool\":\"web_search\",\"params\":{\"query\":\"current Starlink TLE celestrak\"},\"depends_on\":[],\"tag\":\"search_tle\"},\n")
+		sb.WriteString("  {\"tool\":\"web_search\",\"params\":{\"query\":\"current solar flux F10.7\"},\"depends_on\":[],\"tag\":\"search_flux\"},\n")
+		sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":{\"url\":\"${step.0.results.0.url}\",\"format\":\"text\"},\"depends_on\":[0],\"tag\":\"fetch_tle\"},\n")
+		sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":{\"url\":\"${step.1.results.0.url}\",\"format\":\"text\"},\"depends_on\":[1],\"tag\":\"fetch_flux\"},\n")
+		sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"propagate ISS+Starlink TLEs over 14 days with sgp4, apply drag from given F10.7, count close-approaches within 5km, output probability as JSON\",\"mode\":\"shallow\",\"context.tle\":\"${step.2.content}\",\"context.flux\":\"${step.3.content}\"},\"depends_on\":[2,3],\"tag\":\"compute_probability\"}\n")
+		sb.WriteString("]\n")
+		sb.WriteString("```\n")
+		sb.WriteString("Three waves in one plan: search → fetch → compute. Every compute input is wired from real upstream content. If your plan for a quant task ends at search/fetch with no compute, you under-planned — the user's question requires actual computation that the aggregator can't do.\n\n")
+		sb.WriteString("**Counter-example — a task that does NOT need compute:**\n")
+		sb.WriteString("query: \"what's the current ISS altitude?\"\n")
+		sb.WriteString("```json\n")
+		sb.WriteString("[\n")
+		sb.WriteString("  {\"tool\":\"web_search\",\"params\":{\"query\":\"current ISS altitude\"},\"depends_on\":[],\"tag\":\"search_alt\"},\n")
+		sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":{\"url\":\"${step.0.results.0.url}\",\"format\":\"summary\",\"focus\":\"altitude in km\"},\"depends_on\":[0],\"tag\":\"fetch_alt\"}\n")
+		sb.WriteString("]\n")
+		sb.WriteString("```\n")
+		sb.WriteString("The aggregator reads `fetch_alt.content` and reports the altitude. No compute needed.\n\n")
 		// Preflight owns the compute-depth decision. Inject it here so the
 		// planner treats it as authoritative rather than re-deriving deep vs
 		// shallow from workspace residue.
 		if a.preflight != nil && a.preflight.ComputeMode != "" {
 			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", a.preflight.ComputeMode))
 		} else {
-			sb.WriteString("**Preflight compute_mode is unset** — prefer direct tools (bash, web_search, web_fetch, file_*). Add a compute step only if the task genuinely needs code execution, and pick `mode=\"shallow\"` unless the user is explicitly asking to build a new codebase.\n\n")
+			sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss astrodynamics / financial / statistical / ephemeris queries that *sound* like lookups. If the question requires a library (sgp4, pandas, scipy, skyfield, ephem) or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — adding a compute step is always cheaper than refusing the task.\n\n")
 		}
 		sb.WriteString("Level reference:\n")
 		sb.WriteString("- **Direct tools** (bash, service, file_read, web_search): default for downloads, searches, restarts, reads.\n")
-		sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or injected via param_refs from an upstream step).\n")
+		sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or injected via `${step.N.field}` from an upstream step).\n")
 		sb.WriteString("- **edit_file**: LLM-backed edit or create of a specific file. Use whenever you know the path and want the Coder to produce the content. task_files is REQUIRED.\n")
-		sb.WriteString("- **compute(shallow)**: compute a VALUE for downstream use — analytics, rankings, scores, derived constants. The Coder emits a runnable script, the script runs, stdout is captured on `.output` for downstream param_refs. NOT for editing files you already know the path of — use edit_file for that.\n")
+		sb.WriteString("- **compute(shallow)**: compute a VALUE for downstream use — analytics, rankings, scores, derived constants. The Coder emits a runnable script, the script runs, stdout is captured on `.output` so downstream steps can read it via `${step.N.output}`. NOT for editing files you already know the path of — use edit_file for that.\n")
 		sb.WriteString("- **compute(deep)**: new codebases (webapp, CLI tool, service, library) built from scratch. ONE deep node per build.\n\n")
 		sb.WriteString("Required params:\n")
-		sb.WriteString("- compute: `goal` + `mode`. If a follow-up compute step needs data from a prior step, wire it via `param_refs` AND still provide `goal` and `mode` in `params`.\n")
+		sb.WriteString("- compute: `goal` + `mode`. If a follow-up compute step needs data from a prior step, wire it via `${step.N.field}` placeholders AND still provide `goal` and `mode` in `params`.\n")
 		sb.WriteString("- edit_file: `task_files` (at least one path) + `goal`. Skip the path and the Coder will refuse to guess — the step fails.\n\n")
 		sb.WriteString("**Known-path file operations — pick the right tool:**\n")
 		sb.WriteString("- Need an LLM to EDIT or CREATE a file at a known path? → `edit_file` with `task_files=[\"project/...\"]`.\n")
@@ -384,17 +400,17 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("## Rules\n")
 		sb.WriteString("NEVER guess values you don't know. Only use names, paths, and parameters that are visible in the evidence (workspace files, blueprint, conversation). If you don't know the exact service name, file path, or port — plan a diagnostic step first (file_read, service list, bash ls) to discover it.\n")
 		sb.WriteString("NEVER interpret, judge, or refuse requests.\n")
-		sb.WriteString("NEVER put template strings, placeholders, or step/field references in params — use param_refs.\n")
+		sb.WriteString("ALWAYS write step/field references as `${step.N.field}` placeholders inside params — never invent literal values you don't know yet.\n")
 		sb.WriteString("NEVER write code in bash params.\n")
 		sb.WriteString("NEVER use bash for complex multi-step tasks.\n")
 		sb.WriteString("NEVER use interactive commands.\n")
-		sb.WriteString("ALWAYS use compute (type:\"compute\") for coding, development, and analytics. Provide the GOAL, not the code.\n")
+		sb.WriteString("Use compute (type:\"compute\") for coding, development, and analytics work that the aggregator can't do — see the Compute Nodes decision rules above. Provide the GOAL, not the code.\n")
 		sb.WriteString("ALWAYS use the compute mode preflight selected — see the Compute Nodes section above. Workspace contents do NOT influence this choice.\n")
 		sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\", port=NNNN) spawns in the background and returns immediately. ALWAYS include the port parameter so health checks know which port to verify.\n")
 		sb.WriteString("ALWAYS use bash only for commands that terminate: ls, grep, git, npm install, curl, node script.js, etc.\n")
 		sb.WriteString("ALWAYS use web_search for questions needing current data.\n")
-		sb.WriteString("ALWAYS gather required data before grafting compute. Every compute node must have its inputs supplied by prior gathering steps (web_search/web_fetch/file_read/bash) via param_refs — never compute over inputs that don't exist yet.\n")
-		sb.WriteString("ALWAYS complete the full task from start to finish. Never stop partway and ask for permission.\n")
+		sb.WriteString("ALWAYS gather required data before grafting compute. Every compute node must have its inputs supplied by prior gathering steps (web_search/web_fetch/file_read/bash) wired via `${step.N.field}` placeholders — never compute over inputs that don't exist yet.\n")
+		sb.WriteString("ALWAYS plan and complete the full action the user asked for. A worklog showing prior failures is NOT a reason to plan a timid probe (e.g. just file_read) instead of the real edit/build — the user is asking again, plan the action. Imperatives ('do it', 'fix it', 'just do it') force action; never stop partway or ask for permission.\n")
 		sb.WriteString("NEVER plan when context is genuinely incomplete — emit `[{\"tool\":\"gap\",\"gap\":\"<question>\"}]` only for unresolvable references, ambiguous key terms, or information only the user has. Not an escape hatch for tool choice or gatherable data.\n")
 		sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
 		sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
@@ -403,6 +419,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
 		sb.WriteString("- blueprints/ — architecture blueprints (auto-managed by compute)\n")
 		sb.WriteString("- canvas/ — user-facing visual content\n")
+		sb.WriteString("- uploads/<session-id>/ — user-uploaded attachments. When the query has an [attached files] preamble, the paths land here. Each file may have <name>.meta.json (preview) and <name>.summary.md (LLM summary) sidecars.\n")
 		// Workspace tree for orientation (what files exist in the workspace).
 		// We do NOT inject existing blueprints here — the mere presence of
 		// a blueprint in the workspace must not bias the planner toward
@@ -528,22 +545,9 @@ var executiveToolSchemaTemplate = `{
 				"properties": {
 					"type":       {"type": "string", "enum": ["tool","compute"], "description": "Node type: tool (default) or compute (LLM code generation)"},
 					"tool":       {"type": "string", "description": "Tool name from the Tools list"},
-					"params":     {"type": "object", "description": "Tool input params as key-value pairs. ALWAYS populate for tools with required params marked *. Example: for web_search use {\"query\": \"search terms\"}, for bash use {\"command\": \"ls -la\"}. NEVER leave empty."},
+					"params":     {"type": "object", "description": "Tool input params as key-value pairs. ALWAYS populate for tools with required params marked *. Use ${step.N.field} placeholders inside string values to inject results from upstream steps. Example: for web_search use {\"query\": \"search terms\"}, for web_fetch chained off step 0 use {\"url\": \"${step.0.results.0.url}\"}, for bash use {\"command\": \"ls -la\"}. NEVER leave empty."},
 					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Step indices that must complete first"},
 					"tag":        {"type": "string", "description": "Short human-readable label"},
-					"param_refs": {
-						"type": "object",
-						"additionalProperties": {
-							"type": "object",
-							"properties": {
-								"step":     {"type": "integer"},
-								"field":    {"type": "string"},
-								"template": {"type": "string"}
-							},
-							"required": ["step", "field"]
-						},
-						"description": "Dependency injection from upstream step outputs"
-					},
 					"gap": {"type": "string", "description": "For tool=gap only: describes a missing capability"}
 				}
 			}
@@ -574,7 +578,7 @@ func (a *Agent) executiveToolDef() llm.ToolDef {
 		Type: "function",
 		Function: llm.FunctionDef{
 			Name:        "plan",
-			Description: `Submit an execution plan. Example: {"steps":[{"tool":"web_search","params":{"query":"bitcoin price"},"depends_on":[],"tag":"s1"}]}. Chaining example: {"steps":[{"tool":"web_search","params":{"query":"news"},"depends_on":[],"tag":"s1"},{"tool":"web_fetch","params":{},"param_refs":{"url":{"step":0,"field":"results.0.url"}},"depends_on":[0],"tag":"s2"}]}. Trivial: {"steps":[],"answer":"Paris."}`,
+			Description: `Submit an execution plan. Example: {"steps":[{"tool":"web_search","params":{"query":"bitcoin price"},"depends_on":[],"tag":"s1"}]}. Chaining example: {"steps":[{"tool":"web_search","params":{"query":"news"},"depends_on":[],"tag":"s1"},{"tool":"web_fetch","params":{"url":"${step.0.results.0.url}"},"depends_on":[0],"tag":"s2"}]}. Trivial: {"steps":[],"answer":"Paris."}`,
 			Parameters:  schema,
 		},
 	}
@@ -649,7 +653,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 
 	// One gate call for all runtime context the planner needs: worklog
 	// (system state) plus the tool index (signatures + output schemas so
-	// param_refs can be wired against correct result shapes).
+	// ${step.N.field} placeholders can be wired against correct result shapes).
 	userQuery := formatTrigger(trigger)
 	if a.preflight != nil && a.preflight.Context != "" {
 		userQuery += "\n\n## Context\n" + a.preflight.Context
@@ -846,6 +850,32 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 	if len(valid) == 0 && len(gaps) == 0 {
 		return nil, fmt.Errorf("planner produced no valid tools (all hallucinated)")
 	}
+
+	// Data-flow validation at the executive-output boundary.
+	// Catches compute / edit_file steps that declare depends_on but never
+	// reference the upstream data via ${step.N.field} placeholders — a
+	// common executive-LLM under-wiring bug. This is the right architectural
+	// layer for the check: architect-grafted coder nodes (compute(deep)'s
+	// children) communicate via files on disk and never reach this function,
+	// so they're naturally exempt from a rule that doesn't apply to them.
+	{
+		stillValid := valid[:0]
+		for _, s := range valid {
+			depStrs := make([]string, len(s.DependsOn))
+			for i, d := range s.DependsOn {
+				depStrs[i] = fmt.Sprintf("%d", d)
+			}
+			if err := validateDataFlow(s.Tool, depStrs, s.Params); err != nil {
+				log.Printf("[dag] executive plan validation: dropping step %q (%s): %v", s.Tag, s.Tool, err)
+				continue
+			}
+			stillValid = append(stillValid, s)
+		}
+		valid = stillValid
+		if len(valid) == 0 && len(gaps) == 0 {
+			return nil, fmt.Errorf("planner steps all failed data-flow validation — every compute/edit_file step had depends_on without ${step.N.field} wiring")
+		}
+	}
 	if len(valid) == 0 && len(gaps) > 0 {
 		// Gaps cover two cases: missing capabilities (e.g. "I don't have an
 		// SMS tool") and clarification questions (e.g. "Are you asking about
@@ -862,7 +892,7 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 		// Use preflight intent as a floor — inference can raise but not lower.
 		// Preflight sees the full query context; tool-impact inference only
 		// sees resolved impacts which may be 0 for parametric tools (bash
-		// with param_refs not yet populated).
+		// with ${step.N.field} placeholders not yet substituted).
 		preflightFloor := gates.Intent(0)
 		if a.preflight != nil && a.preflight.Intent > 0 {
 			preflightFloor = a.preflight.Intent
@@ -899,8 +929,8 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
  * parseExecutiveOutput extracts PlanSteps from the LLM's raw text output.
  * desc: Always expects a JSON array of steps. If the LLM wraps it in an object
  *       (e.g. {"intent":"...", "steps":[...]}), extracts the array from it.
- *       Validates deps and param_refs ranges, auto-adds missing dep edges,
- *       detects and breaks cycles, and deduplicates param_ref steps.
+ *       Validates deps and ${step.N} placeholder ranges, auto-adds missing dep
+ *       edges, detects and breaks cycles, and deduplicates wired steps.
  * param: raw - the raw LLM output string.
  * param: isAuto - true if intent should be extracted from the response.
  * return: parsed PlanStep slice, inferred intent, or error.
@@ -936,21 +966,16 @@ func (a *Agent) parseExecutiveOutput(raw string, isAuto bool) ([]PlanStep, gates
 		return nil, inferredIntent, &ExecutiveConversationalError{Text: ""}
 	}
 
-	// Debug: log parsed param_refs to diagnose injection failures
-	for i, s := range steps {
-		if len(s.ParamRefs) > 0 {
-			for pn, ref := range s.ParamRefs {
-				log.Printf("[dag] parsed step %d param_ref %s: step=%d field=%q template=%q", i, pn, ref.Step, ref.Field, ref.Template)
-			}
-		}
-	}
-
-	// Validate index-based deps and param_refs are in range
+	// Validate index-based deps and any ${step.N...} templates embedded
+	// in params. Out-of-range step references in templates are blanked
+	// out so planStepsToNodes leaves them as literal placeholders (the
+	// LLM's mistake stays visible in logs rather than silently
+	// resolving to the wrong dep). Self-references in depends_on are
+	// removed.
 	for i, s := range steps {
 		if s.Tool == "" {
 			return nil, inferredIntent, fmt.Errorf("step %d missing tool name", i)
 		}
-		// Filter out invalid deps (out of range, self-reference)
 		validDeps := s.DependsOn[:0]
 		for _, dep := range s.DependsOn {
 			if dep < 0 || dep >= len(steps) {
@@ -964,37 +989,38 @@ func (a *Agent) parseExecutiveOutput(raw string, isAuto bool) ([]PlanStep, gates
 			validDeps = append(validDeps, dep)
 		}
 		steps[i].DependsOn = validDeps
-		// Validate param_refs and auto-add to depends_on if missing
-		for paramName, ref := range s.ParamRefs {
-			if ref.Step < 0 || ref.Step >= len(steps) {
-				log.Printf("[dag] step %d param_ref %q references step %d out of range, skipping", i, paramName, ref.Step)
-				delete(s.ParamRefs, paramName)
-				continue
-			}
-			if ref.Step == i {
-				log.Printf("[dag] step %d param_ref %q references itself, skipping", i, paramName)
-				delete(s.ParamRefs, paramName)
-				continue
-			}
-			if ref.Field == "" {
-				log.Printf("[dag] step %d param_ref %q has empty field, skipping injection", i, paramName)
-				delete(s.ParamRefs, paramName)
-				continue
-			}
-			// Enforce ordering: injection source must be in depends_on so it
-			// resolves before this node fires. Auto-add if the LLM forgot.
-			found := false
-			for _, dep := range s.DependsOn {
-				if dep == ref.Step {
-					found = true
-					break
+
+		// Walk params for ${step.N(.path)?} placeholders. For each
+		// match: validate range, ensure depends_on includes the
+		// referenced step (auto-add if the LLM forgot — common
+		// shortcut where the template is correct but depends_on is
+		// missing).
+		walkParams(steps[i].Params, func(str string) (any, bool) {
+			matches := stepTemplateRe.FindAllStringSubmatch(str, -1)
+			for _, m := range matches {
+				idx, _ := strconv.Atoi(m[1])
+				if idx < 0 || idx >= len(steps) {
+					log.Printf("[dag] step %d template ${step.%d...} out of range", i, idx)
+					continue
+				}
+				if idx == i {
+					log.Printf("[dag] step %d template self-reference, skipping", i)
+					continue
+				}
+				found := false
+				for _, dep := range steps[i].DependsOn {
+					if dep == idx {
+						found = true
+						break
+					}
+				}
+				if !found {
+					log.Printf("[dag] step %d template ${step.%d...} not in depends_on, auto-adding", i, idx)
+					steps[i].DependsOn = append(steps[i].DependsOn, idx)
 				}
 			}
-			if !found {
-				s.DependsOn = append(s.DependsOn, ref.Step)
-				steps[i] = s
-			}
-		}
+			return str, false
+		})
 	}
 
 	// Cycle detection — a DAG must be acyclic. Detect and break any cycles.
@@ -1004,7 +1030,7 @@ func (a *Agent) parseExecutiveOutput(raw string, isAuto bool) ([]PlanStep, gates
 		steps = fixed
 	}
 
-	// Dedup: drop steps that fetch the same URL via identical param_refs.
+	// Dedup: drop steps that fetch the same URL via identical ${step.N.field} placeholders.
 	// The planner sometimes creates two fetch phases for the same search results
 	// with different focus params — one fetch with a broad focus is sufficient.
 	steps = deduplicateParamRefSteps(steps)
@@ -1075,30 +1101,47 @@ func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
 		field string
 	}
 
+	// Helper: pull the first ${step.N(.path)?} placeholder out of a
+	// step's params. Used as the dedup key. Returns step=-1 if no
+	// template anywhere.
+	firstTemplate := func(params map[string]any) (int, string, bool) {
+		var foundStep int
+		var foundField string
+		var ok bool
+		walkParams(params, func(str string) (any, bool) {
+			if ok {
+				return str, false
+			}
+			if m := stepTemplateRe.FindStringSubmatch(str); m != nil {
+				foundStep, _ = strconv.Atoi(m[1])
+				foundField = m[2]
+				ok = true
+			}
+			return str, false
+		})
+		return foundStep, foundField, ok
+	}
+
 	seen := make(map[refKey]int) // refKey → first step index
 	dropSet := make(map[int]bool)
 
 	for i, s := range steps {
-		if len(s.ParamRefs) == 0 {
+		step, field, hasTemplate := firstTemplate(s.Params)
+		if !hasTemplate {
 			continue
 		}
-		// Use the first param_ref as the dedup key (usually "url")
-		for _, ref := range s.ParamRefs {
-			key := refKey{tool: s.Tool, step: ref.Step, field: ref.Field}
-			if firstIdx, exists := seen[key]; exists {
-				// Duplicate — merge focus params if possible, drop this step
-				if firstFocus, ok := steps[firstIdx].Params["focus"].(string); ok {
-					if dupFocus, ok2 := s.Params["focus"].(string); ok2 && dupFocus != firstFocus {
-						// Merge focuses: "pricing, features" + "capabilities, extensibility"
-						steps[firstIdx].Params["focus"] = firstFocus + ", " + dupFocus
-					}
+		key := refKey{tool: s.Tool, step: step, field: field}
+		if firstIdx, exists := seen[key]; exists {
+			// Duplicate — merge focus params if possible, drop this step
+			if firstFocus, ok := steps[firstIdx].Params["focus"].(string); ok {
+				if dupFocus, ok2 := s.Params["focus"].(string); ok2 && dupFocus != firstFocus {
+					steps[firstIdx].Params["focus"] = firstFocus + ", " + dupFocus
 				}
-				dropSet[i] = true
-				log.Printf("[dag] dedup: step %d (%s) duplicates step %d (same %s.%s), merging", i, s.Tag, firstIdx, s.Tool, ref.Field)
-			} else {
-				seen[key] = i
 			}
-			break // only check first param_ref
+			dropSet[i] = true
+			log.Printf("[dag] dedup: step %d (%s) duplicates step %d (same %s ← step.%d.%s), merging", i, s.Tag, firstIdx, s.Tool, step, field)
+		} else {
+			seen[key] = i
 		}
 	}
 
@@ -1128,12 +1171,27 @@ func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
 		}
 		result[i].DependsOn = newDeps
 
-		for pn, ref := range result[i].ParamRefs {
-			if newIdx, ok := indexMap[ref.Step]; ok {
-				ref.Step = newIdx
-				result[i].ParamRefs[pn] = ref
+		// Rewrite any ${step.OLD...} placeholders inside params to point
+		// at the post-dedup index. Templates referencing dropped steps
+		// are remapped to the kept step (whose work absorbed theirs).
+		walkParams(result[i].Params, func(s string) (any, bool) {
+			out := stepTemplateRe.ReplaceAllStringFunc(s, func(match string) string {
+				m := stepTemplateRe.FindStringSubmatch(match)
+				old, _ := strconv.Atoi(m[1])
+				newIdx, ok := indexMap[old]
+				if !ok {
+					return match // dropped without a survivor — leave placeholder for downstream complaint
+				}
+				if m[2] == "" {
+					return "${step." + strconv.Itoa(newIdx) + "}"
+				}
+				return "${step." + strconv.Itoa(newIdx) + "." + m[2] + "}"
+			})
+			if out != s {
+				return out, true
 			}
-		}
+			return s, false
+		})
 	}
 
 	log.Printf("[dag] dedup removed %d duplicate steps (%d → %d)", len(dropSet), len(steps), len(result))
@@ -1143,7 +1201,7 @@ func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
 /*
  * planStepsToNodes converts parsed plan steps into graph nodes.
  * desc: Two-pass: first create all nodes (collecting IDs), then resolve index
- *       deps and param_refs to real node IDs. Filters duplicate tool+params
+ *       deps and rewrites ${step.N} placeholders to real node IDs. Filters duplicate tool+params
  *       against already-executed nodes (for replan grafts). Optionally injects
  *       reflection nodes between depth waves (reflect mode only).
  * param: steps - the parsed plan steps.
@@ -1197,7 +1255,10 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 		nodes[i] = n
 	}
 
-	// Pass 2: resolve index-based deps and param_refs to real node IDs
+	// Pass 2: resolve index-based deps to node IDs, then walk each step's
+	// params for ${step.N(.path)?} placeholders. Rewrite each placeholder
+	// to ${node.<id>(.path)?} so the dispatcher can resolve via the graph
+	// at execute time, and ensure every referenced step is in DependsOn.
 	for i, s := range steps {
 		if i >= len(nodes) || nodes[i] == nil {
 			break // truncated by budget
@@ -1208,56 +1269,19 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 			}
 		}
 
-		// Resolve param_refs step indices → node IDs (dependency injection).
-		// parseExecutiveOutput already validated step ranges; skip invalid as safety net.
-		if len(s.ParamRefs) > 0 {
-			resolved := make(map[string]ResolvedInjection, len(s.ParamRefs))
-			for paramName, ref := range s.ParamRefs {
-				if ref.Step < 0 || ref.Step >= len(nodeIDs) || nodeIDs[ref.Step] == "" {
-					log.Printf("[dag] param_ref %q on step %d references invalid step %d, skipping", paramName, i, ref.Step)
-					continue
-				}
-				resolved[paramName] = ResolvedInjection{
-					NodeID:   nodeIDs[ref.Step],
-					Field:    ref.Field,
-					Template: ref.Template,
-				}
-				// Ensure the referenced step is in DependsOn (safety net)
-				refNodeID := nodeIDs[ref.Step]
-				hasDep := false
-				for _, d := range nodes[i].DependsOn {
-					if d == refNodeID {
-						hasDep = true
-						break
-					}
-				}
-				if !hasDep {
-					nodes[i].DependsOn = append(nodes[i].DependsOn, refNodeID)
+		// Walk params, rewrite ${step.N...} → ${node.<id>...}, collect
+		// implicit deps. Logs each substitution for trace visibility.
+		extraDeps := rewriteStepTemplates(nodes[i].Params, nodeIDs, nodes[i].ID, steps, registry)
+		for _, dep := range extraDeps {
+			has := false
+			for _, d := range nodes[i].DependsOn {
+				if d == dep {
+					has = true
+					break
 				}
 			}
-			nodes[i].ParamRefs = resolved
-			for pn, ri := range resolved {
-				if ri.Template != "" {
-					log.Printf("[dag] param_ref %s.%s ← %s.%s (template: %s)", nodes[i].ID, pn, ri.NodeID, ri.Field, ri.Template)
-				} else {
-					log.Printf("[dag] param_ref %s.%s ← %s.%s", nodes[i].ID, pn, ri.NodeID, ri.Field)
-				}
-			}
-			// Validate field paths against upstream output schemas.
-			// Warnings only — planning is permissive. If the field is truly
-			// missing, resolveInjections will fail fast at execution time.
-			if registry != nil {
-				for pn, ref := range s.ParamRefs {
-					upstreamTool := steps[ref.Step].Tool
-					if skill, ok := registry.Get(upstreamTool); ok {
-						outSchema := tools.GetOutputSchema(skill)
-						if outSchema == nil {
-							log.Printf("[dag] warning: param_ref %s.%s references %s which has no output schema", nodes[i].ID, pn, upstreamTool)
-						} else if !fieldExistsInSchema(outSchema, ref.Field) {
-							log.Printf("[dag] warning: param_ref %s.%s references field %q not in %s output schema", nodes[i].ID, pn, ref.Field, upstreamTool)
-						}
-					}
-				}
+			if !has {
+				nodes[i].DependsOn = append(nodes[i].DependsOn, dep)
 			}
 		}
 	}
@@ -1269,9 +1293,71 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 	return nodes, nil
 }
 
+// stepTemplateRe matches ${step.N(.path)?} placeholders in param strings.
+// Used at plan time to rewrite step indices to concrete node IDs and to
+// validate field paths against upstream output schemas.
+//
+//	${step.0}                 → match, step=0, path=""
+//	${step.3.content}         → match, step=3, path="content"
+//	${step.0.results.0.url}   → match, step=0, path="results.0.url"
+//	${node.X.field}           → not matched (already rewritten)
+var stepTemplateRe = regexp.MustCompile(`\$\{step\.(\d+)(?:\.([^}]+))?\}`)
+
+// rewriteStepTemplates walks every string value reachable in params,
+// finds ${step.N(.path)?} placeholders, and rewrites them in place to
+// ${node.<id>(.path)?} using the plan's step-index → node-id mapping.
+// Returns the set of node IDs referenced by templates so the caller can
+// add them to depends_on if not already present (a common LLM omission).
+//
+// Field-path warnings against upstream tool output schemas are logged
+// here too — the same diagnostic the param_refs code path used to emit,
+// just keyed off the new template syntax.
+func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string, steps []PlanStep, registry *tools.Registry) []string {
+	var implicitDeps []string
+	walkParams(params, func(s string) (any, bool) {
+		out := stepTemplateRe.ReplaceAllStringFunc(s, func(match string) string {
+			m := stepTemplateRe.FindStringSubmatch(match)
+			idx, _ := strconv.Atoi(m[1])
+			field := m[2]
+			if idx < 0 || idx >= len(nodeIDs) || nodeIDs[idx] == "" {
+				log.Printf("[dag] template %s on %s references invalid step %d, leaving placeholder unresolved", match, owner, idx)
+				return match
+			}
+			depID := nodeIDs[idx]
+			implicitDeps = append(implicitDeps, depID)
+			rewritten := "${node." + depID + "}"
+			if field != "" {
+				rewritten = "${node." + depID + "." + field + "}"
+			}
+			log.Printf("[dag] template %s on %s ← node %s%s", match, owner, depID, dotPrefix(field))
+			// Validate field against upstream's declared output schema —
+			// best-effort warning only, mirrors the legacy behaviour.
+			if registry != nil && field != "" {
+				upstreamTool := steps[idx].Tool
+				if skill, ok := registry.Get(upstreamTool); ok {
+					outSchema := tools.GetOutputSchema(skill)
+					if outSchema == nil {
+						log.Printf("[dag] warning: template on %s references %s which has no output schema", owner, upstreamTool)
+					} else if !fieldExistsInSchema(outSchema, field) {
+						log.Printf("[dag] warning: template on %s references field %q not in %s output schema", owner, field, upstreamTool)
+					}
+				}
+			}
+			return rewritten
+		})
+		if out != s {
+			return out, true
+		}
+		return s, false
+	})
+	return implicitDeps
+}
+
+// (dotPrefix lives in dispatcher.go — same package.)
+
 /*
  * fieldExistsInSchema checks if a dot-path field exists in a JSON Schema's properties.
- * desc: Used to validate param_refs field paths against declared output schemas
+ * desc: Used to validate template field paths against declared output schemas
  *       at plan time. Supports nested objects and array items traversal.
  * param: schemaJSON - the raw JSON Schema bytes.
  * param: fieldPath - dot-separated field path to validate.

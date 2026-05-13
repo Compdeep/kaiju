@@ -13,14 +13,35 @@ import (
 
 // validatorClassifierPrompt is the system prompt for the LLM validator.
 // Short on purpose — cheaper to cache, faster to classify.
-const validatorClassifierPrompt = `You classify the output of a validator step that ran after a coder wrote code.
+//
+// Philosophy: bash exit-code is the primary contract. This classifier only
+// fires when bash already exited 0. Our job is to catch the narrow case where
+// a script exited 0 but obviously crashed (unset set -e, unchecked pipes,
+// commands that swallow errors). Default to PASS unless something is clearly
+// broken. False negatives (passing a flawed script) are recoverable by the
+// reflector reading the final evidence; false positives (failing a working
+// script) trigger a full Holmes+debugger cycle and waste minutes.
+const validatorClassifierPrompt = `You classify validator output. The bash already exited 0 (success). Your only job: did the script actually run, or did it crash early?
 
 Return JSON only: {"pass": bool, "reason": "<one short sentence>"}.
 
-- "pass: true"  — output shows the target ran successfully (e.g. HTTP 200 body, test summary with zero failures, build succeeded).
-- "pass: false" — output shows any runtime error, crash, warning-that-aborts, failed assertion, connection refused, or empty response from a server that should have replied.
+PASS (default) — the script ran. Output looks weird, partial, warning-laden, or unfamiliar — that is still PASS. Examples:
+  • JSON with all expected keys
+  • build logs ending in success
+  • HTTP responses (any status)
+  • test runners reporting zero failures (or no test summary at all)
+  • lint complaints, deprecation notices, slow performance
+  • the word "error" appearing inside otherwise-normal output
+  • partial or surprising results
 
-Treat warnings that do not abort execution as pass. Treat any uncaught exception, stack trace, or "error:"-style message as fail regardless of the language.
+FAIL — only when the output shows the script could not run at all:
+  • "command not found" / "No such file or directory" as the whole substance
+  • syntax error or import error preventing execution
+  • an uncaught exception or stack trace that aborted the program
+  • a test runner reporting a non-zero failure count (e.g. "1 failed", "FAIL: …")
+  • "Connection refused" when a server was clearly expected to answer
+
+When in doubt, PASS. False fails cost a full debug cycle; false passes are caught later by the reflector.
 
 No markdown, no code fences, no commentary. JSON object only.`
 
@@ -38,9 +59,13 @@ type validatorLLMResp struct {
 func (a *Agent) classifyValidatorOutput(ctx context.Context, tag, output string) (bool, string, error) {
 	trimmed := strings.TrimSpace(output)
 	if trimmed == "" {
-		// Empty output from a validator = nothing served = failure.
-		// No LLM needed.
-		return true, "empty validator output", nil
+		// Empty output + bash exit 0 = quiet check passed. `grep -q`,
+		// `test`, `[ … ]`, `diff -q` etc. are *defined* to be silent on
+		// success; treating empty stdout as failure was wrongly flagging
+		// every key-existence check as a false positive. Bash exit-code
+		// is the source of truth — failed validators come through the
+		// isBashError branch in the scheduler, never here.
+		return false, "quiet check passed (exit 0, no output)", nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

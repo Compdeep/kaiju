@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
@@ -41,6 +42,24 @@ const preflightSystemPrompt = `You are a query preflight analyst. Analyze the us
 
 If the user's query is "get this site working" and the prior context mentions a React + Vite webapp, the skills should include the webdeveloper skill (because the project is a webapp), but the mode/intent classification should be based only on the literal query "get this site working".
 
+## CRITICAL: identifier preservation in context
+
+The "context" field is the ONLY way concrete details from chat history reach downstream tasks. The Coder, Executive, and microplanner cannot see the conversation — they see only your context paragraph. **Anything you paraphrase, generalise, or omit is permanently lost for this turn.**
+
+You MUST quote verbatim every concrete identifier present in the user's query OR the prior context:
+- URLs (full, with query params, even if long): https://www.murc-kawasesouba.jp/fx/past_3month_result.php?y=2025&m={month}&d={day}&c=366551
+- File paths: uploads/<session>/data.csv, project/script.py
+- HTML/CSS selectors and table classes: <table class="data-table5">, #main
+- API endpoints, function names, column/field names: TTM, 金額, update_csv_with_exchange_rates
+- Exact constants and rules: "5 second delay between requests", "round to 2 decimals", "skip rows where col 9 is empty"
+- Specific data shapes the user described
+
+If the prior context contains URLs or selectors and the current query is "try again" or "do it", you MUST repeat those URLs/selectors verbatim in your context paragraph — otherwise the executive plans against an empty spec and the Coder hallucinates.
+
+Failure mode to avoid: "the user wants to update the CSV with the **correct URLs**" — "correct URLs" is a paraphrase. The downstream LLM does not know which URLs. Quote them.
+
+A long context paragraph is fine. A lossy short one is a bug.
+
 ## Output schema
 
 {
@@ -48,7 +67,7 @@ If the user's query is "get this site working" and the prior context mentions a 
   "mode": "chat" | "meta" | "investigate",
   "intent": %s,
   "required_categories": ["network", "filesystem", "compute", "process", "info"],
-  "context": "one sentence framing the user's intent for the executor",
+  "context": "paragraph covering intent + every concrete identifier (URLs, paths, selectors, constants) verbatim",
   "compute_mode": "" | "shallow" | "deep"
 }
 
@@ -58,9 +77,9 @@ If the user's query is "get this site working" and the prior context mentions a 
 %s
 
 **mode** — Based on the user's CURRENT query only, classify:
-- "chat": ONLY greetings, thanks, small talk, or purely conversational messages with no actionable request. Examples: "hello", "thanks", "how are you".
-- "meta": questions about your own capabilities. Examples: "what can you do", "what tools do you have".
-- "investigate": the user wants ANYTHING done or answered. Download, build, fix, find, run, search, explain, create, analyze, install, deploy, check, test — if there is a verb asking you to act or produce information, it is investigate. When in doubt, choose investigate.
+- "chat": ONLY pure social messages with zero actionable content. Greetings ("hello", "hey"), thanks ("ty", "thanks"), farewells ("bye", "see you"), or trivial acknowledgements ("ok", "got it", "cool"). NOTHING ELSE qualifies as chat.
+- "meta": questions about your own capabilities. Examples: "what can you do", "what tools do you have", "how do you work".
+- "investigate": EVERYTHING ELSE — including complaints, diagnostic comments, frustration, follow-up clarifications, imperatives, questions, hypotheticals. If the user mentions a task, an output, a tool, a file, a website, a number, a name, or expresses ANY desire (explicit or implied), it is investigate. Examples that are investigate, not chat: "you didn't fetch the data", "use your compute", "you have python try again", "I told you to do X", "isn't it possible to Y", "what about Z". When in doubt, ALWAYS choose investigate. Misclassifying chat as investigate costs one extra LLM call; misclassifying investigate as chat blocks the user's actual request.
 
 **intent** — Safety level the plan will need. Pick based on what ACTIONS the query implies, not how it's phrased. A user reporting a problem ("X isn't working", "I can't access Y") after prior work implicitly wants it fixed — that requires operate, not observe. Pick one:
 %s
@@ -72,12 +91,40 @@ If the user's query is "get this site working" and the prior context mentions a 
 - "process": manage system processes, services, daemons
 - "info": system state, env vars, disk, network info
 
-**context** — One sentence summarising what the user wants, using both the current query AND the prior context. This frames vague queries like "do it", "get more", "try again" for the executor. Be specific: "User wants to download more eurodance videos using yt-dlp" not "User wants more." Include the method/tool if the prior context established one.
+**context** — A paragraph covering what the user wants AND every concrete identifier needed to complete the task. Length should match what the task actually requires — short for trivial requests, longer for tasks with URLs/selectors/constants. See the "CRITICAL: identifier preservation" section above for the verbatim-quoting rule.
 
-**compute_mode** — Whether the plan will need a compute node, and at what depth. This decision is yours alone — the planner treats it as authoritative.
-- "deep": the user is asking to BUILD a new codebase — webapp, CLI tool, service, library, multi-file project from scratch. Example queries: "build me a todo app", "scaffold a Vue project", "create a REST API for X".
-- "shallow": the user wants a one-off script, calculation, data transformation, analysis, or ranking — even across many inputs. Example queries: "rank these ports by idle cost", "parse this CSV and find duplicates", "calculate the total revenue by region".
-- "": the user's query needs no compute at all (pure chat, lookup, web search, file read, system info, etc.).
+**compute_mode** — Whether the plan will need a compute node. **Default to "" — the aggregator (an LLM call) handles small math, ranking, summarisation, and reasoning over gathered evidence on its own.** Compute is overhead: it spawns a coder LLM, writes a script, runs it, captures stdout. Only escalate when the LLM cannot reliably do the job.
+
+Set "shallow" ONLY when at least one of these is true:
+- A library is required to do the work (numpy, scipy, pandas, sgp4, skyfield, pyephem, astropy, BeautifulSoup, jq, etc.) — the LLM can't run code.
+- The data is too large for LLM context (CSV with thousands of rows, log files, big JSON dumps).
+- Precision matters in a way the LLM is bad at (financial math, exact floating-point, date arithmetic, sgp4 propagation, statistical inference).
+- The user explicitly asked for code, a script, a deliverable file, or repeatable/auditable output.
+- The output needs to feed another tool as a real value (not prose).
+
+**Lookup-shaped but compute-required.** Some queries phrase themselves as lookups ("find", "when is", "show me", "what's the next") but their answer requires real computation because no static page has it pre-computed. **These all get compute_mode="shallow", regardless of how they're phrased:**
+- Next visible passes / pass times of any satellite from a location ("next Starlink over Tokyo at 9pm", "ISS pass times for Berlin tonight")
+- Current sky position of an astronomical body from an observer ("where is Jupiter from London right now")
+- Conjunction / close-approach probabilities between orbital objects ("probability of Starlink/ISS within 5km in 14 days")
+- Orbital decay, atmospheric drag, re-entry predictions
+- When astronomical events are visible from a location (eclipses, transits, meteor showers, ISS passes)
+- Asteroid risk rankings (Palermo Scale, Torino Scale) for current PHAs
+- Sunrise/sunset/twilight at arbitrary lat/lon and date — only city-level "next sunrise in Tokyo" is a lookup; arbitrary coordinates require computation
+- Currency conversions over historical date ranges (ratesheet × per-row arithmetic)
+- Statistical analysis or ranking across more than ~10 items where the key requires computing
+
+These all need a library (sgp4, skyfield, astropy, ephem, pandas) or a propagation/integration step. The fact that a website exists for it doesn't mean the data is fetchable — most "trackers" are JS widgets that compute on click. Don't assume "Heavens-Above has the page." Set compute_mode="shallow" so the planner fetches raw source data (TLE catalogs from CelesTrak, ephemeris tables, almanacs) and computes properly.
+
+Set "deep" only when the user is asking to BUILD a new codebase — webapp, CLI tool, service, library, multi-file project from scratch ("build me a todo app", "scaffold a Vue project").
+
+Set "" for everything else, including:
+- Pure information retrieval ("what is X", "current ISS altitude" — a static number from a press release)
+- Summarisation / qualitative analysis ("summarise this article", "what's the gist of these results")
+- Simple math the aggregator can do (one sum, one percentage, ranking <10 items by an obvious key)
+- Conversational / advisory answers
+- Generic web searches, file reads, system info
+
+When unsure between "" and "shallow", prefer "shallow" for anything astronomical, orbital, financial, or statistical — the cost of a wasted coder call is much less than the cost of returning "use an external app" to the user, which is forbidden.
 
 The presence of an existing project in the workspace is NOT a signal. Only the user's current query + prior context drive this choice. A user asking "what's the weather" after previously building a webapp still gets compute_mode="".
 
@@ -124,7 +171,7 @@ type preflightRaw struct {
  * return: populated PreflightResult. Never returns nil; on failure, returns
  *         a neutral result so the caller can proceed with defaults.
  */
-func (a *Agent) preflightQuery(ctx context.Context, query string, history []llm.Message) *PreflightResult {
+func (a *Agent) preflightQuery(ctx context.Context, alertID, query string, history []llm.Message) *PreflightResult {
 	manifest := a.buildSkillManifest()
 	log.Printf("[dag] preflight: manifest has %d capabilities + %d guidance skills", len(a.capabilities), len(a.skillGuidance))
 	// Build dynamic intent list from the registry: enum for schema + descriptions.
@@ -158,6 +205,16 @@ func (a *Agent) preflightQuery(ctx context.Context, query string, history []llm.
 	}
 	log.Printf("[dag] preflight: query=%q, history=%d turns (last assistant injected as context)", query, len(history))
 
+	started := time.Now()
+	trace := LLMTrace{
+		AlertID:  alertID,
+		NodeType: "preflight",
+		Tag:      "classify",
+		Started:  started,
+		System:   sysPrompt,
+		User:     query,
+	}
+
 	resp, err := a.executor.Complete(ctx, &llm.ChatRequest{
 		Messages:    msgs,
 		Tools:       []llm.ToolDef{preflightToolDef()},
@@ -165,22 +222,31 @@ func (a *Agent) preflightQuery(ctx context.Context, query string, history []llm.
 		Temperature: 0.0,
 		MaxTokens:   256,
 	})
+	trace.LatencyMS = time.Since(started).Milliseconds()
 	if err != nil {
 		log.Printf("[dag] preflight failed, using defaults: %v", err)
+		trace.Err = err.Error()
+		WriteLLMTrace(trace)
 		return defaultPreflight()
 	}
 
 	raw, err := extractToolArgs(resp)
 	if err != nil {
 		log.Printf("[dag] preflight returned no choices, using defaults")
+		trace.Err = "no tool args returned"
+		WriteLLMTrace(trace)
 		return defaultPreflight()
 	}
+	trace.Output = raw
 	var out preflightRaw
 	if err := ParseLLMJSON(raw, &out); err != nil {
 		log.Printf("[dag] preflight parse failed (%v), using defaults", err)
+		trace.Err = "parse failed: " + err.Error()
+		WriteLLMTrace(trace)
 		return defaultPreflight()
 	}
 
+	WriteLLMTrace(trace)
 	return a.validatePreflight(&out)
 }
 

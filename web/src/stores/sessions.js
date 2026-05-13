@@ -16,7 +16,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   function _ensure(sid) {
     if (!sid) return null
     if (!perSession.has(sid)) {
-      perSession.set(sid, reactive({ messages: [], loading: false }))
+      perSession.set(sid, reactive({ messages: [], loading: false, attachments: [], sendInFlight: false }))
     }
     return perSession.get(sid)
   }
@@ -29,6 +29,14 @@ export const useSessionsStore = defineStore('sessions', () => {
   const loading = computed({
     get: () => _ensure(sessionId.value)?.loading || false,
     set: (v) => { const s = _ensure(sessionId.value); if (s) s.loading = v }
+  })
+  // Per-session list of attached uploads. Each entry is the upload
+  // Result returned by POST /api/v1/sessions/<sid>/uploads (or a
+  // `pending: true` placeholder while uploading). Cleared by chat.send()
+  // after the user's message is dispatched.
+  const attachments = computed({
+    get: () => _ensure(sessionId.value)?.attachments || [],
+    set: (v) => { const s = _ensure(sessionId.value); if (s) s.attachments = v }
   })
 
   /** Get a specific session's state (for SSE routing). */
@@ -63,7 +71,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   function dropSession(sid) { perSession.delete(sid) }
 
   return {
-    sessionId, sessions, messages, loading, intent,
+    sessionId, sessions, messages, loading, attachments, intent,
     runMode, aggMode, executionMode,
     setRunMode, setAggMode, setExecutionMode, setSessionId,
     getSession, dropSession,

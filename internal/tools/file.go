@@ -200,9 +200,9 @@ func (f *FileWrite) Execute(_ context.Context, params map[string]any) (string, e
 	if path == "" {
 		return "", fmt.Errorf("file_write: path is required")
 	}
-	// Reject unresolved placeholder content — param_refs failed or weren't used
+	// Reject unresolved placeholder content — substitution failed or wasn't wired
 	if strings.HasPrefix(content, "${") || strings.HasPrefix(content, "{{") {
-		return "", fmt.Errorf("file_write: content is an unresolved placeholder %q — use param_refs or compute instead", content)
+		return "", fmt.Errorf("file_write: content is an unresolved placeholder %q — wire ${step.N.field} from an upstream step or use compute instead", content)
 	}
 	// Gate writes to the workspace-relative allowed zones. This blocks the
 	// agent from editing its own source tree (cmd/, internal/, etc.) when

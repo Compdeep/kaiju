@@ -739,7 +739,7 @@ func ExistingBlueprints() SourceSpec {
 // ToolIndex returns a spec for a compact listing of the tools named in
 // `names`. Each entry has the tool signature, description, and (when the
 // tool declares one) a compact view of its output schema so the planner
-// knows what fields downstream param_refs can target.
+// knows what fields downstream ${step.N.field} placeholders can target.
 //
 // Pass the relevance-filtered list of tool names the caller wants visible.
 // Empty list → no content.
@@ -1247,7 +1247,7 @@ func (s *existingBlueprintsSource) Load(g *Graph, t *Trigger, a *Agent, params m
 // toolIndexSource: compact per-tool listing for the planner. Signature +
 // description + compact output shape (property names and their descriptions
 // when declared). Output schemas are the bit the planner needs to write
-// correct param_refs against downstream node results.
+// correct ${step.N.field} placeholders against downstream node results.
 type toolIndexSource struct{}
 
 func (s *toolIndexSource) Name() string { return SourceToolIndex }

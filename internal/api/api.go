@@ -13,6 +13,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/uploads"
 	"github.com/Compdeep/kaiju/internal/clearance"
 	"github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
@@ -29,6 +30,7 @@ type API struct {
 	db               *db.DB
 	llmClient        *llm.Client
 	clearanceChecker *clearance.Checker
+	uploadProc       *uploads.Processor // nil until SetUploadProcessor is called from main.go
 }
 
 /*
@@ -65,6 +67,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sessions/{id}/messages", a.handleGetMessages)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/compact", a.handleCompactSession)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/trace", a.handleSaveTrace)
+	// Uploads — per-session attachments
+	mux.HandleFunc("POST /api/v1/sessions/{id}/uploads", a.handleUploadFile)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/uploads", a.handleListUploads)
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}/uploads/{name}", a.handleDeleteUpload)
 	// Memories
 	mux.HandleFunc("POST /api/v1/memories", a.handleStoreMemory)
 	mux.HandleFunc("GET /api/v1/memories", a.handleSearchMemories)

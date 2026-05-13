@@ -48,14 +48,14 @@ Planning Guidance teaches the DAG planner how to structure tool calls. Each patt
 1. Name the tools to use (`bash`, `file_read`, `file_write`, `web_search`, etc.)
 2. Show which steps run in parallel vs sequential
 3. Indicate dependencies between steps
-4. Mention `param_refs` when output from one step feeds into another
+4. Mention `${step.N.field}` placeholders when output from one step feeds into another
 
 Example pattern:
 ```
 ### Do something
 
 1. `tool_a` — description of what it does
-2. `tool_b` — depends on step 0, use param_refs for chaining
+2. `tool_b` — depends on step 0; reference its output inline as `${step.0.field}` inside the relevant param
 3. `tool_c` — parallel with step 1
 ```
 

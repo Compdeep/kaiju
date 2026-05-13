@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/internal/agent/uploads"
 	"github.com/Compdeep/kaiju/internal/api"
 	"github.com/Compdeep/kaiju/internal/auth"
 	"github.com/Compdeep/kaiju/internal/channels"
@@ -562,6 +563,8 @@ func runServe() {
 
 	// Execution API routes (always available — JWT-protected)
 	apiHandler := api.New(ag, cfg.Agent.SafetyLevel, kaijuDB, ag.LLMClient(), clrChecker)
+	// Uploads pipeline — uses the executor client for synchronous summaries.
+	apiHandler.SetUploadProcessor(uploads.New(ag, ag.ExecutorClient()))
 	execMux := http.NewServeMux()
 	apiHandler.RegisterRoutes(execMux)
 	mux.Handle("/api/v1/execute", gateway.WithJWTAuth(jwtSvc)(execMux))

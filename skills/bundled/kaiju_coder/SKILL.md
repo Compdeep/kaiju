@@ -45,7 +45,7 @@ Maximize parallelism: files that don't depend on each other should be read and w
 ### Debugging a failing test or build
 
 1. `bash` — reproduce the failure (run the exact failing command)
-2. `file_read` — read the file(s) referenced in the error output, use `param_refs` to chain from the bash output when possible
+2. `file_read` — read the file(s) referenced in the error output; reference the path inline as `"path": "${step.0.<field>}"` when chaining from the bash output
 3. `file_write` — apply the fix (depends on the read)
 4. `bash` — re-run the original command to confirm (depends on the write)
 
@@ -61,7 +61,7 @@ Maximize parallelism: files that don't depend on each other should be read and w
 Read-only — no writes needed. Plan parallel reads then synthesize.
 
 1. `bash` — `git diff` or `git log` to identify changed files
-2. `file_read` calls in parallel for each changed file (depend on step 0, use `param_refs` to extract paths)
+2. `file_read` calls in parallel for each changed file (depend on step 0; reference each path inline as `"path": "${step.0.<field>}"`)
 
 ### Project discovery
 

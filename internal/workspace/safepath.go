@@ -10,7 +10,7 @@ import (
 // files may land. Anything outside these zones is rejected by SafeJoin to
 // stop the agent from editing its own source tree (or any sibling project)
 // when running in CLI mode where workspace = cwd.
-var AllowedZones = []string{"project", "media", "canvas", "blueprints"}
+var AllowedZones = []string{"project", "media", "canvas", "blueprints", "uploads"}
 
 // SafeJoin resolves relPath against workspace and verifies it falls inside
 // one of AllowedZones. Returns the cleaned absolute path or an error.

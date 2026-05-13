@@ -278,14 +278,14 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		}
-		stdoutStr := stdout.String()
-		stderrStr := stderr.String()
-		if len(stdoutStr) > 200 {
-			stdoutStr = stdoutStr[:200] + "..."
-		}
-		if len(stderrStr) > 200 {
-			stderrStr = stderrStr[:200] + "..."
-		}
+		// Head+tail truncation. The previous head-only strategy stripped the
+		// last line of Python tracebacks (the OverflowError/ValueError/etc.
+		// message) — leaving Holmes with the unhelpful "Traceback (most
+		// recent call last):" header and no error type. For tracebacks and
+		// most CLI errors the diagnostic info lives at the END, not the
+		// start, so we keep both ends.
+		stdoutStr := headTailTruncate(stdout.String(), 200, 600)
+		stderrStr := headTailTruncate(stderr.String(), 200, 600)
 		errInfo := map[string]any{
 			"bash_error": true,
 			"exit_code":  exitCode,
@@ -302,3 +302,16 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 }
 
 var _ tools.Tool = (*Bash)(nil)
+
+// headTailTruncate keeps the first `head` bytes and last `tail` bytes of s,
+// inserting a "... [N bytes elided] ..." separator if truncation happened.
+// Critical for Python tracebacks and most CLI errors, where the actionable
+// line is at the END (e.g. "OverflowError: date value out of range") and a
+// head-only truncation would discard it. Short inputs pass through.
+func headTailTruncate(s string, head, tail int) string {
+	if len(s) <= head+tail {
+		return s
+	}
+	elided := len(s) - head - tail
+	return s[:head] + fmt.Sprintf("\n... [%d bytes elided] ...\n", elided) + s[len(s)-tail:]
+}

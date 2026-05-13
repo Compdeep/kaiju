@@ -45,7 +45,11 @@ type reflectionOutput struct {
 func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	budget *Budget, ch chan<- nodeCompletion, trigger Trigger, gateCtx *ContextResponse, intent ...gates.Intent) {
 
-	sysPrompt := fmt.Sprintf(reflectorClassifierPrompt, a.FormatRule()) + a.fleetSection()
+	// Prepend SOUL.md (identity + persistence litany) — same reach as the
+	// aggregator. Without this the reflector lacks the "don't give up / don't
+	// punt to other apps" cluster and takes the easy "conclude · too complex"
+	// exit on hard queries.
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, fmt.Sprintf(reflectorClassifierPrompt, a.FormatRule())) + a.fleetSection()
 	userPrompt := assembleReflectorPrompt(graph, gateCtx, trigger)
 
 	messages := []llm.Message{
@@ -220,7 +224,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
 	}
 
-	sysPrompt := interjectionReflectionPrompt + toolSection.String() + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, interjectionReflectionPrompt) + toolSection.String() + a.fleetSection()
 
 	// User prompt — operator message first, then graph state
 	var userBuf strings.Builder

@@ -63,8 +63,7 @@ type Node struct {
     Tag        string            // short human label
     Type       NodeType          // NodeTool | NodeCompute | NodeReflector | ...
     ToolName   string            // empty for non-tool nodes
-    Params     map[string]any
-    ParamRefs  map[string]ResolvedInjection  // DI: populated by fireNode before execution
+    Params     map[string]any    // ${node.<id>(.field)?} placeholders inside string values are substituted by fireNode before execution
     DependsOn  []string
     Result     string            // JSON or plain text emitted by the tool
     State      NodeState         // StateReady | StateResolved | StateFailed | StateSkipped
@@ -73,13 +72,9 @@ type Node struct {
     EndedAt    time.Time
     // ...
 }
-
-type ResolvedInjection struct {
-    NodeID   string   // graph node ID of the dep
-    Field    string   // dot-path into dep.Result, "" means use whole result
-    Template string   // optional "X {{value}} Y" wrap
-}
 ```
+
+Dependency injection is expressed inline as `${step.N(.field)?}` placeholders inside string-valued params. The Executive emits them at plan time; `planStepsToNodes` rewrites them to `${node.<id>(.field)?}` once the per-node IDs are minted; the dispatcher substitutes them at fire time from `dep.Result`.
 
 Nodes can be grafted onto the Graph at runtime — architect grafts coder/bash children, the microplanner grafts fix steps after Holmes concludes. `SpawnedBy` records the parent so the scheduler can hoist child results back onto the parent.
 
@@ -107,9 +102,9 @@ Outputs flow into the Executive's prompt as context. `mode=chat` or `mode=meta` 
 
 ```json
 {"steps": [
-  {"tool": "file_read",  "params": {...}, "depends_on": [],   "tag": "..."},
-  {"tool": "edit_file",  "params": {...}, "depends_on": [0],  "tag": "..."},
-  {"tool": "bash",       "params": {...}, "param_refs": {...}, "depends_on": [1], "tag": "..."}
+  {"tool": "file_read",  "params": {"path": "config.json"},                                "depends_on": [],   "tag": "..."},
+  {"tool": "edit_file",  "params": {"goal": "...", "task_files": ["..."]},                 "depends_on": [0],  "tag": "..."},
+  {"tool": "bash",       "params": {"command": "echo '${step.0.content}' | wc -l"},        "depends_on": [1],  "tag": "..."}
 ]}
 ```
 
@@ -147,18 +142,18 @@ The Scheduler also owns:
 Responsibilities, in order:
 
 1. **Tag** the node with the investigation's active skills for frontend display.
-2. **Resolve param_refs** — `resolveInjections`. For each declared ref:
+2. **Substitute templates** — `substituteTemplates`. Walk every string value in `n.Params` looking for `${node.<id>(.field)?}` placeholders. For each:
    - Look up the dep Node in the graph. Dep must have a non-empty `Result`.
-   - Validate presence of the named field in `dep.Result` via `validateParamRef`. If `ref.Field` is "" the whole result is injected as-is; otherwise the field must actually be present. Absent field → fail the step with a descriptive error. (This is what closes the silent-fallback where downstream tools received metadata JSON instead of the intended data.)
-   - Extract the value, apply optional `Template`, land it into `n.Params[paramName]`.
-3. **Validate direct params** — `validateDirectParams`. Every key in `n.Params` that was not injected via `param_refs` must be either declared in the tool's schema or allowed by `additionalProperties`. Unknown keys (e.g. `bash({command, cwd})` where bash has no `cwd`) → fail the step. Each tool declares its own strictness via its schema; the validator just reads it.
+   - If the field path is empty, the whole `dep.Result` replaces the placeholder. Otherwise the field is extracted from `dep.Result` (parsed as JSON when possible). When the placeholder is the entire string value (`"${node.X.f}"`), the substituted value preserves its original type (object, array, number, string). When embedded mid-string (`"prefix ${node.X.f} suffix"`), the value is stringified.
+   - A missing field falls back to the whole result with a `[dispatch:resolve-fallback]` log line so silent corruption is at least audible.
+3. **Validate direct params** — `validateDirectParams`. Every key in `n.Params` must be either declared in the tool's schema or allowed by `additionalProperties`. Unknown keys (e.g. `bash({command, cwd})` where bash has no `cwd`) → fail the step. Each tool declares its own strictness via its schema; the validator just reads it.
 4. **Throttle** — per-tool cooldown via `toolThrottle`.
 5. **Gate** — scope check, rate limit, IGX triad check (impact ≤ min(intent, clearance, scope cap)), external clearance if configured.
 6. **Dispatch** — `ContextualExecutor.ExecuteWithContext(ec, params)` when implemented (compute, edit_file), plain `Execute(ctx, params)` otherwise.
 7. **Audit + side-effect record** — every attempt enters the audit log; non-zero-impact tools land in the event store.
 8. **Truncate** result to `maxToolResultLen` with head+tail preservation, except for ContextualExecutor results (those are structured pipeline data the scheduler parses).
 
-Both failure modes — unknown direct param, missing param_ref field — log a `[dispatch:reject]` line. Failures become `StateFailed` on the node; the existing Reflector → Holmes → Microplanner chain picks recovery.
+Both failure modes — unknown direct param, malformed template — log a `[dispatch:reject]` line. Failures become `StateFailed` on the node; the existing Reflector → Holmes → Microplanner chain picks recovery.
 
 ### Reflector
 
@@ -252,7 +247,7 @@ Executive picks:        compute            edit_file
 ```
 
 - **compute(deep)** — project scaffolding. Architect plans, scheduler grafts setup/coders/execute/service/validators.
-- **compute(shallow)** — value generation. Coder emits a runnable script, scheduler grafts an exec bash child, the script's stdout is merged onto the parent's Result as `.output` for downstream `param_refs`. Must declare `execute`; a shallow compute that produces a file with no executable command is rejected so `.output` is always meaningful.
+- **compute(shallow)** — value generation. Coder emits a runnable script, scheduler grafts an exec bash child, the script's stdout is merged onto the parent's Result as `.output` so downstream steps can read it via `${step.N.output}`. Must declare `execute`; a shallow compute that produces a file with no executable command is rejected so `.output` is always meaningful.
 - **edit_file** — known-path file operations. `task_files` is required. The Coder pipeline runs the same way as compute(shallow) but with an authoritative destination path; the coder's chosen filename is ignored. No `.output`, no execute — this tool writes files, it does not compute values.
 
 ### Architect
@@ -309,33 +304,34 @@ compute      Value generator via runnable script (shallow) or project
 Param flow from plan time to execution:
 
 ```
-planner declares:            {"params": {"path": "..."},
-                              "param_refs": {"content": {"step": 3, "field": "output"}}}
+planner declares:            {"params": {"path": "...",
+                                         "content": "${step.3.output}"}}
                                         │
                                         ▼
-Scheduler builds Node:       Node{Params: {"path": "..."}, ParamRefs: {"content": {NodeID: "n3", Field: "output"}}}
+planStepsToNodes rewrites:   {"params": {"path": "...",
+                                         "content": "${node.n3.output}"}}
                                         │
                                         ▼
-Dispatcher.fireNode:         resolveInjections(n, graph)
-                               for each ref:
-                                 dep := graph.Get(ref.NodeID)
-                                 validateParamRef(paramName, ref, dep.Result)   ← field must exist
-                                 value := extractJSONField(dep.Result, ref.Field)
-                                 n.Params[paramName] = value
-                             validateDirectParams(tool, n.Params, n.ParamRefs)  ← unknown keys → fail
+Dispatcher.fireNode:         substituteTemplates(n, graph)
+                               walk every string value in n.Params:
+                                 for each ${node.<id>(.field)?} match:
+                                   dep := graph.Get(<id>)
+                                   if value is the entire string → replace with typed dep field
+                                   else → embed stringified field mid-string
+                             validateDirectParams(tool, n.Params)  ← unknown keys → fail
                                         │
                                         ▼
 tool.Execute(ctx, n.Params)
 ```
 
-Both validation points fail the node with a descriptive error. The failure flows through the normal path: reflector → Holmes → microplanner replan. No new recovery machinery.
+Substitution failures (referenced node not in graph, dep has no `Result`) fail the node with a descriptive error. Missing-field paths fall back to the whole `dep.Result` with a `[dispatch:resolve-fallback]` log line. Failures flow through the normal path: reflector → Holmes → microplanner replan. No new recovery machinery.
 
 Validation rules:
 
-- **Direct params** — a key is allowed if it appears in `tool.Parameters().properties` OR the schema's `additionalProperties` is true (default when absent, per JSON Schema). Tools with `additionalProperties: false` get strict checking; tools like `compute` that legitimately accept arbitrary param names via `param_refs` stay loose.
-- **Param_refs** — `ref.Field == ""` injects the whole `dep.Result` (legitimate for chaining raw text). Otherwise the field must exist in the dep's Result JSON — no silent fallback to the full result.
+- **Direct params** — a key is allowed if it appears in `tool.Parameters().properties` OR the schema's `additionalProperties` is true (default when absent, per JSON Schema). Tools with `additionalProperties: false` get strict checking; tools like `compute` that legitimately accept arbitrary param names (typically wired in via `${step.N.field}` placeholders) stay loose.
+- **Templates** — `${step.N}` (no field) substitutes the whole upstream result. `${step.N.path.to.field}` extracts via `extractJSONFieldAny` (preserves type when the placeholder is the entire string value, stringifies when embedded mid-string).
 
-Both rejection paths emit `[dispatch:reject]` log lines so telemetry can count hallucination rate without scraping.
+Both direct-param rejection and template failures emit `[dispatch:reject]` log lines so telemetry can count hallucination rate without scraping.
 
 ## Budgets
 

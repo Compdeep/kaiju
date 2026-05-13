@@ -22,7 +22,7 @@
             <div class="form-group">
               <label>api key <span v-if="cfg.llm.api_key" class="key-set">&#10003; set</span><span v-else class="key-missing">not set</span></label>
               <div class="key-row">
-                <input v-model="apiKey" type="password" :placeholder="cfg.llm.api_key ? 'enter new key to replace' : 'paste key'" />
+                <input v-model="apiKey" type="password" name="kaiju-api-key" id="kaiju-api-key" autocomplete="off" data-form-type="other" data-1p-ignore data-lpignore="true" :placeholder="cfg.llm.api_key ? 'enter new key to replace' : 'paste key'" />
                 <button class="btn btn-sm" @click="saveKey" :disabled="!apiKey">save</button>
               </div>
             </div>

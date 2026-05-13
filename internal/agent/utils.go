@@ -1602,9 +1602,28 @@ func scanWorkspaceDeep(root string, maxDepth int) string {
 }
 
 func extractJSONField(jsonStr, fieldPath string) (string, error) {
+	v, err := extractJSONFieldAny(jsonStr, fieldPath)
+	if err != nil {
+		return "", err
+	}
+	switch x := v.(type) {
+	case string:
+		return x, nil
+	default:
+		b, _ := json.Marshal(x)
+		return string(b), nil
+	}
+}
+
+// extractJSONFieldAny is the typed cousin of extractJSONField — instead
+// of stringifying the result, returns the raw decoded value (string,
+// number, bool, []any, map[string]any). Used by template substitution
+// when the WHOLE param value is a single placeholder, so the original
+// type passes through to the tool unmodified.
+func extractJSONFieldAny(jsonStr, fieldPath string) (any, error) {
 	var data any
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return "", fmt.Errorf("result is not JSON: %w", err)
+		return nil, fmt.Errorf("result is not JSON: %w", err)
 	}
 
 	parts := strings.Split(fieldPath, ".")
@@ -1614,27 +1633,20 @@ func extractJSONField(jsonStr, fieldPath string) (string, error) {
 		case map[string]any:
 			val, ok := m[part]
 			if !ok {
-				return "", fmt.Errorf("field %q not found", part)
+				return nil, fmt.Errorf("field %q not found", part)
 			}
 			current = val
 		case []any:
 			idx, err := strconv.Atoi(part)
 			if err != nil || idx < 0 || idx >= len(m) {
-				return "", fmt.Errorf("invalid array index %q", part)
+				return nil, fmt.Errorf("invalid array index %q", part)
 			}
 			current = m[idx]
 		default:
-			return "", fmt.Errorf("cannot traverse into %T at %q", current, part)
+			return nil, fmt.Errorf("cannot traverse into %T at %q", current, part)
 		}
 	}
-
-	switch v := current.(type) {
-	case string:
-		return v, nil
-	default:
-		b, _ := json.Marshal(v)
-		return string(b), nil
-	}
+	return current, nil
 }
 
 /*

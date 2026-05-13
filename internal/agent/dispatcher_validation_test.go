@@ -90,7 +90,7 @@ func TestValidateDirectParams_AllowsDeclaredKeys(t *testing.T) {
 		name:   "bash",
 		params: json.RawMessage(`{"properties":{"command":{},"timeout_sec":{}},"additionalProperties":false}`),
 	}
-	err := validateDirectParams(tool, map[string]any{"command": "ls"}, nil)
+	err := validateDirectParams(tool, map[string]any{"command": "ls"})
 	if err != nil {
 		t.Fatalf("expected allow, got %v", err)
 	}
@@ -101,7 +101,7 @@ func TestValidateDirectParams_RejectsUndeclared_WhenAdditionalFalse(t *testing.T
 		name:   "bash",
 		params: json.RawMessage(`{"properties":{"command":{},"timeout_sec":{}},"additionalProperties":false}`),
 	}
-	err := validateDirectParams(tool, map[string]any{"command": "ls", "cwd": "/tmp"}, nil)
+	err := validateDirectParams(tool, map[string]any{"command": "ls", "cwd": "/tmp"})
 	if err == nil {
 		t.Fatalf("expected reject of unknown param `cwd`")
 	}
@@ -123,76 +123,21 @@ func TestValidateDirectParams_AllowsUndeclared_WhenAdditionalAbsent(t *testing.T
 		"goal":       "X",
 		"mode":       "shallow",
 		"ports_data": "some data",
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("expected allow (additionalProperties default=true), got %v", err)
 	}
 }
 
-func TestValidateDirectParams_IgnoresKeysCoveredByParamRefs(t *testing.T) {
-	// When a param's value is injected via param_refs, its name is the
-	// planner's choice and not meant to appear in the tool's schema.
-	tool := &fakeTool{
-		name:   "file_write",
-		params: json.RawMessage(`{"properties":{"path":{},"content":{}},"additionalProperties":false}`),
-	}
-	refs := map[string]ResolvedInjection{
-		"content": {NodeID: "n1", Field: "body"},
-	}
-	err := validateDirectParams(tool, map[string]any{"path": "/tmp/x", "content": "ignored-by-refs"}, refs)
-	if err != nil {
-		t.Fatalf("content comes from refs, should be allowed: %v", err)
-	}
-}
-
 func TestValidateDirectParams_RejectsMalformedSchema(t *testing.T) {
 	tool := &fakeTool{name: "broken", params: json.RawMessage(`garbage`)}
-	err := validateDirectParams(tool, map[string]any{"x": 1}, nil)
+	err := validateDirectParams(tool, map[string]any{"x": 1})
 	if err == nil {
 		t.Fatalf("expected error for malformed schema")
 	}
 }
 
-// ── validateParamRef ─────────────────────────────────────────────────────
-
-func TestValidateParamRef_AcceptsFieldPresent(t *testing.T) {
-	ref := ResolvedInjection{NodeID: "n1", Field: "output"}
-	depResult := `{"output":"42","other":"x"}`
-	if err := validateParamRef("content", ref, depResult); err != nil {
-		t.Fatalf("expected accept, got %v", err)
-	}
-}
-
-func TestValidateParamRef_RejectsFieldAbsent(t *testing.T) {
-	ref := ResolvedInjection{NodeID: "n1", Field: "output"}
-	depResult := `{"files_created":["x"],"type":"result"}`
-	err := validateParamRef("content", ref, depResult)
-	if err == nil {
-		t.Fatalf("expected reject for missing field")
-	}
-	if !strings.Contains(err.Error(), "output") || !strings.Contains(err.Error(), "n1") {
-		t.Fatalf("error should name field and dep, got %v", err)
-	}
-}
-
-func TestValidateParamRef_AcceptsEmptyFieldAsFullResult(t *testing.T) {
-	// Planner choosing field="" means "inject the whole result as-is".
-	// Legitimate for chaining raw text like file_read output.
-	ref := ResolvedInjection{NodeID: "n1", Field: ""}
-	if err := validateParamRef("content", ref, "some raw text"); err != nil {
-		t.Fatalf("empty field should be allowed: %v", err)
-	}
-}
-
-func TestValidateParamRef_RejectsMalformedDepResult(t *testing.T) {
-	ref := ResolvedInjection{NodeID: "n1", Field: "output"}
-	err := validateParamRef("content", ref, "not json at all")
-	if err == nil {
-		t.Fatalf("expected reject when dep result is not JSON and field is specified")
-	}
-}
-
-// ── validateDataFlow ─────────────────────────────────────────────────────
+// ── validateDataFlow (template-aware) ───────────────────────────────────
 
 func TestValidateDataFlow_AllowsEmptyDependsOn(t *testing.T) {
 	if err := validateDataFlow("compute", nil, nil); err != nil {
@@ -200,83 +145,96 @@ func TestValidateDataFlow_AllowsEmptyDependsOn(t *testing.T) {
 	}
 }
 
-func TestValidateDataFlow_AllowsWhenParamRefsPresent(t *testing.T) {
-	refs := map[string]ResolvedInjection{"ctx": {NodeID: "n1", Field: "output"}}
-	if err := validateDataFlow("compute", []string{"n1"}, refs); err != nil {
-		t.Fatalf("deps + refs → should allow, got %v", err)
+func TestValidateDataFlow_AllowsWhenTemplatePresent(t *testing.T) {
+	params := map[string]any{"context.x": "${node.n1.content}"}
+	if err := validateDataFlow("compute", []string{"n1"}, params); err != nil {
+		t.Fatalf("deps + template → should allow, got %v", err)
 	}
 }
 
-func TestValidateDataFlow_AllowsBashWithDepsNoRefs(t *testing.T) {
-	// Pure sequencing without data flow is legitimate for bash/service/etc.
-	if err := validateDataFlow("bash", []string{"n1"}, nil); err != nil {
+func TestValidateDataFlow_AllowsStepFormTemplate(t *testing.T) {
+	// Pre-rewrite (planStepsToNodes) the template still uses ${step.N}.
+	// Validator should accept either form so the check survives both
+	// stages of the pipeline if it ever fires earlier than expected.
+	params := map[string]any{"context.x": "${step.0.content}"}
+	if err := validateDataFlow("compute", []string{"n1"}, params); err != nil {
+		t.Fatalf("step.N templates should also count as wired, got %v", err)
+	}
+}
+
+func TestValidateDataFlow_AllowsBashWithDepsNoTemplate(t *testing.T) {
+	// Pure sequencing without data flow is legitimate for bash/service.
+	if err := validateDataFlow("bash", []string{"n1"}, map[string]any{"command": "ls"}); err != nil {
 		t.Fatalf("bash sequencing should not be rejected, got %v", err)
 	}
 }
 
-func TestValidateDataFlow_AllowsServiceWithDepsNoRefs(t *testing.T) {
+func TestValidateDataFlow_AllowsServiceWithDepsNoTemplate(t *testing.T) {
 	if err := validateDataFlow("service", []string{"n1", "n2"}, nil); err != nil {
 		t.Fatalf("service sequencing should not be rejected, got %v", err)
 	}
 }
 
-func TestValidateDataFlow_RejectsComputeWithDepsNoRefs(t *testing.T) {
-	err := validateDataFlow("compute", []string{"n1", "n2", "n3"}, nil)
+func TestValidateDataFlow_RejectsComputeWithDepsNoTemplate(t *testing.T) {
+	params := map[string]any{"goal": "rank stuff", "mode": "shallow"}
+	err := validateDataFlow("compute", []string{"n1", "n2", "n3"}, params)
 	if err == nil {
-		t.Fatalf("compute with deps but no refs → should reject")
+		t.Fatalf("compute with deps but no template → should reject")
 	}
 	if !strings.Contains(err.Error(), "compute") {
 		t.Fatalf("error should name the tool, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "param_refs") {
-		t.Fatalf("error should suggest param_refs, got %v", err)
+	if !strings.Contains(err.Error(), "${step.N") {
+		t.Fatalf("error should hint at template syntax, got %v", err)
 	}
 }
 
-func TestValidateDataFlow_RejectsEditFileWithDepsNoRefs(t *testing.T) {
-	err := validateDataFlow("edit_file", []string{"n0"}, nil)
+func TestValidateDataFlow_AllowsEditFileWithTaskFiles(t *testing.T) {
+	// edit_file reads its files via task_files — that IS the data source.
+	// depends_on against an upstream file_read is just sequencing, not a
+	// data-flow omission.
+	err := validateDataFlow("edit_file", []string{"n0"}, map[string]any{"goal": "fix it", "task_files": []string{"project/foo.py"}})
+	if err != nil {
+		t.Fatalf("edit_file with task_files should be allowed regardless of templates, got %v", err)
+	}
+}
+
+func TestValidateDataFlow_RejectsEditFileWithoutTaskFiles(t *testing.T) {
+	// Defensive: if somehow edit_file is called with deps but no task_files,
+	// the rule still fires (no data source declared, no template either).
+	err := validateDataFlow("edit_file", []string{"n0"}, map[string]any{"goal": "fix it"})
 	if err == nil {
-		t.Fatalf("edit_file with deps but no refs → should reject")
-	}
-	if !strings.Contains(err.Error(), "edit_file") {
-		t.Fatalf("error should name the tool, got %v", err)
+		t.Fatalf("edit_file with deps but no task_files and no template → should reject")
 	}
 }
 
-func TestValidateDataFlow_RejectsEmptyRefsMap(t *testing.T) {
-	// An explicitly-empty map is the same as nil — both mean "no wiring".
-	err := validateDataFlow("compute", []string{"n1"}, map[string]ResolvedInjection{})
+func TestValidateDataFlow_AllowsEditFileWithTaskFilesAnyShape(t *testing.T) {
+	// JSON-decoded planner output uses []any, not []string. Both must work.
+	err := validateDataFlow("edit_file", []string{"n0"}, map[string]any{"goal": "fix it", "task_files": []any{"project/foo.py"}})
+	if err != nil {
+		t.Fatalf("edit_file with []any task_files should be allowed, got %v", err)
+	}
+}
+
+func TestValidateDataFlow_RejectsEmptyParams(t *testing.T) {
+	// Explicitly-empty map is the same as nil — both mean "no wiring".
+	err := validateDataFlow("compute", []string{"n1"}, map[string]any{})
 	if err == nil {
 		t.Fatalf("empty map should be treated the same as nil")
 	}
 }
 
-// ── validateParamRef two-case split ──────────────────────────────────────
-
-func TestValidateParamRef_NonJSON_ReturnsSentinel(t *testing.T) {
-	// A dep whose Result is plain text (not JSON) should not be treated as
-	// a planner error — it's an upstream tool bug. Return errResultNotJSON
-	// so the caller can degrade to full-result.
-	ref := ResolvedInjection{NodeID: "n1", Field: "content"}
-	err := validateParamRef("body", ref, "plain text, not json")
-	if err == nil {
-		t.Fatalf("expected sentinel error")
+func TestValidateDataFlow_FindsTemplateInNestedValue(t *testing.T) {
+	// Templates can be nested inside arrays or sub-objects (e.g. compute
+	// params with a context dict). Walker must reach them.
+	params := map[string]any{
+		"goal": "compose",
+		"items": []any{
+			map[string]any{"src": "${node.n1.content}"},
+		},
 	}
-	if !errorsIs(err, errResultNotJSON) {
-		t.Fatalf("expected errResultNotJSON sentinel, got %v", err)
-	}
-}
-
-func TestValidateParamRef_ValidJSONMissingField_ReturnsHardError(t *testing.T) {
-	// Envelope parses but the field isn't in it — brace_json shape. Must
-	// be distinguishable from the non-JSON case.
-	ref := ResolvedInjection{NodeID: "n1", Field: "output"}
-	err := validateParamRef("body", ref, `{"files_created":["x"],"type":"result"}`)
-	if err == nil {
-		t.Fatalf("expected hard error for missing field in valid JSON")
-	}
-	if errorsIs(err, errResultNotJSON) {
-		t.Fatalf("should NOT return the non-JSON sentinel when JSON is valid")
+	if err := validateDataFlow("compute", []string{"n1"}, params); err != nil {
+		t.Fatalf("nested template should count as wired, got %v", err)
 	}
 }
 
@@ -338,8 +296,10 @@ func fakeHeadTail(s string, headN, tailN int, sep ...string) string {
 	return s[:headN] + marker + s[len(s)-tailN:]
 }
 
-// errorsIs is a tiny wrapper to avoid pulling "errors" into the test
-// file's imports just for this one use.
+// errorsIs kept as a tiny utility — used to live alongside an
+// errResultNotJSON sentinel that's since been deleted. Left here in
+// case future tests want to chase wrapped error chains without pulling
+// in "errors" at the file level.
 func errorsIs(err, target error) bool {
 	for err != nil {
 		if err == target {

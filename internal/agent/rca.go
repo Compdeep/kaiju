@@ -350,7 +350,7 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 		}
 	}
 
-	sysPrompt := holmesPrompt + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, holmesPrompt) + a.fleetSection()
 	userPrompt := assembleHolmesPrompt(state, trigger, a, intent, gateCtx)
 
 	log.Printf("[dag] holmes iter %d/%d for %s (%d bytes)", state.Iter, state.MaxIter, sNode.Tag, len(userPrompt))

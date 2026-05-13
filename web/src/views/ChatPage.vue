@@ -92,7 +92,19 @@
         <div class="msg-spacer" :class="{ active: sessions.loading }"></div>
       </div>
 
-      <div class="chat-compose">
+      <div class="chat-compose"
+        @dragover.prevent="dragOver = true"
+        @dragleave.prevent="dragOver = false"
+        @drop.prevent="onDrop">
+        <div v-if="dragOver" class="drop-overlay">drop files to attach</div>
+        <div v-if="sessions.attachments && sessions.attachments.length" class="chip-strip">
+          <UploadChip
+            v-for="(att, i) in sessions.attachments"
+            :key="(att.path || att.filename) + ':' + i"
+            :att="att"
+            @remove="onRemoveAttachment(att)"
+          />
+        </div>
         <div class="compose-row">
           <!-- Inline controls (left of input) -->
           <div class="compose-controls">
@@ -163,6 +175,7 @@
             @keydown.enter.exact.prevent="send"
           ></textarea>
           <!-- Right-side actions -->
+          <UploadButton :disabled="sessions.loading" @files="onFilesPicked" />
           <button class="btn-icon" @click="chat.compactSession()" title="Compact history" :disabled="sessions.messages.length < 10">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
           </button>
@@ -220,6 +233,9 @@ import hljsCpp from 'highlight.js/lib/languages/cpp'
 import hljsTypescript from 'highlight.js/lib/languages/typescript'
 import DAGTrace from '../components/DAGTrace.vue'
 import ComposablePanel from '../components/ComposablePanel.vue'
+import UploadButton from '../components/UploadButton.vue'
+import UploadChip from '../components/UploadChip.vue'
+import * as uploads from '../services/uploads'
 
 hljs.registerLanguage('javascript', hljsJavascript)
 hljs.registerLanguage('js', hljsJavascript)
@@ -265,6 +281,35 @@ const panel = usePanelStore()
 const input = ref('')
 const messagesEl = ref(null)
 const openMenu = ref(null)
+const dragOver = ref(false)
+
+/**
+ * desc: Handle files chosen via the + button picker — kick off concurrent
+ * uploads, each driving its own chip through pending → ready/error.
+ * @param {File[]} files
+ */
+function onFilesPicked(files) {
+  uploads.uploadMany(files)
+}
+
+/**
+ * desc: Handle a native drag-drop onto the compose area. Picks up dataTransfer
+ * files and runs the same upload pipeline as the file picker.
+ * @param {DragEvent} e
+ */
+function onDrop(e) {
+  dragOver.value = false
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (files.length) uploads.uploadMany(files)
+}
+
+/**
+ * desc: Remove an attachment from the chip strip and the server.
+ * @param {Object} att
+ */
+function onRemoveAttachment(att) {
+  uploads.removeAttachment(att)
+}
 
 // Close menus on outside click
 if (typeof document !== 'undefined') {
@@ -615,6 +660,28 @@ watch(() => sessions.sessionId, (newId) => {
 .chat-compose {
   padding: 12px 32px 16px 36px;
   border-top: 1px solid var(--border-subtle);
+  position: relative;
+}
+.chip-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(129, 140, 248, 0.12);
+  border: 2px dashed #818cf8;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: #818cf8;
+  pointer-events: none;
+  z-index: 5;
 }
 .compose-row {
   display: flex; gap: 4px; align-items: flex-end;

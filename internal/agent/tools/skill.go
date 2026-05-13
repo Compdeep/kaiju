@@ -77,12 +77,12 @@ func GetImpact(t Tool, params map[string]any) int {
 
 /*
  * Outputter is an optional interface for tools that return structured JSON.
- * desc: Declares output fields so the executive can build valid param_refs chains and the scheduler can validate field paths; tools returning plain text do not implement this
+ * desc: Declares output fields so the executive can wire valid ${step.N.field} placeholders and the scheduler can validate field paths; tools returning plain text do not implement this
  */
 type Outputter interface {
 	/*
 	 * OutputSchema returns the JSON Schema describing the Execute return value.
-	 * desc: Provides the output schema so downstream tools can reference fields via param_refs
+	 * desc: Provides the output schema so downstream tools can reference fields via ${step.N.field} placeholders
 	 * return: raw JSON representing the output schema, or nil
 	 */
 	OutputSchema() json.RawMessage

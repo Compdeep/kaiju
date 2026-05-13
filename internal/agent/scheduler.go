@@ -152,7 +152,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		if !budget.TrySpawnNode("", true) {
 			return nil, fmt.Errorf("budget exhausted before preflight")
 		}
-		a.preflight = a.preflightQuery(ctx, formatTrigger(trigger), trigger.History)
+		a.preflight = a.preflightQuery(ctx, trigger.AlertID, formatTrigger(trigger), trigger.History)
 		// Per-investigation card list lives on the Graph (DAG path).
 		// a.activeCards is also set so the legacy ReAct path keeps working
 		// — ReAct doesn't use Graph the same way and is still serialized.
@@ -1076,6 +1076,11 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BASH_ERROR", comp.Result)
 					}
 
+					// Count this as work so the reflector sees it and can decide
+					// whether to investigate. Without this, single-step bash plans
+					// that fail get no reflection → no Holmes → no fix loop.
+					workSinceReflection++
+
 					// No cascade prune — the reflector will catch this
 					injectInterjection()
 					launchReady()
@@ -1766,7 +1771,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 						log.Printf("[dag] chat-mode skill guidance gate fetch failed: %v", gerr)
 					}
 				}
-				chatPrompt += "\n\nIMPORTANT: You are in chat-only mode — you cannot execute tools, run commands, or build anything right now. Never say \"I'll do X\" or \"Let me build X\" because you can't follow through. If the user is asking you to do something, answer their question or give information, but do not promise actions you cannot take."
+				chatPrompt += "\n\nThis turn is a quick conversational reply — no tools were invoked because the request was classified as chat. If the user is actually asking for an action (run X, fetch Y, build Z, fix this, find that, compute, search, edit a file, restart a service, anything imperative), do NOT refuse on the basis that you can't execute tools. The full toolchain (compute, file_*, bash, web_*, service, edit_file, etc.) IS available — the next turn will route through it. Acknowledge what they're asking for, restate it as an actionable request, and tell them to confirm so the next turn can run it. Never say 'I cannot execute code' or 'I have no tools' — that is false in this system."
 				chatPrompt += "\n\n## Output format\n" + a.FormatRule()
 				resp, llmErr := a.llm.Complete(dagCtx, &llm.ChatRequest{
 					Messages:    BuildMessagesWithHistory(chatPrompt, query, trigger.History),
@@ -1927,7 +1932,7 @@ func extractBashStdout(result string) string {
  * mergeJSONField parses a JSON object string, sets key=value, returns the
  * reserialised string. Used to graft a field onto an already-stored node
  * Result after its creation (e.g. folding exec stdout onto a compute's
- * result so downstream param_refs can reach it).
+ * result so downstream ${step.N.field} substitution can reach it).
  */
 func mergeJSONField(raw, key, value string) (string, error) {
 	var obj map[string]any
@@ -2071,6 +2076,7 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 // explicit validation expression, we fall back to a generic check: output
 // non-empty, no bare Python/JS traceback, minimum size.
 func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd, validation string, budget *Budget) []*Node {
+	_ = validation // legacy param — coder no longer emits validators; the reflector judges output downstream
 	var grafted []*Node
 	if execCmd == "" {
 		return grafted
@@ -2100,36 +2106,22 @@ func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd,
 	grafted = append(grafted, execNode)
 	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: execID, Node: graph.SnapshotNode(execID)})
 
-	check := strings.TrimSpace(validation)
-	if check == "" {
-		check = fmt.Sprintf(
-			"[ -s $OUT ] && ! grep -qE '^(Traceback|Error:|SyntaxError)' $OUT && [ $(wc -c < $OUT) -gt 40 ]")
-	}
-	// Expose $OUT to the validator regardless of whether it was coder-declared.
-	wrappedCheck := fmt.Sprintf("OUT=%s; %s", outFile, check)
-
-	if !budget.TrySpawnNode("bash", false) {
-		log.Printf("[dag] shallow compute → budget exhausted, skipping verify graft for %s", comp.ID)
-		return grafted
-	}
-	verifyTag := "verify_" + sanitizeTag(comp.Tag)
-	if verifyTag == "verify_" {
-		verifyTag = "verify_" + comp.ID
-	}
-	verifyNode := &Node{
-		Type:      NodeTool,
-		ToolName:  "bash",
-		Params:    map[string]any{"command": wrappedCheck, "timeout_sec": 30},
-		DependsOn: []string{execID},
-		SpawnedBy: compID,
-		Tag:       verifyTag,
-		Source:    "builtin",
-	}
-	vID := graph.AddNode(verifyNode)
-	graph.AddChild(compID, vID)
-	grafted = append(grafted, verifyNode)
-	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
-
+	// Note: we used to graft a `verify_<tag>` bash node here that ran a
+	// coder-supplied bash check against the captured output. That validator
+	// was authored *inside the coder LLM call*, before the script had ever
+	// run — i.e. the LLM was predicting what its own code would print, then
+	// asserting against that prediction. The prediction was wrong constantly
+	// (off-by-N length cutoffs, exact-key greps, jq paths that never matched
+	// the actual output shape), each failure spawned a full Holmes+debugger
+	// cycle, and the cycle's path-hallucinations cascaded further. Removed.
+	//
+	// Failure detection now relies on:
+	//   1. bash exit code on the exec node — non-zero already routes through
+	//      isBashError in the scheduler and is treated as failure.
+	//   2. the reflector — it reads the exec node's captured stdout from
+	//      comp.Result with full context (goal, code, output) and decides
+	//      continue / investigate / conclude. The reflector is strictly
+	//      better positioned than a one-shot bash grep for this judgment.
 	return grafted
 }
 

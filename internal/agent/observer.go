@@ -145,7 +145,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
 	}
 
-	sysPrompt := defaultObserverRolePrompt + toolSection.String() + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, defaultObserverRolePrompt) + toolSection.String() + a.fleetSection()
 	userPrompt := sb.String()
 	messages := []llm.Message{
 		{Role: "system", Content: sysPrompt},

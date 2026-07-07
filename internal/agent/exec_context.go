@@ -46,7 +46,7 @@ type ContextualExecutor interface {
 /*
  * resolveSkillCards pulls ## Architect Guidance and ## Coder Guidance
  * sections from every classifier-active card/skill that has them.
- * desc: Iterates a.activeCards and looks each key up in both the capability
+ * desc: Iterates the given card keys and looks each up in both the capability
  *       card registry and the guidance skill registry. Extracts any
  *       "## Architect Guidance" and "## Coder Guidance" sections, prefixes
  *       each with "### <name>" so multiple sources compose cleanly, and

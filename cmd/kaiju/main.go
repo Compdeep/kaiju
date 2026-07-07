@@ -172,6 +172,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		MaxObserverCalls:  cfg.Agent.MaxObserverCalls,
 		BatchSize:         cfg.Agent.BatchSize,
 		MaxInvestigations: cfg.Agent.MaxInvestigations,
+		MaxConcurrentInvestigations: cfg.Agent.MaxConcurrent,
 		ExecutionMode:     cfg.Agent.ExecutionMode,
 		DAGWallClock:      time.Duration(cfg.Agent.WallClockSec) * time.Second,
 		ComputeTimeout:    time.Duration(cfg.Tools.Compute.TimeoutSec) * time.Second,
@@ -506,14 +507,17 @@ func runServe() {
 		mux.HandleFunc("/ws", webCh.Handler())
 	}
 
-	// SSE endpoint for DAG events
-	mux.HandleFunc("GET /events", gateway.SSEHandler(ag))
-
 	// Auth + JWT (always available when web UI is served)
 	jwtSvc, err := auth.NewJWTService(cfg.API.JWTSecret, cfg.Agent.DataDir, 24)
 	if err != nil {
 		log.Fatalf("[kaiju] JWT service: %v", err)
 	}
+
+	// SSE endpoint for DAG events — JWT-authenticated and filtered per-principal:
+	// a caller only receives events for sessions it owns (isolation enforced in
+	// SSEHandler). Browsers pass the token via ?token= since an EventSource can't
+	// set an Authorization header.
+	mux.Handle("/events", gateway.WithJWTAuthOrQuery(jwtSvc)(gateway.SSEHandler(ag, kaijuDB)))
 
 	// Auth endpoints (unprotected — login doesn't need a token)
 	authAPI := api.NewAuthAPI(kaijuDB, jwtSvc)
@@ -571,6 +575,7 @@ func runServe() {
 	mux.Handle("/api/v1/interject", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/tools", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/status", gateway.WithJWTAuth(jwtSvc)(execMux))
+	mux.Handle("/api/v1/usage", gateway.WithJWTAuth(jwtSvc)(execMux))
 	// Session + memory + clearance routes (JWT-protected)
 	mux.Handle("/api/v1/sessions", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/sessions/", gateway.WithJWTAuth(jwtSvc)(execMux))

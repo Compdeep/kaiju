@@ -223,13 +223,10 @@ type executiveOutput struct {
 func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevant []string, dagMode, intent, toolIndex string) string {
 	var sb strings.Builder
 
-	// Per-investigation skill cards now live on the graph. Fall back to
-	// the legacy agent field if no graph is provided (defensive).
-	cards := []string{}
-	if graph != nil && len(graph.ActiveCards) > 0 {
+	// Per-investigation skill cards live on the graph.
+	var cards []string
+	if graph != nil {
 		cards = graph.ActiveCards
-	} else {
-		cards = a.activeCards
 	}
 
 	// SOUL.md leads — identity + persistence litany are authoritative for every
@@ -371,8 +368,8 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		// Preflight owns the compute-depth decision. Inject it here so the
 		// planner treats it as authoritative rather than re-deriving deep vs
 		// shallow from workspace residue.
-		if a.preflight != nil && a.preflight.ComputeMode != "" {
-			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", a.preflight.ComputeMode))
+		if graph != nil && graph.Preflight != nil && graph.Preflight.ComputeMode != "" {
+			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", graph.Preflight.ComputeMode))
 		} else {
 			sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss astrodynamics / financial / statistical / ephemeris queries that *sound* like lookups. If the question requires a library (sgp4, pandas, scipy, skyfield, ephem) or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — adding a compute step is always cheaper than refusing the task.\n\n")
 		}
@@ -449,10 +446,10 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 
 	// Preflight hints: required tool categories the plan MUST include.
 	// Populated by the pre-plan preflight call in scheduler.go.
-	if a.preflight != nil && len(a.preflight.RequiredCategories) > 0 {
+	if graph != nil && graph.Preflight != nil && len(graph.Preflight.RequiredCategories) > 0 {
 		sb.WriteString("\n## Required Tool Categories\n")
 		sb.WriteString(fmt.Sprintf("This query needs tools from: %s. Your plan MUST include at least one tool from each of these categories. If none exist, declare a gap.\n",
-			strings.Join(a.preflight.RequiredCategories, ", ")))
+			strings.Join(graph.Preflight.RequiredCategories, ", ")))
 		sb.WriteString("Category → common tools:\n")
 		sb.WriteString("- network: web_fetch, web_search\n")
 		sb.WriteString("- filesystem: file_read, file_write, file_list\n")
@@ -644,8 +641,8 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	}
 	intent := trigger.Intent().String()
 	// Preflight override: same logic as structured planner.
-	if trigger.Intent() == gates.IntentAuto && a.preflight != nil {
-		intent = a.preflight.Intent.String()
+	if trigger.Intent() == gates.IntentAuto && graph != nil && graph.Preflight != nil {
+		intent = graph.Preflight.Intent.String()
 		log.Printf("[dag] executive (native) intent from preflight: %s", intent)
 	}
 
@@ -655,8 +652,8 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// (system state) plus the tool index (signatures + output schemas so
 	// ${step.N.field} placeholders can be wired against correct result shapes).
 	userQuery := formatTrigger(trigger)
-	if a.preflight != nil && a.preflight.Context != "" {
-		userQuery += "\n\n## Context\n" + a.preflight.Context
+	if graph != nil && graph.Preflight != nil && graph.Preflight.Context != "" {
+		userQuery += "\n\n## Context\n" + graph.Preflight.Context
 	}
 	var toolIndex string
 	if graph != nil && graph.Context != nil {
@@ -800,7 +797,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			}
 		}
 
-		return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger)
+		return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger, graph.Preflight)
 	}
 
 	// Fallback: model returned text instead of a tool call.
@@ -812,7 +809,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		isAuto := trigger.Intent() == gates.IntentAuto
 		steps, inferredIntent, parseErr := a.parseExecutiveOutput(raw, isAuto)
 		if parseErr == nil {
-			return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger)
+			return a.validatePlanSteps(steps, isAuto, inferredIntent, trigger, graph.Preflight)
 		}
 	}
 
@@ -829,7 +826,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
  * param: trigger - the original trigger for scope checking.
  * return: validated PlanResult or error.
  */
-func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent gates.Intent, trigger Trigger) (*PlanResult, error) {
+func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent gates.Intent, trigger Trigger, preflight *PreflightResult) (*PlanResult, error) {
 	// Extract gaps and filter unknown tools
 	var gaps []string
 	valid := steps[:0]
@@ -894,8 +891,8 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 		// sees resolved impacts which may be 0 for parametric tools (bash
 		// with ${step.N.field} placeholders not yet substituted).
 		preflightFloor := gates.Intent(0)
-		if a.preflight != nil && a.preflight.Intent > 0 {
-			preflightFloor = a.preflight.Intent
+		if preflight != nil && preflight.Intent > 0 {
+			preflightFloor = preflight.Intent
 		}
 		if inferredIntent < preflightFloor {
 			inferredIntent = preflightFloor

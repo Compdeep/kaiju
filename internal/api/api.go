@@ -18,6 +18,7 @@ import (
 	"github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
 	"github.com/Compdeep/kaiju/internal/memory"
+	"github.com/Compdeep/kaiju/internal/tokens"
 )
 
 /*
@@ -56,6 +57,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/execute", a.handleExecute)
 	mux.HandleFunc("GET /api/v1/tools", a.handleListTools)
 	mux.HandleFunc("GET /api/v1/status", a.handleStatus)
+	mux.HandleFunc("GET /api/v1/usage", a.handleUsage)
 	mux.HandleFunc("GET /api/v1/workspace/files", a.handleWorkspaceFiles)
 	mux.HandleFunc("GET /api/v1/workspace/serve", a.handleWorkspaceServe)
 	mux.HandleFunc("POST /api/v1/workspace/write", a.handleWorkspaceWrite)
@@ -217,6 +219,11 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// the authority. A separate HTTP timeout caused connection resets and
 	// ghost retries when the DAG outlived the HTTP deadline.
 	ctx := r.Context()
+	// Attribute this run to the calling principal (JWT sub) and open a per-run
+	// token counter; both ride the ctx through SubmitSync into every LLM call on
+	// the sync path, so RunTotal(ctx) below is this request's exact token cost —
+	// the value the host (makeen) persists per user for durable billing.
+	ctx = tokens.WithRun(tokens.WithPrincipal(ctx, userID))
 
 	result, err := a.agent.Kernel().SubmitSync(ctx, trigger)
 	elapsed := time.Since(start)
@@ -251,6 +258,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		DAGID:      trigger.AlertID,
 		Nodes:      result.Nodes,
 		LLMCalls:   result.LLMCalls,
+		Tokens:     tokens.RunTotal(ctx),
 		DurationMs: elapsed.Milliseconds(),
 	}, http.StatusOK)
 }
@@ -263,14 +271,15 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
  */
 func (a *API) handleInterject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Message string `json:"message"`
+		SessionID string `json:"session_id"`
+		Message   string `json:"message"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
 		jsonError(w, "message is required", http.StatusBadRequest)
 		return
 	}
 
-	ok := a.agent.Interject(req.Message)
+	ok := a.agent.Interject(req.SessionID, req.Message)
 	if !ok {
 		jsonResponse(w, map[string]any{"sent": false, "reason": "no active investigation"}, http.StatusOK)
 		return
@@ -278,6 +287,17 @@ func (a *API) handleInterject(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[api] interjection sent: %s", req.Message)
 	jsonResponse(w, map[string]any{"sent": true}, http.StatusOK)
+}
+
+/*
+ * handleUsage returns in-memory LLM token-usage tallies since process start,
+ * broken down per (principal, category). In-memory only — resets on restart.
+ * Streamed calls (aggregator/verdict) are not yet counted (see llm.CompleteStream).
+ * param: w - HTTP response writer
+ */
+func (a *API) handleUsage(w http.ResponseWriter, _ *http.Request) {
+	usage, total := tokens.Snapshot()
+	jsonResponse(w, map[string]any{"usage": usage, "total": total}, http.StatusOK)
 }
 
 /*

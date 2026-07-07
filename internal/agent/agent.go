@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
@@ -148,6 +147,7 @@ type Config struct {
 	MaxHolmesIters int // max ReAct iterations per Holmes investigation (default: 5)
 	ExecutionMode  string // "interactive" (chat allowed) or "autonomous" (always investigate)
 	DAGWallClock   time.Duration
+	MaxConcurrentInvestigations int // scheduler worker-pool size; 0 => defaultConcurrency (1). Raise once per-principal fairness lands.
 
 	// Embeddings (semantic skill routing)
 	EmbeddingsEnabled  bool
@@ -233,26 +233,19 @@ type Agent struct {
 	fleet         FleetContextProvider // nil on standalone nodes
 	capabilities  CapabilityRegistry   // composable prompt cards
 	intentRegistry *IntentRegistry     // DB-backed intent registry; loaded at startup
-	// NOTE: activeCards and preflight live on the Agent singleton, not on the
-	// per-investigation Graph. Concurrent investigations will race and clobber
-	// each other's state (last writer wins). Kaiju's normal runtime serializes
-	// investigations via a.investigating, so this is latent under current usage.
-	// Fix would move both fields onto Graph alongside Gaps.
-	activeCards []string         // selected per-investigation by preflight (formerly classifier)
-	preflight   *PreflightResult // pre-plan result (mode/intent/categories/skills)
+	// Per-investigation state (active skill cards, preflight result) lives on the
+	// Graph (Graph.ActiveCards / Graph.Preflight), not on the Agent — concurrent
+	// investigations each carry their own Graph, so nothing here is shared or raced.
 	eventStore    *store.Store          // nil if no event store
 
-	interjections chan string     // user messages during active investigation
-	investigating atomic.Bool    // true while investigate is executing
-	kernel        *Kernel          // core runtime — owns investigation lifecycle
+	kernel        *Kernel          // core runtime — owns the scheduler + investigation lifecycle
 
-	// DAG observation (live thought process streaming)
+	// DAG observation (live thought process streaming). Subscribers receive every
+	// investigation's events; each event is tagged with its own Graph's SessionID
+	// at emission, so consumers can route by session.
 	dagMu      sync.RWMutex
 	dagSubs    map[int]chan DAGEvent // subscriber ID → channel
 	dagSubID   int
-	dagGraph   *Graph  // current active graph (nil when idle)
-	dagAlertID    string
-	dagSessionID  string
 }
 
 /*
@@ -340,7 +333,6 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 		gossip:            gossip,
 		ipc:               ipcSender,
 		triggers:          make(chan Trigger, 16),
-		interjections:     make(chan string, 8),
 		dagSubs:           make(map[int]chan DAGEvent),
 		skillGuidance:     make(map[string]*skillmd.SkillMD),
 		soulPrompt:        soul,
@@ -564,25 +556,11 @@ func (a *Agent) relevantTools(ctx context.Context, triggerText string, scope *Re
  * param: msg - the operator's message text.
  * return: false if no investigation is running or the channel is full.
  */
-func (a *Agent) Interject(msg string) bool {
-	if !a.investigating.Load() {
+func (a *Agent) Interject(session, msg string) bool {
+	if a.kernel == nil {
 		return false
 	}
-	select {
-	case a.interjections <- msg:
-		return true
-	default:
-		return false // channel full
-	}
-}
-
-/*
- * IsInvestigating returns true while an investigation is executing.
- * desc: Atomic read of the investigating flag.
- * return: true if an investigation is currently active.
- */
-func (a *Agent) IsInvestigating() bool {
-	return a.investigating.Load()
+	return a.kernel.Interject(session, msg)
 }
 
 /*
@@ -617,45 +595,36 @@ func (a *Agent) SubscribeDAG() (<-chan DAGEvent, func()) {
 }
 
 /*
- * DAGSnapshot returns the current graph state for new SSE connections.
- * desc: Thread-safe snapshot of the active investigation graph.
- * return: nodes slice, alert ID, and whether an investigation is active.
- */
-func (a *Agent) DAGSnapshot() (nodes []*NodeInfo, alertID string, active bool) {
-	a.dagMu.RLock()
-	defer a.dagMu.RUnlock()
-
-	if a.dagGraph == nil {
-		return nil, "", false
-	}
-	return a.dagGraph.Snapshot(), a.dagAlertID, true
-}
-
-/*
  * dagFanOut reads from a Graph observer channel and broadcasts to all subscribers.
  * desc: Runs as a goroutine, forwarding every event from the graph observer
- *       to all registered DAG subscribers.
+ *       to all registered DAG subscribers. The graph tags each event with its
+ *       own SessionID so concurrent investigations stay separable downstream.
  * param: src - the source channel from the Graph observer.
+ * param: graph - the investigation that owns this observer channel.
  */
-func (a *Agent) dagFanOut(src <-chan DAGEvent) {
+func (a *Agent) dagFanOut(src <-chan DAGEvent, graph *Graph) {
 	for evt := range src {
-		a.broadcastDAGEvent(evt)
+		a.broadcastDAGEvent(graph, evt)
 	}
 }
 
 /*
  * broadcastDAGEvent sends an event to all DAG subscribers (non-blocking per sub).
  * desc: Drops events for slow subscribers to prevent blocking the pipeline.
+ *       Tags the event with the emitting graph's SessionID when the caller
+ *       hasn't set one, so subscribers can route by session. graph may be nil
+ *       for paths with no investigation graph (e.g. the ReAct loop), in which
+ *       case the event's own SessionID (if any) is kept as-is.
+ * param: graph - the investigation that emitted the event (may be nil).
  * param: evt - the DAGEvent to broadcast.
  */
-func (a *Agent) broadcastDAGEvent(evt DAGEvent) {
+func (a *Agent) broadcastDAGEvent(graph *Graph, evt DAGEvent) {
+	if evt.SessionID == "" && graph != nil {
+		evt.SessionID = graph.SessionID
+	}
+
 	a.dagMu.RLock()
 	defer a.dagMu.RUnlock()
-
-	// Auto-stamp session ID so individual callsites don't need to pass it.
-	if evt.SessionID == "" && a.dagSessionID != "" {
-		evt.SessionID = a.dagSessionID
-	}
 
 	for _, ch := range a.dagSubs {
 		select {
@@ -865,30 +834,3 @@ func (a *Agent) UpdateGate(rateLimit, maxTurns *int, lockdown *bool) {
 	}
 }
 
-/*
- * investigate dispatches to the DAG engine or the ReAct loop.
- * desc: Sets the investigating flag, runs the appropriate engine based on
- *       configuration, and drains pending interjections on completion.
- * param: ctx - context for the investigation.
- * param: trigger - the investigation trigger.
- */
-func (a *Agent) investigate(ctx context.Context, trigger Trigger) {
-	a.investigating.Store(true)
-	defer func() {
-		a.investigating.Store(false)
-		// Drain any pending interjections
-		for {
-			select {
-			case <-a.interjections:
-			default:
-				return
-			}
-		}
-	}()
-
-	if a.cfg.DAGEnabled {
-		a.runDAG(ctx, trigger)
-		return
-	}
-	a.investigateReAct(ctx, trigger)
-}

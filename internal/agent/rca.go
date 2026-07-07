@@ -240,7 +240,7 @@ func dispatchMicroplannerWithRCA(ctx context.Context, a *Agent, graph *Graph, bu
 	mpID := graph.AddNode(mpNode)
 	graph.SetState(mpID, StateRunning)
 	graph.AddChild(parentID, mpID)
-	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: mpID, Node: graph.SnapshotNode(mpID)})
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: mpID, Node: graph.SnapshotNode(mpID)})
 
 	// Build microplanner context. Same shape as before — curator over worklog
 	// + failures using the problem as the query, plus blueprint sections,

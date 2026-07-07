@@ -244,12 +244,9 @@ func (k *Kernel) handleProgressCheck() {
 	}
 
 	// Read last few worklog entries from the active investigation's session.
-	sid := ""
-	k.agent.dagMu.Lock()
-	if k.agent.dagGraph != nil {
-		sid = k.agent.dagGraph.SessionID
-	}
-	k.agent.dagMu.Unlock()
+	// The session travels on the investigation's trigger, so no shared
+	// dagGraph pointer is needed (and none exists — state is per-Graph now).
+	sid := inv.Trigger.SessionID
 	worklog := readWorklog(k.agent.cfg.MetadataDir, sid, 5)
 	if worklog == "" {
 		return

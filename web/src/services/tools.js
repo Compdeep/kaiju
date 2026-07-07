@@ -49,7 +49,10 @@ function resolveSession(ev) {
 export function connect() {
   if (eventSource) return
 
-  eventSource = new EventSource('/events')
+  // /events is JWT-authenticated and per-principal filtered; an EventSource
+  // can't set headers, so the token rides the query string (kaiju supports it).
+  const token = localStorage.getItem('kaiju_token') || ''
+  eventSource = new EventSource('/events?token=' + encodeURIComponent(token))
 
   eventSource.onmessage = (e) => {
     try {

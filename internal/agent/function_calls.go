@@ -289,6 +289,25 @@ func preflightToolDef() llm.ToolDef {
 	}
 }
 
+// routeToolDef is the minimal tool for the cheap first-pass router: mode only,
+// no skills/intent/categories — those are decided only on the agentic path.
+func routeToolDef() llm.ToolDef {
+	return llm.ToolDef{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name:        "route",
+			Description: "Route the user's latest message to a handling mode.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"mode": { "type": "string", "enum": ["chat", "meta", "investigate"] }
+				},
+				"required": ["mode"]
+			}`),
+		},
+	}
+}
+
 func architectToolDef() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",

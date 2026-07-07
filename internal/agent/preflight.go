@@ -155,23 +155,84 @@ type preflightRaw struct {
 	ComputeMode        string   `json:"compute_mode"`
 }
 
+const routeSystemPrompt = `Classify ONLY the user's latest message into a handling mode, using the tool.
+
+- "chat": pure social messages with zero actionable content — greetings, thanks, farewells, trivial acknowledgements ("hello", "hey", "thanks", "ok", "got it", "bye"). NOTHING else.
+- "meta": questions about your own capabilities ("what can you do", "what tools do you have", "how do you work").
+- "investigate": EVERYTHING ELSE — any task, question, complaint, imperative, follow-up, hypothetical, or expressed desire (explicit or implied). If the user names a task, output, tool, file, website, number, or person, it is investigate. When in doubt, ALWAYS choose investigate — misrouting a real request to chat blocks the user.`
+
 /*
- * preflightQuery runs one executor-model LLM call to answer the four
- * pre-plan questions: skills, mode, intent, required categories.
- * desc: Builds a manifest of the unioned capability cards and SkillMD
- *       guidance, asks the model to classify the query, and validates the
- *       returned fields. Any missing or malformed field falls back to a
- *       safe default (empty list, "investigate", rank 0, []). The last
- *       few turns of conversation history are included so the model can
- *       resolve short follow-ups like "yeah do it" or "run that".
- * param: ctx - context for the LLM call.
- * param: query - the user query text.
- * param: history - conversation history (last N turns used; assistant
- *                  replies are truncated to keep the call small).
- * return: populated PreflightResult. Never returns nil; on failure, returns
- *         a neutral result so the caller can proceed with defaults.
+ * routeQuery is the cheap first pass: it decides the handling mode
+ * (chat / meta / investigate) with a tiny prompt and NO skill manifest. Only the
+ * agentic path then pays for the full classify + skill selection, so a "hello"
+ * never loads the skills it won't use. Fails safe to "investigate" so a real
+ * request is never misrouted to chat.
+ */
+func (a *Agent) routeQuery(ctx context.Context, alertID, query string) string {
+	started := time.Now()
+	trace := LLMTrace{AlertID: alertID, NodeType: "preflight", Tag: "route", Started: started, System: routeSystemPrompt, User: query}
+	resp, err := a.executor.Complete(ctx, &llm.ChatRequest{
+		Messages:    []llm.Message{{Role: "system", Content: routeSystemPrompt}, {Role: "user", Content: query}},
+		Tools:       []llm.ToolDef{routeToolDef()},
+		ToolChoice:  "required",
+		Temperature: 0.0,
+		MaxTokens:   16,
+	})
+	trace.LatencyMS = time.Since(started).Milliseconds()
+	if err != nil {
+		trace.Err = err.Error()
+		WriteLLMTrace(trace)
+		return "investigate"
+	}
+	raw, err := extractToolArgs(resp)
+	if err != nil {
+		trace.Err = "no tool args returned"
+		WriteLLMTrace(trace)
+		return "investigate"
+	}
+	trace.Output = raw
+	var out struct {
+		Mode string `json:"mode"`
+	}
+	if err := ParseLLMJSON(raw, &out); err != nil {
+		trace.Err = "parse failed: " + err.Error()
+		WriteLLMTrace(trace)
+		return "investigate"
+	}
+	WriteLLMTrace(trace)
+	switch out.Mode {
+	case "chat", "meta", "investigate":
+		return out.Mode
+	default:
+		return "investigate"
+	}
+}
+
+/*
+ * preflightQuery is the entry point. It routes first (cheap, no skill manifest).
+ * A pure chat/meta message returns immediately with no skills selected — so
+ * neither this step nor the downstream chat reply pays for skills it won't use.
+ * Agentic queries fall through to the full classification.
  */
 func (a *Agent) preflightQuery(ctx context.Context, alertID, query string, history []llm.Message) *PreflightResult {
+	switch a.routeQuery(ctx, alertID, query) {
+	case "chat":
+		log.Printf("[dag] route: chat — skipped skill classification")
+		return &PreflightResult{Mode: "chat"}
+	case "meta":
+		log.Printf("[dag] route: meta — skipped skill classification")
+		return &PreflightResult{Mode: "meta"}
+	}
+	return a.classifyInvestigate(ctx, alertID, query, history)
+}
+
+/*
+ * classifyInvestigate runs one executor-model LLM call to answer the pre-plan
+ * questions for an AGENTIC query: skills, intent, required categories, context,
+ * compute mode. The skill manifest is built here — only reached on the
+ * investigate path. Any missing/malformed field falls back to a safe default.
+ */
+func (a *Agent) classifyInvestigate(ctx context.Context, alertID, query string, history []llm.Message) *PreflightResult {
 	manifest := a.buildSkillManifest()
 	log.Printf("[dag] preflight: manifest has %d capabilities + %d guidance skills", len(a.capabilities), len(a.skillGuidance))
 	// Build dynamic intent list from the registry: enum for schema + descriptions.

@@ -61,6 +61,7 @@ type AgentConfig struct {
 	BatchSize         int         `json:"batch_size"`
 	MaxInvestigations int         `json:"max_investigations"`
 	MaxConcurrent     int         `json:"max_concurrent"` // scheduler worker-pool size (concurrent investigations); 0 => default (3)
+	DisableCoding     bool        `json:"disable_coding"` // true = refuse deep compute (codebase building); enterprise deployments set this
 	ExecutionMode     string      `json:"execution_mode"` // "interactive" (default) or "autonomous"
 	WallClockSec      int         `json:"wall_clock_sec"`
 	MaxTurns          int         `json:"max_turns"`

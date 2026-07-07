@@ -68,7 +68,21 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 		return "", fmt.Errorf("compute node missing goal param")
 	}
 	if mode == "" {
-		mode = "deep"
+		// Empty mode defaults to deep (architect) — but when code generation is
+		// disabled, default to shallow instead so a simple analytical compute
+		// still works while codebase-building stays off.
+		if a.cfg.DisableCoding {
+			mode = "shallow"
+		} else {
+			mode = "deep"
+		}
+	}
+	// Coding gate: "deep" is the architect/coder codebase-building path. When code
+	// generation is disabled for this deployment (e.g. an enterprise assistant that
+	// must not build software), refuse it. Shallow (one-off analytical scripts) is
+	// unaffected. Reliable chokepoint — enforced regardless of what the planner asked.
+	if a.cfg.DisableCoding && mode == "deep" {
+		return "", fmt.Errorf("code generation is disabled on this deployment: deep compute (codebase building) is not available")
 	}
 
 	tag := sanitizeTag(n.Tag)

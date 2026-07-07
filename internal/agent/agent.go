@@ -9,6 +9,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 	"github.com/Compdeep/kaiju/internal/agent/skillmd"
 	"github.com/Compdeep/kaiju/internal/agent/tools"
 	"github.com/Compdeep/kaiju/internal/compat/ipc"
@@ -283,6 +284,13 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 		cfg.MetadataDir = cfg.Workspace
 	}
 
+	// Resolve system prompts once at boot. Fail-closed: a missing or malformed
+	// override leaves a required prompt empty, and running with an empty system
+	// prompt is a security hazard — abort rather than silently degrade.
+	if err := prompt.Load(cfg.DataDir); err != nil {
+		log.Fatalf("[agent] prompt load failed: %v", err)
+	}
+
 	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel)
 
 	reg := tools.NewRegistry()
@@ -315,7 +323,7 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 	}
 
 	// Load externalized prompts
-	soul := loadSoulPrompt(cfg.DataDir, cfg.CustomSystemPrompt)
+	soul := loadSoulPrompt(cfg.DataDir)
 	caps := loadCapabilities(cfg.DataDir)
 
 	// Executor defaults to same client if not configured separately

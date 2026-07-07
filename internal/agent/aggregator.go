@@ -9,6 +9,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 )
 
 /*
@@ -45,7 +46,7 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	if len(cards) > 0 {
 		aggGuidance = a.capabilities.ComposeAggregatorGuidance(cards)
 	}
-	rolePrompt := fmt.Sprintf(defaultAggregatorRolePrompt, aggGuidance, a.FormatRule(), intentStr)
+	rolePrompt := fmt.Sprintf(prompt.Aggregator, aggGuidance, a.FormatRule(), intentStr)
 
 	messages := BuildMessagesWithHistory(
 		ComposeSystemPrompt(a.soulPrompt, rolePrompt),

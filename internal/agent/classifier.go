@@ -7,14 +7,11 @@ import (
 	"strings"
 
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 )
 
-const classifierSystemPrompt = `You are a query classifier. Given a user query and a list of capability domains, select which domains are relevant to addressing the query.
-
-Available domains:
-%s
-Select 1-3 domains. If uncertain, include general_reasoning.
-Output ONLY JSON: {"select": ["key1", "key2"]}`
+// classifierSystemPrompt moved to prompt.Classifier
+// (internal/agent/prompt/prompts.md).
 
 /*
  * classifierOutput is the parsed response from the classifier LLM call.
@@ -43,7 +40,7 @@ func (a *Agent) classifyCapabilities(ctx context.Context, query string) []string
 		return nil
 	}
 
-	sysPrompt := fmt.Sprintf(classifierSystemPrompt, manifest)
+	sysPrompt := fmt.Sprintf(prompt.Classifier, manifest)
 
 	// Classifier uses the executor (mini) model, not the reasoning model.
 	// The task is a structured multi-label pick from a short manifest —

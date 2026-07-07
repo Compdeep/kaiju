@@ -10,6 +10,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 )
 
 /*
@@ -49,7 +50,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// aggregator. Without this the reflector lacks the "don't give up / don't
 	// punt to other apps" cluster and takes the easy "conclude · too complex"
 	// exit on hard queries.
-	sysPrompt := ComposeSystemPrompt(a.soulPrompt, fmt.Sprintf(reflectorClassifierPrompt, a.FormatRule())) + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, fmt.Sprintf(prompt.Reflector, a.FormatRule())) + a.fleetSection()
 	userPrompt := assembleReflectorPrompt(graph, gateCtx, trigger)
 
 	messages := []llm.Message{
@@ -168,22 +169,8 @@ func assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, trigger Tri
 	return sb.String()
 }
 
-const interjectionReflectionPrompt = `You are a status classifier handling an operator message during an active investigation.
-The operator's message is the PRIMARY input — address it directly.
-
-Output JSON:
-{
-  "decision": "continue|conclude|investigate",
-  "summary": "what happened and how you addressed the operator's message",
-  "problem": "if investigate: describe what needs to change (for Holmes)",
-  "verdict": "final answer (only if conclude)",
-  "aggregate": true/false (only if conclude)
-}
-
-- "continue": operator's message is noted, current plan still makes sense
-- "conclude": operator wants to stop, or evidence is sufficient
-- "investigate": operator wants a different direction — describe the PROBLEM, not the solution
-- Output ONLY the JSON, no commentary`
+// interjectionReflectionPrompt moved to prompt.Interjection
+// (internal/agent/prompt/prompts.md).
 
 /*
  * fireInterjectionReflection runs a reflection checkpoint triggered by a human message.
@@ -224,7 +211,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
 	}
 
-	sysPrompt := ComposeSystemPrompt(a.soulPrompt, interjectionReflectionPrompt) + toolSection.String() + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Interjection) + toolSection.String() + a.fleetSection()
 
 	// User prompt — operator message first, then graph state
 	var userBuf strings.Builder

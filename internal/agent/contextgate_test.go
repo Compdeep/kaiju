@@ -47,6 +47,7 @@ func TestNewContextGate_RegistersAllSources(t *testing.T) {
 		SourceBlueprint, SourceWorklog, SourceNodeReturns, SourceWorkspaceTree,
 		SourceServiceState, SourceHistory, SourceSkillGuidance,
 		SourceWorkspaceDeep, SourceFunctionMap, SourceExistingBlueprints,
+		SourceToolIndex,
 	}
 	if len(gate.sources) != len(expected) {
 		t.Fatalf("expected %d sources, got %d", len(expected), len(gate.sources))
@@ -139,8 +140,14 @@ func TestGet_ReturnSourcesExceedBudget_TrimsAndReturns(t *testing.T) {
 	if !ok {
 		t.Fatal("expected worklog in sources")
 	}
-	if len(wl) > 1000 {
-		t.Errorf("worklog len %d exceeds budget 1000", len(wl))
+	// The gate injects a "Current time:" header into the first non-empty source;
+	// strip it before checking the trimmed worklog content fits the budget.
+	content := wl
+	if i := strings.Index(content, "\n\n"); strings.HasPrefix(content, "Current time:") && i >= 0 {
+		content = content[i+2:]
+	}
+	if len(content) > 1000 {
+		t.Errorf("worklog content len %d exceeds budget 1000", len(content))
 	}
 	if len(resp.Trimmed) == 0 {
 		t.Errorf("expected Trimmed to record the worklog truncation")
@@ -586,7 +593,9 @@ func TestBlueprintSource_NamedAbsolutePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Sources[SourceBlueprint] != "custom content" {
+	// The gate injects a "Current time:" header into the first non-empty source,
+	// so assert the blueprint content is present rather than exact-equal.
+	if !strings.Contains(resp.Sources[SourceBlueprint], "custom content") {
 		t.Errorf("expected custom content, got %q", resp.Sources[SourceBlueprint])
 	}
 }

@@ -944,7 +944,7 @@ func runSkillCmd() {
 					continue
 				}
 				if !found {
-					fmt.Println("Installed skills:\n")
+					fmt.Println("Installed skills:")
 					found = true
 				}
 				version := skillhub.InstalledVersion(sdir)

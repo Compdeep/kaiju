@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Compdeep/kaiju/internal/tokens"
 )
 
 // Message is a single chat message in the OpenAI format.
@@ -151,10 +153,21 @@ func (c *Client) setAuthHeaders(req *http.Request) {
 // Complete sends a chat completion request and returns the response.
 // Routes to the appropriate provider backend.
 func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
+	var resp *ChatResponse
+	var err error
 	if c.provider == ProviderAnthropic {
-		return c.completeAnthropic(ctx, req)
+		resp, err = c.completeAnthropic(ctx, req)
+	} else {
+		resp, err = c.completeOpenAI(ctx, req)
 	}
-	return c.completeOpenAI(ctx, req)
+	// Single token-accounting chokepoint: every non-streamed LLM call for both
+	// providers passes through here, and the ctx carries the (category,
+	// principal) tags set upstream. Streamed calls (CompleteStream) currently
+	// carry no Usage and are undercounted — see the note there.
+	if err == nil && resp != nil {
+		tokens.Add(ctx, resp.Usage.TotalTokens)
+	}
+	return resp, err
 }
 
 // completeOpenAI sends a request to an OpenAI-compatible /v1/chat/completions endpoint.
@@ -201,6 +214,11 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 // CompleteStream sends a streaming chat completion request and calls onChunk
 // for each text delta. Returns the full accumulated text. Only supports
 // OpenAI-compatible endpoints (including OpenRouter).
+//
+// NOTE: the SSE stream carries no Usage frame here, so tokens for streamed calls
+// (aggregator/verdict streaming) are NOT recorded by the tokens package yet —
+// they are undercounted. Follow-up: request a terminal usage chunk via
+// stream_options.include_usage and Add it, or estimate with a tokenizer.
 func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk func(chunk string)) (string, error) {
 	if req.Model == "" {
 		req.Model = c.model

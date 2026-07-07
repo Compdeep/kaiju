@@ -571,6 +571,7 @@ func runServe() {
 	mux.Handle("/api/v1/interject", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/tools", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/status", gateway.WithJWTAuth(jwtSvc)(execMux))
+	mux.Handle("/api/v1/usage", gateway.WithJWTAuth(jwtSvc)(execMux))
 	// Session + memory + clearance routes (JWT-protected)
 	mux.Handle("/api/v1/sessions", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/sessions/", gateway.WithJWTAuth(jwtSvc)(execMux))

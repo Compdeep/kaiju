@@ -177,6 +177,7 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
  * return: SyncResult with verdict, or error.
  */
 func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
+	ctx = tagTokens(ctx, trigger.Type)
 	log.Printf("[react] sync investigation: type=%s alert=%s source=%s",
 		trigger.Type, trigger.AlertID, trigger.Source)
 

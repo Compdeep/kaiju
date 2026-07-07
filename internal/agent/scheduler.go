@@ -325,11 +325,12 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	// Returns true if an interjection was injected (caller should not launchReady yet —
 	// the reflection will complete and launchReady will fire then).
 	injectInterjection := func() bool {
-		if a.interjections == nil {
+		interject := interjectFrom(ctx)
+		if interject == nil {
 			return false
 		}
 		select {
-		case msg := <-a.interjections:
+		case msg := <-interject:
 			if !budget.TrySpawnNode("", true) {
 				log.Printf("[dag] no LLM budget for interjection reflection, message lost: %s", Text.TruncateLog(msg, 100))
 				return false
@@ -1708,19 +1709,6 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// distinguish current vs stale evidence.
 	markRunStart(a.cfg.MetadataDir, trigger.SessionID)
 	rotateServiceLogs(a.cfg.Workspace)
-
-	a.investigating.Store(true)
-	defer func() {
-		a.investigating.Store(false)
-		// Drain any pending interjections
-		for {
-			select {
-			case <-a.interjections:
-			default:
-				return
-			}
-		}
-	}()
 
 	startTime := time.Now()
 	graph, budget, cleanup := a.setupDAGPipeline(trigger)

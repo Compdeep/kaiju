@@ -149,9 +149,9 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
 			turn, len(assistantMsg.ToolCalls), resp.Usage.TotalTokens)
 
 		// Check for user interjection before next LLM call
-		if a.interjections != nil {
+		if interject := interjectFrom(ctx); interject != nil {
 			select {
-			case msg := <-a.interjections:
+			case msg := <-interject:
 				messages = append(messages, llm.Message{
 					Role:    "user",
 					Content: fmt.Sprintf("[Operator interjection]: %s", msg),
@@ -179,18 +179,6 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
 func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
 	log.Printf("[react] sync investigation: type=%s alert=%s source=%s",
 		trigger.Type, trigger.AlertID, trigger.Source)
-
-	a.investigating.Store(true)
-	defer func() {
-		a.investigating.Store(false)
-		for {
-			select {
-			case <-a.interjections:
-			default:
-				return
-			}
-		}
-	}()
 
 	startTime := time.Now()
 
@@ -324,9 +312,9 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			turn, len(assistantMsg.ToolCalls), resp.Usage.TotalTokens)
 
 		// Interjection check
-		if a.interjections != nil {
+		if interject := interjectFrom(ctx); interject != nil {
 			select {
-			case msg := <-a.interjections:
+			case msg := <-interject:
 				messages = append(messages, llm.Message{
 					Role:    "user",
 					Content: fmt.Sprintf("[Operator interjection]: %s", msg),

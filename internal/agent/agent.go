@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
@@ -148,6 +147,7 @@ type Config struct {
 	MaxHolmesIters int // max ReAct iterations per Holmes investigation (default: 5)
 	ExecutionMode  string // "interactive" (chat allowed) or "autonomous" (always investigate)
 	DAGWallClock   time.Duration
+	MaxConcurrentInvestigations int // scheduler worker-pool size; 0 => defaultConcurrency (1). Raise once per-principal fairness lands.
 
 	// Embeddings (semantic skill routing)
 	EmbeddingsEnabled  bool
@@ -238,9 +238,7 @@ type Agent struct {
 	// investigations each carry their own Graph, so nothing here is shared or raced.
 	eventStore    *store.Store          // nil if no event store
 
-	interjections chan string     // user messages during active investigation
-	investigating atomic.Bool    // true while investigate is executing
-	kernel        *Kernel          // core runtime — owns investigation lifecycle
+	kernel        *Kernel          // core runtime — owns the scheduler + investigation lifecycle
 
 	// DAG observation (live thought process streaming). Subscribers receive every
 	// investigation's events; each event is tagged with its own Graph's SessionID
@@ -335,7 +333,6 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 		gossip:            gossip,
 		ipc:               ipcSender,
 		triggers:          make(chan Trigger, 16),
-		interjections:     make(chan string, 8),
 		dagSubs:           make(map[int]chan DAGEvent),
 		skillGuidance:     make(map[string]*skillmd.SkillMD),
 		soulPrompt:        soul,
@@ -559,25 +556,11 @@ func (a *Agent) relevantTools(ctx context.Context, triggerText string, scope *Re
  * param: msg - the operator's message text.
  * return: false if no investigation is running or the channel is full.
  */
-func (a *Agent) Interject(msg string) bool {
-	if !a.investigating.Load() {
+func (a *Agent) Interject(session, msg string) bool {
+	if a.kernel == nil {
 		return false
 	}
-	select {
-	case a.interjections <- msg:
-		return true
-	default:
-		return false // channel full
-	}
-}
-
-/*
- * IsInvestigating returns true while an investigation is executing.
- * desc: Atomic read of the investigating flag.
- * return: true if an investigation is currently active.
- */
-func (a *Agent) IsInvestigating() bool {
-	return a.investigating.Load()
+	return a.kernel.Interject(session, msg)
 }
 
 /*
@@ -851,30 +834,3 @@ func (a *Agent) UpdateGate(rateLimit, maxTurns *int, lockdown *bool) {
 	}
 }
 
-/*
- * investigate dispatches to the DAG engine or the ReAct loop.
- * desc: Sets the investigating flag, runs the appropriate engine based on
- *       configuration, and drains pending interjections on completion.
- * param: ctx - context for the investigation.
- * param: trigger - the investigation trigger.
- */
-func (a *Agent) investigate(ctx context.Context, trigger Trigger) {
-	a.investigating.Store(true)
-	defer func() {
-		a.investigating.Store(false)
-		// Drain any pending interjections
-		for {
-			select {
-			case <-a.interjections:
-			default:
-				return
-			}
-		}
-	}()
-
-	if a.cfg.DAGEnabled {
-		a.runDAG(ctx, trigger)
-		return
-	}
-	a.investigateReAct(ctx, trigger)
-}

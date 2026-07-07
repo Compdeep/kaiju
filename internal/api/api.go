@@ -263,14 +263,15 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
  */
 func (a *API) handleInterject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Message string `json:"message"`
+		SessionID string `json:"session_id"`
+		Message   string `json:"message"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
 		jsonError(w, "message is required", http.StatusBadRequest)
 		return
 	}
 
-	ok := a.agent.Interject(req.Message)
+	ok := a.agent.Interject(req.SessionID, req.Message)
 	if !ok {
 		jsonResponse(w, map[string]any{"sent": false, "reason": "no active investigation"}, http.StatusOK)
 		return

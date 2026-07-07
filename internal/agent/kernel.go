@@ -26,53 +26,38 @@ type KernelEvent struct {
 	Data interface{}
 }
 
-// syncSubmission carries a trigger + a result channel for synchronous callers.
-type syncSubmission struct {
-	Trigger  Trigger
-	ResultCh chan invResult
-}
-
 // invResult is the outcome of an investigation.
 type invResult struct {
 	Result *SyncResult
 	Err    error
 }
 
-// ── Investigation ───────────────────────────────────────────────────────────
-
-// Investigation is the kernel's view of a running investigation.
-type Investigation struct {
-	Trigger            Trigger
-	StartedAt          time.Time
-	Cancel             context.CancelFunc
-	ResultCh           chan invResult // nil for async, set for sync callers
-	StuckCount         int            // consecutive heartbeat ticks where failure threshold was met
-	HeartbeatThreshold int            // stuck ticks required before the kernel interjects (0 => default 3)
-}
-
 // ── Kernel ──────────────────────────────────────────────────────────────────
 
-// Kernel is the core runtime. Everything else — executive, scheduler,
-// reflector, tools — are modules that plug into it. The kernel provides
-// the main event loop, module lifecycle, and message passing.
+// Kernel is the core runtime. Everything else — the scheduler, heartbeat,
+// executive, and future subsystems — are owned and managed by the kernel, which
+// provides the front door (Submit/SubmitSync), the event loop, and module
+// lifecycle. The scheduler is the kernel's work-dispatch subsystem: a priority
+// queue + worker pool that replaced the old single-flight activeInv.
 type Kernel struct {
-	agent   *Agent
-	modules map[string]Module
-	events  chan KernelEvent
-	ctx     context.Context
-	cancel  context.CancelFunc
-	mu      sync.RWMutex
-
-	// Current investigation (nil when idle). One at a time.
-	activeInv *Investigation
+	agent     *Agent
+	modules   map[string]Module
+	events    chan KernelEvent
+	scheduler *Scheduler // work-dispatch subsystem (priority queue + worker pool)
+	ctx       context.Context
+	cancel    context.CancelFunc
+	mu        sync.RWMutex
 }
 
-// NewKernel creates a kernel bound to an agent.
+// NewKernel creates a kernel bound to an agent, with its scheduler wired to
+// a.RunDAGSync. Modules are registered by the caller (Agent.InitKernel) before
+// Run. Worker-pool size comes from cfg.MaxConcurrentInvestigations (0 => 1).
 func NewKernel(agent *Agent) *Kernel {
 	return &Kernel{
-		agent:   agent,
-		modules: make(map[string]Module),
-		events:  make(chan KernelEvent, 64),
+		agent:     agent,
+		modules:   make(map[string]Module),
+		events:    make(chan KernelEvent, 64),
+		scheduler: newScheduler(agent.RunDAGSync, schedulerWorkers(agent.cfg.MaxConcurrentInvestigations), maxQueueDepth),
 	}
 }
 
@@ -85,7 +70,9 @@ func (k *Kernel) Register(m Module) {
 func (k *Kernel) Run(ctx context.Context) {
 	k.ctx, k.cancel = context.WithCancel(ctx)
 
-	// Start all modules
+	// Start the work-dispatch subsystem, then the modules.
+	k.scheduler.Start(k.ctx)
+
 	for name, m := range k.modules {
 		if err := m.Start(k); err != nil {
 			log.Printf("[kernel] module %s failed to start: %v", name, err)
@@ -94,7 +81,7 @@ func (k *Kernel) Run(ctx context.Context) {
 		}
 	}
 
-	log.Printf("[kernel] running (%d modules)", len(k.modules))
+	log.Printf("[kernel] running (%d modules, scheduler workers=%d)", len(k.modules), k.scheduler.workers)
 
 	// Main event loop
 	for {
@@ -117,195 +104,117 @@ func (k *Kernel) Emit(ev KernelEvent) {
 	}
 }
 
-// Submit fires an async investigation (fire and forget).
+// Submit queues a fire-and-forget investigation through the scheduler.
 func (k *Kernel) Submit(trigger Trigger) {
-	k.Emit(KernelEvent{Type: "investigation.submit", Data: trigger})
+	prio, session := schedulePolicy(trigger)
+	k.scheduler.Submit(trigger, prio, session)
 }
 
-// SubmitSync submits an investigation and blocks until the result is ready.
-// Used by the API handler and CLI.
+// SubmitSync queues an investigation through the scheduler and blocks until it
+// completes, is preempted by a newer same-session message (ErrPreempted), or ctx
+// is cancelled. Used by the chat path.
 func (k *Kernel) SubmitSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
-	resultCh := make(chan invResult, 1)
-	k.Emit(KernelEvent{
-		Type: "investigation.submit.sync",
-		Data: syncSubmission{Trigger: trigger, ResultCh: resultCh},
-	})
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case r := <-resultCh:
-		return r.Result, r.Err
-	}
+	prio, session := schedulePolicy(trigger)
+	return k.scheduler.SubmitSync(ctx, trigger, prio, session)
 }
+
+// InFlight reports whether any investigation is currently executing.
+func (k *Kernel) InFlight() bool { return k.scheduler.AnyRunning() }
+
+// Interject steers the query running for a session via the scheduler. Returns
+// true if a query was running for the session, false if none was.
+func (k *Kernel) Interject(session, msg string) bool {
+	return k.scheduler.Interject(session, msg)
+}
+
+// SetConcurrency live-resizes how many investigations run at once.
+func (k *Kernel) SetConcurrency(n int) { k.scheduler.SetConcurrency(n) }
+
+// Concurrency returns the current concurrent-investigation limit.
+func (k *Kernel) Concurrency() int { return k.scheduler.Concurrency() }
 
 // Agent returns the underlying agent for modules that need shared resources.
 func (k *Kernel) Agent() *Agent {
 	return k.agent
 }
 
-// ActiveInvestigation returns the current investigation, or nil.
-func (k *Kernel) ActiveInvestigation() *Investigation {
-	k.mu.RLock()
-	defer k.mu.RUnlock()
-	return k.activeInv
+// schedulePolicy maps a trigger to its scheduler priority and session key. Both
+// key on the trigger's SessionID — an opaque conversation/thread identifier the
+// host assigns (for makeen, derived from the caller principal). Interactive chat
+// outranks background work and a newer message steers the running query;
+// everything else is background and a repeat dedupes a still-queued copy. An
+// empty SessionID means no dedupe/steer key. The kernel stays ignorant of what a
+// session means.
+func schedulePolicy(t Trigger) (Priority, string) {
+	if t.Type == "chat_query" {
+		return PriorityChat, t.SessionID
+	}
+	return PriorityBackground, t.SessionID
 }
 
 // ── Internal ────────────────────────────────────────────────────────────────
 
 func (k *Kernel) dispatch(ev KernelEvent) {
 	switch ev.Type {
-	case "investigation.submit":
-		trigger, ok := ev.Data.(Trigger)
-		if !ok {
-			log.Printf("[kernel] invalid trigger data for investigation.submit")
-			return
-		}
-		k.startInvestigation(trigger, nil)
-
-	case "investigation.submit.sync":
-		sub, ok := ev.Data.(syncSubmission)
-		if !ok {
-			log.Printf("[kernel] invalid data for investigation.submit.sync")
-			return
-		}
-		k.startInvestigation(sub.Trigger, sub.ResultCh)
-
-	case "investigation.complete":
-		result, ok := ev.Data.(invResult)
-		if !ok {
-			log.Printf("[kernel] invalid data for investigation.complete")
-			return
-		}
-		k.completeInvestigation(result)
-
 	case "heartbeat.progress":
 		k.handleProgressCheck()
 	}
 }
 
-func (k *Kernel) startInvestigation(trigger Trigger, resultCh chan invResult) {
-	k.mu.Lock()
-	if k.activeInv != nil {
-		k.mu.Unlock()
-		if resultCh != nil {
-			resultCh <- invResult{Err: fmt.Errorf("investigation already running")}
-		}
-		return
-	}
-
-	invCtx, invCancel := context.WithCancel(k.ctx)
-
-	k.activeInv = &Investigation{
-		Trigger:            trigger,
-		StartedAt:          time.Now(),
-		Cancel:             invCancel,
-		ResultCh:           resultCh,
-		HeartbeatThreshold: trigger.HeartbeatThreshold,
-	}
-	k.mu.Unlock()
-
-	log.Printf("[kernel] investigation started: %s", trigger.AlertID)
-
-	go func() {
-		result, err := k.agent.RunDAGSync(invCtx, trigger)
-		k.Emit(KernelEvent{
-			Type: "investigation.complete",
-			Data: invResult{Result: result, Err: err},
-		})
-	}()
-}
-
-func (k *Kernel) completeInvestigation(result invResult) {
-	k.mu.Lock()
-	inv := k.activeInv
-	k.activeInv = nil
-	k.mu.Unlock()
-
-	if inv == nil {
-		return
-	}
-
-	elapsed := time.Since(inv.StartedAt)
-	log.Printf("[kernel] investigation complete in %s", elapsed.Round(time.Millisecond))
-
-	// Return result to sync caller if present
-	if inv.ResultCh != nil {
-		inv.ResultCh <- result
-	}
-}
-
+// handleProgressCheck nudges any investigation that appears stuck. It reads the
+// scheduler's running set, so it covers every in-flight investigation (one per
+// worker), not a single global one.
 func (k *Kernel) handleProgressCheck() {
-	k.mu.RLock()
-	inv := k.activeInv
-	k.mu.RUnlock()
-
-	if inv == nil {
-		return
+	for _, job := range k.scheduler.RunningJobs() {
+		k.checkJobProgress(job)
 	}
+}
 
-	// Read last few worklog entries from the active investigation's session.
-	// The session travels on the investigation's trigger, so no shared
-	// dagGraph pointer is needed (and none exists — state is per-Graph now).
-	sid := inv.Trigger.SessionID
-	worklog := readWorklog(k.agent.cfg.MetadataDir, sid, 5)
+// checkJobProgress counts recent failures in a running investigation's worklog
+// and, after a bounded number of consecutive stuck ticks, interjects a progress
+// check rather than letting it spin on the same failing fix. job.stuckCount is
+// written only here (the heartbeat runs single-threaded).
+func (k *Kernel) checkJobProgress(job *Job) {
+	worklog := readWorklog(k.agent.cfg.MetadataDir, job.trigger.SessionID, 5)
 	if worklog == "" {
 		return
 	}
-
-	// Count failures in last 5 entries.
-	lines := strings.Split(strings.TrimSpace(worklog), "\n")
 	failCount := 0
-	for _, l := range lines {
+	for _, l := range strings.Split(strings.TrimSpace(worklog), "\n") {
 		if strings.Contains(l, "VALIDATION_FAIL") || strings.Contains(l, "BASH_ERROR") || strings.Contains(l, "RETRIES_EXHAUSTED") {
 			failCount++
 		}
 	}
-
-	// Update the stuck counter: tick up while failures dominate, reset when progress resumes.
-	k.mu.Lock()
+	// Tick up while failures dominate, reset when progress resumes.
 	if failCount >= 3 {
-		inv.StuckCount++
+		job.stuckCount++
 	} else {
-		inv.StuckCount = 0
+		job.stuckCount = 0
 	}
-	stuck := inv.StuckCount
-	threshold := inv.HeartbeatThreshold
-	elapsed := time.Since(inv.StartedAt)
-	k.mu.Unlock()
-
+	stuck := job.stuckCount
+	threshold := job.trigger.HeartbeatThreshold
 	if threshold <= 0 {
 		threshold = 3 // default ~90s at a 30s tick
 	}
-
-	// Interject on first crossing and every `threshold` ticks thereafter — bounded escalation, not an unbounded loop.
+	// Interject on first crossing and every `threshold` ticks thereafter —
+	// bounded escalation, not an unbounded loop.
 	if stuck == 0 || stuck%threshold != 0 {
 		return
 	}
 
-	log.Printf("[kernel] heartbeat: stuck for %d consecutive ticks (%s elapsed, threshold=%d), injecting progress check",
-		stuck, elapsed.Round(time.Second), threshold)
-	k.agent.Interject(fmt.Sprintf(
+	elapsed := time.Since(job.startedAt).Round(time.Second)
+	log.Printf("[kernel] heartbeat: investigation %s stuck for %d consecutive ticks (%s elapsed, threshold=%d), injecting progress check",
+		job.trigger.AlertID, stuck, elapsed, threshold)
+	k.Interject(job.trigger.SessionID, fmt.Sprintf(
 		"Progress check (%s elapsed, %d consecutive stuck ticks): recent steps keep failing. "+
 			"Investigate the root cause via Holmes — don't keep retrying the same fix. "+
 			"If Holmes has already run multiple times and can't find a fix, conclude honestly.",
-		elapsed.Round(time.Second), stuck))
+		elapsed, stuck))
 }
 
 func (k *Kernel) shutdown() {
 	log.Printf("[kernel] shutting down")
-
-	// Cancel active investigation
-	k.mu.Lock()
-	if k.activeInv != nil {
-		k.activeInv.Cancel()
-		if k.activeInv.ResultCh != nil {
-			k.activeInv.ResultCh <- invResult{Err: fmt.Errorf("kernel shutting down")}
-		}
-		k.activeInv = nil
-	}
-	k.mu.Unlock()
-
-	// Stop all modules
+	// The scheduler stops via k.ctx — its workers drain and exit on their own.
 	for name, m := range k.modules {
 		if err := m.Stop(); err != nil {
 			log.Printf("[kernel] module %s stop error: %v", name, err)

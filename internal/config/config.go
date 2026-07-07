@@ -60,6 +60,7 @@ type AgentConfig struct {
 	MaxObserverCalls  int         `json:"max_observer_calls"`
 	BatchSize         int         `json:"batch_size"`
 	MaxInvestigations int         `json:"max_investigations"`
+	MaxConcurrent     int         `json:"max_concurrent"` // scheduler worker-pool size (concurrent investigations); 0 => default (3)
 	ExecutionMode     string      `json:"execution_mode"` // "interactive" (default) or "autonomous"
 	WallClockSec      int         `json:"wall_clock_sec"`
 	MaxTurns          int         `json:"max_turns"`

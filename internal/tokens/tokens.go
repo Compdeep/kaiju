@@ -12,10 +12,12 @@ package tokens
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 type catKey struct{}
 type prinKey struct{}
+type runKey struct{}
 
 // WithCategory tags ctx so LLM token usage on calls made under it is attributed
 // to category. Set once at an agent entry point; it propagates to every LLM call
@@ -29,6 +31,30 @@ func WithCategory(ctx context.Context, category string) context.Context {
 // LLM call made under the same context (i.e. the synchronous request path).
 func WithPrincipal(ctx context.Context, principal string) context.Context {
 	return context.WithValue(ctx, prinKey{}, principal)
+}
+
+// WithRun attaches a per-run token accumulator to ctx. Read it back with
+// RunTotal after the run finishes to get that single request's token cost. The
+// accumulator is a shared pointer carried through the context, so it reflects
+// every Add made under this ctx — including on a scheduler worker goroutine, as
+// long as that goroutine's ctx derives from this one (the synchronous path).
+func WithRun(ctx context.Context) context.Context {
+	return context.WithValue(ctx, runKey{}, new(int64))
+}
+
+func runCounter(ctx context.Context) *int64 {
+	if p, ok := ctx.Value(runKey{}).(*int64); ok {
+		return p
+	}
+	return nil
+}
+
+// RunTotal returns the tokens accumulated on this ctx's run counter (0 if none).
+func RunTotal(ctx context.Context) int64 {
+	if p := runCounter(ctx); p != nil {
+		return atomic.LoadInt64(p)
+	}
+	return 0
 }
 
 func categoryFrom(ctx context.Context) string {
@@ -70,6 +96,11 @@ func Add(ctx context.Context, n int) {
 	counts[k] += int64(n)
 	total += int64(n)
 	mu.Unlock()
+	// Per-request tally (if the caller opened one with WithRun), so the API can
+	// return this single run's cost for durable per-user metering in the host.
+	if p := runCounter(ctx); p != nil {
+		atomic.AddInt64(p, int64(n))
+	}
 }
 
 // Usage is one (principal, category) tally, for JSON reporting.

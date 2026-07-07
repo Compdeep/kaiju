@@ -24,6 +24,7 @@ func Default() *Config {
 			MaxObserverCalls: 50,
 			BatchSize:        5,
 			MaxInvestigations: 5,
+			MaxConcurrent:    3,
 			ExecutionMode:    "interactive",
 			WallClockSec:     180,
 			MaxTurns:         15,

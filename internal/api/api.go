@@ -219,9 +219,11 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// the authority. A separate HTTP timeout caused connection resets and
 	// ghost retries when the DAG outlived the HTTP deadline.
 	ctx := r.Context()
-	// Attribute this run's token usage to the calling principal (JWT sub); it
-	// rides the ctx through SubmitSync into every LLM call on the sync path.
-	ctx = tokens.WithPrincipal(ctx, userID)
+	// Attribute this run to the calling principal (JWT sub) and open a per-run
+	// token counter; both ride the ctx through SubmitSync into every LLM call on
+	// the sync path, so RunTotal(ctx) below is this request's exact token cost —
+	// the value the host (makeen) persists per user for durable billing.
+	ctx = tokens.WithRun(tokens.WithPrincipal(ctx, userID))
 
 	result, err := a.agent.Kernel().SubmitSync(ctx, trigger)
 	elapsed := time.Since(start)
@@ -256,6 +258,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		DAGID:      trigger.AlertID,
 		Nodes:      result.Nodes,
 		LLMCalls:   result.LLMCalls,
+		Tokens:     tokens.RunTotal(ctx),
 		DurationMs: elapsed.Milliseconds(),
 	}, http.StatusOK)
 }

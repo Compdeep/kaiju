@@ -21,10 +21,11 @@ const (
 const (
 	// defaultConcurrency is the fallback worker-pool size when the config
 	// (agent.MaxConcurrentInvestigations / dag.max_concurrent) does not set one.
-	// It stays 1 for now: the per-Graph state work (parallelism spine) makes >1
-	// safe, but production concurrency waits on per-principal fairness so a single
-	// caller can't monopolise the pool. Raise via config once that lands.
-	defaultConcurrency = 1
+	// The per-Graph state work (parallelism spine) makes >1 safe, and jobs are
+	// keyed by session so distinct callers run on distinct workers; a reserved
+	// chat lane keeps one worker free for interactive callers under background
+	// load. Explicit per-principal fairness caps remain a Phase-2 follow-up.
+	defaultConcurrency = 3
 	// maxQueueDepth bounds the pending queue; beyond it new background jobs are
 	// dropped (chat is exempt — see enqueue).
 	maxQueueDepth = 100

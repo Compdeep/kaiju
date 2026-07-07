@@ -173,6 +173,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		BatchSize:         cfg.Agent.BatchSize,
 		MaxInvestigations: cfg.Agent.MaxInvestigations,
 		MaxConcurrentInvestigations: cfg.Agent.MaxConcurrent,
+		DisableCoding:     cfg.Agent.DisableCoding,
 		ExecutionMode:     cfg.Agent.ExecutionMode,
 		DAGWallClock:      time.Duration(cfg.Agent.WallClockSec) * time.Second,
 		ComputeTimeout:    time.Duration(cfg.Tools.Compute.TimeoutSec) * time.Second,

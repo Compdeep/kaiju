@@ -164,6 +164,7 @@ type Config struct {
 
 	// Compute node
 	ComputeTimeout time.Duration // max code execution time for compute nodes (default 120s)
+	DisableCoding  bool          // when true, deep compute (architect/codebase building) is refused; shallow analytical compute still works
 }
 
 /*

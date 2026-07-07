@@ -66,23 +66,18 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
 	// dies cleanly when the investigation ends.
 	graph.Context = NewContextGate(graph, &trigger, a)
 
+	// Tag this investigation's graph with its session so every event it emits is
+	// routable per-session — no shared dagSessionID that a concurrent run could
+	// clobber. broadcastDAGEvent stamps SessionID from the graph at emission.
+	graph.SessionID = trigger.SessionID
+
 	observerCh := make(chan DAGEvent, 128)
 	graph.SetObserver(observerCh)
-	a.dagMu.Lock()
-	a.dagGraph = graph
-	a.dagAlertID = trigger.AlertID
-	a.dagSessionID = trigger.SessionID
-	a.dagMu.Unlock()
-	go a.dagFanOut(observerCh)
-	a.broadcastDAGEvent(DAGEvent{Type: "start", AlertID: trigger.AlertID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
+	go a.dagFanOut(observerCh, graph)
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "start", AlertID: trigger.AlertID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
 
 	cleanup := func() {
-		a.broadcastDAGEvent(DAGEvent{Type: "done", AlertID: trigger.AlertID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
-		a.dagMu.Lock()
-		a.dagGraph = nil
-		a.dagAlertID = ""
-		a.dagSessionID = ""
-		a.dagMu.Unlock()
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "done", AlertID: trigger.AlertID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
 		close(observerCh)
 	}
 
@@ -152,14 +147,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		if !budget.TrySpawnNode("", true) {
 			return nil, fmt.Errorf("budget exhausted before preflight")
 		}
-		a.preflight = a.preflightQuery(ctx, trigger.AlertID, formatTrigger(trigger), trigger.History)
-		// Per-investigation card list lives on the Graph (DAG path).
-		// a.activeCards is also set so the legacy ReAct path keeps working
-		// — ReAct doesn't use Graph the same way and is still serialized.
-		graph.ActiveCards = a.preflight.Skills
-		a.activeCards = a.preflight.Skills
+		pf := a.preflightQuery(ctx, trigger.AlertID, formatTrigger(trigger), trigger.History)
+		// Per-investigation preflight + card list live on the Graph, not the
+		// Agent, so concurrent investigations never clobber each other's state.
+		graph.Preflight = pf
+		graph.ActiveCards = pf.Skills
 		log.Printf("[dag] preflight: mode=%s intent=%s skills=%v categories=%v context=%q",
-			a.preflight.Mode, a.preflight.Intent, a.preflight.Skills, a.preflight.RequiredCategories, Text.TruncateLog(a.preflight.Context, 120))
+			pf.Mode, pf.Intent, pf.Skills, pf.RequiredCategories, Text.TruncateLog(pf.Context, 120))
 
 		// Autonomous mode: force investigate regardless of preflight classification.
 		// The agent always acts, never chats. Per-request override wins over config.
@@ -167,15 +161,15 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		if trigger.ExecutionMode != "" {
 			execMode = trigger.ExecutionMode
 		}
-		if execMode == "autonomous" && (a.preflight.Mode == "chat" || a.preflight.Mode == "meta") {
-			log.Printf("[dag] autonomous mode: overriding preflight mode=%s → investigate", a.preflight.Mode)
-			a.preflight.Mode = "investigate"
+		if execMode == "autonomous" && (pf.Mode == "chat" || pf.Mode == "meta") {
+			log.Printf("[dag] autonomous mode: overriding preflight mode=%s → investigate", pf.Mode)
+			pf.Mode = "investigate"
 		}
 
 		// Short-circuit chat/meta queries — skip the executive entirely.
 		// Only fires in interactive mode (autonomous overrides above).
-		if a.preflight.Mode == "chat" || a.preflight.Mode == "meta" {
-			log.Printf("[dag] preflight short-circuit: mode=%s, skipping planner", a.preflight.Mode)
+		if pf.Mode == "chat" || pf.Mode == "meta" {
+			log.Printf("[dag] preflight short-circuit: mode=%s, skipping planner", pf.Mode)
 			return nil, &ExecutiveConversationalError{Text: ""}
 		}
 	}
@@ -184,23 +178,23 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	if !budget.TrySpawnNode("", true) {
 		return nil, fmt.Errorf("budget exhausted before planner")
 	}
-	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "running", Tag: "plan"}})
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "running", Tag: "plan"}})
 
 	planResult, err := a.runExecutive(ctx, trigger, graph)
 	if err != nil {
 		// Conversational response (trivial query) — not a real failure
 		var convErr *ExecutiveConversationalError
 		if errors.As(err, &convErr) {
-			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "direct answer"}})
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "direct answer"}})
 			if convErr.Text != "" {
-				a.broadcastDAGEvent(DAGEvent{Type: "verdict", Text: convErr.Text})
+				a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: convErr.Text})
 			}
 			return nil, err
 		}
-		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "failed", Tag: "plan", Error: err.Error()}})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "failed", Tag: "plan", Error: err.Error()}})
 		return nil, fmt.Errorf("planner failed: %w", err)
 	}
-	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "plan"}})
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "plan"}})
 
 	initialNodes, err := planStepsToNodes(planResult.Steps, graph, budget, a.registry, dagMode)
 	if err != nil {
@@ -269,7 +263,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			n.StartedAt = time.Now()
 			inflight++
 			// Broadcast node running event
-			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: n.ID, Node: graph.SnapshotNode(n.ID)})
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: n.ID, Node: graph.SnapshotNode(n.ID)})
 			if n.Type == NodeReflection {
 				// Reflector is the sync point for the debug-cycle flag. Fix 2
 				// guarantees no reflection fires while debuggerInflight is true,
@@ -331,11 +325,12 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	// Returns true if an interjection was injected (caller should not launchReady yet —
 	// the reflection will complete and launchReady will fire then).
 	injectInterjection := func() bool {
-		if a.interjections == nil {
+		interject := interjectFrom(ctx)
+		if interject == nil {
 			return false
 		}
 		select {
-		case msg := <-a.interjections:
+		case msg := <-interject:
 			if !budget.TrySpawnNode("", true) {
 				log.Printf("[dag] no LLM budget for interjection reflection, message lost: %s", Text.TruncateLog(msg, 100))
 				return false
@@ -354,7 +349,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			graph.SetState(rID, StateRunning)
 			rNode.StartedAt = time.Now()
 			inflight++
-			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
 			// Build interjection context via ContextGate. Reflector is
 			// deterministic — no Query, just node returns + worklog.
 			intCtx, ictxErr := graph.Context.Get(ctx, ContextRequest{
@@ -415,7 +410,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		graph.SetState(rID, StateRunning)
 		rNode.StartedAt = time.Now()
 		inflight++
-		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
 		// Build batch reflection context via ContextGate. Deterministic, no curator.
 		batchCtxResp, bctxErr := graph.Context.Get(ctx, ContextRequest{
 			ReturnSources: Sources(
@@ -514,7 +509,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			// Sync point: previous Holmes/microplanner cycle is provably done
 			// by the time we get here (inflight has dropped to 0). Clear once.
 			debuggerInflight = false
-			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
 			// Build main reflection context via ContextGate. Deterministic, no curator.
 			reflCtxResp, rctxErr := graph.Context.Get(ctx, ContextRequest{
 				ReturnSources: Sources(
@@ -556,7 +551,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				}
 			}
 			// Broadcast node completion event
-			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: node.ID, Node: graph.SnapshotNode(node.ID)})
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: node.ID, Node: graph.SnapshotNode(node.ID)})
 
 			// ── Handle observer completions ──
 			if node.Type == NodeObserver {
@@ -598,7 +593,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							reflectionInflight = true
 							// Sync point: any prior debug cycle is acknowledged done.
 							debuggerInflight = false
-							a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
+							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
 							obsCtxResp, octxErr := graph.Context.Get(ctx, ContextRequest{
 								ReturnSources: Sources(
 									NodeReturns("all"),
@@ -644,7 +639,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						graph.SetState(comp.NodeID, StatePending)
 						log.Printf("[dag] blind retry for %s", comp.NodeID)
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BLIND_RETRY", errMsg)
-						a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
+						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
 						launchReady()
 						continue
 					}
@@ -660,7 +655,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						go a.oneshotRetry(ctx, node, comp, graph, budget, completionCh, errMsg, intent, trigger.Scope)
 						log.Printf("[dag] oneshot retry for %s", comp.NodeID)
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "ONESHOT_RETRY", errMsg)
-						a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
+						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
 						launchReady() // let dependents proceed with failed dep
 						continue
 					}
@@ -825,7 +820,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				for _, an := range actionNodes {
 					an.Source = "holmes"
 					graph.AddChild(comp.NodeID, an.ID)
-					a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: an.ID, Node: graph.SnapshotNode(an.ID)})
+					a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: an.ID, Node: graph.SnapshotNode(an.ID)})
 					actionNodeIDs = append(actionNodeIDs, an.ID)
 				}
 
@@ -847,7 +842,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					continue
 				}
 				nextNode.DependsOn = actionNodeIDs
-				a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nextNode.ID, Node: graph.SnapshotNode(nextNode.ID)})
+				a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: nextNode.ID, Node: graph.SnapshotNode(nextNode.ID)})
 				log.Printf("[dag] holmes iter %d → %d actions → iter %d queued",
 					prevState.Iter, len(actionNodes), prevState.Iter+1)
 				launchReady()
@@ -877,7 +872,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 								fixIDs = append(fixIDs, nn.ID)
 								debugGraftIDs[nn.ID] = true
 								debugGraftPending++
-								a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nn.ID, Node: graph.SnapshotNode(nn.ID)})
+								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: nn.ID, Node: graph.SnapshotNode(nn.ID)})
 							}
 						}
 						// Inject blueprint_ref into compute nodes that don't have one.
@@ -921,7 +916,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 								graph.AddChild(comp.NodeID, vID)
 								debugGraftIDs[vID] = true
 								debugGraftPending++
-								a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
+								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
 								rv++
 							}
 							if rv > 0 {
@@ -1050,7 +1045,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 								log.Printf("[dag] holmes setup failed: %v", err)
 							} else {
 								inflight++
-								a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: sNode.ID, Node: graph.SnapshotNode(sNode.ID)})
+								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: sNode.ID, Node: graph.SnapshotNode(sNode.ID)})
 								go a.fireHolmes(ctx, sNode, graph, budget, completionCh, trigger, intent)
 								debuggerInflight = true
 								log.Printf("[dag] dispatched holmes %s (iter 1/%d): %s", sNode.ID, maxIter, Text.TruncateLog(problem, 200))
@@ -1190,7 +1185,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							graph.AddChild(comp.NodeID, hID)
 							log.Printf("[dag] auto-grafted health check %s for service %s (port %s)", hID, svcResult.Name, port)
 							appendWorklog(a.cfg.MetadataDir, graph.SessionID, svcResult.Name, "SERVICE_START", fmt.Sprintf("pid %d, health check grafted on port %s", svcResult.PID, port))
-							a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: hID, Node: graph.SnapshotNode(hID)})
+							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: hID, Node: graph.SnapshotNode(hID)})
 						}
 					}
 				}
@@ -1269,7 +1264,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							lastDepID = sID
 							allGraftedNodes = append(allGraftedNodes, setupNode)
 							graph.AddChild(comp.NodeID, sID)
-							a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
+							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
 						}
 						if len(cr.Setup) > 0 {
 							log.Printf("[dag] compute plan → grafted %d setup bash nodes", len(cr.Setup))
@@ -1301,7 +1296,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							computeNodes[i] = followNode
 							allGraftedNodes = append(allGraftedNodes, followNode)
 							graph.AddChild(comp.NodeID, fID)
-							a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: fID, Node: graph.SnapshotNode(fID)})
+							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: fID, Node: graph.SnapshotNode(fID)})
 						}
 
 						// Resolve inter-task dependencies
@@ -1349,7 +1344,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 										eID := graph.AddNode(execNode)
 										allGraftedNodes = append(allGraftedNodes, execNode)
 										graph.AddChild(comp.NodeID, eID)
-										a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: eID, Node: graph.SnapshotNode(eID)})
+										a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: eID, Node: graph.SnapshotNode(eID)})
 										log.Printf("[dag] compute plan → grafted execute node %s: %s", eID, execCmd)
 									}
 								}
@@ -1388,7 +1383,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 										sID := graph.AddNode(svcNode)
 										allGraftedNodes = append(allGraftedNodes, svcNode)
 										graph.AddChild(comp.NodeID, sID)
-										a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
+										a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
 										log.Printf("[dag] compute plan → grafted service node %s: %s", sID, svcCmd)
 									}
 								}
@@ -1442,7 +1437,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							sID := graph.AddNode(svcNode)
 							allGraftedNodes = append(allGraftedNodes, svcNode)
 							graph.AddChild(comp.NodeID, sID)
-							a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
+							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
 							log.Printf("[dag] compute plan → grafted top-level service node %s: %s", sID, svc.Command)
 						}
 
@@ -1493,7 +1488,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 								graph.AddChild(comp.NodeID, vID)
 								validationNodes = append(validationNodes, verifyNode)
 								allGraftedNodes = append(allGraftedNodes, verifyNode)
-								a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
+								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
 							}
 							if len(validationNodes) > 0 {
 								log.Printf("[dag] compute plan → grafted %d validation checks", len(validationNodes))
@@ -1701,6 +1696,9 @@ type SyncResult struct {
  * return: SyncResult pointer with verdict, actions, and gaps, or error.
  */
 func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
+	// Attribute every LLM call in this run to a token-usage category. Principal
+	// (if any) is already on ctx from the API boundary and is preserved.
+	ctx = tagTokens(ctx, trigger.Type)
 	// Route to ReAct loop if mode=react
 	if trigger.DAGMode == "react" {
 		return a.RunReActSync(ctx, trigger)
@@ -1714,19 +1712,6 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// distinguish current vs stale evidence.
 	markRunStart(a.cfg.MetadataDir, trigger.SessionID)
 	rotateServiceLogs(a.cfg.Workspace)
-
-	a.investigating.Store(true)
-	defer func() {
-		a.investigating.Store(false)
-		// Drain any pending interjections
-		for {
-			select {
-			case <-a.interjections:
-			default:
-				return
-			}
-		}
-	}()
 
 	startTime := time.Now()
 	graph, budget, cleanup := a.setupDAGPipeline(trigger)
@@ -1812,8 +1797,8 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	if pr.ReflectionVerdict != "" && aggMode == 0 {
 		log.Printf("[dag] skipping aggregator (agg_mode=0, reflection concluded)")
 		verdict = pr.ReflectionVerdict
-		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize (skipped)"}})
-		a.broadcastDAGEvent(DAGEvent{Type: "verdict", Text: verdict})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize (skipped)"}})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: verdict})
 	} else {
 		if dagCtx.Err() != nil {
 			return nil, fmt.Errorf("wall clock expired before aggregator")
@@ -1830,7 +1815,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		}
 		log.Printf("[dag] aggregator using %s model (agg_mode=%d)", aggLabel, aggMode)
 
-		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "running", Tag: "synthesize"}})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "running", Tag: "synthesize"}})
 
 		var aggErr error
 		aggCtxResp2, actxErr2 := graph.Context.Get(dagCtx, ContextRequest{
@@ -1846,10 +1831,10 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		}
 		verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggCtxResp2)
 		if aggErr != nil {
-			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
 			return nil, fmt.Errorf("aggregator failed: %w", aggErr)
 		}
-		a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize"}})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize"}})
 	}
 
 	elapsed := time.Since(startTime)
@@ -2104,7 +2089,7 @@ func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd,
 	execID := graph.AddNode(execNode)
 	graph.AddChild(compID, execID)
 	grafted = append(grafted, execNode)
-	a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: execID, Node: graph.SnapshotNode(execID)})
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: execID, Node: graph.SnapshotNode(execID)})
 
 	// Note: we used to graft a `verify_<tag>` bash node here that ran a
 	// coder-supplied bash check against the captured output. That validator

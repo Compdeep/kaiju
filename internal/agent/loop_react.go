@@ -17,13 +17,15 @@ const maxToolResultLen = 4096
 /*
  * systemPrompt returns the base system prompt for the ReAct loop.
  * desc: Composes the soul prompt with role description, ReAct role prompt,
- *       capability card context, and fleet section.
+ *       capability card context, and fleet section. Active skill cards are
+ *       passed in per-run (the caller owns them), not read off the Agent.
+ * param: cards - active skill card keys for this run (may be nil).
  * return: the fully composed system prompt string.
  */
-func (a *Agent) systemPrompt() string {
+func (a *Agent) systemPrompt(cards []string) string {
 	cardContext := ""
-	if len(a.activeCards) > 0 {
-		cardContext = "\n\n" + a.capabilities.ComposeBodies(a.activeCards)
+	if len(cards) > 0 {
+		cardContext = "\n\n" + a.capabilities.ComposeBodies(cards)
 	}
 	rolePrompt := fmt.Sprintf("You are an agent on node %s.\n%s\n\n%s%s%s",
 		a.cfg.NodeID, roleDescription(a.cfg.NodeRole), defaultReactRolePrompt, cardContext, a.fleetSection())
@@ -45,15 +47,17 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
 
 	startTime := time.Now()
 
-	// Classify capabilities for this query (optional — disabled by default)
+	// Classify capabilities for this query (optional — disabled by default).
+	// Cards are per-run local state, not stored on the Agent.
+	var cards []string
 	if a.cfg.ClassifierEnabled && len(a.capabilities) > 0 {
-		a.activeCards = a.classifyCapabilities(ctx, formatTrigger(trigger))
-		log.Printf("[agent] classified: %v", a.activeCards)
+		cards = a.classifyCapabilities(ctx, formatTrigger(trigger))
+		log.Printf("[agent] classified: %v", cards)
 	}
 
 	// Build initial messages with conversation history
 	messages := BuildMessagesWithHistory(
-		a.systemPrompt(),
+		a.systemPrompt(cards),
 		formatTrigger(trigger),
 		trigger.History,
 	)
@@ -145,9 +149,9 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
 			turn, len(assistantMsg.ToolCalls), resp.Usage.TotalTokens)
 
 		// Check for user interjection before next LLM call
-		if a.interjections != nil {
+		if interject := interjectFrom(ctx); interject != nil {
 			select {
-			case msg := <-a.interjections:
+			case msg := <-interject:
 				messages = append(messages, llm.Message{
 					Role:    "user",
 					Content: fmt.Sprintf("[Operator interjection]: %s", msg),
@@ -173,20 +177,9 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
  * return: SyncResult with verdict, or error.
  */
 func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
+	ctx = tagTokens(ctx, trigger.Type)
 	log.Printf("[react] sync investigation: type=%s alert=%s source=%s",
 		trigger.Type, trigger.AlertID, trigger.Source)
-
-	a.investigating.Store(true)
-	defer func() {
-		a.investigating.Store(false)
-		for {
-			select {
-			case <-a.interjections:
-			default:
-				return
-			}
-		}
-	}()
 
 	startTime := time.Now()
 
@@ -197,7 +190,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	// Build initial messages — no skill guidance injection (same as native planner).
 	// Skills are available as tool descriptions in the API tools array.
 	messages := BuildMessagesWithHistory(
-		a.systemPrompt(),
+		a.systemPrompt(nil),
 		formatTrigger(trigger),
 		trigger.History,
 	)
@@ -252,7 +245,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 
 		// Stream text content as verdict chunks
 		if assistantMsg.Content != "" {
-			a.broadcastDAGEvent(DAGEvent{Type: "verdict", Text: assistantMsg.Content})
+			a.broadcastDAGEvent(nil, DAGEvent{Type: "verdict", Text: assistantMsg.Content, SessionID: trigger.SessionID})
 			verdict = assistantMsg.Content
 		}
 
@@ -277,7 +270,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 				paramsStr = paramsStr[:120] + "..."
 			}
 
-			a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nodeID, Node: &NodeInfo{
+			a.broadcastDAGEvent(nil, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: nodeID, Node: &NodeInfo{
 				ID: nodeID, Type: "tool", State: "running",
 				Tool: tc.Function.Name, Tag: tc.Function.Name,
 				Params: paramsStr,
@@ -295,7 +288,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			}
 			if execErr != nil {
 				toolMsg.Content = fmt.Sprintf("error: %v", execErr)
-				a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nodeID, Node: &NodeInfo{
+				a.broadcastDAGEvent(nil, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: nodeID, Node: &NodeInfo{
 					ID: nodeID, Type: "tool", State: "failed",
 					Tool: tc.Function.Name, Tag: tc.Function.Name,
 					Ms: toolMs, Error: execErr.Error(),
@@ -306,7 +299,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 				if len(truncResult) > 200 {
 					truncResult = truncResult[:200] + "..."
 				}
-				a.broadcastDAGEvent(DAGEvent{Type: "node", NodeID: nodeID, Node: &NodeInfo{
+				a.broadcastDAGEvent(nil, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: nodeID, Node: &NodeInfo{
 					ID: nodeID, Type: "tool", State: "resolved",
 					Tool: tc.Function.Name, Tag: tc.Function.Name,
 					Ms: toolMs, ResultSize: len(result),
@@ -320,9 +313,9 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			turn, len(assistantMsg.ToolCalls), resp.Usage.TotalTokens)
 
 		// Interjection check
-		if a.interjections != nil {
+		if interject := interjectFrom(ctx); interject != nil {
 			select {
-			case msg := <-a.interjections:
+			case msg := <-interject:
 				messages = append(messages, llm.Message{
 					Role:    "user",
 					Content: fmt.Sprintf("[Operator interjection]: %s", msg),

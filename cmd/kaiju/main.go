@@ -224,7 +224,10 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	if cfg.Tools.Sysinfo.Enabled {
 		reg.Replace(kaijutools.NewSysinfo(cfg.Agent.Workspace), "builtin")
 	}
-	if cfg.Tools.Compute.Enabled {
+	// Coding tools (compute + edit_file). disable_coding is the master switch for
+	// the whole coding module — when set, these tools aren't even registered, so
+	// the planner never sees them.
+	if cfg.Tools.Compute.Enabled && !cfg.Agent.DisableCoding {
 		reg.Replace(agent.NewComputeTool(ag), "builtin")
 		// edit_file rides the same Coder pipeline as compute(shallow) so
 		// gate it on the same config flag. Decouple later if we want file

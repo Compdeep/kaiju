@@ -36,13 +36,10 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	userPrompt := assembleAggregatorPrompt(trigger, graph, gateCtx)
 
 	intentStr := intent.String()
-	// Per-investigation cards live on the graph; fall back to agent field
-	// if no graph is provided (defensive).
-	cards := []string{}
-	if graph != nil && len(graph.ActiveCards) > 0 {
+	// Per-investigation cards live on the graph.
+	var cards []string
+	if graph != nil {
 		cards = graph.ActiveCards
-	} else {
-		cards = a.activeCards
 	}
 	aggGuidance := ""
 	if len(cards) > 0 {
@@ -69,7 +66,7 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   aggMaxTokens,
 	}, func(chunk string) {
-		a.broadcastDAGEvent(DAGEvent{Type: "verdict", Text: chunk})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: chunk})
 	})
 
 	trace := LLMTrace{

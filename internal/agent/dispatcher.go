@@ -447,10 +447,9 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		isContextual = true
 		// Resolve classifier-active skills into per-role guidance sections.
 		// Compute uses this; other contextual tools may ignore it.
-		// Cards live on the graph (per-investigation), with fallback to the
-		// legacy agent field for safety.
-		activeCards := a.activeCards
-		if graph != nil && len(graph.ActiveCards) > 0 {
+		// Cards live on the graph (per-investigation).
+		var activeCards []string
+		if graph != nil {
 			activeCards = graph.ActiveCards
 		}
 		cards, names := a.resolveComputeSkillCards(activeCards)

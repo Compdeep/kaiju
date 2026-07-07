@@ -378,6 +378,17 @@ func readWorklog(workspace, sessionID string, maxLines int) string {
 }
 
 /*
+ * resetWorklog clears the worklog for a given session.
+ * desc: Removes the session's worklog file so a subsequent readWorklog returns
+ *       empty. Only the target session is affected; a missing file is a no-op.
+ */
+func resetWorklog(workspace, sessionID string) {
+	if err := os.Remove(worklogPath(workspace, sessionID)); err != nil && !os.IsNotExist(err) {
+		log.Printf("[worklog] reset %s: %v", sessionID, err)
+	}
+}
+
+/*
  * appendWorklog appends an entry to the shared compute worklog.
  * desc: Each entry is a single timestamped line. The worklog is the primary
  *       timeline for the reflector and aggregator — it replaces the scattered

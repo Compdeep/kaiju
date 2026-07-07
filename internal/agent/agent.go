@@ -233,26 +233,21 @@ type Agent struct {
 	fleet         FleetContextProvider // nil on standalone nodes
 	capabilities  CapabilityRegistry   // composable prompt cards
 	intentRegistry *IntentRegistry     // DB-backed intent registry; loaded at startup
-	// NOTE: activeCards and preflight live on the Agent singleton, not on the
-	// per-investigation Graph. Concurrent investigations will race and clobber
-	// each other's state (last writer wins). Kaiju's normal runtime serializes
-	// investigations via a.investigating, so this is latent under current usage.
-	// Fix would move both fields onto Graph alongside Gaps.
-	activeCards []string         // selected per-investigation by preflight (formerly classifier)
-	preflight   *PreflightResult // pre-plan result (mode/intent/categories/skills)
+	// Per-investigation state (active skill cards, preflight result) lives on the
+	// Graph (Graph.ActiveCards / Graph.Preflight), not on the Agent — concurrent
+	// investigations each carry their own Graph, so nothing here is shared or raced.
 	eventStore    *store.Store          // nil if no event store
 
 	interjections chan string     // user messages during active investigation
 	investigating atomic.Bool    // true while investigate is executing
 	kernel        *Kernel          // core runtime — owns investigation lifecycle
 
-	// DAG observation (live thought process streaming)
+	// DAG observation (live thought process streaming). Subscribers receive every
+	// investigation's events; each event is tagged with its own Graph's SessionID
+	// at emission, so consumers can route by session.
 	dagMu      sync.RWMutex
 	dagSubs    map[int]chan DAGEvent // subscriber ID → channel
 	dagSubID   int
-	dagGraph   *Graph  // current active graph (nil when idle)
-	dagAlertID    string
-	dagSessionID  string
 }
 
 /*
@@ -617,45 +612,36 @@ func (a *Agent) SubscribeDAG() (<-chan DAGEvent, func()) {
 }
 
 /*
- * DAGSnapshot returns the current graph state for new SSE connections.
- * desc: Thread-safe snapshot of the active investigation graph.
- * return: nodes slice, alert ID, and whether an investigation is active.
- */
-func (a *Agent) DAGSnapshot() (nodes []*NodeInfo, alertID string, active bool) {
-	a.dagMu.RLock()
-	defer a.dagMu.RUnlock()
-
-	if a.dagGraph == nil {
-		return nil, "", false
-	}
-	return a.dagGraph.Snapshot(), a.dagAlertID, true
-}
-
-/*
  * dagFanOut reads from a Graph observer channel and broadcasts to all subscribers.
  * desc: Runs as a goroutine, forwarding every event from the graph observer
- *       to all registered DAG subscribers.
+ *       to all registered DAG subscribers. The graph tags each event with its
+ *       own SessionID so concurrent investigations stay separable downstream.
  * param: src - the source channel from the Graph observer.
+ * param: graph - the investigation that owns this observer channel.
  */
-func (a *Agent) dagFanOut(src <-chan DAGEvent) {
+func (a *Agent) dagFanOut(src <-chan DAGEvent, graph *Graph) {
 	for evt := range src {
-		a.broadcastDAGEvent(evt)
+		a.broadcastDAGEvent(graph, evt)
 	}
 }
 
 /*
  * broadcastDAGEvent sends an event to all DAG subscribers (non-blocking per sub).
  * desc: Drops events for slow subscribers to prevent blocking the pipeline.
+ *       Tags the event with the emitting graph's SessionID when the caller
+ *       hasn't set one, so subscribers can route by session. graph may be nil
+ *       for paths with no investigation graph (e.g. the ReAct loop), in which
+ *       case the event's own SessionID (if any) is kept as-is.
+ * param: graph - the investigation that emitted the event (may be nil).
  * param: evt - the DAGEvent to broadcast.
  */
-func (a *Agent) broadcastDAGEvent(evt DAGEvent) {
+func (a *Agent) broadcastDAGEvent(graph *Graph, evt DAGEvent) {
+	if evt.SessionID == "" && graph != nil {
+		evt.SessionID = graph.SessionID
+	}
+
 	a.dagMu.RLock()
 	defer a.dagMu.RUnlock()
-
-	// Auto-stamp session ID so individual callsites don't need to pass it.
-	if evt.SessionID == "" && a.dagSessionID != "" {
-		evt.SessionID = a.dagSessionID
-	}
 
 	for _, ch := range a.dagSubs {
 		select {

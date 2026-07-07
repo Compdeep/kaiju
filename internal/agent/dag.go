@@ -250,6 +250,7 @@ type Graph struct {
 	Validators  []ValidatorDef // architect-declared validation checks, stored for replay after replans
 	Context     *ContextGate   // per-investigation context API; constructed at investigation start
 	ActiveCards []string       // skill card keys selected by preflight; read by skill_guidance source and DAG-path callers
+	Preflight   *PreflightResult // preflight result (mode/intent/skills/compute-mode); per-investigation, read by the planner
 }
 
 /*

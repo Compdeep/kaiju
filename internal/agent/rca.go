@@ -218,6 +218,14 @@ func dispatchMicroplannerWithRCA(ctx context.Context, a *Agent, graph *Graph, bu
 	completionCh chan<- nodeCompletion, trigger Trigger, parentID string, investigationCount int,
 	problem string, rca *RCAReport, addressing []string, intent gates.Intent) (string, error) {
 
+	// Coding module disabled: the microplanner is a code-fix planner (blueprint /
+	// compute-per-file). When coding is off, Holmes still produces its RCA as
+	// evidence, but we don't graft a fix planner — the investigation concludes and
+	// the aggregator reports the failure + root cause honestly.
+	if a.cfg.DisableCoding {
+		return "", nil
+	}
+
 	if !budget.TrySpawnNode("", true) {
 		return "", fmt.Errorf("no budget for microplanner")
 	}

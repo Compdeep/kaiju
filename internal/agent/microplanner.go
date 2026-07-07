@@ -12,6 +12,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 )
 
 /*
@@ -66,7 +67,7 @@ func extractDebugSummary(raw string) string {
 func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph,
 	budget *Budget, ch chan<- nodeCompletion, gateCtx *ContextResponse, trigger Trigger, intent gates.Intent) {
 
-	sysPrompt := ComposeSystemPrompt(a.soulPrompt, debuggerPrompt) + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Microplanner) + a.fleetSection()
 	userPrompt := assembleDebuggerPrompt(mpNode, gateCtx, trigger, a, intent)
 
 	log.Printf("[dag] debugger prompt for %s (%d bytes): %s", mpNode.Tag, len(userPrompt), Text.TruncateLog(userPrompt, 800))

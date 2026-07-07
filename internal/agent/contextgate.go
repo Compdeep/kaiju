@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
@@ -521,41 +522,8 @@ func specNames(specs []SourceSpec) []string {
 
 // ── Curator ─────────────────────────────────────────────────────────────────
 
-const curatorSystemPrompt = `You are a context curator for an autonomous AI agent. A node in an execution graph needs to act on a query, and has provided source materials. Your job: write a SUMMARY containing exactly the information from those sources that bears on the query. Quote VERBATIM. Drop the rest.
-
-## Source vocabulary
-
-- blueprint: an architectural plan for a project. Sections may include Goal, Architecture, Directory Structure, Files, Build System, Services.
-- worklog: chronological log of events from this investigation. Format: TIMESTAMP TAG ACTION DETAILS.
-- node_returns: results returned by previously-executed nodes (tools, compute jobs). May include errors, command output, file paths.
-- workspace_tree: a light listing of files on disk in the agent's workspace.
-- workspace_deep: a deep workspace scan including small file contents and structure (architect-grade).
-- function_map: discovered function declarations across the workspace, formatted as a list of signatures.
-- existing_blueprints: contents of all blueprints in the session, not just the latest one.
-- service_state: registry of long-running processes (servers, daemons) including name, status, port, PID.
-- history: recent conversation turns between the user and the agent.
-- skill_guidance: instructions from active skill cards.
-
-## Rules
-
-1. Quote relevant content VERBATIM. Never paraphrase error messages, file paths, line numbers, stack traces, command output, package names, or stderr/stdout text. These are diagnostic keys — paraphrasing destroys them.
-2. Drop irrelevant content. Do not pad with material that doesn't bear on the query.
-3. Order content by relevance to the query, not by source order.
-4. If nothing is relevant, return an empty summary.
-5. Never invent content. Never add commentary outside the summary.
-6. Stay within the size budget. If sources exceed it, prefer the most relevant content.
-
-## Extraction patterns
-
-7. **Pair errors with their commands.** When a command failed, include BOTH the command and its error/stderr/stdout. Just the error without the command is half-useful.
-8. **Collapse recurring errors with a count.** If the same error message (or near-identical) appears multiple times across the sources, list it ONCE with a note like "(occurred 4 times: n31, n34, n45, n47)" instead of repeating it. Recurrence is itself a signal.
-9. **Surface what was tried that DIDN'T work.** If the query is about a failure and the sources show prior fix attempts (DEBUG_PLAN entries, [oneshot_retry] tags, retried bash commands), call those out explicitly so the caller doesn't repeat them.
-10. **Preserve workdir + paths.** When a command fails, the working directory matters as much as the error. Include "cd <dir> && ..." prefixes verbatim.
-11. **Include exact identifiers.** Module names, package names, file paths, line numbers, port numbers, PIDs, function names. The query usually mentions one of these — extract content that contains it.
-12. **Drop pure-progress noise.** Lines like "added N packages", "STARTED", "OK" are noise unless they contain a clue about state change relevant to the query.
-
-Output ONLY a JSON object: {"summary": "<verbatim relevant content>"}.
-No prose, no markdown fences.`
+// curatorSystemPrompt moved to prompt.Curator
+// (internal/agent/prompt/prompts.md).
 
 // runCurator builds the user message and calls the executor LLM. Returns the
 // extracted summary string. Failures bubble up; the caller decides how to react.
@@ -591,7 +559,7 @@ func (g *ContextGate) runCurator(ctx context.Context, query string, sources map[
 
 	resp, err := g.agent.executor.Complete(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: curatorSystemPrompt},
+			{Role: "system", Content: prompt.Curator},
 			{Role: "user", Content: sb.String()},
 		},
 		Tools:       []llm.ToolDef{curatorToolDef()},

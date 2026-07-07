@@ -37,6 +37,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 )
 
 /*
@@ -350,7 +351,7 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 		}
 	}
 
-	sysPrompt := ComposeSystemPrompt(a.soulPrompt, holmesPrompt) + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Holmes) + a.fleetSection()
 	userPrompt := assembleHolmesPrompt(state, trigger, a, intent, gateCtx)
 
 	log.Printf("[dag] holmes iter %d/%d for %s (%d bytes)", state.Iter, state.MaxIter, sNode.Tag, len(userPrompt))

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 )
 
 /*
@@ -24,29 +25,8 @@ type observerOutput struct {
 	Cancel []string   `json:"cancel"`   // tags/IDs to cancel when action == "cancel"
 }
 
-const defaultObserverRolePrompt = `You are an observer monitoring a live investigation.
-A step just completed. Decide if the investigation should adapt.
-
-Output JSON:
-{
-  "action": "continue|inject|cancel|reflect",
-  "reason": "brief explanation",
-  "nodes": [{"tool":"...","params":{},"depends_on":[],"tag":"..."}],
-  "cancel": ["tag1", "tag2"]
-}
-
-Actions:
-- "continue": result is expected, no changes needed. This is the most common response.
-- "inject": result reveals something urgent — add new investigation steps immediately
-- "cancel": result makes some pending steps pointless — cancel them by tag
-- "reflect": enough evidence has accumulated — trigger a full reflection checkpoint
-
-Rules:
-- Default to "continue" unless the result is surprising or reveals new leads
-- Only "inject" for genuinely new information that wasn't anticipated by the plan
-- Only "cancel" if pending steps are provably pointless (e.g. target IP is already known-clean)
-- Use "reflect" sparingly — only when enough evidence warrants a full review
-- Output ONLY the JSON, no commentary`
+// defaultObserverRolePrompt moved to prompt.Observer
+// (internal/agent/prompt/prompts.md).
 
 /*
  * fireObserver runs a lightweight LLM call to evaluate a completed node's
@@ -145,7 +125,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
 	}
 
-	sysPrompt := ComposeSystemPrompt(a.soulPrompt, defaultObserverRolePrompt) + toolSection.String() + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Observer) + toolSection.String() + a.fleetSection()
 	userPrompt := sb.String()
 	messages := []llm.Message{
 		{Role: "system", Content: sysPrompt},

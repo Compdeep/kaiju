@@ -18,6 +18,7 @@ import (
 	"github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
 	"github.com/Compdeep/kaiju/internal/memory"
+	"github.com/Compdeep/kaiju/internal/tokens"
 )
 
 /*
@@ -56,6 +57,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/execute", a.handleExecute)
 	mux.HandleFunc("GET /api/v1/tools", a.handleListTools)
 	mux.HandleFunc("GET /api/v1/status", a.handleStatus)
+	mux.HandleFunc("GET /api/v1/usage", a.handleUsage)
 	mux.HandleFunc("GET /api/v1/workspace/files", a.handleWorkspaceFiles)
 	mux.HandleFunc("GET /api/v1/workspace/serve", a.handleWorkspaceServe)
 	mux.HandleFunc("POST /api/v1/workspace/write", a.handleWorkspaceWrite)
@@ -217,6 +219,9 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// the authority. A separate HTTP timeout caused connection resets and
 	// ghost retries when the DAG outlived the HTTP deadline.
 	ctx := r.Context()
+	// Attribute this run's token usage to the calling principal (JWT sub); it
+	// rides the ctx through SubmitSync into every LLM call on the sync path.
+	ctx = tokens.WithPrincipal(ctx, userID)
 
 	result, err := a.agent.Kernel().SubmitSync(ctx, trigger)
 	elapsed := time.Since(start)
@@ -279,6 +284,17 @@ func (a *API) handleInterject(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[api] interjection sent: %s", req.Message)
 	jsonResponse(w, map[string]any{"sent": true}, http.StatusOK)
+}
+
+/*
+ * handleUsage returns in-memory LLM token-usage tallies since process start,
+ * broken down per (principal, category). In-memory only — resets on restart.
+ * Streamed calls (aggregator/verdict) are not yet counted (see llm.CompleteStream).
+ * param: w - HTTP response writer
+ */
+func (a *API) handleUsage(w http.ResponseWriter, _ *http.Request) {
+	usage, total := tokens.Snapshot()
+	jsonResponse(w, map[string]any{"usage": usage, "total": total}, http.StatusOK)
 }
 
 /*

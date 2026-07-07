@@ -1696,6 +1696,9 @@ type SyncResult struct {
  * return: SyncResult pointer with verdict, actions, and gaps, or error.
  */
 func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
+	// Attribute every LLM call in this run to a token-usage category. Principal
+	// (if any) is already on ctx from the API boundary and is preserved.
+	ctx = tagTokens(ctx, trigger.Type)
 	// Route to ReAct loop if mode=react
 	if trigger.DAGMode == "react" {
 		return a.RunReActSync(ctx, trigger)

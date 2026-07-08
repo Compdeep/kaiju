@@ -70,6 +70,14 @@ type Trigger struct {
 	History   []llm.Message   `json:"history,omitempty"`    // conversation history
 	AggMode       int    `json:"agg_mode,omitempty"`        // 0=skip aggregator, 1=executor model (default), 2=reasoning model
 	ExecutionMode string `json:"execution_mode,omitempty"` // per-request override: "interactive" or "autonomous"
+	// Per-request model routing (all optional; empty ⇒ configured default).
+	// Provider is a name in cfg.Providers; Model is that provider's model id.
+	// Heavy lane = executive/aggregator/reasoning; Light lane = the executor
+	// (classify/route/reflect/observe). Keys are never carried here.
+	Provider         string `json:"provider,omitempty"`
+	Model            string `json:"model,omitempty"`
+	ExecutorProvider string `json:"executor_provider,omitempty"`
+	ExecutorModel    string `json:"executor_model,omitempty"`
 	HeartbeatThreshold int `json:"heartbeat_threshold,omitempty"` // consecutive stuck ticks before kernel interjects (0 = default 3; raise for long-running work like downloads)
 }
 
@@ -124,6 +132,12 @@ type Config struct {
 	LLMEndpoint   string
 	LLMAPIKey     string
 	LLMModel      string
+	// Providers is the credential catalog for per-request model routing,
+	// keyed by provider name (openai, anthropic, openrouter, selfhosted, …).
+	// Built into one llm.Client per provider at boot; a request selects a
+	// provider+model and kaiju routes to the matching keyed client. Keys live
+	// only here — requests carry a selection, never a key.
+	Providers map[string]ProviderCreds
 	MaxTurns      int
 	Temperature   float64
 	MaxTokens     int
@@ -217,6 +231,10 @@ type Agent struct {
 	cfg         Config
 	llm         *llm.Client     // reasoning model (executive, aggregator, classifier)
 	executor    *llm.Client     // executor model (reflection, observer, micro-planner)
+	// providerClients holds one client per configured provider for per-request
+	// model routing (see model_route.go). Nil/empty ⇒ routing off, everything
+	// uses llm/executor as today.
+	providerClients map[string]*llm.Client
 	registry    *tools.Registry
 	gate        *gates.Gate
 	clearanceCheck ClearanceChecker // external authorization (nil = no check)
@@ -330,10 +348,35 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 	// Executor defaults to same client if not configured separately
 	executorClient := client
 
+	// One client per configured provider for per-request model routing. The
+	// map key is the routing name (what a request selects); Type is the wire
+	// protocol (defaults to the name). Model is left empty — the per-request
+	// model overrides it at the call seam (see model_route.go).
+	providerClients := make(map[string]*llm.Client, len(cfg.Providers))
+	for name, p := range cfg.Providers {
+		if p.APIKey == "" {
+			log.Printf("[agent] provider %q has no api_key, skipping", name)
+			continue
+		}
+		wire := p.Type
+		if wire == "" {
+			wire = name
+		}
+		providerClients[name] = llm.NewClientWithProvider(wire, p.Endpoint, p.APIKey, "")
+	}
+	if len(providerClients) > 0 {
+		names := make([]string, 0, len(providerClients))
+		for n := range providerClients {
+			names = append(names, n)
+		}
+		log.Printf("[agent] model routing enabled, providers: %v", names)
+	}
+
 	return &Agent{
 		cfg:               cfg,
 		llm:               client,
 		executor:          executorClient,
+		providerClients:   providerClients,
 		registry:          reg,
 		gate:              gate,
 		clearance:         clr,

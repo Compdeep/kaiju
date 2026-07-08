@@ -73,7 +73,7 @@ func (a *Agent) classifyValidatorOutput(ctx context.Context, tag, output string)
 
 	userPrompt := fmt.Sprintf("Validator tag: %s\n\n--- captured output ---\n%s", tag, Text.HeadTail(trimmed, 2000, 2000))
 
-	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
+	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: validatorClassifierPrompt},
 			{Role: "user", Content: userPrompt},

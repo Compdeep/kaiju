@@ -370,7 +370,7 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 	}
 
 	started := time.Now()
-	resp, llmErr := a.llm.Complete(ctx, &llm.ChatRequest{
+	resp, llmErr := a.completeHeavy(ctx, &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{holmesToolDef()},
 		ToolChoice:  "required",

@@ -16,11 +16,30 @@ import (
 type Config struct {
 	LLM      LLMConfig      `json:"llm"`
 	Executor ExecutorConfig `json:"executor"`
-	Agent    AgentConfig    `json:"agent"`
-	Channels ChannelsConfig `json:"channels"`
-	API        APIConfig      `json:"api"`
-	Tools      ToolsConfig    `json:"tools"`
-	SkillsDirs []string       `json:"skills_dirs"`
+	// Providers is the credential catalog for per-request model routing. Each
+	// entry is a named provider (openai, anthropic, openrouter, selfhosted, …)
+	// holding the endpoint + key. The host (e.g. makeen) selects a provider +
+	// model per request; kaiju resolves the name to the keyed client here. The
+	// KEYS live only here — callers never supply a key, only a selection.
+	Providers  map[string]ProviderConfig `json:"providers,omitempty"`
+	Agent      AgentConfig               `json:"agent"`
+	Channels   ChannelsConfig            `json:"channels"`
+	API        APIConfig                 `json:"api"`
+	Tools      ToolsConfig               `json:"tools"`
+	SkillsDirs []string                  `json:"skills_dirs"`
+}
+
+/*
+ * ProviderConfig holds the credentials for one routable provider.
+ * desc: Endpoint + key for a named provider. Type is the wire protocol
+ *       ("openai" default, or "anthropic"); it defaults to the map key when
+ *       empty, so "selfhosted" (an OpenAI-compatible endpoint) should set
+ *       Type:"openai" while pointing Endpoint at the private host.
+ */
+type ProviderConfig struct {
+	Type     string `json:"type,omitempty"` // wire protocol: "openai" (default) | "anthropic"
+	Endpoint string `json:"endpoint"`
+	APIKey   string `json:"api_key"`
 }
 
 /*
@@ -262,6 +281,11 @@ func (c *Config) resolve() {
 	c.LLM.Endpoint = resolveEnv(c.LLM.Endpoint)
 	c.Executor.APIKey = resolveEnv(c.Executor.APIKey)
 	c.Executor.Endpoint = resolveEnv(c.Executor.Endpoint)
+	for name, p := range c.Providers {
+		p.APIKey = resolveEnv(p.APIKey)
+		p.Endpoint = resolveEnv(p.Endpoint)
+		c.Providers[name] = p
+	}
 	c.Channels.Telegram.Token = resolveEnv(c.Channels.Telegram.Token)
 	c.Channels.Discord.Token = resolveEnv(c.Channels.Discord.Token)
 	c.API.AuthToken = resolveEnv(c.API.AuthToken)

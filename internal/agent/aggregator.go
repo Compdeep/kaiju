@@ -28,10 +28,16 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 }
 
 func (a *Agent) runAggregatorWithIntent(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
-	return a.runAggregatorWithClient(ctx, trigger, graph, intent, history, a.llm, gateCtx)
+	// Default aggregator path uses the heavy lane, routed to the host-selected
+	// provider when present (model_route.go).
+	client, model := a.heavyLane(ctx)
+	return a.runAggregatorWithClient(ctx, trigger, graph, intent, history, client, model, gateCtx)
 }
 
-func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, client *llm.Client, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
+// runAggregatorWithClient synthesizes the final verdict. model is the routed
+// model id for client; when non-empty it overrides the client's default so a
+// selected provider gets its own model (empty ⇒ client default applies).
+func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, client *llm.Client, model string, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
 
 	// Assemble user prompt from gate context plus capability gaps from graph.
 	userPrompt := assembleAggregatorPrompt(trigger, graph, gateCtx)
@@ -63,6 +69,7 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	}
 	started := time.Now()
 	raw, err := client.CompleteStream(ctx, &llm.ChatRequest{
+		Model:       model,
 		Messages:    messages,
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   aggMaxTokens,

@@ -8,6 +8,15 @@ type ExecuteRequest struct {
 	SessionID     string `json:"session_id,omitempty"`     // conversation session for memory
 	AggMode       *int   `json:"agg_mode,omitempty"`       // 0=skip, 1=executor model (default), 2=reasoning model
 	ExecutionMode string `json:"execution_mode,omitempty"` // "interactive" or "autonomous" (per-request override)
+	// Per-request model routing (optional; empty ⇒ configured default). The
+	// host selects a provider name (as configured in kaiju's providers block)
+	// and a model id for each lane — heavy (answer/reasoning) and executor
+	// (light: classify/route/reflect). Requests carry only the selection; the
+	// provider keys live in kaiju's config, never in the request.
+	Provider         string `json:"provider,omitempty"`          // heavy-lane provider: openai|anthropic|openrouter|selfhosted
+	Model            string `json:"model,omitempty"`             // heavy-lane model id
+	ExecutorProvider string `json:"executor_provider,omitempty"` // light-lane provider
+	ExecutorModel    string `json:"executor_model,omitempty"`    // light-lane model id
 }
 
 // ActionInfo describes a recommended follow-up action from the aggregator.

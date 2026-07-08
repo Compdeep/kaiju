@@ -688,7 +688,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	messages := BuildMessagesWithHistory(sysPromptN, userQuery, executiveHistory)
 
 	startedN := time.Now()
-	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
+	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{a.executiveToolDef()},
 		ToolChoice:  "required",
@@ -756,7 +756,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
 				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: fmt.Sprintf("Error: %v. Fix the JSON and call plan() again. Remember: goal, mode, query go INSIDE params, not at the step level.", err)},
 			)
-			retryResp, retryErr := a.llm.Complete(ctx, &llm.ChatRequest{
+			retryResp, retryErr := a.completeHeavy(ctx, &llm.ChatRequest{
 				Messages:    retryMessages,
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  "required",

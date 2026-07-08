@@ -95,7 +95,7 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
 			MaxTokens:   a.cfg.MaxTokens,
 		}
 
-		resp, err := a.llm.Complete(ctx, req)
+		resp, err := a.completeHeavy(ctx, req)
 		if err != nil {
 			log.Printf("[agent] LLM error on turn %d: %v", turn, err)
 			break
@@ -178,6 +178,7 @@ func (a *Agent) investigateReAct(ctx context.Context, trigger Trigger) {
  */
 func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
 	ctx = tagTokens(ctx, trigger.Type)
+	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))
 	log.Printf("[react] sync investigation: type=%s alert=%s source=%s",
 		trigger.Type, trigger.AlertID, trigger.Source)
 
@@ -223,7 +224,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			toolChoice = "required"
 		}
 
-		resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
+		resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
 			Messages:    messages,
 			Tools:       toolDefs,
 			ToolChoice:  toolChoice,

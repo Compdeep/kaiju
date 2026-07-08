@@ -133,7 +133,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	}
 
 	startedObs := time.Now()
-	resp, err := a.executor.Complete(ctx, &llm.ChatRequest{
+	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{observerToolDef()},
 		ToolChoice:  "required",

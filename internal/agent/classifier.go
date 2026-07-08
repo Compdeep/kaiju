@@ -45,7 +45,7 @@ func (a *Agent) classifyCapabilities(ctx context.Context, query string) []string
 	// Classifier uses the executor (mini) model, not the reasoning model.
 	// The task is a structured multi-label pick from a short manifest —
 	// well within mini capability, and mini is several times faster.
-	resp, err := a.executor.Complete(ctx, &llm.ChatRequest{
+	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: sysPrompt},
 			{Role: "user", Content: query},

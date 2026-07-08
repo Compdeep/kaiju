@@ -208,6 +208,10 @@ type modelInfo struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider"`
 	Context  string `json:"context,omitempty"`
+	// Available reports whether this model's provider is configured with a key
+	// in kaiju's providers block, i.e. whether the host can actually route to
+	// it. The host (makeen) filters the catalog to available ∩ org-enabled.
+	Available bool `json:"available"`
 }
 
 /*
@@ -216,7 +220,24 @@ type modelInfo struct {
  * param: w - HTTP response writer
  */
 func (c *ConfigAPI) handleListModels(w http.ResponseWriter, _ *http.Request) {
-	jsonResponse(w, allModels, http.StatusOK)
+	// Mark each model available iff its provider is configured with a key.
+	// The legacy single-provider config (llm.provider) also counts, so hosts
+	// that haven't adopted the providers block still see their models.
+	configured := make(map[string]bool, len(c.cfg.Providers)+1)
+	for name, p := range c.cfg.Providers {
+		if p.APIKey != "" {
+			configured[name] = true
+		}
+	}
+	if c.cfg.LLM.Provider != "" && c.cfg.LLM.APIKey != "" {
+		configured[c.cfg.LLM.Provider] = true
+	}
+	out := make([]modelInfo, len(allModels))
+	for i, m := range allModels {
+		m.Available = configured[m.Provider]
+		out[i] = m
+	}
+	jsonResponse(w, out, http.StatusOK)
 }
 
 // allModels is the supported model catalog.

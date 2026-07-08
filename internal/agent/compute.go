@@ -347,7 +347,7 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 	systemPrompt := ComposeSystemPrompt(a.soulPrompt, buildComputeArchitectPrompt(architectGuidance))
 
 	startedArch := time.Now()
-	resp, err := a.llm.Complete(ctx, &llm.ChatRequest{
+	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},

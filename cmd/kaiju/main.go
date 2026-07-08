@@ -141,6 +141,24 @@ func loadConfig() *config.Config {
 }
 
 // createAgent builds the agent from config.
+// buildProviderCreds converts the config providers catalog into the agent's
+// routing credentials. Keys stay server-side; a request selects a provider by
+// name and kaiju resolves it to the keyed client built from these.
+func buildProviderCreds(providers map[string]config.ProviderConfig) map[string]agent.ProviderCreds {
+	if len(providers) == 0 {
+		return nil
+	}
+	out := make(map[string]agent.ProviderCreds, len(providers))
+	for name, p := range providers {
+		out[name] = agent.ProviderCreds{
+			Type:     p.Type,
+			Endpoint: p.Endpoint,
+			APIKey:   p.APIKey,
+		}
+	}
+	return out
+}
+
 func createAgent(cfg *config.Config) *agent.Agent {
 	// Default classifier_enabled to true when not set in config.
 	// Explicit false (pointer set to false) disables preflight for testing.
@@ -153,6 +171,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		LLMEndpoint:       cfg.LLM.Endpoint,
 		LLMAPIKey:         cfg.LLM.APIKey,
 		LLMModel:          cfg.LLM.Model,
+		Providers:         buildProviderCreds(cfg.Providers),
 		MaxTurns:          cfg.Agent.MaxTurns,
 		Temperature:       cfg.LLM.Temperature,
 		MaxTokens:         cfg.LLM.MaxTokens,

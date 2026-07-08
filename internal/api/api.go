@@ -146,6 +146,11 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		Data:    mustMarshal(map[string]string{"query": req.Query}),
 		Source:  "api",
 		Scope:   scope,
+		// Per-request model routing (host selection; keys stay in kaiju config).
+		Provider:         req.Provider,
+		Model:            req.Model,
+		ExecutorProvider: req.ExecutorProvider,
+		ExecutorModel:    req.ExecutorModel,
 	}
 
 	// ── Memory boundary (chat input) ──────────────────────────────────────

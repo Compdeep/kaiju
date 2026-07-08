@@ -1699,6 +1699,9 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// Attribute every LLM call in this run to a token-usage category. Principal
 	// (if any) is already on ctx from the API boundary and is preserved.
 	ctx = tagTokens(ctx, trigger.Type)
+	// Carry the per-request model selection so every heavy/light lane call in
+	// this run routes to the host-chosen provider (see model_route.go).
+	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))
 	// Route to ReAct loop if mode=react
 	if trigger.DAGMode == "react" {
 		return a.RunReActSync(ctx, trigger)
@@ -1758,7 +1761,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 				}
 				chatPrompt += "\n\nThis turn is a quick conversational reply — no tools were invoked because the request was classified as chat. If the user is actually asking for an action (run X, fetch Y, build Z, fix this, find that, compute, search, edit a file, restart a service, anything imperative), do NOT refuse on the basis that you can't execute tools. The full toolchain (compute, file_*, bash, web_*, service, edit_file, etc.) IS available — the next turn will route through it. Acknowledge what they're asking for, restate it as an actionable request, and tell them to confirm so the next turn can run it. Never say 'I cannot execute code' or 'I have no tools' — that is false in this system."
 				chatPrompt += "\n\n## Output format\n" + a.FormatRule()
-				resp, llmErr := a.llm.Complete(dagCtx, &llm.ChatRequest{
+				resp, llmErr := a.completeHeavy(dagCtx, &llm.ChatRequest{
 					Messages:    BuildMessagesWithHistory(chatPrompt, query, trigger.History),
 					Temperature: a.cfg.Temperature,
 					MaxTokens:   a.cfg.MaxTokens,
@@ -1806,11 +1809,13 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		// Aggregator is exempt from budget — it must always run to give the user a response
 		budget.TrySpawnNode("", true) // charge if possible, but don't block
 
-		// Select LLM client based on agg_mode
-		aggClient := a.llm // default: reasoning model
+		// Select LLM lane based on agg_mode, then route to the host-selected
+		// provider within that lane (model_route.go). aggModel is the routed
+		// model id ("" ⇒ the lane client's own default).
+		aggClient, aggModel := a.heavyLane(dagCtx) // default: reasoning model
 		aggLabel := "reasoning"
 		if aggMode == 1 {
-			aggClient = a.executor // executor model only when explicitly requested
+			aggClient, aggModel = a.lightLane(dagCtx) // executor model only when explicitly requested
 			aggLabel = "executor"
 		}
 		log.Printf("[dag] aggregator using %s model (agg_mode=%d)", aggLabel, aggMode)
@@ -1829,7 +1834,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 			log.Printf("[dag] aggregator2 context build failed: %v", actxErr2)
 			aggCtxResp2 = &ContextResponse{Sources: map[string]string{}}
 		}
-		verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggCtxResp2)
+		verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggModel, aggCtxResp2)
 		if aggErr != nil {
 			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
 			return nil, fmt.Errorf("aggregator failed: %w", aggErr)
@@ -1988,7 +1993,7 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 
 	prompt := fmt.Sprintf("Command failed:\n%s\n\nError:\n%s\n\nReturn ONLY the fixed command, nothing else.", command, Text.TruncateLog(errMsg, 300))
 
-	resp, err := a.executor.Complete(ctx, &llm.ChatRequest{
+	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: "Fix the shell command based on the error. Return ONLY the corrected command, no explanation."},
 			{Role: "user", Content: prompt},

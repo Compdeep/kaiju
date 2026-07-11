@@ -111,3 +111,31 @@ func (a *Agent) completeLight(ctx context.Context, req *llm.ChatRequest) (*llm.C
 	}
 	return c.Complete(ctx, req)
 }
+
+// OneShot runs a single provider-routed LLM completion with NO agent machinery —
+// no preflight, planner, DAG, tools, reflection, or aggregator. It is the raw
+// passthrough for hosts that need a plain completion (e.g. makeen's compliance
+// LLM-detection stage). The provider selects one of the configured provider
+// clients (falling back to the reasoning client); token counting still fires via
+// Complete. Returns the assistant content and the total tokens used.
+func (a *Agent) OneShot(ctx context.Context, provider, model string, messages []llm.Message, temperature float64, maxTokens int) (string, int, error) {
+	client := a.llm
+	if provider != "" {
+		if c := a.providerClients[provider]; c != nil {
+			client = c
+		}
+	}
+	resp, err := client.Complete(ctx, &llm.ChatRequest{
+		Model:       model,
+		Messages:    messages,
+		Temperature: temperature,
+		MaxTokens:   maxTokens,
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	if len(resp.Choices) == 0 {
+		return "", resp.Usage.TotalTokens, nil
+	}
+	return resp.Choices[0].Message.Content, resp.Usage.TotalTokens, nil
+}

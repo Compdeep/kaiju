@@ -595,6 +595,7 @@ func runServe() {
 	execMux := http.NewServeMux()
 	apiHandler.RegisterRoutes(execMux)
 	mux.Handle("/api/v1/execute", gateway.WithJWTAuth(jwtSvc)(execMux))
+	mux.Handle("/api/v1/oneshot", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/interject", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/tools", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/status", gateway.WithJWTAuth(jwtSvc)(execMux))

@@ -55,6 +55,7 @@ func New(ag *agent.Agent, safetyLevel int, database *db.DB, llmClient *llm.Clien
  */
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/execute", a.handleExecute)
+	mux.HandleFunc("POST /api/v1/oneshot", a.handleOneShot)
 	mux.HandleFunc("GET /api/v1/tools", a.handleListTools)
 	mux.HandleFunc("GET /api/v1/status", a.handleStatus)
 	mux.HandleFunc("GET /api/v1/usage", a.handleUsage)
@@ -490,6 +491,46 @@ func (a *API) handleWorkspaceWrite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, map[string]string{"status": "ok", "path": req.Path}, http.StatusOK)
+}
+
+// OneShotRequest is a raw completion request — a plain LLM call with no agent
+// machinery (no preflight, planner, DAG, tools, reflection, or aggregator).
+type OneShotRequest struct {
+	Messages    []llm.Message `json:"messages"`
+	Provider    string        `json:"provider,omitempty"`
+	Model       string        `json:"model,omitempty"`
+	Temperature float64       `json:"temperature,omitempty"`
+	MaxTokens   int           `json:"max_tokens,omitempty"`
+}
+
+/*
+ * handleOneShot runs a single provider-routed LLM completion, bypassing the
+ * agent entirely. For hosts (e.g. makeen's compliance LLM-detection stage) that
+ * need a raw completion routed through kaiju's provider keys, without paying for
+ * the reasoning pipeline. Token usage is still attributed to the caller.
+ */
+func (a *API) handleOneShot(w http.ResponseWriter, r *http.Request) {
+	var req OneShotRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.Messages) == 0 {
+		jsonError(w, "messages is required", http.StatusBadRequest)
+		return
+	}
+	var userID string
+	if claims, ok := gateway.ClaimsFromContext(r.Context()); ok {
+		userID = claims.Username
+	}
+	ctx := tokens.WithRun(tokens.WithPrincipal(r.Context(), userID))
+	content, toks, err := a.agent.OneShot(ctx, req.Provider, req.Model, req.Messages, req.Temperature, req.MaxTokens)
+	if err != nil {
+		log.Printf("[api] oneshot error: %v", err)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonResponse(w, map[string]any{"content": content, "tokens": toks}, http.StatusOK)
 }
 
 /*

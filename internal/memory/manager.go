@@ -187,6 +187,32 @@ func (m *Manager) LoadHistory(ctx context.Context, sessionID string, maxMessages
 	return msgs, nil
 }
 
+// LoadChatHistory returns the recent conversation VERBATIM — most-recent
+// maxMessages, chronological, UN-truncated, and with NO cross-session long-term
+// memory. LoadHistory (used by the agent planner) truncates long messages to
+// head+tail and windows to the OLDEST N — both shred a roleplay/chat thread,
+// which needs the exact recent turns for continuity. The chat lane uses this.
+func (m *Manager) LoadChatHistory(ctx context.Context, sessionID string, maxMessages int) ([]llm.Message, error) {
+	if _, err := m.db.GetSessionForUser(sessionID, m.userID); err != nil {
+		return nil, nil // not found or not owned
+	}
+	if maxMessages <= 0 {
+		maxMessages = DefaultMaxHistory
+	}
+	dbMsgs, err := m.db.GetRecentMessages(sessionID, maxMessages)
+	if err != nil {
+		return nil, fmt.Errorf("memory: load chat history: %w", err)
+	}
+	msgs := make([]llm.Message, 0, len(dbMsgs))
+	for _, dm := range dbMsgs {
+		switch dm.Role {
+		case "user", "assistant", "system":
+			msgs = append(msgs, llm.Message{Role: dm.Role, Content: dm.Content})
+		}
+	}
+	return msgs, nil
+}
+
 /*
  * StoreMessage saves a message to the session.
  * desc: Persists the message and auto-titles the session from the first user message.

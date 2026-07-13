@@ -202,22 +202,29 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	var memMgr *memory.Manager
 	if req.SessionID != "" && userID != "" && a.db != nil {
 		memMgr = memory.New(a.db, a.llmClient, userID)
+		trigger.SessionID = req.SessionID
 
-		// Load conversation history
-		if history, err := memMgr.LoadHistory(r.Context(), req.SessionID, 50); err == nil {
-			trigger.SessionID = req.SessionID
-			trigger.History = history
-		}
+		// Planner-only memory context. The chat lane is a plain conversational
+		// turn — it builds its OWN clean, verbatim history below and must not
+		// receive the planner's truncated history or cross-session long-term
+		// memory. So skip both entirely in chat mode (also saves two DB searches
+		// per chat turn). Only the message WRITE below is shared.
+		if !req.ChatMode {
+			// Load conversation history
+			if history, err := memMgr.LoadHistory(r.Context(), req.SessionID, 50); err == nil {
+				trigger.History = history
+			}
 
-		// Inject long-term memory context as a system message at the head
-		// of the history slice. From here on, memory is opaque conversation
-		// data — execution-layer code may READ trigger.History but never
-		// distinguishes "real history" from "injected memory."
-		if ltCtx, err := memMgr.InjectLongTermContext(r.Context()); err == nil && ltCtx != "" {
-			trigger.History = append(
-				[]llm.Message{{Role: "system", Content: ltCtx}},
-				trigger.History...,
-			)
+			// Inject long-term memory context as a system message at the head
+			// of the history slice. From here on, memory is opaque conversation
+			// data — execution-layer code may READ trigger.History but never
+			// distinguishes "real history" from "injected memory."
+			if ltCtx, err := memMgr.InjectLongTermContext(r.Context()); err == nil && ltCtx != "" {
+				trigger.History = append(
+					[]llm.Message{{Role: "system", Content: ltCtx}},
+					trigger.History...,
+				)
+			}
 		}
 
 		// Store the user message immediately (chat output boundary for the
@@ -275,7 +282,20 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		cp, cm := a.resolveChat(req)
 		dp, dmodel := a.agent.ChatModel()
 		log.Printf("[chat] chat_mode=true → direct to provider=%q model=%q (req.chat_model=%q, agent default=%q/%q)", cp, cm, req.ChatModel, dp, dmodel)
-		msgs := agent.BuildMessagesWithHistory(chatSystemPrompt, req.Query, trigger.History)
+		// Clean chat history: recent, full, VERBATIM, no cross-session long-term
+		// memory. LoadHistory (used by the planner) truncates long messages and
+		// windows to the oldest N — both shred a roleplay/chat thread. The user's
+		// current message was already stored above, so it's the last turn in this
+		// history; do NOT append it again.
+		var msgs []llm.Message
+		if memMgr != nil {
+			if hist, _ := memMgr.LoadChatHistory(ctx, req.SessionID, 40); len(hist) > 0 {
+				msgs = append([]llm.Message{{Role: "system", Content: chatSystemPrompt}}, hist...)
+			}
+		}
+		if len(msgs) == 0 {
+			msgs = agent.BuildMessagesWithHistory(chatSystemPrompt, req.Query, nil)
+		}
 		if len(visionImgs) > 0 && agent.IsVisionModel(cm) {
 			llm.AttachImages(msgs, visionImgs)
 		}

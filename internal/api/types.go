@@ -17,6 +17,17 @@ type ExecuteRequest struct {
 	Model            string `json:"model,omitempty"`             // heavy-lane model id
 	ExecutorProvider string `json:"executor_provider,omitempty"` // light-lane provider
 	ExecutorModel    string `json:"executor_model,omitempty"`    // light-lane model id
+	// Vision lane: the model that answers questions about attached images
+	// directly (no planner/tools). Empty ⇒ the configured default vision model.
+	VisionProvider string `json:"vision_provider,omitempty"`
+	VisionModel    string `json:"vision_model,omitempty"`
+	// Chat lane: when ChatMode is true, the turn is answered by a direct
+	// completion (no planner/DAG/tools) — for plain conversation and non-tool
+	// models. The model is the override below, else the configured chat default,
+	// else the reasoning model.
+	ChatMode     bool   `json:"chat_mode,omitempty"`
+	ChatProvider string `json:"chat_provider,omitempty"`
+	ChatModel    string `json:"chat_model,omitempty"`
 }
 
 // ActionInfo describes a recommended follow-up action from the aggregator.

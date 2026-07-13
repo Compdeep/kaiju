@@ -156,7 +156,14 @@
               <div class="ctl-btn" :class="{ active: sessions.executionMode === 'autonomous' }">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
               </div>
-              <span class="ctl-tip">{{ sessions.executionMode === 'autonomous' ? 'auto' : 'chat' }}</span>
+              <span class="ctl-tip">{{ sessions.executionMode === 'autonomous' ? 'auto' : 'live' }}</span>
+            </div>
+            <!-- Chat lane: direct reply, no planner/tools -->
+            <div class="ctl-wrap" @click.stop="sessions.toggleChatMode()" title="Chat mode — direct reply, no planner or tools (needed for roleplay models)">
+              <div class="ctl-btn" :class="{ active: sessions.chatMode }">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <span class="ctl-tip">{{ sessions.chatMode ? 'direct' : 'agent' }}</span>
             </div>
             <!-- Interject chip -->
             <Transition name="chip">

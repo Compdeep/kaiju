@@ -179,6 +179,7 @@ export async function send(text) {
       mode: s.runMode,
       agg_mode: parseInt(s.aggMode),
       execution_mode: s.executionMode || undefined,
+      chat_mode: s.chatMode || undefined,
     })
     const msg = {
       role: 'assistant',

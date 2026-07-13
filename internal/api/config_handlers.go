@@ -80,6 +80,14 @@ type configPatch struct {
 		APIKey   *string `json:"api_key,omitempty"`
 		Model    *string `json:"model,omitempty"`
 	} `json:"executor,omitempty"`
+	Vision *struct {
+		Provider *string `json:"provider,omitempty"`
+		Model    *string `json:"model,omitempty"`
+	} `json:"vision,omitempty"`
+	Chat *struct {
+		Provider *string `json:"provider,omitempty"`
+		Model    *string `json:"model,omitempty"`
+	} `json:"chat,omitempty"`
 	Agent *struct {
 		DAGEnabled  *bool   `json:"dag_enabled,omitempty"`
 		DAGMode     *string `json:"dag_mode,omitempty"`
@@ -156,6 +164,34 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Apply vision patches (live-applied to the agent below)
+	if patch.Vision != nil {
+		if patch.Vision.Provider != nil {
+			c.cfg.Vision.Provider = *patch.Vision.Provider
+		}
+		if patch.Vision.Model != nil {
+			c.cfg.Vision.Model = *patch.Vision.Model
+		}
+		if c.agent != nil {
+			c.agent.SetVisionModel(c.cfg.Vision.Provider, c.cfg.Vision.Model)
+			log.Printf("[config] vision model updated: provider=%s model=%s", c.cfg.Vision.Provider, c.cfg.Vision.Model)
+		}
+	}
+
+	// Apply chat patches (live-applied to the agent)
+	if patch.Chat != nil {
+		if patch.Chat.Provider != nil {
+			c.cfg.Chat.Provider = *patch.Chat.Provider
+		}
+		if patch.Chat.Model != nil {
+			c.cfg.Chat.Model = *patch.Chat.Model
+		}
+		if c.agent != nil {
+			c.agent.SetChatModel(c.cfg.Chat.Provider, c.cfg.Chat.Model)
+			log.Printf("[config] chat model updated: provider=%s model=%s", c.cfg.Chat.Provider, c.cfg.Chat.Model)
+		}
+	}
+
 	// Live-update the agent's LLM clients when config changes
 	if patch.LLM != nil && c.agent != nil {
 		c.agent.SetLLMClient(c.cfg.LLM.Provider, c.cfg.LLM.Endpoint, c.cfg.LLM.APIKey, c.cfg.LLM.Model)
@@ -212,6 +248,9 @@ type modelInfo struct {
 	// in kaiju's providers block, i.e. whether the host can actually route to
 	// it. The host (makeen) filters the catalog to available ∩ org-enabled.
 	Available bool `json:"available"`
+	// Vision reports whether the model accepts image input — the UI shows an
+	// attach affordance and the agent may pass uploaded images to it.
+	Vision bool `json:"vision,omitempty"`
 }
 
 /*
@@ -262,7 +301,11 @@ var allModels = []modelInfo{
 	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "google", Context: "1M"},
 	{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Provider: "google", Context: "1M"},
 
-	// Qwen
+	// Qwen — non-thinking instruct (good for the reasoning/executor lanes: tools + no <think>)
+	{ID: "qwen/qwen3-max", Name: "Qwen3 Max (flagship)", Provider: "openrouter", Context: "262K"},
+	{ID: "qwen/qwen3-235b-a22b-2507", Name: "Qwen3 235B 2507 (non-thinking)", Provider: "openrouter", Context: "262K"},
+	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Name: "Qwen3 30B 2507 (non-thinking)", Provider: "openrouter", Context: "131K"},
+	// Qwen3 (thinking variants)
 	{ID: "qwen/qwen3-235b-a22b", Name: "Qwen3 235B", Provider: "openrouter", Context: "128K"},
 	{ID: "qwen/qwen3-30b-a3b", Name: "Qwen3 30B", Provider: "openrouter", Context: "128K"},
 	{ID: "qwen/qwen3-32b", Name: "Qwen3 32B", Provider: "openrouter", Context: "128K"},
@@ -273,6 +316,20 @@ var allModels = []modelInfo{
 	{ID: "qwen/qwen3-0.6b", Name: "Qwen3 0.6B", Provider: "openrouter", Context: "128K"},
 	{ID: "qwen/qwq-32b", Name: "QwQ 32B (Reasoning)", Provider: "openrouter", Context: "128K"},
 	{ID: "qwen/qwen-2.5-coder-32b-instruct", Name: "Qwen 2.5 Coder 32B", Provider: "openrouter", Context: "128K"},
+	{ID: "qwen/qwen-2.5-72b-instruct", Name: "Qwen 2.5 72B", Provider: "openrouter", Context: "128K"},
+	{ID: "qwen/qwen-2.5-7b-instruct", Name: "Qwen 2.5 7B", Provider: "openrouter", Context: "128K"},
+	{ID: "qwen/qwen-2.5-vl-72b-instruct", Name: "Qwen 2.5 VL 72B (Vision)", Provider: "openrouter", Context: "128K", Vision: true},
+	{ID: "qwen/qwen-2.5-vl-7b-instruct", Name: "Qwen 2.5 VL 7B (Vision)", Provider: "openrouter", Context: "32K", Vision: true},
+
+	// Roleplay / creative / uncensored fine-tunes — NO tool-calling; use the chat
+	// lane, not the planner (they 404 on tools). Good for conversation / RP.
+	{ID: "sao10k/l3.3-euryale-70b", Name: "Euryale L3.3 70B (RP)", Provider: "openrouter", Context: "131K"},
+	{ID: "cognitivecomputations/dolphin-mistral-24b-venice-edition", Name: "Dolphin Venice 24B (uncensored)", Provider: "openrouter", Context: "128K"},
+	{ID: "deepseek/deepseek-chat-v3.1", Name: "DeepSeek V3.1 (RP · strong JP)", Provider: "openrouter", Context: "164K"},
+	{ID: "nousresearch/hermes-4-405b", Name: "Hermes 4 405B (permissive)", Provider: "openrouter", Context: "131K"},
+	{ID: "thedrummer/skyfall-36b-v2", Name: "Skyfall 36B (RP)", Provider: "openrouter", Context: "32K"},
+	{ID: "anthracite-org/magnum-v4-72b", Name: "Magnum v4 72B (RP)", Provider: "openrouter", Context: "32K"},
+	{ID: "thedrummer/cydonia-24b-v4.1", Name: "Cydonia 24B (RP)", Provider: "openrouter", Context: "32K"},
 
 	// OpenRouter — other popular models
 	{ID: "anthropic/claude-sonnet-4", Name: "Claude Sonnet 4", Provider: "openrouter", Context: "200K"},

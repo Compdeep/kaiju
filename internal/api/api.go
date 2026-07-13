@@ -34,6 +34,31 @@ type API struct {
 	uploadProc       *uploads.Processor // nil until SetUploadProcessor is called from main.go
 }
 
+// resolveVision picks the vision model for a turn: the per-request override
+// (host selection) wins, else the agent's configured default (which the config
+// API live-updates). Empty model ⇒ no dedicated vision lane.
+func (a *API) resolveVision(req ExecuteRequest) (provider, model string) {
+	if req.VisionModel != "" {
+		return req.VisionProvider, req.VisionModel
+	}
+	return a.agent.VisionModel()
+}
+
+// resolveChat picks the chat-lane model: per-request override → configured chat
+// default → ("","") which OneShot resolves to the reasoning model.
+func (a *API) resolveChat(req ExecuteRequest) (provider, model string) {
+	if req.ChatModel != "" {
+		return req.ChatProvider, req.ChatModel
+	}
+	return a.agent.ChatModel()
+}
+
+// chatSystemPrompt frames a direct (planner-less) conversational turn.
+const chatSystemPrompt = "You are a helpful conversational assistant. Respond directly to the user. You have no tools — just answer."
+
+// visionSystemPrompt frames a direct image-analysis turn (no tools/DAG).
+const visionSystemPrompt = "You are a vision assistant. The user has attached one or more images to this conversation. Answer the user's question using what you can see in the image(s). Be direct and concise. If a question isn't about the image, answer it normally."
+
 /*
  * New creates an API handler set.
  * desc: Constructs an API instance wired to the agent, database, LLM client, and clearance checker.
@@ -230,6 +255,77 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// the sync path, so RunTotal(ctx) below is this request's exact token cost —
 	// the value the host (makeen) persists per user for durable billing.
 	ctx = tokens.WithRun(tokens.WithPrincipal(ctx, userID))
+
+	// Vision routing. When the session has image uploads:
+	//   • if a vision model is configured/selected, the image question is
+	//     answered DIRECTLY by that model (no planner/tools) — so a tool-less
+	//     vision model like Qwen-VL works and images always reach a capable model.
+	//   • otherwise images ride the ctx and the agent attaches them to heavy-lane
+	//     calls only if the reasoning model itself supports vision.
+	var visionImgs []string
+	if a.uploadProc != nil && req.SessionID != "" {
+		visionImgs = a.uploadProc.SessionImageDataURIs(req.SessionID)
+	}
+
+	// Chat lane. When chat mode is on, answer with a direct completion — no
+	// planner/DAG/tools — so plain conversation and non-tool models (roleplay
+	// fine-tunes) work. Takes precedence over the vision lane; if the session has
+	// images and the chat model is vision-capable, they ride along.
+	if req.ChatMode {
+		cp, cm := a.resolveChat(req)
+		dp, dmodel := a.agent.ChatModel()
+		log.Printf("[chat] chat_mode=true → direct to provider=%q model=%q (req.chat_model=%q, agent default=%q/%q)", cp, cm, req.ChatModel, dp, dmodel)
+		msgs := agent.BuildMessagesWithHistory(chatSystemPrompt, req.Query, trigger.History)
+		if len(visionImgs) > 0 && agent.IsVisionModel(cm) {
+			llm.AttachImages(msgs, visionImgs)
+		}
+		content, toks, cerr := a.agent.OneShot(ctx, cp, cm, msgs, 0.7, 1024)
+		elapsed := time.Since(start)
+		if cerr != nil {
+			log.Printf("[api] chat execute error: %v", cerr)
+			jsonResponse(w, ExecuteResponse{Error: cerr.Error(), DurationMs: elapsed.Milliseconds()}, http.StatusInternalServerError)
+			return
+		}
+		if memMgr != nil && content != "" {
+			memMgr.StoreMessage(req.SessionID, "assistant", content)
+		}
+		jsonResponse(w, ExecuteResponse{
+			Verdict:    content,
+			DAGID:      trigger.AlertID,
+			Nodes:      0,
+			LLMCalls:   1,
+			Tokens:     int64(toks),
+			DurationMs: elapsed.Milliseconds(),
+		}, http.StatusOK)
+		return
+	}
+
+	if len(visionImgs) > 0 {
+		if vp, vm := a.resolveVision(req); vm != "" {
+			msgs := agent.BuildMessagesWithHistory(visionSystemPrompt, req.Query, trigger.History)
+			llm.AttachImages(msgs, visionImgs)
+			content, toks, verr := a.agent.OneShot(ctx, vp, vm, msgs, 0.3, 1024)
+			elapsed := time.Since(start)
+			if verr != nil {
+				log.Printf("[api] vision execute error: %v", verr)
+				jsonResponse(w, ExecuteResponse{Error: verr.Error(), DurationMs: elapsed.Milliseconds()}, http.StatusInternalServerError)
+				return
+			}
+			if memMgr != nil && content != "" {
+				memMgr.StoreMessage(req.SessionID, "assistant", content)
+			}
+			jsonResponse(w, ExecuteResponse{
+				Verdict:    content,
+				DAGID:      trigger.AlertID,
+				Nodes:      0,
+				LLMCalls:   1,
+				Tokens:     int64(toks),
+				DurationMs: elapsed.Milliseconds(),
+			}, http.StatusOK)
+			return
+		}
+		ctx = agent.WithVisionImages(ctx, visionImgs)
+	}
 
 	result, err := a.agent.Kernel().SubmitSync(ctx, trigger)
 	elapsed := time.Since(start)
@@ -501,6 +597,10 @@ type OneShotRequest struct {
 	Model       string        `json:"model,omitempty"`
 	Temperature float64       `json:"temperature,omitempty"`
 	MaxTokens   int           `json:"max_tokens,omitempty"`
+	// Images are https URLs or base64 data: URIs, attached to the most recent
+	// user message as multimodal content (for a vision model). Supplied per
+	// request by the host; not persisted here.
+	Images []string `json:"images,omitempty"`
 }
 
 /*
@@ -518,6 +618,28 @@ func (a *API) handleOneShot(w http.ResponseWriter, r *http.Request) {
 	if len(req.Messages) == 0 {
 		jsonError(w, "messages is required", http.StatusBadRequest)
 		return
+	}
+	// Bound untrusted knobs: a passthrough completion must not be able to request
+	// an unbounded generation or an out-of-range temperature. 0 ⇒ a sane default.
+	if req.MaxTokens <= 0 || req.MaxTokens > 8192 {
+		req.MaxTokens = 1024
+	}
+	if req.Temperature < 0 {
+		req.Temperature = 0
+	} else if req.Temperature > 2 {
+		req.Temperature = 2
+	}
+	// Multimodal: attach images to the latest user message. Bound the payload.
+	if len(req.Images) > 0 {
+		total := 0
+		for _, img := range req.Images {
+			total += len(img)
+		}
+		if total > 24*1024*1024 { // ~18 MB of image bytes as base64
+			jsonError(w, "image payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		llm.AttachImages(req.Messages, req.Images)
 	}
 	var userID string
 	if claims, ok := gateway.ClaimsFromContext(r.Context()); ok {

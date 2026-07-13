@@ -592,6 +592,10 @@ func runServe() {
 	apiHandler := api.New(ag, cfg.Agent.SafetyLevel, kaijuDB, ag.LLMClient(), clrChecker)
 	// Uploads pipeline — uses the executor client for synchronous summaries.
 	apiHandler.SetUploadProcessor(uploads.New(ag, ag.ExecutorClient()))
+	// Vision lane — the model that answers image questions directly.
+	ag.SetVisionModel(cfg.Vision.Provider, cfg.Vision.Model)
+	// Chat lane — direct completion, no planner (empty ⇒ reasoning model).
+	ag.SetChatModel(cfg.Chat.Provider, cfg.Chat.Model)
 	execMux := http.NewServeMux()
 	apiHandler.RegisterRoutes(execMux)
 	mux.Handle("/api/v1/execute", gateway.WithJWTAuth(jwtSvc)(execMux))

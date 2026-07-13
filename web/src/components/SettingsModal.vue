@@ -85,6 +85,62 @@
               </div>
             </div>
 
+            <!-- Vision Model -->
+            <div class="model-section">
+              <div class="model-label">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                vision
+              </div>
+              <div class="model-desc">answers questions about attached images (direct, bypasses tools)</div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>provider</label>
+                  <select v-model="visionProvider" @change="onVisionProviderChange">
+                    <option value="">none (disabled)</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="ollama">Ollama</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>model</label>
+                  <select v-model="cfg.vision.model" @change="patchConfig">
+                    <option value="">none</option>
+                    <option v-for="m in visionModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Chat Model -->
+            <div class="model-section">
+              <div class="model-label">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                chat
+              </div>
+              <div class="model-desc">direct replies, no tools/planner — toggle chat mode in the composer (works with roleplay models)</div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>provider</label>
+                  <select v-model="chatProvider" @change="onChatProviderChange">
+                    <option value="">same as reasoning</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="ollama">Ollama</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>model</label>
+                  <select v-model="cfg.chat.model" @change="patchConfig">
+                    <option value="">same as reasoning</option>
+                    <option v-for="m in chatModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div class="divider"></div>
 
             <div class="form-group">
@@ -148,10 +204,12 @@ import api from '../api/client'
 defineEmits(['close'])
 const settings = useSettingsStore()
 const tab = ref('models')
-const cfg = ref({ llm: { provider: '', model: '', endpoint: '' }, executor: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1 } })
+const cfg = ref({ llm: { provider: '', model: '', endpoint: '' }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1 } })
 const allModels = ref([])
 const apiKey = ref('')
 const execProvider = ref('')
+const visionProvider = ref('')
+const chatProvider = ref('')
 const intentOptions = ref([])
 
 const ENDPOINTS = {
@@ -203,6 +261,45 @@ function onExecutorProviderChange() {
 }
 
 /**
+ * desc: Vision-capable models for the selected vision provider.
+ * @returns {Array<Object>} Models with vision=true for that provider
+ */
+const visionModels = computed(() => {
+  const p = visionProvider.value
+  return allModels.value.filter(m => m.provider === p && m.vision)
+})
+
+/**
+ * desc: Handle vision provider change — pick the first vision model, or clear.
+ * @returns {void}
+ */
+function onVisionProviderChange() {
+  cfg.value.vision.provider = visionProvider.value
+  const available = visionModels.value
+  cfg.value.vision.model = available.length ? available[0].id : ''
+  patchConfig()
+}
+
+/**
+ * desc: Models for the selected chat provider (any model — no capability filter).
+ * @returns {Array<Object>}
+ */
+const chatModels = computed(() => {
+  const p = chatProvider.value || cfg.value.llm.provider
+  return allModels.value.filter(m => m.provider === p)
+})
+
+/**
+ * desc: Handle chat provider change — pick the first model, or "same as reasoning".
+ * @returns {void}
+ */
+function onChatProviderChange() {
+  cfg.value.chat.provider = chatProvider.value
+  cfg.value.chat.model = chatProvider.value && chatModels.value.length ? chatModels.value[0].id : ''
+  patchConfig()
+}
+
+/**
  * desc: Persist the current LLM, executor, and agent configuration to the server
  * @returns {Promise<void>}
  */
@@ -211,6 +308,8 @@ async function patchConfig() {
     await api.patch('/api/v1/config', {
       llm: { provider: cfg.value.llm.provider, model: cfg.value.llm.model, endpoint: cfg.value.llm.endpoint },
       executor: { provider: cfg.value.executor.provider || undefined, model: cfg.value.executor.model || undefined },
+      vision: { provider: cfg.value.vision.provider, model: cfg.value.vision.model },
+      chat: { provider: cfg.value.chat.provider, model: cfg.value.chat.model },
       agent: { dag_mode: cfg.value.agent.dag_mode, executive_mode: cfg.value.agent.executive_mode, safety_level: cfg.value.agent.safety_level },
     })
   } catch (err) { console.error('config patch:', err) }
@@ -234,7 +333,11 @@ onMounted(async () => {
     const [c, m] = await Promise.all([api.get('/api/v1/config'), api.get('/api/v1/models')])
     cfg.value = c
     if (!cfg.value.executor) cfg.value.executor = { provider: '', model: '' }
+    if (!cfg.value.vision) cfg.value.vision = { provider: '', model: '' }
+    if (!cfg.value.chat) cfg.value.chat = { provider: '', model: '' }
     execProvider.value = cfg.value.executor.provider || ''
+    visionProvider.value = cfg.value.vision.provider || ''
+    chatProvider.value = cfg.value.chat.provider || ''
     allModels.value = m
   } catch (err) { console.error('settings load:', err) }
   // Load intent registry — the sole source of truth for the default-safety

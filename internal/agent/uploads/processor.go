@@ -14,6 +14,7 @@ package uploads
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -102,6 +103,37 @@ type Processor struct {
 // New builds a Processor. Call once at startup and reuse.
 func New(ag *agent.Agent, executor *llm.Client) *Processor {
 	return &Processor{agent: ag, executor: executor}
+}
+
+// SessionImageDataURIs returns every image a session has uploaded, each encoded
+// as a base64 data: URI ready to hand to a vision model. Empty on none/error.
+// This is what makes an uploaded image "pinned": it's re-read each turn, so the
+// image stays visible across follow-up questions.
+func (p *Processor) SessionImageDataURIs(sessionID string) []string {
+	if sessionID == "" {
+		return nil
+	}
+	dir := filepath.Join(p.agent.Workspace(), "uploads", sessionID)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		mime, ok := allowedExt[strings.ToLower(filepath.Ext(e.Name()))]
+		if !ok || !strings.HasPrefix(mime, "image/") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		out = append(out, "data:"+mime+";base64,"+base64.StdEncoding.EncodeToString(data))
+	}
+	return out
 }
 
 // Process runs the full pipeline for one upload: validate → write →

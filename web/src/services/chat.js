@@ -149,32 +149,39 @@ export async function send(text) {
 
   if (!s.sessionId) await createSession()
 
+  // Bind to the session that ORIGINATED this send. Every message/loading write
+  // below happens AFTER an await, so it must target THIS session's state — not
+  // the active-session proxies (s.messages/s.loading/s.sessionId), which follow
+  // whatever chat is open now. Writing through the proxies is what made a reply
+  // land in the wrong chat when you switched mid-request.
+  const sendingSid = s.sessionId
+  const sendingSess = s.getSession(sendingSid)
+  if (!sendingSess) return
+
   // Snapshot attachments BEFORE we mutate the list — they're cleared
   // after the user message is built so subsequent queries start fresh.
-  const attached = (s.attachments || []).filter(a => !a.pending && !a.error)
+  const attached = (sendingSess.attachments || []).filter(a => !a.pending && !a.error)
   const attachBlock = buildAttachmentBlock(attached)
   const queryWithAttachments = attachBlock ? `${attachBlock}\n${text}` : text
 
-  s.messages.push({ role: 'user', content: text })
-  s.loading = true
+  sendingSess.messages.push({ role: 'user', content: text })
+  sendingSess.loading = true
   // Mark the per-session state as actively sending so the SSE 'done'
   // handler doesn't fire its page-reload-recovery path during a normal
   // run (which would refetch messages before /trace lands and clobber
   // the in-memory msg.trace we're about to set below).
-  const sendingSid = s.sessionId
-  const sendingSess = s.getSession(sendingSid)
-  if (sendingSess) sendingSess.sendInFlight = true
+  sendingSess.sendInFlight = true
   dag.archiveAndClear()
   dag.interjectMode = true
   dag.interjections = []
 
   // Clear the chip strip — files stay on disk; the agent has the paths.
-  s.attachments = []
+  sendingSess.attachments = []
 
   try {
     const data = await api.post('/api/v1/execute', {
       query: queryWithAttachments,
-      session_id: s.sessionId,
+      session_id: sendingSid,
       intent: s.intent,
       mode: s.runMode,
       agg_mode: parseInt(s.aggMode),
@@ -187,21 +194,21 @@ export async function send(text) {
     }
     if (dag.nodes.length) msg.trace = [...dag.nodes]
     if (data.gaps && data.gaps.length) msg.gaps = data.gaps
-    s.messages.push(msg)
+    sendingSess.messages.push(msg)
     dag.streamingVerdict = ''
   } catch (err) {
-    s.messages.push({ role: 'assistant', content: `[error] ${err.message}` })
+    sendingSess.messages.push({ role: 'assistant', content: `[error] ${err.message}` })
   } finally {
-    s.loading = false
+    sendingSess.loading = false
     dag.interjectMode = false
     dag.interjections = []
-    if (s.sessionId && dag.nodes.length) {
-      try { await api.post(`/api/v1/sessions/${s.sessionId}/trace`, { nodes: dag.nodes }) } catch {}
+    if (sendingSid && dag.nodes.length) {
+      try { await api.post(`/api/v1/sessions/${sendingSid}/trace`, { nodes: dag.nodes }) } catch {}
     }
     // Trace is now persisted. Clear the in-flight flag *after* /trace
     // so any late-arriving SSE 'done' for this session sees us still
     // active and skips the recovery reload.
-    if (sendingSess) sendingSess.sendInFlight = false
+    sendingSess.sendInFlight = false
     dag.archiveAndClear()
     loadSessions()
   }

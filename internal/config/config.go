@@ -16,6 +16,15 @@ import (
 type Config struct {
 	LLM      LLMConfig      `json:"llm"`
 	Executor ExecutorConfig `json:"executor"`
+	// Vision is the model that answers questions about attached images directly
+	// (bypassing the planner/tools) — so a tool-less vision model works, and
+	// image attachments always route to a capable model regardless of the
+	// reasoning model. Empty ⇒ no dedicated lane (images fall back to the
+	// reasoning model if it supports vision).
+	Vision VisionConfig `json:"vision,omitempty"`
+	// Chat is a direct-completion lane (no planner/tools) for plain conversation
+	// and non-tool-calling models (roleplay fine-tunes). Empty ⇒ reasoning model.
+	Chat ChatConfig `json:"chat,omitempty"`
 	// Providers is the credential catalog for per-request model routing. Each
 	// entry is a named provider (openai, anthropic, openrouter, selfhosted, …)
 	// holding the endpoint + key. The host (e.g. makeen) selects a provider +
@@ -63,6 +72,26 @@ type ExecutorConfig struct {
 	Provider string `json:"provider,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
 	APIKey   string `json:"api_key,omitempty"` // defaults to LLM.APIKey if empty
+	Model    string `json:"model,omitempty"`
+}
+
+/*
+ * VisionConfig configures the vision lane — the model that answers questions
+ * about attached images via a direct completion. Provider is a name from the
+ * providers block; the key stays there.
+ */
+type VisionConfig struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+}
+
+/*
+ * ChatConfig configures the chat lane — a direct completion with NO planner/DAG/
+ * tools, for plain conversation and models that can't tool-call (roleplay
+ * fine-tunes, etc.). Empty ⇒ same as the reasoning model.
+ */
+type ChatConfig struct {
+	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 }
 

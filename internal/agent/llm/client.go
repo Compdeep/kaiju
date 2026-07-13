@@ -15,12 +15,75 @@ import (
 )
 
 // Message is a single chat message in the OpenAI format.
+//
+// Content is the plain-text body (the common case). For multimodal input, set
+// Parts instead: it carries an OpenAI content-parts array (text + image_url) and,
+// when non-empty, is what gets serialized as `content`. Parts is marshal-only
+// (json:"-") and never persisted — the agent's session stores text, and images
+// are re-supplied per request by the host (Makeen), never held in kaiju.
 type Message struct {
-	Role       string     `json:"role"`                  // "system", "user", "assistant", "tool"
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"` // set when role == "tool"
-	Name       string     `json:"name,omitempty"`         // function name for tool results
+	Role       string        `json:"role"`                   // "system", "user", "assistant", "tool"
+	Content    string        `json:"content,omitempty"`
+	Parts      []ContentPart `json:"-"`                      // multimodal parts; overrides Content when set
+	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"` // set when role == "tool"
+	Name       string        `json:"name,omitempty"`         // function name for tool results
+}
+
+// ContentPart is one element of a multimodal message content array.
+type ContentPart struct {
+	Type     string    `json:"type"`                // "text" | "image_url"
+	Text     string    `json:"text,omitempty"`      // when Type == "text"
+	ImageURL *ImageURL `json:"image_url,omitempty"` // when Type == "image_url"
+}
+
+// ImageURL holds an image reference — an https URL or a base64 data: URI.
+type ImageURL struct {
+	URL string `json:"url"`
+}
+
+// AttachImages folds images (https URLs or base64 data: URIs) into the last
+// user message as OpenAI content parts — existing text first, then each image.
+// No-op when there's no image or no user message. Mutates msgs in place.
+func AttachImages(msgs []Message, images []string) {
+	if len(images) == 0 {
+		return
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "user" {
+			continue
+		}
+		parts := make([]ContentPart, 0, len(images)+1)
+		if msgs[i].Content != "" {
+			parts = append(parts, ContentPart{Type: "text", Text: msgs[i].Content})
+		}
+		for _, img := range images {
+			parts = append(parts, ContentPart{Type: "image_url", ImageURL: &ImageURL{URL: img}})
+		}
+		msgs[i].Parts = parts
+		msgs[i].Content = ""
+		return
+	}
+}
+
+// MarshalJSON emits `content` as the parts array when Parts is set, else as the
+// plain Content string — so text-only messages are byte-for-byte unchanged and
+// existing readers (which never see Parts) are unaffected.
+func (m Message) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		Role       string     `json:"role"`
+		Content    any        `json:"content,omitempty"`
+		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string     `json:"tool_call_id,omitempty"`
+		Name       string     `json:"name,omitempty"`
+	}
+	w := wire{Role: m.Role, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID, Name: m.Name}
+	if len(m.Parts) > 0 {
+		w.Content = m.Parts
+	} else {
+		w.Content = m.Content
+	}
+	return json.Marshal(w)
 }
 
 // ToolCall represents a function call requested by the model.

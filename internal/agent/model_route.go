@@ -2,9 +2,49 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Compdeep/kaiju/internal/agent/llm"
 )
+
+// visionImagesKey carries a turn's uploaded images (base64 data: URIs or URLs)
+// on the run context, set once at the API boundary.
+type visionImagesKey struct{}
+
+// WithVisionImages returns ctx carrying images to attach to heavy-lane LLM calls
+// when the resolved model is vision-capable. No-op for an empty list.
+func WithVisionImages(ctx context.Context, images []string) context.Context {
+	if len(images) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, visionImagesKey{}, images)
+}
+
+func visionImagesFrom(ctx context.Context) []string {
+	if v, ok := ctx.Value(visionImagesKey{}).([]string); ok {
+		return v
+	}
+	return nil
+}
+
+// IsVisionModel reports whether a model id accepts image input. Kept as a
+// pattern check here (the authoritative catalog lives in the api package; a
+// dependency the agent core must not take).
+func IsVisionModel(id string) bool {
+	s := strings.ToLower(id)
+	switch {
+	case strings.Contains(s, "vl-"), strings.HasSuffix(s, "-vl"): // qwen-vl, …
+		return true
+	case strings.Contains(s, "gpt-4o"), strings.Contains(s, "gpt-4.1"):
+		return true
+	case strings.Contains(s, "claude-3"), strings.Contains(s, "claude-4"),
+		strings.Contains(s, "claude-sonnet"), strings.Contains(s, "claude-opus"), strings.Contains(s, "claude-haiku"):
+		return true
+	case strings.Contains(s, "gemini"), strings.Contains(s, "llama-4"), strings.Contains(s, "grok-4"):
+		return true
+	}
+	return false
+}
 
 /*
  * Per-request model routing.
@@ -98,6 +138,13 @@ func (a *Agent) completeHeavy(ctx context.Context, req *llm.ChatRequest) (*llm.C
 	c, model := a.heavyLane(ctx)
 	if model != "" {
 		req.Model = model
+	}
+	// Vision: when the resolved heavy model accepts images and this turn carries
+	// uploaded images on the ctx, attach them to the latest user message. Images
+	// ride the ctx so they re-attach on every heavy call this turn (kept visible
+	// across follow-ups). A non-vision model never receives image bytes.
+	if imgs := visionImagesFrom(ctx); len(imgs) > 0 && IsVisionModel(req.Model) {
+		llm.AttachImages(req.Messages, imgs)
 	}
 	return c.Complete(ctx, req)
 }

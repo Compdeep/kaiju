@@ -9,6 +9,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   const runMode = ref(localStorage.getItem('kaiju_run_mode') || 'reflect')
   const aggMode = ref(localStorage.getItem('kaiju_agg_mode') || '-1')
   const executionMode = ref(localStorage.getItem('kaiju_exec_mode') || 'interactive')
+  const chatMode = ref(localStorage.getItem('kaiju_chat_mode') === '1')
 
   // Per-session state: messages + loading
   const perSession = reactive(new Map())
@@ -67,13 +68,18 @@ export const useSessionsStore = defineStore('sessions', () => {
     localStorage.setItem('kaiju_exec_mode', mode)
   }
 
+  function toggleChatMode() {
+    chatMode.value = !chatMode.value
+    localStorage.setItem('kaiju_chat_mode', chatMode.value ? '1' : '0')
+  }
+
   /** Clean up on session delete. */
   function dropSession(sid) { perSession.delete(sid) }
 
   return {
     sessionId, sessions, messages, loading, attachments, intent,
-    runMode, aggMode, executionMode,
-    setRunMode, setAggMode, setExecutionMode, setSessionId,
+    runMode, aggMode, executionMode, chatMode,
+    setRunMode, setAggMode, setExecutionMode, toggleChatMode, setSessionId,
     getSession, dropSession,
   }
 })

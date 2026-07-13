@@ -235,6 +235,13 @@ type Agent struct {
 	// model routing (see model_route.go). Nil/empty ⇒ routing off, everything
 	// uses llm/executor as today.
 	providerClients map[string]*llm.Client
+	// Vision lane default — the model that answers image questions directly
+	// (see api handleExecute). Provider is a name from providerClients.
+	visionProvider string
+	visionModel    string
+	// Chat lane default — direct completion, no planner/tools. Empty ⇒ reasoning.
+	chatProvider string
+	chatModel    string
 	registry    *tools.Registry
 	gate        *gates.Gate
 	clearanceCheck ClearanceChecker // external authorization (nil = no check)
@@ -711,6 +718,30 @@ func (a *Agent) DAGEnabled() bool {
  */
 func (a *Agent) SetDAGEnabled(enabled bool) {
 	a.cfg.DAGEnabled = enabled
+}
+
+// SetVisionModel sets the default vision lane (provider name + model id). Empty
+// model disables the dedicated lane.
+func (a *Agent) SetVisionModel(provider, model string) {
+	a.visionProvider = provider
+	a.visionModel = model
+}
+
+// VisionModel returns the default vision lane (provider, model).
+func (a *Agent) VisionModel() (provider, model string) {
+	return a.visionProvider, a.visionModel
+}
+
+// SetChatModel sets the default chat lane (provider, model). Empty model ⇒ the
+// chat lane uses the reasoning model.
+func (a *Agent) SetChatModel(provider, model string) {
+	a.chatProvider = provider
+	a.chatModel = model
+}
+
+// ChatModel returns the default chat lane (provider, model).
+func (a *Agent) ChatModel() (provider, model string) {
+	return a.chatProvider, a.chatModel
 }
 
 /*

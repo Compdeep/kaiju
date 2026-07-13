@@ -850,7 +850,12 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 		}
 	}
 	if len(valid) == 0 && len(gaps) == 0 {
-		return nil, fmt.Errorf("planner produced no valid tools (all hallucinated)")
+		// Every planned tool was hallucinated (none exist in the registry) and
+		// there are no gaps. That means the planner found no real tools to run —
+		// the same situation as an empty plan, so treat it as conversational and
+		// fall back to a direct answer instead of failing the whole request.
+		log.Printf("[dag] all planned tools hallucinated — falling back to conversational")
+		return nil, &ExecutiveConversationalError{Text: ""}
 	}
 
 	// Data-flow validation at the executive-output boundary.

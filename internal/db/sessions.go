@@ -158,6 +158,39 @@ func (d *DB) GetMessages(sessionID string, limit int) ([]Message, error) {
 	return msgs, nil
 }
 
+// GetRecentMessages returns the most recent `limit` messages for a session in
+// chronological order (oldest → newest). GetMessages returns the OLDEST N
+// (ORDER BY created_at LIMIT) — fine for the agent, but it drops the tail of a
+// long conversation, which is exactly what a chat/RP thread needs. This keeps
+// the tail instead.
+func (d *DB) GetRecentMessages(sessionID string, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := d.conn.Query(
+		`SELECT id, session_id, role, content, dag_trace, created_at FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`,
+		sessionID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.DAGTrace, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	// Query returned newest-first; reverse to chronological.
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
 // ─── User-scoped methods (multi-tenant) ─────────────────────────────────────
 
 /*

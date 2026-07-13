@@ -67,8 +67,19 @@
           <div :class="['msg', msg.role]">
             <div class="msg-meta">
               <span class="msg-author">{{ msg.role === 'user' ? 'you' : 'kaiju' }}</span>
+              <span class="msg-tools" v-if="editing !== i && !sessions.loading">
+                <button v-if="msg.id" class="msg-tool" title="Edit this message" @click="startEdit(i, msg)">✎</button>
+                <button v-if="msg.role === 'assistant' && i === lastAssistantIndex" class="msg-tool" title="Regenerate reply" @click="chat.regenerate()">↻</button>
+              </span>
             </div>
-            <div class="msg-content md" v-html="renderMd(msg.content)"></div>
+            <div v-if="editing === i" class="msg-edit">
+              <textarea v-model="editBuf" class="msg-edit-area" rows="4"></textarea>
+              <div class="msg-edit-actions">
+                <button class="msg-edit-save" @click="saveEdit(msg)">save</button>
+                <button class="msg-edit-cancel" @click="editing = null">cancel</button>
+              </div>
+            </div>
+            <div v-else class="msg-content md" v-html="renderMd(msg.content)"></div>
           </div>
         </template>
 
@@ -216,7 +227,7 @@
 /**
  * desc: Main chat page with resizable sidebar, message thread, DAG trace display, composable panel, and interjection support
  */
-import { ref, nextTick, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionsStore } from '../stores/sessions'
 import { useDagStore } from '../stores/dag'
@@ -286,6 +297,26 @@ const sessions = useSessionsStore()
 const dag = useDagStore()
 const panel = usePanelStore()
 const input = ref('')
+
+// ── Inline message editing / regenerate ──
+const editing = ref(null)   // index of the message being edited, or null
+const editBuf = ref('')     // edit textarea buffer
+const lastAssistantIndex = computed(() => {
+  const m = sessions.messages
+  for (let i = m.length - 1; i >= 0; i--) if (m[i].role === 'assistant') return i
+  return -1
+})
+function startEdit(i, msg) { editing.value = i; editBuf.value = msg.content }
+async function saveEdit(msg) {
+  if (!msg.id) { editing.value = null; return }
+  try {
+    await chat.editMessage(sessions.sessionId, msg.id, editBuf.value)
+    msg.content = editBuf.value  // reflect immediately; server now holds it
+  } catch (err) {
+    alert('Edit failed: ' + err.message)
+  }
+  editing.value = null
+}
 const messagesEl = ref(null)
 const openMenu = ref(null)
 const dragOver = ref(false)
@@ -589,6 +620,15 @@ watch(() => sessions.sessionId, (newId) => {
 
 .msg { display: flex; flex-direction: column; gap: 4px; max-width: 740px; }
 .msg-meta { display: flex; align-items: center; gap: 6px; }
+.msg-tools { display: inline-flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+.msg:hover .msg-tools { opacity: 1; }
+.msg-tool { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 1px 4px; border-radius: 4px; line-height: 1; }
+.msg-tool:hover { color: var(--accent); background: var(--surface); }
+.msg-edit { display: flex; flex-direction: column; gap: 6px; }
+.msg-edit-area { width: 100%; resize: vertical; font: inherit; font-size: 14px; line-height: 1.6; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.msg-edit-actions { display: flex; gap: 6px; }
+.msg-edit-save, .msg-edit-cancel { font-size: 12px; padding: 3px 10px; border-radius: 5px; border: 1px solid var(--line); cursor: pointer; background: var(--surface); color: var(--text); }
+.msg-edit-save { background: var(--accent); color: #fff; border-color: var(--accent); }
 .msg-author {
   font-size: 11px; font-weight: 700; font-family: var(--mono);
   text-transform: uppercase; letter-spacing: 0.06em;

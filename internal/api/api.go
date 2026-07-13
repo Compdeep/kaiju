@@ -93,6 +93,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sessions", a.handleListSessions)
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", a.handleDeleteSession)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/messages", a.handleGetMessages)
+	mux.HandleFunc("PATCH /api/v1/sessions/{id}/messages/{msgId}", a.handleEditMessage)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/compact", a.handleCompactSession)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/trace", a.handleSaveTrace)
 	// Uploads — per-session attachments
@@ -123,7 +124,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.Query == "" {
+	if req.Query == "" && !req.Regenerate {
 		jsonError(w, "query is required", http.StatusBadRequest)
 		return
 	}
@@ -164,6 +165,39 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+
+	// Regenerate: re-run the last turn. Drop the previous assistant reply and
+	// answer the last user message again. Ownership-checked; the delete is scoped
+	// to the session, so a user can only regenerate their own chat. The query is
+	// taken from history (not the request), and the user message is NOT re-stored.
+	regenerating := false
+	if req.Regenerate {
+		if req.SessionID == "" || userID == "" || a.db == nil {
+			jsonError(w, "regenerate requires a session", http.StatusBadRequest)
+			return
+		}
+		if _, err := a.db.GetSessionForUser(req.SessionID, userID); err != nil {
+			jsonError(w, "session not found", http.StatusNotFound)
+			return
+		}
+		msgs, _ := a.db.GetRecentMessages(req.SessionID, 200)
+		lastUser := -1
+		for i := len(msgs) - 1; i >= 0; i-- {
+			if msgs[i].Role == "user" {
+				lastUser = i
+				break
+			}
+		}
+		if lastUser < 0 {
+			jsonError(w, "nothing to regenerate", http.StatusBadRequest)
+			return
+		}
+		if lastUser+1 < len(msgs) { // drop the assistant reply after it
+			a.db.DeleteMessagesFrom(req.SessionID, msgs[lastUser+1].ID)
+		}
+		req.Query = msgs[lastUser].Content
+		regenerating = true
 	}
 
 	trigger := agent.Trigger{
@@ -229,8 +263,11 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 
 		// Store the user message immediately (chat output boundary for the
 		// user-side turn). The assistant turn is stored after the aggregator
-		// runs, also outside the execution layer.
-		memMgr.StoreMessage(req.SessionID, "user", req.Query)
+		// runs, also outside the execution layer. On regenerate the user message
+		// is already in history, so don't duplicate it.
+		if !regenerating {
+			memMgr.StoreMessage(req.SessionID, "user", req.Query)
+		}
 	}
 	if req.Mode != "" {
 		trigger.DAGMode = req.Mode

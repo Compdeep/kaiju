@@ -83,7 +83,7 @@ export async function switchSession(id) {
     try {
       const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
       ss.messages = (msgs || []).map(m => {
-        const msg = { role: m.role, content: m.content }
+        const msg = { id: m.id, role: m.role, content: m.content }
         if (m.dag_trace) {
           try { msg.trace = JSON.parse(m.dag_trace) } catch {}
         }
@@ -101,6 +101,65 @@ export async function switchSession(id) {
     } catch {
       ss.messages = []
     }
+  }
+}
+
+/**
+ * desc: Re-fetch a session's messages from the server (so they carry DB ids,
+ *       needed for edit/regenerate). Replaces the session's message list.
+ * @param {string} id - session id
+ */
+export async function refreshMessages(id) {
+  const s = useSessionsStore()
+  const ss = s.getSession(id)
+  if (!ss) return
+  try {
+    const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
+    ss.messages = (msgs || []).map(m => {
+      const msg = { id: m.id, role: m.role, content: m.content }
+      if (m.dag_trace) { try { msg.trace = JSON.parse(m.dag_trace) } catch {} }
+      return msg
+    })
+  } catch { /* keep current view on failure */ }
+}
+
+/**
+ * desc: Edit one message's stored content (owner-only, enforced server-side).
+ * @param {string} sid - session id
+ * @param {number} msgId - message id
+ * @param {string} content - new content
+ */
+export async function editMessage(sid, msgId, content) {
+  await api.patch(`/api/v1/sessions/${sid}/messages/${msgId}`, { content })
+}
+
+/**
+ * desc: Regenerate the last turn — drop the last assistant reply and re-run the
+ *       last user message on the server, then refresh the view.
+ */
+export async function regenerate() {
+  const s = useSessionsStore()
+  const dag = useDagStore()
+  const sid = s.sessionId
+  const sess = s.getSession(sid)
+  if (!sess) return
+  sess.loading = true
+  dag.archiveAndClear()
+  try {
+    await api.post('/api/v1/execute', {
+      session_id: sid,
+      regenerate: true,
+      chat_mode: s.chatMode || undefined,
+      mode: s.runMode,
+      agg_mode: parseInt(s.aggMode),
+      execution_mode: s.executionMode || undefined,
+    })
+  } catch (err) {
+    console.error('regenerate:', err)
+  } finally {
+    sess.loading = false
+    dag.archiveAndClear()
+    await refreshMessages(sid)
   }
 }
 
@@ -211,6 +270,8 @@ export async function send(text) {
     sendingSess.sendInFlight = false
     dag.archiveAndClear()
     loadSessions()
+    // Sync ids from the server so the just-sent messages become editable.
+    refreshMessages(sendingSid)
   }
 }
 

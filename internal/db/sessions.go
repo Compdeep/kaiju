@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -156,6 +157,36 @@ func (d *DB) GetMessages(sessionID string, limit int) ([]Message, error) {
 		msgs = append(msgs, m)
 	}
 	return msgs, nil
+}
+
+// UpdateMessageContent overwrites one message's content, scoped to its session.
+// The caller MUST have verified the session belongs to the requesting user
+// (handlers do this via GetSessionForUser); the session_id clause is a second
+// guard. Returns an error if no such message exists in that session.
+func (d *DB) UpdateMessageContent(sessionID string, msgID int64, content string) error {
+	res, err := d.conn.Exec(
+		`UPDATE messages SET content = ? WHERE id = ? AND session_id = ?`,
+		content, msgID, sessionID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("message not found in session")
+	}
+	return nil
+}
+
+// DeleteMessagesFrom removes the message with id == fromID and every later
+// message in the session (by id). Used by regenerate (drop the last assistant
+// reply) and edit-resubmit (drop from an edited user message onward). Scoped to
+// the session; caller verifies ownership.
+func (d *DB) DeleteMessagesFrom(sessionID string, fromID int64) error {
+	_, err := d.conn.Exec(
+		`DELETE FROM messages WHERE session_id = ? AND id >= ?`,
+		sessionID, fromID,
+	)
+	return err
 }
 
 // GetRecentMessages returns the most recent `limit` messages for a session in

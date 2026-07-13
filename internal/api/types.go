@@ -28,6 +28,10 @@ type ExecuteRequest struct {
 	ChatMode     bool   `json:"chat_mode,omitempty"`
 	ChatProvider string `json:"chat_provider,omitempty"`
 	ChatModel    string `json:"chat_model,omitempty"`
+	// Regenerate re-runs the last turn: the previous assistant reply is dropped
+	// and the last user message is answered again. Query is ignored (taken from
+	// history). Session-scoped and ownership-checked.
+	Regenerate bool `json:"regenerate,omitempty"`
 }
 
 // ActionInfo describes a recommended follow-up action from the aggregator.

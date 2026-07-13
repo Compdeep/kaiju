@@ -1953,6 +1953,10 @@ func classifyRetryTier(errMsg string) string {
 		"command not found",
 		"splice", "edit out of bounds",
 		"timed out", "command timed out", // a 60s timeout won't succeed on retry
+		// A broken ${node.<id>.field} wiring is structural — an LLM shell fix
+		// can't resolve a dependency; it only mangles the placeholder into a
+		// real (invalid) shell expansion and loops. Fail it cleanly instead.
+		"dependency injection failed",
 	}
 	for _, p := range skipPatterns {
 		if strings.Contains(lower, p) {
@@ -1988,6 +1992,26 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 	command, _ := node.Params["command"].(string)
 	if command == "" {
 		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}
+		return
+	}
+
+	// A failed command that STILL carries kaiju ${node.<id>.field} placeholders
+	// never had its dependency outputs injected — that's a DAG wiring failure,
+	// not a shell bug. The dispatcher resolves these via substituteTemplates
+	// before executing; this retry path historically did not, so the raw
+	// placeholder reached the shell as "sh: Bad substitution", and the
+	// shell-fixer LLM below (which can't tell a kaiju placeholder from a shell
+	// variable) would just fiddle with quoting forever. Resolve the templates
+	// here instead — the dep may have completed since the first attempt — and
+	// fail cleanly with the injection error if it genuinely can't resolve. No LLM.
+	if nodeTemplateRe.MatchString(command) {
+		if err := substituteTemplates(node, graph); err != nil {
+			log.Printf("[dag] oneshot: %s has unresolved templates (dependency injection, not a shell fix): %v", node.ID, err)
+			ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("dependency injection failed: %w", err)}
+			return
+		}
+		appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "TEMPLATE_REINJECT", "resolved ${node...} placeholders on retry")
+		a.execBashParams(ctx, node, comp, ch)
 		return
 	}
 
@@ -2040,7 +2064,20 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 
 	appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "ONESHOT_FIX", fmt.Sprintf("%s → %s", Text.TruncateLog(command, 60), Text.TruncateLog(fixed, 60)))
 
-	// Execute through the registry (same as normal dispatch)
+	// Resolve any ${node.<id>.field} templates before executing — exactly like
+	// the dispatcher — so a placeholder can never reach the shell. (The LLM fix
+	// shouldn't introduce one, but this keeps the retry path consistent with
+	// normal dispatch and closes the leak for good.)
+	if err := substituteTemplates(node, graph); err != nil {
+		ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("dependency injection failed: %w", err)}
+		return
+	}
+	a.execBashParams(ctx, node, comp, ch)
+}
+
+// execBashParams runs the bash tool with the node's current params (same path as
+// normal dispatch) and reports the outcome. Shared by the oneshot retry paths.
+func (a *Agent) execBashParams(ctx context.Context, node *Node, comp nodeCompletion, ch chan nodeCompletion) {
 	sk, ok := a.registry.Get("bash")
 	if !ok {
 		ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("bash tool not found")}

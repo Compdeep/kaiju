@@ -4,11 +4,50 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
 	"github.com/Compdeep/kaiju/internal/memory"
 )
+
+/*
+ * handleEditMessage overwrites one message's content in a session the caller
+ * owns. No LLM — a direct edit to the stored history, so a user can correct or
+ * steer either their own message or the assistant's reply. Authorized strictly
+ * by user id: the session must belong to the JWT principal, and the update is
+ * scoped to (session, message) — a user can never edit another user's chat.
+ */
+func (a *API) handleEditMessage(w http.ResponseWriter, r *http.Request) {
+	claims, ok := gateway.ClaimsFromContext(r.Context())
+	if !ok {
+		jsonError(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	sessionID := r.PathValue("id")
+	// Ownership gate — the session must belong to THIS user.
+	if _, err := a.db.GetSessionForUser(sessionID, claims.Username); err != nil {
+		jsonError(w, "session not found", http.StatusNotFound)
+		return
+	}
+	msgID, err := strconv.ParseInt(r.PathValue("msgId"), 10, 64)
+	if err != nil || msgID <= 0 {
+		jsonError(w, "invalid message id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := a.db.UpdateMessageContent(sessionID, msgID, body.Content); err != nil {
+		jsonError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	jsonResponse(w, map[string]string{"status": "updated"}, http.StatusOK)
+}
 
 /*
  * handleCreateSession creates a new conversation session for the authenticated user.

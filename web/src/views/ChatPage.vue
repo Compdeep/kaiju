@@ -67,9 +67,10 @@
           <div :class="['msg', msg.role]">
             <div class="msg-meta">
               <span class="msg-author">{{ msg.role === 'user' ? 'you' : 'kaiju' }}</span>
-              <span class="msg-tools" v-if="editing !== i && !sessions.loading">
-                <button v-if="msg.id" class="msg-tool" title="Edit this message" @click="startEdit(i, msg)">✎</button>
-                <button v-if="msg.role === 'assistant' && i === lastAssistantIndex" class="msg-tool" title="Regenerate reply" @click="chat.regenerate()">↻</button>
+              <span class="msg-tools" v-if="editing !== i">
+                <button v-if="msg.id && !sessions.loading" class="msg-tool" title="Edit this message" @click="startEdit(i, msg)">✎</button>
+                <button v-if="msg.role === 'assistant' && i === lastAssistantIndex && !sessions.loading" class="msg-tool" title="Regenerate reply" @click="chat.regenerate()">↻</button>
+                <button v-if="msg.id" class="msg-tool" title="Delete this message (and everything after)" @click="deleteMsg(msg)">🗑</button>
               </span>
             </div>
             <div v-if="editing === i" class="msg-edit">
@@ -307,6 +308,15 @@ const lastAssistantIndex = computed(() => {
   return -1
 })
 function startEdit(i, msg) { editing.value = i; editBuf.value = msg.content }
+async function deleteMsg(msg) {
+  if (!msg.id) return
+  if (!confirm('Delete this message and everything after it?')) return
+  try {
+    await chat.deleteMessage(sessions.sessionId, msg.id)
+  } catch (err) {
+    alert('Delete failed: ' + err.message)
+  }
+}
 async function saveEdit(msg) {
   if (!msg.id) { editing.value = null; return }
   try {
@@ -387,6 +397,7 @@ onMounted(async () => {
     await chat.switchSession(sessions.sessions[0].id)
     router.replace({ name: 'chat', params: { id: sessions.sessions[0].id } })
   }
+  scrollToBottom() // open at the latest turn
   tools.connect()
 })
 
@@ -485,13 +496,22 @@ async function send() {
     // Don't await — send starts loading, spacer expands via CSS
     chat.send(text)
     // Scroll down once after spacer expands so the thinking indicator is visible
-    nextTick(() => {
-      setTimeout(() => {
-        if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
-      }, 260) // after spacer CSS transition (240ms)
-    })
+    scrollToBottom(260) // after spacer CSS transition (240ms)
   }
 
+}
+
+/**
+ * desc: Scroll the message list to the newest message. Used on send and, so a
+ *       chat opens at the latest turn, after loading/switching a session.
+ * @param {number} delay - ms to wait after render before scrolling
+ */
+function scrollToBottom(delay = 60) {
+  nextTick(() => {
+    setTimeout(() => {
+      if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+    }, delay)
+  })
 }
 
 
@@ -510,6 +530,7 @@ function renderMd(text) {
 watch(() => route.params.id, async (newId) => {
   if (newId && newId !== sessions.sessionId) {
     await chat.switchSession(newId)
+    scrollToBottom() // jump to the latest turn when opening a chat
   }
 })
 

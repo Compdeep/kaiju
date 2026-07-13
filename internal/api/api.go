@@ -94,6 +94,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", a.handleDeleteSession)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/messages", a.handleGetMessages)
 	mux.HandleFunc("PATCH /api/v1/sessions/{id}/messages/{msgId}", a.handleEditMessage)
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}/messages/{msgId}", a.handleDeleteMessage)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/compact", a.handleCompactSession)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/trace", a.handleSaveTrace)
 	// Uploads — per-session attachments

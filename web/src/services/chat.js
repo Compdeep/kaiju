@@ -134,6 +134,20 @@ export async function editMessage(sid, msgId, content) {
 }
 
 /**
+ * desc: Delete a message (and everything after it) from a session, then refresh.
+ *       Owner-only, enforced server-side. Unsticks a turn with no reply.
+ * @param {string} sid - session id
+ * @param {number} msgId - message id
+ */
+export async function deleteMessage(sid, msgId) {
+  const s = useSessionsStore()
+  await api.del(`/api/v1/sessions/${sid}/messages/${msgId}`)
+  const sess = s.getSession(sid)
+  if (sess) sess.loading = false // deleting clears any stuck "inflight" state
+  await refreshMessages(sid)
+}
+
+/**
  * desc: Regenerate the last turn — drop the last assistant reply and re-run the
  *       last user message on the server, then refresh the view.
  */
@@ -143,6 +157,12 @@ export async function regenerate() {
   const sid = s.sessionId
   const sess = s.getSession(sid)
   if (!sess) return
+  // Optimistically drop the old assistant reply NOW so the view shows just the
+  // "thinking" state, not old-reply + new-reply stacked. refreshMessages() below
+  // reconciles with the server (which also deleted it).
+  if (sess.messages.length && sess.messages[sess.messages.length - 1].role === 'assistant') {
+    sess.messages.pop()
+  }
   sess.loading = true
   dag.archiveAndClear()
   try {

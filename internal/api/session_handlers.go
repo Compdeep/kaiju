@@ -50,6 +50,35 @@ func (a *API) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 /*
+ * handleDeleteMessage removes a message (and everything after it) from a session
+ * the caller owns. Used to delete the last message — including unsticking a
+ * turn whose reply never came back — or to truncate a chat at a point. Same
+ * user-id authorization as edit: a user can only delete from their own chat.
+ */
+func (a *API) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
+	claims, ok := gateway.ClaimsFromContext(r.Context())
+	if !ok {
+		jsonError(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	sessionID := r.PathValue("id")
+	if _, err := a.db.GetSessionForUser(sessionID, claims.Username); err != nil {
+		jsonError(w, "session not found", http.StatusNotFound)
+		return
+	}
+	msgID, err := strconv.ParseInt(r.PathValue("msgId"), 10, 64)
+	if err != nil || msgID <= 0 {
+		jsonError(w, "invalid message id", http.StatusBadRequest)
+		return
+	}
+	if err := a.db.DeleteMessagesFrom(sessionID, msgID); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonResponse(w, map[string]string{"status": "deleted"}, http.StatusOK)
+}
+
+/*
  * handleCreateSession creates a new conversation session for the authenticated user.
  * desc: Extracts the user from JWT claims and creates a new session via the memory manager.
  * param: w - HTTP response writer

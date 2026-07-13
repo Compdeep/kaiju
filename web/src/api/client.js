@@ -15,16 +15,33 @@ function getToken() {
  * @param {Object} [body] - Request body to serialize as JSON
  * @returns {Promise<Object>} Parsed JSON response
  */
-async function request(method, path, body) {
+// Default per-request timeout. Bounds every call so a stalled/hung request
+// (e.g. a long agent run whose connection drops) can never leave the UI stuck
+// in a loading state forever — the fetch aborts, the caller's finally runs, and
+// the input unlocks. Generous enough for legitimate long agent runs.
+const DEFAULT_TIMEOUT_MS = 300000 // 5 min
+
+async function request(method, path, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const headers = { 'Content-Type': 'application/json' }
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const res = await fetch(BASE + path, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  const controller = new AbortController()
+  const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null
+  let res
+  try {
+    res = await fetch(BASE + path, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+  } catch (err) {
+    if (err?.name === 'AbortError') throw new Error('request timed out')
+    throw err
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 
   if (res.status === 401) {
     localStorage.removeItem('kaiju_token')
@@ -40,8 +57,8 @@ async function request(method, path, body) {
 export const api = {
   /** @param {string} path @returns {Promise<Object>} */
   get: (path) => request('GET', path),
-  /** @param {string} path @param {Object} body @returns {Promise<Object>} */
-  post: (path, body) => request('POST', path, body),
+  /** @param {string} path @param {Object} body @param {Object} [opts] @returns {Promise<Object>} */
+  post: (path, body, opts) => request('POST', path, body, opts),
   /** @param {string} path @param {Object} body @returns {Promise<Object>} */
   put: (path, body) => request('PUT', path, body),
   /** @param {string} path @returns {Promise<Object>} */

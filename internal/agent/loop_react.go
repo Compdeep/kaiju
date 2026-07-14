@@ -10,6 +10,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 )
 
 const maxToolResultLen = 4096
@@ -28,7 +29,7 @@ func (a *Agent) systemPrompt(cards []string) string {
 		cardContext = "\n\n" + a.capabilities.ComposeBodies(cards)
 	}
 	rolePrompt := fmt.Sprintf("You are an agent on node %s.\n%s\n\n%s%s%s",
-		a.cfg.NodeID, roleDescription(a.cfg.NodeRole), defaultReactRolePrompt, cardContext, a.fleetSection())
+		a.cfg.NodeID, roleDescription(a.cfg.NodeRole), prompt.React, cardContext, a.fleetSection())
 	return ComposeSystemPrompt(a.soulPrompt, rolePrompt)
 }
 

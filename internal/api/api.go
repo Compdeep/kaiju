@@ -13,6 +13,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 	"github.com/Compdeep/kaiju/internal/agent/uploads"
 	"github.com/Compdeep/kaiju/internal/clearance"
 	"github.com/Compdeep/kaiju/internal/db"
@@ -53,12 +54,9 @@ func (a *API) resolveChat(req ExecuteRequest) (provider, model string) {
 	return a.agent.ChatModel()
 }
 
-// The chat-lane persona now lives in the composable prompt package (SOUL +
-// prompt.Chat), assembled inside Agent.Converse. Only the standalone vision
-// fallback below keeps a local prompt for now.
-
-// visionSystemPrompt frames a direct image-analysis turn (no tools/DAG).
-const visionSystemPrompt = "You are a vision assistant. The user has attached one or more images to this conversation. Answer the user's question using what you can see in the image(s). Be direct and concise. If a question isn't about the image, answer it normally."
+// Lane personas now live in the composable prompt package: the chat lane uses
+// SOUL + prompt.Chat (assembled in Agent.Converse); the vision fallback uses
+// SOUL + prompt.Vision. Both are operator-overridable via dataDir/prompts.md.
 
 /*
  * New creates an API handler set.
@@ -377,7 +375,8 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 
 	if len(visionImgs) > 0 {
 		if vp, vm := a.resolveVision(req); vm != "" {
-			msgs := agent.BuildMessagesWithHistory(visionSystemPrompt, req.Query, trigger.History)
+			visionSystem := agent.ComposeSystemPrompt(a.agent.SoulPrompt(), prompt.Vision)
+			msgs := agent.BuildMessagesWithHistory(visionSystem, req.Query, trigger.History)
 			llm.AttachImages(msgs, visionImgs)
 			content, toks, verr := a.agent.OneShot(ctx, vp, vm, msgs, 0.3, 1024)
 			elapsed := time.Since(start)

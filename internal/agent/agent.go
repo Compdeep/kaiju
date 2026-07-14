@@ -447,6 +447,14 @@ func (a *Agent) Workspace() string {
 	return a.cfg.Workspace
 }
 
+// SoulPrompt returns the agent's resolved soul/persona prompt — the operator's
+// SOUL override (dataDir/prompts.md or SOUL.md) if present, else the embedded
+// default. Exposed so API-layer lanes (the vision fallback) can compose the same
+// persona; the chat lane uses a.soulPrompt directly via Converse.
+func (a *Agent) SoulPrompt() string {
+	return a.soulPrompt
+}
+
 /*
  * Submit queues a trigger for investigation.
  * desc: Non-blocking enqueue. Drops the trigger if the queue is full.

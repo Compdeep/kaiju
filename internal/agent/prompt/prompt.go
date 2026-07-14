@@ -41,6 +41,9 @@ var (
 	Interjection string
 	Classifier   string
 	Curator      string
+	Chat         string
+	Vision       string
+	React        string
 )
 
 // sectionOrder is the canonical list of required section names, in a stable
@@ -57,6 +60,9 @@ var sectionOrder = []string{
 	"INTERJECTION",
 	"CLASSIFIER",
 	"CURATOR",
+	"CHAT",
+	"VISION",
+	"REACT",
 }
 
 // targets maps each required section name to the package var it fills.
@@ -72,6 +78,9 @@ var targets = map[string]*string{
 	"INTERJECTION": &Interjection,
 	"CLASSIFIER":   &Classifier,
 	"CURATOR":      &Curator,
+	"CHAT":         &Chat,
+	"VISION":       &Vision,
+	"REACT":        &React,
 }
 
 func init() {

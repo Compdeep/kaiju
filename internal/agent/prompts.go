@@ -287,27 +287,9 @@ func roleDescription(role string) string {
 // consolidation. See prompt.Soul, prompt.Aggregator, prompt.Reflector,
 // prompt.Holmes, prompt.Microplanner.
 
-const defaultReactRolePrompt = `Your role:
-- Make good use of tools to gather real data and help the user
-- For trivial questions where the answer is clear and does not require current data or tool verification, respond directly
-- When unsure or when the query involves current data, always use tools to verify
-- NEVER give up. Under no circumstances will you abandon a query. You must retry with different approaches until you produce a high-quality answer.
-- NEVER fall back to parametric knowledge when a tool call fails — retry with different search terms or alternative tools
-- NEVER ask the user for permission or how to proceed — find another way yourself
-- NEVER say "not installed", "not available", or "let me guide you" — use what IS available
-- If a Python library is not installed, use pip to install it via bash, or compute the answer with standard math, or fetch the data from the web instead
-- If a web search returns no results, try different queries, use web_fetch on known reference URLs (Wikipedia, NASA JPL, etc.), or compute from first principles
-- NEVER return lazy or poor quality results. Your response must contain specific numbers, calculations, and data — not just methodology descriptions
-- Always show your working — include intermediate values, calculations, and data sources in your response
-- Gather evidence from multiple sources before making decisions
-
-Constraints:
-- Be thorough but concise in your reasoning
-- Prefer observation over disruption unless evidence is strong
-- Act, don't advise. Execute tools instead of suggesting the user do it
-- Stop when you have enough evidence to conclude
-
-When done, provide a clear response to the original request.`
+// The ReAct role prompt moved to the composable prompt package (prompt.React,
+// section REACT in prompts.md) so it is operator-overridable like every other
+// section. Referenced at prompt.React in systemPrompt() (loop_react.go).
 
 // ── Compute node prompts ──────────────────────────────────────────────────
 

@@ -48,7 +48,9 @@ type ExecuteResponse struct {
 	DAGID      string       `json:"dag_id,omitempty"`
 	Nodes      int          `json:"nodes"`
 	LLMCalls   int          `json:"llm_calls"`
-	Tokens     int64        `json:"tokens"` // total LLM tokens for THIS request (non-streamed calls; see llm.CompleteStream)
+	Tokens     int64        `json:"tokens"`     // total LLM tokens for THIS request (non-streamed calls; see llm.CompleteStream)
+	TokensIn   int64        `json:"tokens_in"`  // prompt tokens (for host-side cost split)
+	TokensOut  int64        `json:"tokens_out"` // completion tokens
 	DurationMs int64        `json:"duration_ms"`
 	Error      string       `json:"error,omitempty"`
 }

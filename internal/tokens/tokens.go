@@ -33,26 +33,46 @@ func WithPrincipal(ctx context.Context, principal string) context.Context {
 	return context.WithValue(ctx, prinKey{}, principal)
 }
 
-// WithRun attaches a per-run token accumulator to ctx. Read it back with
-// RunTotal after the run finishes to get that single request's token cost. The
-// accumulator is a shared pointer carried through the context, so it reflects
-// every Add made under this ctx — including on a scheduler worker goroutine, as
-// long as that goroutine's ctx derives from this one (the synchronous path).
-func WithRun(ctx context.Context) context.Context {
-	return context.WithValue(ctx, runKey{}, new(int64))
+// runAcc is a per-run accumulator split by prompt (in) vs completion (out) tokens.
+type runAcc struct {
+	in  int64
+	out int64
 }
 
-func runCounter(ctx context.Context) *int64 {
-	if p, ok := ctx.Value(runKey{}).(*int64); ok {
+// WithRun attaches a per-run token accumulator to ctx. Read it back with
+// RunTotal / RunIn / RunOut after the run finishes to get that single request's
+// token cost. The accumulator is a shared pointer carried through the context, so
+// it reflects every Add made under this ctx — including on a scheduler worker
+// goroutine, as long as that goroutine's ctx derives from this one.
+func WithRun(ctx context.Context) context.Context {
+	return context.WithValue(ctx, runKey{}, new(runAcc))
+}
+
+func runCounter(ctx context.Context) *runAcc {
+	if p, ok := ctx.Value(runKey{}).(*runAcc); ok {
 		return p
 	}
 	return nil
 }
 
-// RunTotal returns the tokens accumulated on this ctx's run counter (0 if none).
+// RunTotal returns prompt+completion tokens accumulated on this ctx (0 if none).
 func RunTotal(ctx context.Context) int64 {
 	if p := runCounter(ctx); p != nil {
-		return atomic.LoadInt64(p)
+		return atomic.LoadInt64(&p.in) + atomic.LoadInt64(&p.out)
+	}
+	return 0
+}
+
+// RunIn / RunOut return this run's prompt / completion token totals.
+func RunIn(ctx context.Context) int64 {
+	if p := runCounter(ctx); p != nil {
+		return atomic.LoadInt64(&p.in)
+	}
+	return 0
+}
+func RunOut(ctx context.Context) int64 {
+	if p := runCounter(ctx); p != nil {
+		return atomic.LoadInt64(&p.out)
 	}
 	return 0
 }
@@ -85,9 +105,15 @@ var (
 	total  int64
 )
 
-// Add records n tokens against the (principal, category) tagged on ctx.
-// Concurrency-safe. No-op for n <= 0.
-func Add(ctx context.Context, n int) {
+// Add records n tokens (unsplit) against the (principal, category) tagged on ctx.
+// Kept for callers that only have a total; counted as completion on the run acc.
+func Add(ctx context.Context, n int) { AddSplit(ctx, 0, n) }
+
+// AddSplit records prompt (in) and completion (out) tokens against the
+// (principal, category) tagged on ctx, and onto the per-run accumulator if one
+// was opened with WithRun. Concurrency-safe.
+func AddSplit(ctx context.Context, in, out int) {
+	n := in + out
 	if n <= 0 {
 		return
 	}
@@ -96,10 +122,13 @@ func Add(ctx context.Context, n int) {
 	counts[k] += int64(n)
 	total += int64(n)
 	mu.Unlock()
-	// Per-request tally (if the caller opened one with WithRun), so the API can
-	// return this single run's cost for durable per-user metering in the host.
 	if p := runCounter(ctx); p != nil {
-		atomic.AddInt64(p, int64(n))
+		if in > 0 {
+			atomic.AddInt64(&p.in, int64(in))
+		}
+		if out > 0 {
+			atomic.AddInt64(&p.out, int64(out))
+		}
 	}
 }
 

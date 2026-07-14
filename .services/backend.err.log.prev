@@ -1,0 +1,13 @@
+Compilation error in /home/sites/kaiju/kaiju/project/kaiju_saas/backend/src/server.ts
+Error: Must use import to load ES Module: /home/sites/kaiju/kaiju/project/kaiju_saas/backend/src/server.ts
+    at Object.<anonymous> (/home/sites/kaiju/kaiju/project/kaiju_saas/backend/src/server.ts:1:7)
+    at Module._compile (node:internal/modules/cjs/loader:1521:14)
+    at Module._compile (/home/sites/kaiju/kaiju/project/kaiju_saas/backend/node_modules/source-map-support/source-map-support.js:568:25)
+    at Module.m._compile (/tmp/ts-node-dev-hook-9658675973468538.js:69:33)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1623:10)
+    at require.extensions..jsx.require.extensions..js (/tmp/ts-node-dev-hook-9658675973468538.js:114:20)
+    at require.extensions.<computed> (/tmp/ts-node-dev-hook-9658675973468538.js:71:20)
+    at Object.nodeDevHook [as .ts] (/home/sites/kaiju/kaiju/project/kaiju_saas/backend/node_modules/ts-node-dev/lib/hook.js:63:13)
+    at Module.load (node:internal/modules/cjs/loader:1266:32)
+    at Function.Module._load (node:internal/modules/cjs/loader:1091:12)
+Killed

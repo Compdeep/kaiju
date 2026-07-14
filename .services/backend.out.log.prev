@@ -1,0 +1,6 @@
+
+> backend@1.0.0 dev
+> ts-node-dev --respawn src/server.ts
+
+[INFO] 12:53:50 ts-node-dev ver. 2.0.0 (using ts-node ver. 10.9.2, typescript ver. 5.9.3)
+[ERROR] 12:53:50 Error: Must use import to load ES Module: /home/sites/kaiju/kaiju/project/kaiju_saas/backend/src/server.ts

@@ -1,0 +1,12 @@
+--- RUN Apr 26 01:16:11 ---
+[Apr 26 01:16:15] get_kernel_logs — OK: bash: -- Journal begins at Sun 2025-10-26 08:00:02 UTC, ends at Sun 2026-04-26 01:00:02 UTC. -- -- No entr...
+[Apr 26 01:16:20] analyze_kernel_logs — OK: wrote project/analyze_kernel_logs.py (python)
+[Apr 26 01:16:20] analyze_kernel_logs — OK: compute: {"code_path":"/home/sites/kaiju/kaiju/project/analyze_kernel_logs.py","execute":"KAIJU_CONTEXT='/hom...
+[Apr 26 01:16:20] exec_analyze_kernel_logs — BASH_ERROR: {"bash_error":true,"command":"( KAIJU_CONTEXT='/home/sites/kaiju/kaiju/.kaiju/sessions/cli-1777166155432389264/ctx/analyze_kernel_logs_1777166180055508516.json' python3 project/analyze_kernel_logs.py ) \u003e/tmp/kaiju_n2.out 2\u003e\u00261; rc=$?; cat /tmp/kaiju_n2.out; exit $rc","error":"exit status 1","exit_code":1,"stderr":"","stdout":"Traceback (most recent call last):\n  File \"/home/sites/kaiju/kaiju/project/analyze_kernel_logs.py\", line 44, in \u003cmodule\u003e\n    main()\n  File \"/home/sites/kaiju/kaiju/project/analyze_kernel_logs.py\", lin..."}
+[Apr 26 01:16:20] verify_analyze_kernel_logs — VALIDATION_FAIL: {"bash_error":true,"command":"OUT=/tmp/kaiju_n2.out; grep -q 'No kernel log entries were found' $OUT","error":"exit status 1","exit_code":1,"stderr":"","stdout":""}
+[Apr 26 01:16:23] reflect — CONCLUDE: 
+--- RUN Apr 26 01:16:46 ---
+[Apr 26 01:16:50] list_var_log — OK: file_list: {"entries":[{"name":"alternatives.log","type":"file","size":13397},{"name":"alternatives.log.1","typ...
+[Apr 26 01:16:50] read_kern_log — FAILED: file_read: open /var/log/kern.log: permission denied
+[Apr 26 01:16:50] analyze_kern_log — FAILED: dependency injection failed: param_ref "query": dep n2 empty (failed)
+[Apr 26 01:16:52] reflect — CONCLUDE: 

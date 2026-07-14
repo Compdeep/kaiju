@@ -53,8 +53,9 @@ func (a *API) resolveChat(req ExecuteRequest) (provider, model string) {
 	return a.agent.ChatModel()
 }
 
-// chatSystemPrompt frames a direct (planner-less) conversational turn.
-const chatSystemPrompt = "You are a helpful conversational assistant. Respond directly to the user. You have no tools — just answer."
+// The chat-lane persona now lives in the composable prompt package (SOUL +
+// prompt.Chat), assembled inside Agent.Converse. Only the standalone vision
+// fallback below keeps a local prompt for now.
 
 // visionSystemPrompt frames a direct image-analysis turn (no tools/DAG).
 const visionSystemPrompt = "You are a vision assistant. The user has attached one or more images to this conversation. Answer the user's question using what you can see in the image(s). Be direct and concise. If a question isn't about the image, answer it normally."
@@ -319,40 +320,54 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	if req.ChatMode {
 		cp, cm := a.resolveChat(req)
 		dp, dmodel := a.agent.ChatModel()
-		log.Printf("[chat] chat_mode=true → direct to provider=%q model=%q (req.chat_model=%q, agent default=%q/%q)", cp, cm, req.ChatModel, dp, dmodel)
-		// Clean chat history: recent, full, VERBATIM, no cross-session long-term
-		// memory. LoadHistory (used by the planner) truncates long messages and
-		// windows to the oldest N — both shred a roleplay/chat thread. The user's
-		// current message was already stored above, so it's the last turn in this
-		// history; do NOT append it again.
-		var msgs []llm.Message
+		log.Printf("[chat] chat_mode=true → direct to provider=%q model=%q (req.chat_model=%q, agent default=%q/%q, tools=%v)", cp, cm, req.ChatModel, dp, dmodel, req.ChatTools)
+		// History: recent, verbatim, no cross-session long-term memory. The user's
+		// current message was already stored above, so it's the last turn here.
+		var history []llm.Message
 		if memMgr != nil {
-			if hist, _ := memMgr.LoadChatHistory(ctx, req.SessionID, 40); len(hist) > 0 {
-				msgs = append([]llm.Message{{Role: "system", Content: chatSystemPrompt}}, hist...)
+			history, _ = memMgr.LoadChatHistory(ctx, req.SessionID, 40)
+		}
+		// The chat lane's tool permission IS the explicit ChatTools list (API-driven).
+		// Empty ⇒ pure chat. It deliberately does NOT inherit the JWT's broader tool
+		// scope, so a chat turn can only ever run the tools this request named.
+		var chatScope *agent.ResolvedScope
+		if len(req.ChatTools) > 0 {
+			chatScope = &agent.ResolvedScope{AllowedTools: map[string]bool{}}
+			for _, name := range req.ChatTools {
+				chatScope.AllowedTools[name] = true
 			}
 		}
-		if len(msgs) == 0 {
-			msgs = agent.BuildMessagesWithHistory(chatSystemPrompt, req.Query, nil)
-		}
-		if len(visionImgs) > 0 && agent.IsVisionModel(cm) {
-			llm.AttachImages(msgs, visionImgs)
-		}
-		content, toks, cerr := a.agent.OneShot(ctx, cp, cm, msgs, 0.7, 1024)
+		res, cerr := a.agent.Converse(ctx, agent.ChatTurn{
+			Provider:  cp,
+			Model:     cm,
+			History:   history,
+			Query:     req.Query,
+			ToolNames: req.ChatTools,
+			Images:    visionImgs,
+			Scope:     chatScope,
+			AlertID:   trigger.AlertID,
+		})
 		elapsed := time.Since(start)
 		if cerr != nil {
 			log.Printf("[api] chat execute error: %v", cerr)
 			jsonResponse(w, ExecuteResponse{Error: cerr.Error(), DurationMs: elapsed.Milliseconds()}, http.StatusInternalServerError)
 			return
 		}
-		if memMgr != nil && content != "" {
-			memMgr.StoreMessage(req.SessionID, "assistant", content)
+		if memMgr != nil && res.Content != "" {
+			memMgr.StoreMessage(req.SessionID, "assistant", res.Content)
+			// Keep the chat lane's memory bounded: summarise old turns into a
+			// [Conversation summary] system message (which LoadChatHistory then
+			// carries), so long threads aren't truncated to a goldfish window.
+			if shouldCompact, _ := memMgr.ShouldCompact(req.SessionID); shouldCompact {
+				go memMgr.Compact(context.Background(), req.SessionID)
+			}
 		}
 		jsonResponse(w, ExecuteResponse{
-			Verdict:    content,
+			Verdict:    res.Content,
 			DAGID:      trigger.AlertID,
 			Nodes:      0,
-			LLMCalls:   1,
-			Tokens:     int64(toks),
+			LLMCalls:   res.LLMCalls,
+			Tokens:     int64(res.Tokens),
 			TokensIn:   tokens.RunIn(ctx),
 			TokensOut:  tokens.RunOut(ctx),
 			DurationMs: elapsed.Milliseconds(),

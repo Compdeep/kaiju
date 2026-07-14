@@ -1,0 +1,46 @@
+[
+  {
+    "name": "saas-web",
+    "command": "npm run dev",
+    "workdir": "/home/sites/kaiju/kaiju",
+    "port": 5173,
+    "pid": 2516164,
+    "started_at": "2026-04-18T20:51:46.186481748Z",
+    "status": "crashed",
+    "log_out": "/home/sites/kaiju/kaiju/.services/saas-web.out.log",
+    "log_err": "/home/sites/kaiju/kaiju/.services/saas-web.err.log"
+  },
+  {
+    "name": "vite",
+    "command": "npm run dev",
+    "workdir": "/home/sites/kaiju/kaiju/project/kaiju_saas",
+    "port": 5173,
+    "pid": 2548193,
+    "started_at": "2026-04-19T18:11:30.520490416Z",
+    "status": "running",
+    "log_out": "/home/sites/kaiju/kaiju/.services/vite.out.log",
+    "log_err": "/home/sites/kaiju/kaiju/.services/vite.err.log"
+  },
+  {
+    "name": "frontend",
+    "command": "npm run dev",
+    "workdir": "/home/sites/kaiju/kaiju/project/kaiju_saas/frontend",
+    "port": 3000,
+    "pid": 2661767,
+    "started_at": "2026-04-22T12:03:27.661593542Z",
+    "status": "running",
+    "log_out": "/home/sites/kaiju/kaiju/.services/frontend.out.log",
+    "log_err": "/home/sites/kaiju/kaiju/.services/frontend.err.log"
+  },
+  {
+    "name": "backend",
+    "command": "npm run dev",
+    "workdir": "/home/sites/kaiju/kaiju/project/kaiju_saas/backend",
+    "port": 4000,
+    "pid": 2663137,
+    "started_at": "2026-04-22T12:53:49.334137804Z",
+    "status": "running",
+    "log_out": "/home/sites/kaiju/kaiju/.services/backend.out.log",
+    "log_err": "/home/sites/kaiju/kaiju/.services/backend.err.log"
+  }
+]

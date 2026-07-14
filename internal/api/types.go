@@ -28,6 +28,11 @@ type ExecuteRequest struct {
 	ChatMode     bool   `json:"chat_mode,omitempty"`
 	ChatProvider string `json:"chat_provider,omitempty"`
 	ChatModel    string `json:"chat_model,omitempty"`
+	// ChatTools is the explicit, API-driven tool allowlist for the chat lane.
+	// Empty ⇒ pure chat (no tools). When set, the chat turn may call ONLY these
+	// tools (a bounded reason-act loop, still no planner); the list is also the
+	// execution permission, so the lane never inherits a broader tool scope.
+	ChatTools []string `json:"chat_tools,omitempty"`
 	// Regenerate re-runs the last turn: the previous assistant reply is dropped
 	// and the last user message is answered again. Query is ignored (taken from
 	// history). Session-scoped and ownership-checked.

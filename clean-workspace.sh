@@ -1,0 +1,9 @@
+rm -rf /home/uchan/.kaiju/workspace/.services
+rm -rf /home/uchan/.kaiju/workspace/.services.json 
+rm -rf /home/uchan/.kaiju/workspace/.worklog 
+rm -rf /home/uchan/.kaiju/workspace/project/*
+rm -rf /home/uchan/.kaiju/workspace/sessions/*
+rm -rf /home/uchan/.kaiju/workspace/blueprints/*
+rm -rf /home/sites/kaiju/kaiju/.kaiju/blueprints/
+rm -rf /home/sites/kaiju/kaiju/project/*
+rm -rf /tmp/kaiju-prompts/*

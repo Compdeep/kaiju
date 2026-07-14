@@ -353,6 +353,8 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			Nodes:      0,
 			LLMCalls:   1,
 			Tokens:     int64(toks),
+			TokensIn:   tokens.RunIn(ctx),
+			TokensOut:  tokens.RunOut(ctx),
 			DurationMs: elapsed.Milliseconds(),
 		}, http.StatusOK)
 		return
@@ -378,6 +380,8 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 				Nodes:      0,
 				LLMCalls:   1,
 				Tokens:     int64(toks),
+			TokensIn:   tokens.RunIn(ctx),
+			TokensOut:  tokens.RunOut(ctx),
 				DurationMs: elapsed.Milliseconds(),
 			}, http.StatusOK)
 			return
@@ -419,6 +423,8 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		Nodes:      result.Nodes,
 		LLMCalls:   result.LLMCalls,
 		Tokens:     tokens.RunTotal(ctx),
+		TokensIn:   tokens.RunIn(ctx),
+		TokensOut:  tokens.RunOut(ctx),
 		DurationMs: elapsed.Milliseconds(),
 	}, http.StatusOK)
 }

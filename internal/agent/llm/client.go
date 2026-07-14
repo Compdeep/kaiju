@@ -228,7 +228,7 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 	// principal) tags set upstream. Streamed calls (CompleteStream) currently
 	// carry no Usage and are undercounted — see the note there.
 	if err == nil && resp != nil {
-		tokens.Add(ctx, resp.Usage.TotalTokens)
+		tokens.AddSplit(ctx, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	}
 	return resp, err
 }

@@ -310,7 +310,6 @@ const lastAssistantIndex = computed(() => {
 function startEdit(i, msg) { editing.value = i; editBuf.value = msg.content }
 async function deleteMsg(msg) {
   if (!msg.id) return
-  if (!confirm('Delete this message and everything after it?')) return
   try {
     await chat.deleteMessage(sessions.sessionId, msg.id)
   } catch (err) {

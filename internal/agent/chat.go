@@ -49,12 +49,7 @@ const chatMaxTurns = 6
 //   - Vision: images attach to the turn when Model is vision-capable, so an image
 //     message is handled on this same lane (no separate vision path needed).
 func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
-	client := a.llm
-	if t.Provider != "" {
-		if c := a.providerClients[t.Provider]; c != nil {
-			client = c
-		}
-	}
+	client := a.clientFor(t.Provider)
 
 	system := ComposeSystemPrompt(a.soulPrompt, prompt.Chat)
 	var messages []llm.Message

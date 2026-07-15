@@ -130,6 +130,19 @@ func (a *Agent) lightLane(ctx context.Context) (*llm.Client, string) {
 	return a.executor, ""
 }
 
+// clientFor returns the connection for the named provider, or the default
+// reasoning client when the name is empty or not configured. Shared by the
+// simple provider-routed callers (OneShot, Converse). heavyLane/lightLane do
+// NOT use it — they resolve a model too and default differently.
+func (a *Agent) clientFor(provider string) *llm.Client {
+	if provider != "" {
+		if c := a.providerClients[provider]; c != nil {
+			return c
+		}
+	}
+	return a.llm
+}
+
 // completeHeavy runs a heavy-lane completion through the routed client. Drop-in
 // for a.llm.Complete. A non-empty routed model overrides req.Model so the
 // selected provider gets its own model id (kaiju's internal default would not
@@ -166,12 +179,7 @@ func (a *Agent) completeLight(ctx context.Context, req *llm.ChatRequest) (*llm.C
 // clients (falling back to the reasoning client); token counting still fires via
 // Complete. Returns the assistant content and the total tokens used.
 func (a *Agent) OneShot(ctx context.Context, provider, model string, messages []llm.Message, temperature float64, maxTokens int) (string, int, error) {
-	client := a.llm
-	if provider != "" {
-		if c := a.providerClients[provider]; c != nil {
-			client = c
-		}
-	}
+	client := a.clientFor(provider)
 	resp, err := client.Complete(ctx, &llm.ChatRequest{
 		Model:       model,
 		Messages:    messages,

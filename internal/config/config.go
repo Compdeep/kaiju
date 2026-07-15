@@ -93,6 +93,10 @@ type VisionConfig struct {
 type ChatConfig struct {
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
+	// Tools is the default chat-lane tool allowlist, used when a request sends no
+	// chat_tools of its own. Empty ⇒ pure chat. Include "agent" to let chat
+	// delegate deep, multi-step work to the full executive.
+	Tools []string `json:"tools,omitempty"`
 }
 
 /*

@@ -15,6 +15,12 @@ func Default() *Config {
 			Temperature: 0.3,
 			MaxTokens:   4096,
 		},
+		Chat: ChatConfig{
+			// Agent enabled by default: chat can look things up (web_fetch) and
+			// delegate deep, multi-step work to the full agent. A request that
+			// sends its own chat_tools overrides this.
+			Tools: []string{"web_fetch", "agent"},
+		},
 		Agent: AgentConfig{
 			DAGEnabled:       true,
 			DAGMode:          "orchestrator",

@@ -242,6 +242,7 @@ type Agent struct {
 	// Chat lane default — direct completion, no planner/tools. Empty ⇒ reasoning.
 	chatProvider string
 	chatModel    string
+	chatTools    []string
 	registry    *tools.Registry
 	gate        *gates.Gate
 	clearanceCheck ClearanceChecker // external authorization (nil = no check)
@@ -764,6 +765,13 @@ func (a *Agent) SetChatModel(provider, model string) {
 func (a *Agent) ChatModel() (provider, model string) {
 	return a.chatProvider, a.chatModel
 }
+
+// SetChatTools sets the default chat-lane tool allowlist, used when a request
+// sends no chat_tools of its own.
+func (a *Agent) SetChatTools(tools []string) { a.chatTools = tools }
+
+// ChatTools returns the default chat-lane tool allowlist.
+func (a *Agent) ChatTools() []string { return a.chatTools }
 
 /*
  * DAGMode returns the configured DAG execution mode.

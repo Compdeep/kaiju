@@ -343,13 +343,18 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		if memMgr != nil {
 			history, _ = memMgr.LoadChatHistory(ctx, req.SessionID, 40)
 		}
-		// The chat lane's tool permission IS the explicit ChatTools list (API-driven).
-		// Empty ⇒ pure chat. It deliberately does NOT inherit the JWT's broader tool
-		// scope, so a chat turn can only ever run the tools this request named.
+		// The chat lane's tool permission IS the tool list (API-driven). A request
+		// may name its own chat_tools; if it sends none, fall back to the instance
+		// default (chat.tools config). Empty ⇒ pure chat. The list does NOT inherit
+		// the JWT's broader scope — a chat turn can only run the tools named here.
+		chatTools := req.ChatTools
+		if len(chatTools) == 0 {
+			chatTools = a.agent.ChatTools()
+		}
 		var chatScope *agent.ResolvedScope
-		if len(req.ChatTools) > 0 {
+		if len(chatTools) > 0 {
 			chatScope = &agent.ResolvedScope{AllowedTools: map[string]bool{}}
-			for _, name := range req.ChatTools {
+			for _, name := range chatTools {
 				chatScope.AllowedTools[name] = true
 			}
 		}
@@ -358,7 +363,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			Model:     cm,
 			History:   history,
 			Query:     req.Query,
-			ToolNames: req.ChatTools,
+			ToolNames: chatTools,
 			Images:    visionImgs,
 			Scope:     chatScope,
 			AlertID:   trigger.AlertID,

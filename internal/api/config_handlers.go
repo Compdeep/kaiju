@@ -85,8 +85,9 @@ type configPatch struct {
 		Model    *string `json:"model,omitempty"`
 	} `json:"vision,omitempty"`
 	Chat *struct {
-		Provider *string `json:"provider,omitempty"`
-		Model    *string `json:"model,omitempty"`
+		Provider *string   `json:"provider,omitempty"`
+		Model    *string   `json:"model,omitempty"`
+		Tools    *[]string `json:"tools,omitempty"`
 	} `json:"chat,omitempty"`
 	Agent *struct {
 		DAGEnabled  *bool   `json:"dag_enabled,omitempty"`
@@ -186,9 +187,13 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		if patch.Chat.Model != nil {
 			c.cfg.Chat.Model = *patch.Chat.Model
 		}
+		if patch.Chat.Tools != nil {
+			c.cfg.Chat.Tools = *patch.Chat.Tools
+		}
 		if c.agent != nil {
 			c.agent.SetChatModel(c.cfg.Chat.Provider, c.cfg.Chat.Model)
-			log.Printf("[config] chat model updated: provider=%s model=%s", c.cfg.Chat.Provider, c.cfg.Chat.Model)
+			c.agent.SetChatTools(c.cfg.Chat.Tools)
+			log.Printf("[config] chat updated: provider=%s model=%s tools=%v", c.cfg.Chat.Provider, c.cfg.Chat.Model, c.cfg.Chat.Tools)
 		}
 	}
 

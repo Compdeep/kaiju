@@ -562,7 +562,7 @@ func runChat() {
 					scope.AllowedTools[n] = true
 				}
 			}
-			res, err := ag.Converse(ctx, agent.ChatTurn{
+			res, err := ag.Chat(ctx, agent.ChatTurn{
 				Provider:  cp,
 				Model:     cm,
 				History:   history,

@@ -24,12 +24,45 @@ type ChatTurn struct {
 	MaxTurns  int
 }
 
-// ChatResult is the outcome of a chat-lane turn.
+// ChatResult is the outcome of a chat turn.
 type ChatResult struct {
 	Content   string
 	ToolCalls int
 	LLMCalls  int
 	Tokens    int
+	Nodes     int // >0 when the turn was handled by the agent (a sub-DAG)
+}
+
+// Chat is the chat FRONT DOOR — call this, not Converse, from every surface (API,
+// CLI). It decides, via the tuned classifier rather than the model's tool-choice,
+// whether a turn needs the full agent: when "agent" is in the turn's tools and the
+// classifier says investigate, it runs the agent (with history for context) and
+// returns its answer (its steps stream as DAG events for live progress);
+// otherwise it answers on the chat lane (Converse) with the agent removed from the
+// tool list. Light tools (e.g. web_fetch) stay model-driven in the chat lane — only
+// the agent decision is gated by the classifier, because that's the unreliable one.
+func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
+	agentEnabled := false
+	for _, n := range t.ToolNames {
+		if n == agentToolName {
+			agentEnabled = true
+			break
+		}
+	}
+	if agentEnabled && a.RouteChat(ctx, t.AlertID, t.Query) == "investigate" {
+		verdict, nodes, llmCalls, err := a.RunAgentTask(ctx, t.AlertID, t.Query, t.History)
+		return ChatResult{Content: verdict, Nodes: nodes, LLMCalls: llmCalls}, err
+	}
+	if agentEnabled {
+		kept := t.ToolNames[:0]
+		for _, n := range t.ToolNames {
+			if n != agentToolName {
+				kept = append(kept, n)
+			}
+		}
+		t.ToolNames = kept
+	}
+	return a.Converse(ctx, t)
 }
 
 // chatMaxTurns bounds the reason-act loop when tools are in play. Chat is not an

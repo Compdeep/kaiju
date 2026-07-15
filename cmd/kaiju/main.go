@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/uploads"
 	"github.com/Compdeep/kaiju/internal/api"
 	"github.com/Compdeep/kaiju/internal/auth"
@@ -56,6 +57,8 @@ func main() {
 		runSkillCmd()
 	case "user":
 		runUserCmd()
+	case "config":
+		runConfigCmd()
 	case "version":
 		fmt.Printf("kaiju %s\n", version)
 	case "help", "--help", "-h":
@@ -86,6 +89,102 @@ Usage:
 }
 
 // loadConfig finds and loads the config, falling back to defaults.
+// resolveConfigPath finds the config file the CLI reads/writes: --config wins,
+// then $KAIJU_CONFIG, then the first existing default location, else kaiju.json.
+func resolveConfigPath() string {
+	for i, arg := range os.Args {
+		if arg == "--config" && i+1 < len(os.Args) {
+			return os.Args[i+1]
+		}
+	}
+	if p := os.Getenv("KAIJU_CONFIG"); p != "" {
+		return p
+	}
+	for _, p := range []string{"kaiju.json", "kaiju.config.json"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return "kaiju.json"
+}
+
+// positionalArgs returns os.Args[from:] with any "--config <path>" pair removed,
+// so subcommand parsing ignores where the flag was placed.
+func positionalArgs(from int) []string {
+	var out []string
+	for i := from; i < len(os.Args); i++ {
+		if os.Args[i] == "--config" {
+			i++ // skip the value too
+			continue
+		}
+		out = append(out, os.Args[i])
+	}
+	return out
+}
+
+// runConfigCmd: `kaiju config show` and `kaiju config set <key> <value>` for the
+// knobs an operator flips day-to-day — the chat tool allowlist and the agent
+// mode. Writes the JSON config in place.
+func runConfigCmd() {
+	path := resolveConfigPath()
+	cfg, err := config.Load(path)
+	if err != nil {
+		cfg = config.Default()
+	}
+	args := positionalArgs(2)
+
+	if len(args) == 0 || args[0] == "show" {
+		ce := "true"
+		if cfg.Agent.ClassifierEnabled != nil && !*cfg.Agent.ClassifierEnabled {
+			ce = "false"
+		}
+		fmt.Printf("config: %s\n", path)
+		fmt.Printf("  chat.tools               = %s\n", strings.Join(cfg.Chat.Tools, ","))
+		fmt.Printf("  agent.execution_mode     = %s\n", cfg.Agent.ExecutionMode)
+		fmt.Printf("  agent.classifier_enabled = %s\n", ce)
+		return
+	}
+
+	if args[0] == "set" && len(args) >= 3 {
+		key, val := args[1], strings.Join(args[2:], " ")
+		switch key {
+		case "chat.tools":
+			var toolsList []string
+			for _, t := range strings.Split(val, ",") {
+				if t = strings.TrimSpace(t); t != "" {
+					toolsList = append(toolsList, t)
+				}
+			}
+			cfg.Chat.Tools = toolsList
+		case "agent.execution_mode":
+			if val != "interactive" && val != "autonomous" {
+				fmt.Fprintln(os.Stderr, "agent.execution_mode must be 'interactive' or 'autonomous'")
+				os.Exit(1)
+			}
+			cfg.Agent.ExecutionMode = val
+		case "agent.classifier_enabled":
+			b := val == "true"
+			cfg.Agent.ClassifierEnabled = &b
+		default:
+			fmt.Fprintf(os.Stderr, "unknown key %q (known: chat.tools, agent.execution_mode, agent.classifier_enabled)\n", key)
+			os.Exit(1)
+		}
+		data, merr := json.MarshalIndent(cfg, "", "  ")
+		if merr != nil {
+			log.Fatalf("config: marshal: %v", merr)
+		}
+		if werr := os.WriteFile(path, data, 0600); werr != nil {
+			log.Fatalf("config: write %s: %v", path, werr)
+		}
+		fmt.Printf("set %s = %s  (%s)\n", key, val, path)
+		return
+	}
+
+	fmt.Fprintln(os.Stderr, "usage: kaiju config [show | set <key> <value>]")
+	fmt.Fprintln(os.Stderr, "  keys: chat.tools (comma list, e.g. web_fetch,agent), agent.execution_mode, agent.classifier_enabled")
+	os.Exit(1)
+}
+
 func loadConfig() *config.Config {
 	// Check for --config flag
 	configPath := ""
@@ -410,55 +509,76 @@ func runChat() {
 
 	fmt.Printf("  kaiju v%s — type /quit to exit, /intent to set safety level\n", version)
 
+	// Surface agent progress: chat runs on the chat lane (no DAG of its own), so
+	// while a turn is in flight the only source of DAG events is the agent tool
+	// delegating to the executive. Print each step so a long agent run isn't a
+	// silent wait.
+	dagCh, unsubDAG := ag.SubscribeDAG()
+	defer unsubDAG()
+	go func() {
+		for evt := range dagCh {
+			switch evt.Type {
+			case "start":
+				fmt.Println("  \033[2m▸ agent working…\033[0m")
+			case "node":
+				if evt.Node != nil {
+					switch evt.Node.State {
+					case "running":
+						fmt.Printf("  \033[2m  ⟳ %s\033[0m\n", evt.Node.Tag)
+					case "resolved":
+						fmt.Printf("  \033[2m  ✓ %s\033[0m\n", evt.Node.Tag)
+					case "failed":
+						fmt.Printf("  \033[2m  ✗ %s\033[0m\n", evt.Node.Tag)
+					}
+				}
+			case "done":
+				fmt.Println("  \033[2m▸ agent done\033[0m")
+			}
+		}
+	}()
+
 	// Message router: inbox → agent → response → cli
 	go func() {
 		for msg := range inbox {
 			sessionID := cliCh.SessionID()
 
-			trigger := agent.Trigger{
-				Type:      "chat_query",
-				AlertID:   fmt.Sprintf("cli-%d", time.Now().UnixNano()),
-				Data:      mustJSON(map[string]string{"query": msg.Text}),
-				Source:    "cli",
-				SessionID: sessionID,
-				AggMode:   -1, // auto: let reflector + compute carve-out decide
-			}
-
-			// Load conversation history from DB
+			// Chat lane: answer via Converse with the instance's default chat
+			// tools (which include "agent", so chat can delegate deep work to the
+			// executive — its steps print above via the DAG subscription). Store the
+			// user turn first so the loaded history includes it.
 			if memMgr != nil && sessionID != "" {
-				if history, err := memMgr.LoadHistory(ctx, sessionID, 50); err == nil {
-					trigger.History = history
-				}
 				memMgr.StoreMessage(sessionID, "user", msg.Text)
 			}
-
-			// Apply CLI intent toggle — resolve via the agent's registry
-			// so custom intents work.
-			if intentStr := cliCh.Intent(); intentStr != "" {
-				intentVal := intentStringToRank(intentStr, ag.Intents())
-				trigger.MaxIntent = &intentVal
+			var history []llm.Message
+			if memMgr != nil && sessionID != "" {
+				history, _ = memMgr.LoadChatHistory(ctx, sessionID, 40)
 			}
-
-			result, err := ag.Kernel().SubmitSync(ctx, trigger)
+			cp, cm := ag.ChatModel()
+			toolNames := ag.ChatTools()
+			var scope *agent.ResolvedScope
+			if len(toolNames) > 0 {
+				scope = &agent.ResolvedScope{AllowedTools: map[string]bool{}}
+				for _, n := range toolNames {
+					scope.AllowedTools[n] = true
+				}
+			}
+			res, err := ag.Converse(ctx, agent.ChatTurn{
+				Provider:  cp,
+				Model:     cm,
+				History:   history,
+				Query:     msg.Text,
+				ToolNames: toolNames,
+				Scope:     scope,
+				AlertID:   fmt.Sprintf("cli-%d", time.Now().UnixNano()),
+			})
 			if err != nil {
-				cliCh.Send(ctx, channels.OutboundMessage{
-					ChannelID: "cli",
-					SessionID: sessionID,
-					Text:      fmt.Sprintf("[error] %v", err),
-				})
+				cliCh.Send(ctx, channels.OutboundMessage{ChannelID: "cli", SessionID: sessionID, Text: fmt.Sprintf("[error] %v", err)})
 				continue
 			}
-
-			// Store assistant response
 			if memMgr != nil && sessionID != "" {
-				memMgr.StoreMessage(sessionID, "assistant", result.Verdict)
+				memMgr.StoreMessage(sessionID, "assistant", res.Content)
 			}
-
-			cliCh.Send(ctx, channels.OutboundMessage{
-				ChannelID: "cli",
-				SessionID: sessionID,
-				Text:      result.Verdict,
-			})
+			cliCh.Send(ctx, channels.OutboundMessage{ChannelID: "cli", SessionID: sessionID, Text: res.Content})
 		}
 	}()
 

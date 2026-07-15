@@ -351,6 +351,48 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		if len(chatTools) == 0 {
 			chatTools = a.agent.ChatTools()
 		}
+		// When the agent is enabled for this chat, the tuned classifier decides —
+		// reliably — whether this turn needs the agent, rather than leaving it to
+		// the chat model's tool-choice (which under-delegates). investigate → run
+		// the agent (its steps broadcast as DAG events for live progress), with the
+		// conversation history for context; chat/meta → answer on the chat lane
+		// below, with the agent removed from the tool list. Light tools (web_fetch)
+		// stay model-driven in the chat lane — only the agent decision is gated here.
+		agentEnabled := false
+		for _, n := range chatTools {
+			if n == "agent" {
+				agentEnabled = true
+				break
+			}
+		}
+		if agentEnabled && a.agent.RouteChat(ctx, trigger.AlertID, req.Query) == "investigate" {
+			log.Printf("[chat] classifier=investigate → running agent")
+			verdict, nodes, llmCalls, aerr := a.agent.RunAgentTask(ctx, trigger.AlertID, req.Query, history)
+			elapsed := time.Since(start)
+			if aerr != nil {
+				log.Printf("[api] chat→agent error: %v", aerr)
+				jsonResponse(w, ExecuteResponse{Error: aerr.Error(), DurationMs: elapsed.Milliseconds()}, http.StatusInternalServerError)
+				return
+			}
+			if memMgr != nil && verdict != "" {
+				memMgr.StoreMessage(req.SessionID, "assistant", verdict)
+				if shouldCompact, _ := memMgr.ShouldCompact(req.SessionID); shouldCompact {
+					go memMgr.Compact(context.Background(), req.SessionID)
+				}
+			}
+			jsonResponse(w, execResult(ctx, trigger.AlertID, verdict, nodes, llmCalls, tokens.RunTotal(ctx), elapsed), http.StatusOK)
+			return
+		}
+		if agentEnabled {
+			// classifier said chat/meta — don't offer the agent tool to the model.
+			kept := chatTools[:0]
+			for _, n := range chatTools {
+				if n != "agent" {
+					kept = append(kept, n)
+				}
+			}
+			chatTools = kept
+		}
 		var chatScope *agent.ResolvedScope
 		if len(chatTools) > 0 {
 			chatScope = &agent.ResolvedScope{AllowedTools: map[string]bool{}}

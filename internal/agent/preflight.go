@@ -105,23 +105,9 @@ func (a *Agent) routeQuery(ctx context.Context, alertID, query string) string {
 	}
 }
 
-/*
- * preflightQuery is the entry point. It routes first (cheap, no skill manifest).
- * A pure chat/meta message returns immediately with no skills selected — so
- * neither this step nor the downstream chat reply pays for skills it won't use.
- * Agentic queries fall through to the full classification.
- */
-func (a *Agent) preflightQuery(ctx context.Context, alertID, query string, history []llm.Message) *PreflightResult {
-	switch a.routeQuery(ctx, alertID, query) {
-	case "chat":
-		log.Printf("[dag] route: chat — skipped skill classification")
-		return &PreflightResult{Mode: "chat"}
-	case "meta":
-		log.Printf("[dag] route: meta — skipped skill classification")
-		return &PreflightResult{Mode: "meta"}
-	}
-	return a.classifyInvestigate(ctx, alertID, query, history)
-}
+// The fused preflightQuery wrapper (route + classify in one call) was split: the
+// scheduler now calls routeQuery and classifyInvestigate explicitly, so routing
+// and plan-prep are independent — autonomous mode skips routing entirely.
 
 /*
  * classifyInvestigate runs one executor-model LLM call to answer the pre-plan

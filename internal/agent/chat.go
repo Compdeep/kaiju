@@ -3,11 +3,28 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/prompt"
 )
+
+// isToolUnsupported reports whether an LLM error means the model/endpoint cannot
+// use tools at all (as opposed to a transient failure worth surfacing). Providers
+// signal this differently; OpenRouter returns a 404 "No endpoints found that
+// support tool use." When the chat lane sees this, it retries the turn with no
+// tools instead of failing — so a tool-less model still answers.
+func isToolUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "support tool use") ||
+		strings.Contains(msg, "does not support tool") ||
+		strings.Contains(msg, "tool use is not supported") ||
+		strings.Contains(msg, "tools are not supported")
+}
 
 // ChatTurn is the input to the chat lane. History is the conversation so far
 // (from memory), INCLUDING the current user message as its last entry; Query is
@@ -141,7 +158,22 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		resp, err := client.Complete(ctx, req)
 		res.LLMCalls++
 		if err != nil {
-			return res, err
+			// The chat lane may be pointed at a model that can't use tools at all —
+			// a roleplay/uncensored fine-tune, or any endpoint without tool support.
+			// Offering tools to such a model hard-fails (OpenRouter 404: "no
+			// endpoints found that support tool use"). That must NOT fail the turn:
+			// answering tool-less models is the chat lane's whole reason to exist.
+			// Drop the tools for the rest of this conversation and retry as pure chat.
+			if len(req.Tools) > 0 && isToolUnsupported(err) {
+				toolDefs = nil
+				req.Tools = nil
+				req.ToolChoice = ""
+				resp, err = client.Complete(ctx, req)
+				res.LLMCalls++
+			}
+			if err != nil {
+				return res, err
+			}
 		}
 		res.Tokens += resp.Usage.TotalTokens
 		if len(resp.Choices) == 0 {

@@ -369,6 +369,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			Images:    visionImgs,
 			Scope:     chatScope,
 			AlertID:   trigger.AlertID,
+			SessionID: req.SessionID,
 		})
 		elapsed := time.Since(start)
 		if cerr != nil {

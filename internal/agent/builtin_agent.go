@@ -62,19 +62,20 @@ func (t *AgentTool) Execute(ctx context.Context, params map[string]any) (string,
 		return "", fmt.Errorf("agent: 'task' parameter is required")
 	}
 	// Model-initiated delegation: the model wrote a self-contained task, so no
-	// conversation history is passed.
-	verdict, _, _, err := t.agent.RunAgentTask(ctx, fmt.Sprintf("agent-tool-%d", time.Now().UnixNano()), task, nil)
+	// conversation history or session is passed.
+	verdict, _, _, err := t.agent.RunAgentTask(ctx, fmt.Sprintf("agent-tool-%d", time.Now().UnixNano()), "", task, nil)
 	return verdict, err
 }
 
 // RunAgentTask runs a task through the full executive synchronously — a fresh,
 // autonomous run (always investigates, no chat-escape). history (may be nil)
-// gives the agent conversation context so a follow-up like "summarise it" works;
-// the run has no session, so its internal steps never write to the caller's
-// memory. Returns the synthesized verdict plus the run's node/LLM counts. Shared
-// by the agent tool and the chat front door's classifier-driven escalation. Its
-// DAG events are broadcast during the run, so subscribers can show live progress.
-func (a *Agent) RunAgentTask(ctx context.Context, alertID, task string, history []llm.Message) (verdict string, nodes, llmCalls int, err error) {
+// gives the agent conversation context so a follow-up like "summarise it" works.
+// sessionID (may be "") is used ONLY to tag the run's DAG step events so a UI can
+// show them under the originating conversation — the executive writes no memory,
+// so this never pollutes that conversation. Returns the synthesized verdict plus
+// the run's node/LLM counts. Shared by the agent tool and the chat front door's
+// classifier-driven escalation.
+func (a *Agent) RunAgentTask(ctx context.Context, alertID, sessionID, task string, history []llm.Message) (verdict string, nodes, llmCalls int, err error) {
 	data, merr := json.Marshal(map[string]string{"query": task})
 	if merr != nil {
 		return "", 0, 0, fmt.Errorf("agent: marshal task: %w", merr)
@@ -86,6 +87,7 @@ func (a *Agent) RunAgentTask(ctx context.Context, alertID, task string, history 
 		Source:        "agent",
 		ExecutionMode: "autonomous", // always investigate; never chat-escape a delegated task
 		History:       history,
+		SessionID:     sessionID, // event attribution only (executive writes no memory)
 	}
 	res, rerr := a.RunDAGSync(ctx, trigger)
 	if rerr != nil {

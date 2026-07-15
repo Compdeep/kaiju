@@ -143,6 +143,20 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		intent = gates.Intent(*t.MaxIntent)
 	}
 
+	// stream runs a completion and broadcasts each text delta as a verdict event
+	// on the DAG bus, tagged with this turn's session, so the frontend renders the
+	// answer token-by-token (the same channel the agent lane streams on). A tool-
+	// deciding turn produces no text, so nothing is broadcast for it. The returned
+	// response is shaped like a normal completion (content, tool calls, usage), and
+	// usage is billed through the shared token counter inside CompleteStreamResp.
+	stream := func(r *llm.ChatRequest) (*llm.ChatResponse, error) {
+		return client.CompleteStreamResp(ctx, r, func(chunk string) {
+			if t.SessionID != "" {
+				a.broadcastDAGEvent(nil, DAGEvent{Type: "verdict", Text: chunk, SessionID: t.SessionID})
+			}
+		})
+	}
+
 	res := ChatResult{}
 	for turn := 0; turn < maxTurns; turn++ {
 		req := &llm.ChatRequest{
@@ -155,7 +169,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 			req.Tools = toolDefs
 			req.ToolChoice = "auto" // never force — chat may simply answer
 		}
-		resp, err := client.Complete(ctx, req)
+		resp, err := stream(req)
 		res.LLMCalls++
 		if err != nil {
 			// The chat lane may be pointed at a model that can't use tools at all —
@@ -168,7 +182,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 				toolDefs = nil
 				req.Tools = nil
 				req.ToolChoice = ""
-				resp, err = client.Complete(ctx, req)
+				resp, err = stream(req)
 				res.LLMCalls++
 			}
 			if err != nil {
@@ -207,7 +221,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 
 	// Hit the turn cap with tools still in flight — take one final, tool-less
 	// completion so the user gets a real answer instead of nothing.
-	resp, err := client.Complete(ctx, &llm.ChatRequest{
+	resp, err := stream(&llm.ChatRequest{
 		Model:       t.Model,
 		Messages:    messages,
 		Temperature: 0.7,

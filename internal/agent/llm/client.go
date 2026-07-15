@@ -121,6 +121,14 @@ type ChatRequest struct {
 	Temperature float64   `json:"temperature"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
 	Stream      bool      `json:"stream,omitempty"`
+	// StreamOptions asks the provider (OpenAI/OpenRouter) to emit a terminal
+	// usage frame during streaming, so streamed calls are billed like normal ones.
+	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+}
+
+// StreamOptions controls streaming behavior for OpenAI-compatible endpoints.
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
 }
 
 // ChatResponse is the response from POST /v1/chat/completions.
@@ -274,46 +282,66 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 	return &chatResp, nil
 }
 
-// CompleteStream sends a streaming chat completion request and calls onChunk
-// for each text delta. Returns the full accumulated text. Only supports
-// OpenAI-compatible endpoints (including OpenRouter).
-//
-// NOTE: the SSE stream carries no Usage frame here, so tokens for streamed calls
-// (aggregator/verdict streaming) are NOT recorded by the tokens package yet —
-// they are undercounted. Follow-up: request a terminal usage chunk via
-// stream_options.include_usage and Add it, or estimate with a tokenizer.
+// CompleteStream streams a chat completion and calls onChunk for each text
+// delta, returning the full accumulated text. Thin wrapper over
+// CompleteStreamResp for callers that only need the text.
 func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk func(chunk string)) (string, error) {
+	resp, err := c.CompleteStreamResp(ctx, req, onChunk)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Choices) == 0 {
+		return "", nil
+	}
+	return resp.Choices[0].Message.Content, nil
+}
+
+// CompleteStreamResp streams a chat completion (OpenAI SSE format, incl.
+// OpenRouter), calling onChunk for each text delta so callers can render tokens
+// live. Unlike CompleteStream's old text-only parse, it ALSO assembles any tool
+// calls (from indexed argument fragments) and captures token usage via
+// stream_options.include_usage — so a streamed turn supports tools and is billed
+// through the same token counter as a non-streamed call. Returns a ChatResponse
+// shaped exactly like Complete's, so callers can treat streamed and non-streamed
+// turns identically.
+func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChunk func(chunk string)) (*ChatResponse, error) {
 	if req.Model == "" {
 		req.Model = c.model
 	}
 	req.Stream = true
+	req.StreamOptions = &StreamOptions{IncludeUsage: true}
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.chatURL(), bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	c.setAuthHeaders(httpReq)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("http request: %w", err)
+		return nil, fmt.Errorf("http request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(data), 300))
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(data), 300))
 	}
 
-	// Parse SSE stream: each line is "data: {...}" with delta.content
-	var full strings.Builder
+	var content strings.Builder
+	toolsByIndex := map[int]*ToolCall{}
+	var order []int // tool-call indices in first-seen order
+	var usage Usage
+	finish := "stop"
+
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // tool-arg frames can be long
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -327,23 +355,83 @@ func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk f
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content string `json:"content"`
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
 				} `json:"delta"`
+				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
+			Usage *Usage `json:"usage"` // present only in the terminal frame
 		}
 		if json.Unmarshal([]byte(payload), &chunk) != nil {
 			continue
 		}
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			text := chunk.Choices[0].Delta.Content
-			full.WriteString(text)
+		if chunk.Usage != nil {
+			usage = *chunk.Usage
+		}
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+		ch := chunk.Choices[0]
+		if ch.FinishReason != "" {
+			finish = ch.FinishReason
+		}
+		if ch.Delta.Content != "" {
+			content.WriteString(ch.Delta.Content)
 			if onChunk != nil {
-				onChunk(text)
+				onChunk(ch.Delta.Content)
 			}
 		}
+		// Tool calls stream as indexed deltas: id/name arrive once, arguments in
+		// fragments. Accumulate per index.
+		for _, tc := range ch.Delta.ToolCalls {
+			acc, ok := toolsByIndex[tc.Index]
+			if !ok {
+				acc = &ToolCall{Type: "function"}
+				toolsByIndex[tc.Index] = acc
+				order = append(order, tc.Index)
+			}
+			if tc.ID != "" {
+				acc.ID = tc.ID
+			}
+			if tc.Type != "" {
+				acc.Type = tc.Type
+			}
+			if tc.Function.Name != "" {
+				acc.Function.Name = tc.Function.Name
+			}
+			acc.Function.Arguments += tc.Function.Arguments
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
 
-	return full.String(), scanner.Err()
+	// Bill the streamed call through the same counter as non-streamed ones, so
+	// chat/aggregator streaming is no longer undercounted.
+	if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+		tokens.AddSplit(ctx, usage.PromptTokens, usage.CompletionTokens)
+	}
+
+	var toolCalls []ToolCall
+	for _, idx := range order {
+		toolCalls = append(toolCalls, *toolsByIndex[idx])
+	}
+	return &ChatResponse{
+		Choices: []Choice{{
+			Index:        0,
+			Message:      Message{Role: "assistant", Content: content.String(), ToolCalls: toolCalls},
+			FinishReason: finish,
+		}},
+		Usage: usage,
+	}, nil
 }
 
 // EmbedRequest is the body for POST /v1/embeddings.

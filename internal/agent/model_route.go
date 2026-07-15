@@ -172,6 +172,18 @@ func (a *Agent) completeLight(ctx context.Context, req *llm.ChatRequest) (*llm.C
 	return c.Complete(ctx, req)
 }
 
+// completeRoute makes the routing-classifier call. If a route model is pinned in
+// config it uses that (a small capable model, e.g. gpt-5-mini) so the run-the-agent
+// decision is reliable; otherwise it falls back to the executor (light) lane so
+// the rest of the cheap background calls are unaffected.
+func (a *Agent) completeRoute(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, error) {
+	if a.routeModel != "" {
+		req.Model = a.routeModel
+		return a.clientFor(a.routeProvider).Complete(ctx, req)
+	}
+	return a.completeLight(ctx, req)
+}
+
 // OneShot runs a single provider-routed LLM completion with NO agent machinery —
 // no preflight, planner, DAG, tools, reflection, or aggregator. It is the raw
 // passthrough for hosts that need a plain completion (e.g. makeen's compliance

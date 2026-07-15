@@ -142,6 +142,8 @@ func runConfigCmd() {
 		fmt.Printf("  chat.tools               = %s\n", strings.Join(cfg.Chat.Tools, ","))
 		fmt.Printf("  agent.execution_mode     = %s\n", cfg.Agent.ExecutionMode)
 		fmt.Printf("  agent.classifier_enabled = %s\n", ce)
+		fmt.Printf("  agent.route_provider     = %s\n", cfg.Agent.RouteProvider)
+		fmt.Printf("  agent.route_model        = %s\n", cfg.Agent.RouteModel)
 		return
 	}
 
@@ -165,8 +167,12 @@ func runConfigCmd() {
 		case "agent.classifier_enabled":
 			b := val == "true"
 			cfg.Agent.ClassifierEnabled = &b
+		case "agent.route_provider":
+			cfg.Agent.RouteProvider = val
+		case "agent.route_model":
+			cfg.Agent.RouteModel = val
 		default:
-			fmt.Fprintf(os.Stderr, "unknown key %q (known: chat.tools, agent.execution_mode, agent.classifier_enabled)\n", key)
+			fmt.Fprintf(os.Stderr, "unknown key %q (known: chat.tools, agent.execution_mode, agent.classifier_enabled, agent.route_provider, agent.route_model)\n", key)
 			os.Exit(1)
 		}
 		data, merr := json.MarshalIndent(cfg, "", "  ")
@@ -722,6 +728,7 @@ func runServe() {
 	// Chat lane — direct completion, no planner (empty ⇒ reasoning model).
 	ag.SetChatModel(cfg.Chat.Provider, cfg.Chat.Model)
 	ag.SetChatTools(cfg.Chat.Tools)
+	ag.SetRouteModel(cfg.Agent.RouteProvider, cfg.Agent.RouteModel)
 	execMux := http.NewServeMux()
 	apiHandler.RegisterRoutes(execMux)
 	mux.Handle("/api/v1/execute", gateway.WithJWTAuth(jwtSvc)(execMux))

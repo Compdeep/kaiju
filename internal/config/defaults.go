@@ -32,6 +32,10 @@ func Default() *Config {
 			MaxInvestigations: 5,
 			MaxConcurrent:    3,
 			ExecutionMode:    "interactive",
+			// Default the routing decision to a small capable model so "does this
+			// need the agent?" is reliable. Overridable everywhere.
+			RouteProvider:    "openai",
+			RouteModel:       "gpt-5-mini",
 			WallClockSec:     180,
 			MaxTurns:         15,
 			RateLimit:        100,

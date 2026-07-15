@@ -94,6 +94,8 @@ type configPatch struct {
 		DAGMode     *string `json:"dag_mode,omitempty"`
 		SafetyLevel *int    `json:"safety_level,omitempty"`
 		MaxInvestigations *int `json:"max_investigations,omitempty"`
+		RouteProvider *string `json:"route_provider,omitempty"`
+		RouteModel    *string `json:"route_model,omitempty"`
 	} `json:"agent,omitempty"`
 }
 
@@ -146,6 +148,16 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.Agent.MaxInvestigations != nil {
 			c.cfg.Agent.MaxInvestigations = *patch.Agent.MaxInvestigations
+		}
+		if patch.Agent.RouteProvider != nil {
+			c.cfg.Agent.RouteProvider = *patch.Agent.RouteProvider
+		}
+		if patch.Agent.RouteModel != nil {
+			c.cfg.Agent.RouteModel = *patch.Agent.RouteModel
+		}
+		if patch.Agent.RouteProvider != nil || patch.Agent.RouteModel != nil {
+			c.agent.SetRouteModel(c.cfg.Agent.RouteProvider, c.cfg.Agent.RouteModel)
+			log.Printf("[config] route model updated: provider=%s model=%s", c.cfg.Agent.RouteProvider, c.cfg.Agent.RouteModel)
 		}
 	}
 

@@ -68,7 +68,7 @@ type preflightRaw struct {
 func (a *Agent) routeQuery(ctx context.Context, alertID, query string) string {
 	started := time.Now()
 	trace := LLMTrace{AlertID: alertID, NodeType: "preflight", Tag: "route", Started: started, System: prompt.Route, User: query}
-	resp, err := a.completeLight(ctx, &llm.ChatRequest{
+	resp, err := a.completeRoute(ctx, &llm.ChatRequest{
 		Messages:    []llm.Message{{Role: "system", Content: prompt.Route}, {Role: "user", Content: query}},
 		Tools:       []llm.ToolDef{routeToolDef()},
 		ToolChoice:  "required",

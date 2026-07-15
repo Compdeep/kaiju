@@ -243,6 +243,8 @@ type Agent struct {
 	chatProvider string
 	chatModel    string
 	chatTools    []string
+	routeProvider string
+	routeModel    string
 	registry    *tools.Registry
 	gate        *gates.Gate
 	clearanceCheck ClearanceChecker // external authorization (nil = no check)
@@ -772,6 +774,18 @@ func (a *Agent) SetChatTools(tools []string) { a.chatTools = tools }
 
 // ChatTools returns the default chat-lane tool allowlist.
 func (a *Agent) ChatTools() []string { return a.chatTools }
+
+// SetRouteModel pins the model that makes the routing decision (empty ⇒ the
+// executor lane). Live-applied so the config API/CLI can change it at runtime.
+func (a *Agent) SetRouteModel(provider, model string) {
+	a.routeProvider = provider
+	a.routeModel = model
+}
+
+// RouteModel returns the pinned routing model (provider, model).
+func (a *Agent) RouteModel() (provider, model string) {
+	return a.routeProvider, a.routeModel
+}
 
 /*
  * DAGMode returns the configured DAG execution mode.

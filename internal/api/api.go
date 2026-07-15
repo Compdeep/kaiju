@@ -112,6 +112,24 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/clearance/{tool}", a.handleDeleteClearanceEndpoint)
 }
 
+// execResult builds the common success response shared by every lane (chat,
+// vision, executive): the verdict, run counts, token totals (in/out split read
+// from the ctx accumulator), and elapsed time. Callers that carry extra fields
+// (the executive's Actions/Gaps) set them on the returned value before sending.
+// Single source so the response shape can't drift across lanes.
+func execResult(ctx context.Context, alertID, verdict string, nodes, llmCalls int, total int64, elapsed time.Duration) ExecuteResponse {
+	return ExecuteResponse{
+		Verdict:    verdict,
+		DAGID:      alertID,
+		Nodes:      nodes,
+		LLMCalls:   llmCalls,
+		Tokens:     total,
+		TokensIn:   tokens.RunIn(ctx),
+		TokensOut:  tokens.RunOut(ctx),
+		DurationMs: elapsed.Milliseconds(),
+	}
+}
+
 /*
  * handleExecute processes a DAG execution request.
  * desc: Decodes the execute payload, resolves user context and intent from JWT, loads memory, runs the DAG, and returns the result.
@@ -360,16 +378,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 				go memMgr.Compact(context.Background(), req.SessionID)
 			}
 		}
-		jsonResponse(w, ExecuteResponse{
-			Verdict:    res.Content,
-			DAGID:      trigger.AlertID,
-			Nodes:      0,
-			LLMCalls:   res.LLMCalls,
-			Tokens:     int64(res.Tokens),
-			TokensIn:   tokens.RunIn(ctx),
-			TokensOut:  tokens.RunOut(ctx),
-			DurationMs: elapsed.Milliseconds(),
-		}, http.StatusOK)
+		jsonResponse(w, execResult(ctx, trigger.AlertID, res.Content, 0, res.LLMCalls, int64(res.Tokens), elapsed), http.StatusOK)
 		return
 	}
 
@@ -388,16 +397,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			if memMgr != nil && content != "" {
 				memMgr.StoreMessage(req.SessionID, "assistant", content)
 			}
-			jsonResponse(w, ExecuteResponse{
-				Verdict:    content,
-				DAGID:      trigger.AlertID,
-				Nodes:      0,
-				LLMCalls:   1,
-				Tokens:     int64(toks),
-			TokensIn:   tokens.RunIn(ctx),
-			TokensOut:  tokens.RunOut(ctx),
-				DurationMs: elapsed.Milliseconds(),
-			}, http.StatusOK)
+			jsonResponse(w, execResult(ctx, trigger.AlertID, content, 0, 1, int64(toks), elapsed), http.StatusOK)
 			return
 		}
 		ctx = agent.WithVisionImages(ctx, visionImgs)
@@ -429,18 +429,10 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		apiActions = append(apiActions, ActionInfo{Tool: a.Tool, Params: a.Params})
 	}
 
-	jsonResponse(w, ExecuteResponse{
-		Verdict:    result.Verdict,
-		Actions:    apiActions,
-		Gaps:       result.Gaps,
-		DAGID:      trigger.AlertID,
-		Nodes:      result.Nodes,
-		LLMCalls:   result.LLMCalls,
-		Tokens:     tokens.RunTotal(ctx),
-		TokensIn:   tokens.RunIn(ctx),
-		TokensOut:  tokens.RunOut(ctx),
-		DurationMs: elapsed.Milliseconds(),
-	}, http.StatusOK)
+	resp := execResult(ctx, trigger.AlertID, result.Verdict, result.Nodes, result.LLMCalls, tokens.RunTotal(ctx), elapsed)
+	resp.Actions = apiActions
+	resp.Gaps = result.Gaps
+	jsonResponse(w, resp, http.StatusOK)
 }
 
 /*

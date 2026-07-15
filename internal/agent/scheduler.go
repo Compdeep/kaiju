@@ -137,17 +137,40 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		dagMode = trigger.DAGMode
 	}
 
-	// ── Phase 0: Preflight ──
-	// One executor-model LLM call answers four questions at once:
-	//   - skills: which guidance cards apply
-	//   - mode: chat / meta / investigate (chat and meta short-circuit the executive)
-	//   - intent: a rank from the intent registry (used when trigger intent is Auto)
-	//   - required_categories: tool categories the plan must include
+	// ── Phase 0: Preflight (two separable jobs) ──
+	//   routing   — mode = chat / meta / investigate; chat & meta short-circuit the
+	//               executive. Only needed in interactive mode.
+	//   plan-prep — skills (which guidance cards), intent (rank), required_categories,
+	//               and a context paragraph. The agent's own pre-plan setup.
+	// Autonomous mode is pure agent: skip routing (its result would only be
+	// discarded) and run plan-prep directly. Interactive mode routes first, and
+	// short-circuits chat/meta before paying for plan-prep.
 	if a.cfg.ClassifierEnabled {
 		if !budget.TrySpawnNode("", true) {
 			return nil, fmt.Errorf("budget exhausted before preflight")
 		}
-		pf := a.preflightQuery(ctx, trigger.AlertID, formatTrigger(trigger), trigger.History)
+		execMode := a.cfg.ExecutionMode
+		if trigger.ExecutionMode != "" {
+			execMode = trigger.ExecutionMode
+		}
+		query := formatTrigger(trigger)
+		var pf *PreflightResult
+		if execMode == "autonomous" {
+			// Pure agent: no routing (its result would only be discarded). Prepare
+			// the plan directly, so autonomous always has full skills/context.
+			pf = a.classifyInvestigate(ctx, trigger.AlertID, query, trigger.History)
+			pf.Mode = "investigate"
+		} else {
+			// Interactive: route first; chat & meta short-circuit before plan-prep.
+			switch a.routeQuery(ctx, trigger.AlertID, query) {
+			case "chat":
+				pf = &PreflightResult{Mode: "chat"}
+			case "meta":
+				pf = &PreflightResult{Mode: "meta"}
+			default:
+				pf = a.classifyInvestigate(ctx, trigger.AlertID, query, trigger.History)
+			}
+		}
 		// Per-investigation preflight + card list live on the Graph, not the
 		// Agent, so concurrent investigations never clobber each other's state.
 		graph.Preflight = pf
@@ -155,19 +178,8 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		log.Printf("[dag] preflight: mode=%s intent=%s skills=%v categories=%v context=%q",
 			pf.Mode, pf.Intent, pf.Skills, pf.RequiredCategories, Text.TruncateLog(pf.Context, 120))
 
-		// Autonomous mode: force investigate regardless of preflight classification.
-		// The agent always acts, never chats. Per-request override wins over config.
-		execMode := a.cfg.ExecutionMode
-		if trigger.ExecutionMode != "" {
-			execMode = trigger.ExecutionMode
-		}
-		if execMode == "autonomous" && (pf.Mode == "chat" || pf.Mode == "meta") {
-			log.Printf("[dag] autonomous mode: overriding preflight mode=%s → investigate", pf.Mode)
-			pf.Mode = "investigate"
-		}
-
-		// Short-circuit chat/meta queries — skip the executive entirely.
-		// Only fires in interactive mode (autonomous overrides above).
+		// Short-circuit chat/meta — skip the executive entirely. Interactive only;
+		// autonomous never produces these modes.
 		if pf.Mode == "chat" || pf.Mode == "meta" {
 			log.Printf("[dag] preflight short-circuit: mode=%s, skipping planner", pf.Mode)
 			return nil, &ExecutiveConversationalError{Text: ""}

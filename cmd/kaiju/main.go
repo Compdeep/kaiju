@@ -576,6 +576,7 @@ func runChat() {
 				ToolNames: toolNames,
 				Scope:     scope,
 				AlertID:   fmt.Sprintf("cli-%d", time.Now().UnixNano()),
+				SessionID: sessionID,
 			})
 			if err != nil {
 				cliCh.Send(ctx, channels.OutboundMessage{ChannelID: "cli", SessionID: sessionID, Text: fmt.Sprintf("[error] %v", err)})

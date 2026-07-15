@@ -22,6 +22,10 @@ type ChatTurn struct {
 	Scope     *ResolvedScope
 	AlertID   string
 	MaxTurns  int
+	// SessionID correlates a classifier-routed agent sub-run's step events back to
+	// this conversation so the UI can show the agent working live. It is used for
+	// event attribution only — the sub-run writes no memory to it.
+	SessionID string
 }
 
 // ChatResult is the outcome of a chat turn.
@@ -50,7 +54,7 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		}
 	}
 	if agentEnabled && a.RouteChat(ctx, t.AlertID, t.Query) == "investigate" {
-		verdict, nodes, llmCalls, err := a.RunAgentTask(ctx, t.AlertID, t.Query, t.History)
+		verdict, nodes, llmCalls, err := a.RunAgentTask(ctx, t.AlertID, t.SessionID, t.Query, t.History)
 		return ChatResult{Content: verdict, Nodes: nodes, LLMCalls: llmCalls}, err
 	}
 	if agentEnabled {

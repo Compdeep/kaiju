@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
@@ -60,28 +61,50 @@ func (t *AgentTool) Execute(ctx context.Context, params map[string]any) (string,
 	if task == "" {
 		return "", fmt.Errorf("agent: 'task' parameter is required")
 	}
-	data, err := json.Marshal(map[string]string{"query": task})
-	if err != nil {
-		return "", fmt.Errorf("agent: marshal task: %w", err)
+	// Model-initiated delegation: the model wrote a self-contained task, so no
+	// conversation history is passed.
+	verdict, _, _, err := t.agent.RunAgentTask(ctx, fmt.Sprintf("agent-tool-%d", time.Now().UnixNano()), task, nil)
+	return verdict, err
+}
+
+// RunAgentTask runs a task through the full executive synchronously — a fresh,
+// autonomous run (always investigates, no chat-escape). history (may be nil)
+// gives the agent conversation context so a follow-up like "summarise it" works;
+// the run has no session, so its internal steps never write to the caller's
+// memory. Returns the synthesized verdict plus the run's node/LLM counts. Shared
+// by the agent tool and the chat front door's classifier-driven escalation. Its
+// DAG events are broadcast during the run, so subscribers can show live progress.
+func (a *Agent) RunAgentTask(ctx context.Context, alertID, task string, history []llm.Message) (verdict string, nodes, llmCalls int, err error) {
+	data, merr := json.Marshal(map[string]string{"query": task})
+	if merr != nil {
+		return "", 0, 0, fmt.Errorf("agent: marshal task: %w", merr)
 	}
 	trigger := Trigger{
 		Type:          "api_query",
-		AlertID:       fmt.Sprintf("agent-tool-%d", time.Now().UnixNano()),
+		AlertID:       alertID,
 		Data:          data,
-		Source:        "agent_tool",
+		Source:        "agent",
 		ExecutionMode: "autonomous", // always investigate; never chat-escape a delegated task
+		History:       history,
 	}
-	res, err := t.agent.RunDAGSync(ctx, trigger)
-	if err != nil {
+	res, rerr := a.RunDAGSync(ctx, trigger)
+	if rerr != nil {
 		// A conversational fallback (trivial task) isn't a failure — return its text.
 		var convErr *ExecutiveConversationalError
-		if errors.As(err, &convErr) {
-			return convErr.Text, nil
+		if errors.As(rerr, &convErr) {
+			return convErr.Text, 0, 0, nil
 		}
-		return "", err
+		return "", 0, 0, rerr
 	}
 	if res == nil {
-		return "", nil
+		return "", 0, 0, nil
 	}
-	return res.Verdict, nil
+	return res.Verdict, res.Nodes, res.LLMCalls, nil
+}
+
+// RouteChat classifies a chat message with the tuned router (chat / meta /
+// investigate). The chat front door uses it to decide, reliably, whether a turn
+// needs the agent — instead of leaving that to the chat model's tool-choice.
+func (a *Agent) RouteChat(ctx context.Context, alertID, query string) string {
+	return a.routeQuery(ctx, alertID, query)
 }

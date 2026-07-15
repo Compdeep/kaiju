@@ -269,6 +269,11 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		}), "builtin")
 	}
 
+	// Agent tool: lets the chat lane delegate deep, multi-step work to the full
+	// executive. Always registered; kept out of the planner's own toolset
+	// (relevantTools) so it can only be invoked by a lane that names it.
+	reg.Replace(agent.NewAgentTool(ag), "builtin")
+
 	// System tools (always enabled)
 	reg.Replace(kaijutools.NewProcessList(), "builtin")
 	reg.Replace(kaijutools.NewProcessKill(), "builtin")

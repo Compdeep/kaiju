@@ -601,6 +601,19 @@ func (a *Agent) relevantTools(ctx context.Context, triggerText string, scope *Re
 		}
 	}
 
+	// The agent tool is never offered to the executive/planner — that would let
+	// an agent spawn an agent (unbounded recursion). It is reachable only when a
+	// lane names it directly (the chat lane's chat_tools). Strip it here.
+	if len(base) > 0 {
+		pruned := make([]string, 0, len(base))
+		for _, n := range base {
+			if n != agentToolName {
+				pruned = append(pruned, n)
+			}
+		}
+		base = pruned
+	}
+
 	// Apply scope filtering — tools not in scope are invisible to the executive.
 	// nil scope = full access (CLI local user).
 	// Wildcard "*" in AllowedTools means all tools.

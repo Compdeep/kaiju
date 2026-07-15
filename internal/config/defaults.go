@@ -16,6 +16,14 @@ func Default() *Config {
 			MaxTokens:   4096,
 		},
 		Chat: ChatConfig{
+			// The default chat model MUST support tool calling, because Tools below
+			// defaults to web_fetch + agent: offering a tool to a model that can't
+			// use one hard-fails the turn. gpt-4o-mini is tool-capable and cheap;
+			// a deployment that prefers another model (e.g. a cost-effective Qwen)
+			// overrides this in its config file. Leaving it empty would fall back to
+			// the reasoning model, which isn't guaranteed tool-capable.
+			Provider: "openai",
+			Model:    "gpt-4o-mini",
 			// Agent enabled by default: chat can look things up (web_fetch) and
 			// delegate deep, multi-step work to the full agent. A request that
 			// sends its own chat_tools overrides this.

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
@@ -61,35 +60,34 @@ func (t *AgentTool) Execute(ctx context.Context, params map[string]any) (string,
 	if task == "" {
 		return "", fmt.Errorf("agent: 'task' parameter is required")
 	}
-	// Model-initiated delegation: the model wrote a self-contained task, so no
-	// conversation history or session is passed.
-	verdict, _, _, err := t.agent.RunAgentTask(ctx, fmt.Sprintf("agent-tool-%d", time.Now().UnixNano()), "", task, nil, nil)
+	// Model-initiated delegation: the model wrote a self-contained task; no request
+	// context to inherit, so the base trigger is empty (config defaults apply).
+	verdict, _, _, err := t.agent.RunAgentTask(ctx, Trigger{}, task)
 	return verdict, err
 }
 
-// RunAgentTask runs a task through the full executive synchronously — a fresh,
-// autonomous run (always investigates, no chat-escape). history (may be nil)
-// gives the agent conversation context so a follow-up like "summarise it" works.
-// sessionID (may be "") is used ONLY to tag the run's DAG step events so a UI can
-// show them under the originating conversation — the executive writes no memory,
-// so this never pollutes that conversation. Returns the synthesized verdict plus
-// the run's node/LLM counts. Shared by the agent tool and the chat front door's
-// classifier-driven escalation.
-func (a *Agent) RunAgentTask(ctx context.Context, alertID, sessionID, task string, history []llm.Message, maxIntent *int) (verdict string, nodes, llmCalls int, err error) {
+// RunAgentTask runs a task through the full executive synchronously. It COPIES
+// the request's base Trigger so the sub-run inherits everything the request
+// specified — per-request models, resolved intent, tool scope, session (for event
+// attribution; the executive writes no memory), and conversation history — then
+// overrides only the delegated bits (task, autonomous, fresh alert id). Deriving
+// from the one struct means new request fields flow here for free, instead of
+// being threaded (and dropped) by hand. The agent tool passes an empty base.
+// Returns the verdict plus node/LLM counts.
+func (a *Agent) RunAgentTask(ctx context.Context, base Trigger, task string) (verdict string, nodes, llmCalls int, err error) {
 	data, merr := json.Marshal(map[string]string{"query": task})
 	if merr != nil {
 		return "", 0, 0, fmt.Errorf("agent: marshal task: %w", merr)
 	}
-	trigger := Trigger{
-		Type:          "api_query",
-		AlertID:       alertID,
-		Data:          data,
-		Source:        "agent",
-		ExecutionMode: "autonomous", // always investigate; never chat-escape a delegated task
-		History:       history,
-		SessionID:     sessionID,   // event attribution only (executive writes no memory)
-		MaxIntent:     maxIntent,   // honour the turn's resolved safety level (nil ⇒ default)
-	}
+	// COPY the request trigger so the sub-run inherits everything the request
+	// specified — models (Provider/Model/Executor*), intent (MaxIntent), scope,
+	// session (event attribution), history — then override only the delegated bits.
+	trigger := base
+	trigger.Type = "api_query"
+	trigger.AlertID = fmt.Sprintf("agent-%d", time.Now().UnixNano())
+	trigger.Data = data
+	trigger.Source = "agent"
+	trigger.ExecutionMode = "autonomous" // always investigate; never chat-escape a delegated task
 	res, rerr := a.RunDAGSync(ctx, trigger)
 	if rerr != nil {
 		// A conversational fallback (trivial task) isn't a failure — return its text.

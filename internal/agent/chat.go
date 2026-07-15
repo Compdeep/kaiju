@@ -28,9 +28,12 @@ type ChatTurn struct {
 	SessionID string
 	// MaxIntent is the resolved IGX safety rank for this turn (already capped by
 	// JWT/scope by the caller). nil ⇒ the registry default. It gates chat-lane tool
-	// execution AND is passed to the agent when a turn is escalated, so the user's
-	// chosen safety level is honoured wherever the turn is handled.
+	// execution.
 	MaxIntent *int
+	// Base is the request's Trigger. When the turn escalates to the agent, the
+	// sub-run is a COPY of this — so it inherits everything the request specified
+	// (models, intent, scope, session, history) with nothing to thread by hand.
+	Base Trigger
 }
 
 // ChatResult is the outcome of a chat turn.
@@ -59,7 +62,7 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		}
 	}
 	if agentEnabled && a.RouteChat(ctx, t.AlertID, t.Query) == "investigate" {
-		verdict, nodes, llmCalls, err := a.RunAgentTask(ctx, t.AlertID, t.SessionID, t.Query, t.History, t.MaxIntent)
+		verdict, nodes, llmCalls, err := a.RunAgentTask(ctx, t.Base, t.Query)
 		return ChatResult{Content: verdict, Nodes: nodes, LLMCalls: llmCalls}, err
 	}
 	if agentEnabled {

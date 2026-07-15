@@ -601,6 +601,7 @@ func runServe() {
 	ag.SetVisionModel(cfg.Vision.Provider, cfg.Vision.Model)
 	// Chat lane — direct completion, no planner (empty ⇒ reasoning model).
 	ag.SetChatModel(cfg.Chat.Provider, cfg.Chat.Model)
+	ag.SetChatTools(cfg.Chat.Tools)
 	execMux := http.NewServeMux()
 	apiHandler.RegisterRoutes(execMux)
 	mux.Handle("/api/v1/execute", gateway.WithJWTAuth(jwtSvc)(execMux))

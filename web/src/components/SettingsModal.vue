@@ -119,7 +119,7 @@
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                 chat
               </div>
-              <div class="model-desc">direct replies, no tools/planner — toggle chat mode in the composer (works with roleplay models)</div>
+              <div class="model-desc">the default lane. Answers directly, uses the tools you enable below, and hands multi-step work to the agent automatically.</div>
               <div class="form-row">
                 <div class="form-group">
                   <label>provider</label>
@@ -137,6 +137,16 @@
                     <option value="">same as reasoning</option>
                     <option v-for="m in chatModels" :key="m.id" :value="m.id">{{ m.name }}</option>
                   </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>tools chat can use</label>
+                <div class="model-desc">enable <strong>agent</strong> to let chat run multi-step work; <strong>web_fetch</strong> for quick lookups. Others are advanced.</div>
+                <div class="tool-picker">
+                  <label v-for="t in availableTools" :key="t.name" class="tool-chk" :title="t.description">
+                    <input type="checkbox" :checked="chatToolsHas(t.name)" @change="toggleChatTool(t.name)" />
+                    <span class="tool-name">{{ t.name }}</span>
+                  </label>
                 </div>
               </div>
             </div>
@@ -210,6 +220,20 @@ const apiKey = ref('')
 const execProvider = ref('')
 const visionProvider = ref('')
 const chatProvider = ref('')
+const availableTools = ref([])
+
+/** desc: is a tool in the chat allowlist? */
+function chatToolsHas(name) {
+  return Array.isArray(cfg.value.chat.tools) && cfg.value.chat.tools.includes(name)
+}
+/** desc: toggle a tool in the chat allowlist and persist. */
+function toggleChatTool(name) {
+  if (!Array.isArray(cfg.value.chat.tools)) cfg.value.chat.tools = []
+  const i = cfg.value.chat.tools.indexOf(name)
+  if (i >= 0) cfg.value.chat.tools.splice(i, 1)
+  else cfg.value.chat.tools.push(name)
+  patchConfig()
+}
 const intentOptions = ref([])
 
 const ENDPOINTS = {
@@ -309,7 +333,7 @@ async function patchConfig() {
       llm: { provider: cfg.value.llm.provider, model: cfg.value.llm.model, endpoint: cfg.value.llm.endpoint },
       executor: { provider: cfg.value.executor.provider || undefined, model: cfg.value.executor.model || undefined },
       vision: { provider: cfg.value.vision.provider, model: cfg.value.vision.model },
-      chat: { provider: cfg.value.chat.provider, model: cfg.value.chat.model },
+      chat: { provider: cfg.value.chat.provider, model: cfg.value.chat.model, tools: cfg.value.chat.tools || [] },
       agent: { dag_mode: cfg.value.agent.dag_mode, executive_mode: cfg.value.agent.executive_mode, safety_level: cfg.value.agent.safety_level },
     })
   } catch (err) { console.error('config patch:', err) }
@@ -335,6 +359,8 @@ onMounted(async () => {
     if (!cfg.value.executor) cfg.value.executor = { provider: '', model: '' }
     if (!cfg.value.vision) cfg.value.vision = { provider: '', model: '' }
     if (!cfg.value.chat) cfg.value.chat = { provider: '', model: '' }
+    if (!Array.isArray(cfg.value.chat.tools)) cfg.value.chat.tools = []
+    try { availableTools.value = await api.get('/api/v1/tools') } catch {}
     execProvider.value = cfg.value.executor.provider || ''
     visionProvider.value = cfg.value.vision.provider || ''
     chatProvider.value = cfg.value.chat.provider || ''
@@ -367,6 +393,10 @@ onMounted(async () => {
   color: var(--text); margin-bottom: 2px;
 }
 .model-desc { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; }
+.tool-picker { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.tool-chk { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; user-select: none; }
+.tool-chk input { cursor: pointer; }
+.tool-chk .tool-name { font-family: var(--font-mono, monospace); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
 .toggle-label { font-size: 13px; font-weight: 500; }

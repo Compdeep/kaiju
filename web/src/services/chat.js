@@ -262,10 +262,11 @@ export async function send(text) {
       query: queryWithAttachments,
       session_id: sendingSid,
       intent: s.intent,
-      mode: s.runMode,
-      agg_mode: parseInt(s.aggMode),
-      execution_mode: s.executionMode || undefined,
-      chat_mode: s.chatMode || undefined,
+      // Chat is the front door: every turn runs the chat lane. The tuned
+      // classifier decides whether it needs the agent (which streams its steps
+      // into the DAG trace below) and which chat tools are available comes from
+      // the instance config (Settings). The old direct-vs-agent toggle is gone.
+      chat_mode: true,
     })
     const msg = {
       role: 'assistant',

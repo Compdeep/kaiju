@@ -343,6 +343,15 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		if memMgr != nil {
 			history, _ = memMgr.LoadChatHistory(ctx, req.SessionID, 40)
 		}
+		// If the classifier escalates this turn to the agent, the sub-run is a copy
+		// of `trigger` (ChatTurn.Base). Put the conversation history on it so the
+		// agent has the same context the chat lane would, and put any session images
+		// on the ctx so the agent's heavy-lane calls attach them — matching the
+		// non-chat vision path below. Both flow through the one struct, not by hand.
+		trigger.History = history
+		if len(visionImgs) > 0 {
+			ctx = agent.WithVisionImages(ctx, visionImgs)
+		}
 		// The chat lane's tool permission IS the tool list (API-driven). A request
 		// may name its own chat_tools; if it sends none, fall back to the instance
 		// default (chat.tools config). Empty ⇒ pure chat. The list does NOT inherit
@@ -350,6 +359,20 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		chatTools := req.ChatTools
 		if len(chatTools) == 0 {
 			chatTools = a.agent.ChatTools()
+		}
+		// Cap the named tools by the caller's JWT/DB scope: a chat request can only
+		// use tools the principal is actually allowed. Wildcard "*" (or nil scope)
+		// means unrestricted, so leave the list untouched; otherwise drop anything
+		// outside the allowlist. Without this a request could name a tool broader
+		// than its clearance and reach it via the chat lane.
+		if scope != nil && !scope.AllowedTools["*"] {
+			kept := chatTools[:0]
+			for _, name := range chatTools {
+				if scope.AllowedTools[name] {
+					kept = append(kept, name)
+				}
+			}
+			chatTools = kept
 		}
 		var chatScope *agent.ResolvedScope
 		if len(chatTools) > 0 {
@@ -370,7 +393,10 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			Scope:     chatScope,
 			AlertID:   trigger.AlertID,
 			SessionID: req.SessionID,
-			MaxIntent: &intent, // resolved + JWT/scope-capped above; honoured by chat tools and the agent
+			MaxIntent: &intent, // resolved + JWT/scope-capped above; gates chat-lane tools
+			// Base carries the whole request (models, intent, scope, session, history)
+			// so an escalated agent sub-run inherits it by value — nothing dropped.
+			Base: trigger,
 		})
 		elapsed := time.Since(start)
 		if cerr != nil {
@@ -387,7 +413,10 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 				go memMgr.Compact(context.Background(), req.SessionID)
 			}
 		}
-		jsonResponse(w, execResult(ctx, trigger.AlertID, res.Content, res.Nodes, res.LLMCalls, int64(res.Tokens), elapsed), http.StatusOK)
+		// Token total from the run counter, not res.Tokens: every LLM call on both
+		// the chat lane and an escalated agent sub-run tallies the same ctx counter,
+		// so this is the request's true cost (res.Tokens misses the agent path).
+		jsonResponse(w, execResult(ctx, trigger.AlertID, res.Content, res.Nodes, res.LLMCalls, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 		return
 	}
 

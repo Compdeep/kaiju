@@ -585,6 +585,14 @@ func runChat() {
 				AlertID:   fmt.Sprintf("cli-%d", time.Now().UnixNano()),
 				SessionID: sessionID,
 				MaxIntent: maxIntent,
+				// Base is copied for an escalated agent sub-run. Carry the session,
+				// history, and intent; leave models empty so it uses the configured
+				// reasoning/executor lanes (the CLI does no per-request model routing).
+				Base: agent.Trigger{
+					SessionID: sessionID,
+					History:   history,
+					MaxIntent: maxIntent,
+				},
 			})
 			if err != nil {
 				cliCh.Send(ctx, channels.OutboundMessage{ChannelID: "cli", SessionID: sessionID, Text: fmt.Sprintf("[error] %v", err)})

@@ -26,6 +26,11 @@ type ChatTurn struct {
 	// this conversation so the UI can show the agent working live. It is used for
 	// event attribution only — the sub-run writes no memory to it.
 	SessionID string
+	// MaxIntent is the resolved IGX safety rank for this turn (already capped by
+	// JWT/scope by the caller). nil ⇒ the registry default. It gates chat-lane tool
+	// execution AND is passed to the agent when a turn is escalated, so the user's
+	// chosen safety level is honoured wherever the turn is handled.
+	MaxIntent *int
 }
 
 // ChatResult is the outcome of a chat turn.
@@ -54,7 +59,7 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		}
 	}
 	if agentEnabled && a.RouteChat(ctx, t.AlertID, t.Query) == "investigate" {
-		verdict, nodes, llmCalls, err := a.RunAgentTask(ctx, t.AlertID, t.SessionID, t.Query, t.History)
+		verdict, nodes, llmCalls, err := a.RunAgentTask(ctx, t.AlertID, t.SessionID, t.Query, t.History, t.MaxIntent)
 		return ChatResult{Content: verdict, Nodes: nodes, LLMCalls: llmCalls}, err
 	}
 	if agentEnabled {
@@ -111,9 +116,12 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	if maxTurns <= 0 {
 		maxTurns = chatMaxTurns
 	}
-	// Intent for tool gating: chat tools are conversational helpers. Use the
-	// registry default rank; per-tool impact + scope still gate at execution.
+	// Intent for tool gating: the caller's resolved request intent if set, else
+	// the registry default. Per-tool impact + scope still gate at execution.
 	intent := gates.Intent(a.intentRegistry.DefaultRank())
+	if t.MaxIntent != nil {
+		intent = gates.Intent(*t.MaxIntent)
+	}
 
 	res := ChatResult{}
 	for turn := 0; turn < maxTurns; turn++ {

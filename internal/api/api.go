@@ -370,6 +370,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			Scope:     chatScope,
 			AlertID:   trigger.AlertID,
 			SessionID: req.SessionID,
+			MaxIntent: &intent, // resolved + JWT/scope-capped above; honoured by chat tools and the agent
 		})
 		elapsed := time.Since(start)
 		if cerr != nil {

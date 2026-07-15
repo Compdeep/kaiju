@@ -568,6 +568,13 @@ func runChat() {
 					scope.AllowedTools[n] = true
 				}
 			}
+			// Apply the CLI /intent selection so the safety level gates chat tools
+			// and any escalated agent run, just like the API/UI.
+			var maxIntent *int
+			if intentStr := cliCh.Intent(); intentStr != "" {
+				iv := intentStringToRank(intentStr, ag.Intents())
+				maxIntent = &iv
+			}
 			res, err := ag.Chat(ctx, agent.ChatTurn{
 				Provider:  cp,
 				Model:     cm,
@@ -577,6 +584,7 @@ func runChat() {
 				Scope:     scope,
 				AlertID:   fmt.Sprintf("cli-%d", time.Now().UnixNano()),
 				SessionID: sessionID,
+				MaxIntent: maxIntent,
 			})
 			if err != nil {
 				cliCh.Send(ctx, channels.OutboundMessage{ChannelID: "cli", SessionID: sessionID, Text: fmt.Sprintf("[error] %v", err)})

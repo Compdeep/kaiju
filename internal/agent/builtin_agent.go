@@ -63,7 +63,7 @@ func (t *AgentTool) Execute(ctx context.Context, params map[string]any) (string,
 	}
 	// Model-initiated delegation: the model wrote a self-contained task, so no
 	// conversation history or session is passed.
-	verdict, _, _, err := t.agent.RunAgentTask(ctx, fmt.Sprintf("agent-tool-%d", time.Now().UnixNano()), "", task, nil)
+	verdict, _, _, err := t.agent.RunAgentTask(ctx, fmt.Sprintf("agent-tool-%d", time.Now().UnixNano()), "", task, nil, nil)
 	return verdict, err
 }
 
@@ -75,7 +75,7 @@ func (t *AgentTool) Execute(ctx context.Context, params map[string]any) (string,
 // so this never pollutes that conversation. Returns the synthesized verdict plus
 // the run's node/LLM counts. Shared by the agent tool and the chat front door's
 // classifier-driven escalation.
-func (a *Agent) RunAgentTask(ctx context.Context, alertID, sessionID, task string, history []llm.Message) (verdict string, nodes, llmCalls int, err error) {
+func (a *Agent) RunAgentTask(ctx context.Context, alertID, sessionID, task string, history []llm.Message, maxIntent *int) (verdict string, nodes, llmCalls int, err error) {
 	data, merr := json.Marshal(map[string]string{"query": task})
 	if merr != nil {
 		return "", 0, 0, fmt.Errorf("agent: marshal task: %w", merr)
@@ -87,7 +87,8 @@ func (a *Agent) RunAgentTask(ctx context.Context, alertID, sessionID, task strin
 		Source:        "agent",
 		ExecutionMode: "autonomous", // always investigate; never chat-escape a delegated task
 		History:       history,
-		SessionID:     sessionID, // event attribution only (executive writes no memory)
+		SessionID:     sessionID,   // event attribution only (executive writes no memory)
+		MaxIntent:     maxIntent,   // honour the turn's resolved safety level (nil ⇒ default)
 	}
 	res, rerr := a.RunDAGSync(ctx, trigger)
 	if rerr != nil {

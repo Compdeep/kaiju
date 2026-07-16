@@ -77,7 +77,7 @@ Or if URLs come from a search:
 
 1. `web_search` — find the download page
 2. `web_fetch` — extract download URLs from the page (depends on step 0)
-3. `bash` — download each URL with curl (depends on step 1; reference the URL inline as `"command": "curl -O '${step.1.content}'"` or similar)
+3. `bash` — download each URL found in step 1 with curl (depends on step 1)
 
 ### Check if tools are installed
 

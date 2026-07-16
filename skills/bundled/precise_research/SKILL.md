@@ -53,7 +53,7 @@ Questions that chain facts: "the person who did X also did Y, what is Z?"
 
 1. `web_search` — find X (step 0)
 2. `web_fetch` — extract the person/item from X (depends on step 0)
-3. `web_search` — search for Y using the extracted value (depends on step 1; reference it inline as `"query": "Y about ${step.1.content}"`)
+3. `web_search` — search for Y using the value extracted in step 1 (depends on step 1)
 4. `web_fetch` — extract Z (depends on step 2)
 
 ### ArXiv and academic papers

@@ -18,6 +18,18 @@ kaiju.json
 *.db-journal
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Scratch workspace (data_science skill runs `cd project && .venv/bin/python`);
+# it's a machine-local venv + generated files, never source.
+/project/
+
+# Python caches (from compute/data_science runs)
+__pycache__/
+*.pyc
 
 # IDE
 .vscode/

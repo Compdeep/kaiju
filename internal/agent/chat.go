@@ -143,17 +143,22 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		intent = gates.Intent(*t.MaxIntent)
 	}
 
-	// stream runs a completion and broadcasts each text delta as a verdict event
-	// on the DAG bus, tagged with this turn's session, so the frontend renders the
-	// answer token-by-token (the same channel the agent lane streams on). A tool-
-	// deciding turn produces no text, so nothing is broadcast for it. The returned
-	// response is shaped like a normal completion (content, tool calls, usage), and
-	// usage is billed through the shared token counter inside CompleteStreamResp.
+	// broadcast emits text to the frontend as a verdict event on this turn's
+	// session — the same channel the agent lane streams answers on.
+	broadcast := func(text string) {
+		if t.SessionID != "" && text != "" {
+			a.broadcastDAGEvent(nil, DAGEvent{Type: "verdict", Text: text, SessionID: t.SessionID})
+		}
+	}
+	// stream runs a TOOL-LESS completion and broadcasts each text delta as it
+	// arrives, so the frontend renders the answer token-by-token. Only tool-less
+	// turns stream: a tool-capable ("tool-deciding") turn is run non-streamed via
+	// client.Complete instead, because some models emit their tool call as plain
+	// `content` rather than structured tool_calls — streaming that would broadcast
+	// raw tool-call JSON to the UI as if it were the answer (the web_fetch bug).
 	stream := func(r *llm.ChatRequest) (*llm.ChatResponse, error) {
 		return client.CompleteStreamResp(ctx, r, func(chunk string) {
-			if t.SessionID != "" {
-				a.broadcastDAGEvent(nil, DAGEvent{Type: "verdict", Text: chunk, SessionID: t.SessionID})
-			}
+			broadcast(chunk)
 		})
 	}
 
@@ -165,11 +170,23 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 			Temperature: 0.7,
 			MaxTokens:   1024,
 		}
-		if len(toolDefs) > 0 {
+		toolsThisTurn := len(toolDefs) > 0
+		if toolsThisTurn {
 			req.Tools = toolDefs
 			req.ToolChoice = "auto" // never force — chat may simply answer
 		}
-		resp, err := stream(req)
+
+		// Tool-capable turn ⇒ NON-streaming (client.Complete): the model's tool
+		// call comes back as structured tool_calls and nothing is broadcast, so
+		// tool-call JSON can never leak to the UI as answer text. Tool-less turn ⇒
+		// stream, so a plain answer renders token-by-token.
+		var resp *llm.ChatResponse
+		var err error
+		if toolsThisTurn {
+			resp, err = client.Complete(ctx, req)
+		} else {
+			resp, err = stream(req)
+		}
 		res.LLMCalls++
 		if err != nil {
 			// The chat lane may be pointed at a model that can't use tools at all —
@@ -178,8 +195,9 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 			// endpoints found that support tool use"). That must NOT fail the turn:
 			// answering tool-less models is the chat lane's whole reason to exist.
 			// Drop the tools for the rest of this conversation and retry as pure chat.
-			if len(req.Tools) > 0 && isToolUnsupported(err) {
+			if toolsThisTurn && isToolUnsupported(err) {
 				toolDefs = nil
+				toolsThisTurn = false
 				req.Tools = nil
 				req.ToolChoice = ""
 				resp, err = stream(req)
@@ -199,6 +217,11 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		// No tool calls ⇒ this is the answer.
 		if len(msg.ToolCalls) == 0 {
 			res.Content = msg.Content
+			// A tool-capable turn was fetched non-streamed, so its text never
+			// reached the UI. Push the finished answer now (once).
+			if toolsThisTurn {
+				broadcast(msg.Content)
+			}
 			return res, nil
 		}
 

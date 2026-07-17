@@ -1,5 +1,7 @@
 # Binary
 kaiju
+.kaiju
+.kaiju-state
 *.exe
 
 # Dependencies

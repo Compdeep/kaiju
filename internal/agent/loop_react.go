@@ -132,10 +132,12 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			totalToolCalls++
 			nodeID := fmt.Sprintf("react_%d", totalToolCalls)
 
-			// Compact params for display
+			// Compact params for display. Keep enough that a tool's URL survives —
+			// web_fetch lists other keys (focus/format) before "url", so a tight cap
+			// chops the URL off before the UI ever sees it.
 			paramsStr := tc.Function.Arguments
-			if len(paramsStr) > 120 {
-				paramsStr = paramsStr[:120] + "..."
+			if len(paramsStr) > 512 {
+				paramsStr = paramsStr[:512] + "..."
 			}
 
 			a.broadcastDAGEvent(nil, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: nodeID, Node: &NodeInfo{

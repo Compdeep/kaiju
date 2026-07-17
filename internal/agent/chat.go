@@ -76,6 +76,10 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// whether an offered agent should still pick this turn up (e.g. "investigate X"
 	// phrased as plain chat).
 	if wantsTool || (agentOffered && a.RouteChat(ctx, t.AlertID, t.Query) == "investigate") {
+		// Chat answers can be long. Force the aggregator (agg_mode=2, reasoning
+		// lane, full synthesis budget) so a reflection-concluded run doesn't hand
+		// back the 1024-token-capped reflection verdict truncated mid-sentence.
+		t.Base.AggMode = 2
 		verdict, nodes, llmCalls, err := a.RunAgentTask(ctx, t.Base, t.Query)
 		return ChatResult{Content: verdict, Nodes: nodes, LLMCalls: llmCalls}, err
 	}

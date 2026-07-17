@@ -58,6 +58,12 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 		{Role: "user", Content: userPrompt},
 	}
 
+	// Surface the reflection checkpoint as a live node so the UI shows it running
+	// (the executive/tool/aggregator nodes broadcast; reflection didn't until now).
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: rNode.ID, Node: &NodeInfo{
+		ID: rNode.ID, Type: "reflection", State: "running", Tag: "reflect",
+	}})
+
 	started := time.Now()
 	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages:    messages,
@@ -85,6 +91,9 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	if err != nil {
 		trace.Err = err.Error()
 		WriteLLMTrace(trace)
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: rNode.ID, Node: &NodeInfo{
+			ID: rNode.ID, Type: "reflection", State: "failed", Tag: "reflect", Ms: time.Since(started).Milliseconds(), Error: err.Error(),
+		}})
 		ch <- nodeCompletion{NodeID: rNode.ID, Err: fmt.Errorf("reflection LLM: %w", err)}
 		return
 	}
@@ -93,6 +102,9 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	if err != nil {
 		trace.Err = err.Error()
 		WriteLLMTrace(trace)
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: rNode.ID, Node: &NodeInfo{
+			ID: rNode.ID, Type: "reflection", State: "failed", Tag: "reflect", Ms: time.Since(started).Milliseconds(), Error: err.Error(),
+		}})
 		ch <- nodeCompletion{NodeID: rNode.ID, Err: fmt.Errorf("reflection: %w", err)}
 		return
 	}
@@ -103,6 +115,9 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 
 	log.Printf("[dag] reflection output: %s", Text.TruncateLog(raw, 200))
 
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: rNode.ID, Node: &NodeInfo{
+		ID: rNode.ID, Type: "reflection", State: "resolved", Tag: "reflect", Ms: time.Since(started).Milliseconds(),
+	}})
 	ch <- nodeCompletion{NodeID: rNode.ID, Result: raw, TokensIn: resp.Usage.PromptTokens, TokensOut: resp.Usage.CompletionTokens}
 }
 

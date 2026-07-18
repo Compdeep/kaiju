@@ -20,6 +20,13 @@ type Claims struct {
 	Username  string   `json:"sub"`
 	MaxIntent int      `json:"max_intent"`
 	Scopes    []string `json:"scopes"`
+	// Tools is an explicit per-request tool allowlist stamped by the HOST that
+	// mints the token (e.g. makeen), so the host controls exactly which tools a
+	// request may reach without provisioning a kaiju user. When present it is the
+	// authority: the request is limited to these tools (deny-by-default — an empty
+	// or absent Tools on an authenticated request means NO tools, never the full
+	// registry). "*" grants everything. Ignored for the local, token-less CLI.
+	Tools []string `json:"tools,omitempty"`
 	jwt.RegisteredClaims
 }
 

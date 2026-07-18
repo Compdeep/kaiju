@@ -166,22 +166,12 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			intent = claims.MaxIntent
 		}
 
-		// Resolve user's tool scope from DB
-		if a.db != nil {
-			if user, err := a.db.GetUser(userID); err == nil {
-				if dbScope, err := a.db.ResolveUserScope(user); err == nil {
-					scope = &agent.ResolvedScope{
-						Username:     dbScope.Username,
-						AllowedTools: dbScope.AllowedTools,
-						MaxImpact:    dbScope.MaxImpact,
-						MaxIntent:    dbScope.MaxIntent,
-					}
-					// Cap intent by scope
-					if dbScope.MaxIntent < intent {
-						intent = dbScope.MaxIntent
-					}
-				}
-			}
+		// DENY-BY-DEFAULT tool scope from the signed token (see resolveToolScope).
+		scope = resolveToolScope(claims, a.db)
+		// Cap intent by a provisioned DB scope's ceiling. A token Tools-claim scope
+		// leaves MaxIntent at 0, so this only bites for a real DB-user scope.
+		if scope != nil && scope.MaxIntent > 0 && scope.MaxIntent < intent {
+			intent = scope.MaxIntent
 		}
 	}
 

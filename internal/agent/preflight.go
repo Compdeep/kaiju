@@ -75,17 +75,25 @@ func (a *Agent) routeQuery(ctx context.Context, alertID, query string) string {
 		Temperature: 0.0,
 		MaxTokens:   16,
 	})
+	// On ANY classifier failure — the model errored, refused, or returned
+	// unparseable output — fall back to "chat", which the ROUTE prompt itself calls
+	// the default and common case. Escalating to the agent should be a POSITIVE
+	// decision, not what happens when the router trips. An aligned route model often
+	// balks at classifying edge content (e.g. adult roleplay), and defaulting that
+	// balk to "investigate" wrongly forced those turns onto the agent path — where
+	// the (also aligned) planner then refused. Failing toward the cheap, safe
+	// conversational lane keeps the user's selected chat model in play.
 	trace.LatencyMS = time.Since(started).Milliseconds()
 	if err != nil {
 		trace.Err = err.Error()
 		WriteLLMTrace(trace)
-		return "investigate"
+		return "chat"
 	}
 	raw, err := extractToolArgs(resp)
 	if err != nil {
 		trace.Err = "no tool args returned"
 		WriteLLMTrace(trace)
-		return "investigate"
+		return "chat"
 	}
 	trace.Output = raw
 	var out struct {
@@ -94,14 +102,14 @@ func (a *Agent) routeQuery(ctx context.Context, alertID, query string) string {
 	if err := ParseLLMJSON(raw, &out); err != nil {
 		trace.Err = "parse failed: " + err.Error()
 		WriteLLMTrace(trace)
-		return "investigate"
+		return "chat"
 	}
 	WriteLLMTrace(trace)
 	switch out.Mode {
 	case "chat", "meta", "investigate":
 		return out.Mode
 	default:
-		return "investigate"
+		return "chat"
 	}
 }
 

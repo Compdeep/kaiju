@@ -137,9 +137,13 @@ func buildAnthropicRequest(model string, req *ChatRequest) *anthropicRequest {
 		})
 	}
 
-	// Convert tool_choice: OpenAI "required" → Anthropic {"type": "any"}
+	// Convert tool_choice from the OpenAI shape to Anthropic's:
+	//   "required"                                  → {"type":"any"}
+	//   {"type":"function","function":{"name":X}}   → {"type":"tool","name":X}
 	if req.ToolChoice == "required" {
 		aReq.ToolChoice = map[string]string{"type": "any"}
+	} else if fn := forcedToolName(req.ToolChoice); fn != "" {
+		aReq.ToolChoice = map[string]string{"type": "tool", "name": fn}
 	} else if req.ToolChoice != nil {
 		aReq.ToolChoice = req.ToolChoice
 	}

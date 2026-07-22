@@ -242,6 +242,10 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	sb.WriteString("(1) Assist the user with questions, research, and conversation.\n")
 	sb.WriteString("(2) Plan and decompose tasks into discrete operations available below.\n")
 	sb.WriteString("    Plan in waves — each wave depends on the previous via depends_on.\n\n")
+	sb.WriteString("Either way, you always answer by calling `plan`, and every tool you use is a STEP inside that plan. Example — to look something up:\n")
+	sb.WriteString("  `plan({\"steps\": [{\"tool\": \"web_search\", \"params\": {\"query\": \"latest SpaceX launch date\"}, \"depends_on\": [], \"tag\": \"s1\"}]})`\n")
+	sb.WriteString("If you can answer straight away with no tools, plan empty steps with an `answer`:\n")
+	sb.WriteString("  `plan({\"steps\": [], \"answer\": \"Paris.\"})`\n\n")
 	sb.WriteString("## Wiring data between steps\n\n")
 	sb.WriteString("Every input goes in `params`. Each value is one of:\n")
 	sb.WriteString("- a LITERAL — a value you know now. `\"path\": \"uploads/data.csv\"`.\n")
@@ -689,9 +693,13 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 
 	startedN := time.Now()
 	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
-		Messages:    messages,
-		Tools:       []llm.ToolDef{a.executiveToolDef()},
-		ToolChoice:  "required",
+		Messages: messages,
+		Tools:    []llm.ToolDef{a.executiveToolDef()},
+		// PIN the model to `plan` — not just "call some tool". A weak reasoning
+		// model, seeing web_search/web_fetch named all over the guidance, otherwise
+		// emits a direct tool call instead of wrapping it in a plan; that hard-fails
+		// with "planner called unexpected tool" and there's no retry for it.
+		ToolChoice:  llm.ForceToolChoice("plan"),
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.cfg.MaxTokens,
 	})
@@ -759,7 +767,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			retryResp, retryErr := a.completeHeavy(ctx, &llm.ChatRequest{
 				Messages:    retryMessages,
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
-				ToolChoice:  "required",
+				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.cfg.MaxTokens,
 			})

@@ -126,6 +126,31 @@ type ChatRequest struct {
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
 }
 
+// ForceToolChoice returns a tool_choice value that REQUIRES the model to call
+// exactly the named tool — not merely "call some tool" (that's "required"). It
+// uses the OpenAI/OpenRouter shape ({"type":"function","function":{"name":X}});
+// the Anthropic client re-maps it to that provider's {"type":"tool","name":X}.
+// Used to pin the planner to `plan` so a weak model can't emit a real tool call
+// (e.g. web_search) directly instead of wrapping it in a plan.
+func ForceToolChoice(name string) any {
+	return map[string]any{"type": "function", "function": map[string]any{"name": name}}
+}
+
+// forcedToolName extracts the tool name from a ForceToolChoice value, or "" if
+// the value isn't that shape. Used by providers that need to re-map it.
+func forcedToolName(tc any) string {
+	m, ok := tc.(map[string]any)
+	if !ok || m["type"] != "function" {
+		return ""
+	}
+	fn, ok := m["function"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	name, _ := fn["name"].(string)
+	return name
+}
+
 // StreamOptions controls streaming behavior for OpenAI-compatible endpoints.
 type StreamOptions struct {
 	IncludeUsage bool `json:"include_usage,omitempty"`

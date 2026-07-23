@@ -28,6 +28,7 @@ import (
 	kaijudb "github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
 	"github.com/Compdeep/kaiju/internal/memory"
+	"github.com/Compdeep/kaiju/internal/plugins"
 	"github.com/Compdeep/kaiju/internal/skillhub"
 	"github.com/Compdeep/kaiju/internal/workspace"
 	kaijutools "github.com/Compdeep/kaiju/internal/tools"
@@ -77,6 +78,7 @@ func printUsage() {
 Usage:
   kaiju chat                  Interactive CLI chat
   kaiju serve [--config FILE] Start gateway daemon (API + channels)
+              [--plugins a,b]   Switch on compiled-in plugins (e.g. pdf)
   kaiju run "query"           One-shot query, print result, exit
   kaiju skill install <slug>  Install skill from ClawHub
   kaiju skill list            List installed skills
@@ -108,16 +110,56 @@ func resolveConfigPath() string {
 	return "kaiju.json"
 }
 
-// positionalArgs returns os.Args[from:] with any "--config <path>" pair removed,
-// so subcommand parsing ignores where the flag was placed.
+// positionalArgs returns os.Args[from:] with any "--config <path>" or
+// "--plugins <list>" pair removed, so subcommand parsing ignores where the flags
+// were placed.
 func positionalArgs(from int) []string {
 	var out []string
 	for i := from; i < len(os.Args); i++ {
-		if os.Args[i] == "--config" {
+		if os.Args[i] == "--config" || os.Args[i] == "--plugins" {
 			i++ // skip the value too
 			continue
 		}
 		out = append(out, os.Args[i])
+	}
+	return out
+}
+
+// pluginNamesFromArgs reads the `--plugins a,b` (or repeated `--plugins a
+// --plugins b`) override off the command line. kaiju parses args by hand (no flag
+// package), so we scan os.Args the same way resolveConfigPath does.
+func pluginNamesFromArgs() []string {
+	var out []string
+	for i, a := range os.Args {
+		if a == "--plugins" && i+1 < len(os.Args) {
+			out = append(out, splitList(os.Args[i+1])...)
+		}
+	}
+	return out
+}
+
+// mergePluginNames unions the config list with any CLI override, de-duplicating
+// while preserving first-seen order.
+func mergePluginNames(fromCfg, fromArgs []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range append(append([]string{}, fromCfg...), fromArgs...) {
+		if s = strings.TrimSpace(s); s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// splitList splits a comma- or space-separated list into trimmed, non-empty items.
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' }) {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
 	}
 	return out
 }
@@ -379,6 +421,13 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	// (relevantTools) so it can only be invoked by a lane that names it.
 	reg.Replace(agent.NewAgentTool(ag), "builtin")
 
+	// Vision tool: lets the planner read an image mid-plan (a fetched screenshot,
+	// an uploaded photo) via the vision model. Only register it when a vision model
+	// is configured — without one it could only ever error.
+	if cfg.Vision.Model != "" {
+		reg.Replace(agent.NewVisionTool(ag), "builtin")
+	}
+
 	// System tools (always enabled)
 	reg.Replace(kaijutools.NewProcessList(), "builtin")
 	reg.Replace(kaijutools.NewProcessKill(), "builtin")
@@ -397,6 +446,24 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		reg.Replace(kaijutools.NewMemoryStore(mem), "builtin")
 		reg.Replace(kaijutools.NewMemoryRecall(mem), "builtin")
 		reg.Replace(kaijutools.NewMemorySearch(mem), "builtin")
+	}
+
+	// Optional plugin tools (compiled in behind build tags, switched on by config
+	// `plugins` or the `--plugins` flag). On a default build nothing is compiled
+	// in, so Activate returns nothing and this is a no-op.
+	if want := mergePluginNames(cfg.Plugins, pluginNamesFromArgs()); len(want) > 0 {
+		ptools, on, missing := plugins.Activate(want, plugins.Deps{Workspace: cfg.Agent.Workspace})
+		for _, pt := range ptools {
+			reg.Replace(pt, "plugin")
+		}
+		if len(on) > 0 {
+			log.Printf("[kaiju] plugins active: %s", strings.Join(on, ", "))
+		}
+		if len(missing) > 0 {
+			log.Printf("[kaiju] plugins requested but not compiled in (rebuild with -tags plugin_<name>): %s", strings.Join(missing, ", "))
+		}
+	} else if compiled := plugins.Compiled(); len(compiled) > 0 {
+		log.Printf("[kaiju] plugins compiled in but none activated (set config `plugins` or --plugins): %s", strings.Join(compiled, ", "))
 	}
 
 	// Load SKILL.md user skills

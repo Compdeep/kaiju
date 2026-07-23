@@ -36,6 +36,11 @@ type Config struct {
 	API        APIConfig                 `json:"api"`
 	Tools      ToolsConfig               `json:"tools"`
 	SkillsDirs []string                  `json:"skills_dirs"`
+	// Plugins names the optional, build-tag-gated plugins to switch on at startup
+	// (e.g. ["pdf"]). A name here only takes effect if the binary was compiled
+	// with that plugin's tag (`-tags plugin_pdf`); otherwise it's reported as
+	// missing and ignored. See internal/plugins.
+	Plugins []string `json:"plugins,omitempty"`
 }
 
 /*

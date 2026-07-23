@@ -21,23 +21,27 @@ function getToken() {
 // the input unlocks. Generous enough for legitimate long agent runs.
 const DEFAULT_TIMEOUT_MS = 300000 // 5 min
 
-async function request(method, path, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+async function request(method, path, body, { timeoutMs = DEFAULT_TIMEOUT_MS, signal: extSignal } = {}) {
   const headers = { 'Content-Type': 'application/json' }
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
 
   const controller = new AbortController()
   const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null
+  // The hard timeout above is a last-resort backstop. A caller may also pass its
+  // own signal (e.g. an idle-abort that fires when the agent stops making
+  // progress); AbortSignal.any aborts the fetch when EITHER fires.
+  const signal = extSignal ? AbortSignal.any([controller.signal, extSignal]) : controller.signal
   let res
   try {
     res = await fetch(BASE + path, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
+      signal,
     })
   } catch (err) {
-    if (err?.name === 'AbortError') throw new Error('request timed out')
+    if (err?.name === 'AbortError') throw new Error(extSignal?.aborted ? 'stopped — no progress for a while' : 'request timed out')
     throw err
   } finally {
     if (timer) clearTimeout(timer)

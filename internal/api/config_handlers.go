@@ -268,6 +268,10 @@ type modelInfo struct {
 	// Vision reports whether the model accepts image input — the UI shows an
 	// attach affordance and the agent may pass uploaded images to it.
 	Vision bool `json:"vision,omitempty"`
+	// Chat marks a model as suited to the chat lane (conversation / roleplay /
+	// creative tunes with no tool-calling). The settings UI filters the chat-model
+	// picker to these so the list stays relevant instead of showing every model.
+	Chat bool `json:"chat,omitempty"`
 }
 
 /*
@@ -340,13 +344,16 @@ var allModels = []modelInfo{
 
 	// Roleplay / creative / uncensored fine-tunes — NO tool-calling; use the chat
 	// lane, not the planner (they 404 on tools). Good for conversation / RP.
-	{ID: "sao10k/l3.3-euryale-70b", Name: "Euryale L3.3 70B (RP)", Provider: "openrouter", Context: "131K"},
-	{ID: "cognitivecomputations/dolphin-mistral-24b-venice-edition", Name: "Dolphin Venice 24B (uncensored)", Provider: "openrouter", Context: "128K"},
-	{ID: "deepseek/deepseek-chat-v3.1", Name: "DeepSeek V3.1 (RP · strong JP)", Provider: "openrouter", Context: "164K"},
-	{ID: "nousresearch/hermes-4-405b", Name: "Hermes 4 405B (permissive)", Provider: "openrouter", Context: "131K"},
-	{ID: "thedrummer/skyfall-36b-v2", Name: "Skyfall 36B (RP)", Provider: "openrouter", Context: "32K"},
-	{ID: "anthracite-org/magnum-v4-72b", Name: "Magnum v4 72B (RP)", Provider: "openrouter", Context: "32K"},
-	{ID: "thedrummer/cydonia-24b-v4.1", Name: "Cydonia 24B (RP)", Provider: "openrouter", Context: "32K"},
+	// Chat:true surfaces them in the settings chat-model picker.
+	{ID: "sao10k/l3.3-euryale-70b", Name: "Euryale L3.3 70B (RP · best quality)", Provider: "openrouter", Context: "131K", Chat: true},
+	{ID: "sao10k/l3.1-euryale-70b", Name: "Euryale L3.1 70B (RP · prior gen)", Provider: "openrouter", Context: "131K", Chat: true},
+	{ID: "thedrummer/cydonia-24b-v4.1", Name: "Cydonia 24B (RP · fast)", Provider: "openrouter", Context: "131K", Chat: true},
+	{ID: "deepseek/deepseek-chat-v3.1", Name: "DeepSeek V3.1 (RP · most reliable)", Provider: "openrouter", Context: "164K", Chat: true},
+	{ID: "anthracite-org/magnum-v4-72b", Name: "Magnum v4 72B (RP)", Provider: "openrouter", Context: "16K", Chat: true},
+	{ID: "nousresearch/hermes-4-70b", Name: "Hermes 4 70B (permissive)", Provider: "openrouter", Context: "131K", Chat: true},
+	{ID: "nousresearch/hermes-4-405b", Name: "Hermes 4 405B (permissive)", Provider: "openrouter", Context: "131K", Chat: true},
+	{ID: "cognitivecomputations/dolphin-mistral-24b-venice-edition", Name: "Dolphin Venice 24B (uncensored)", Provider: "openrouter", Context: "128K", Chat: true},
+	{ID: "thedrummer/skyfall-36b-v2", Name: "Skyfall 36B (RP)", Provider: "openrouter", Context: "32K", Chat: true},
 
 	// OpenRouter — other popular models
 	{ID: "anthropic/claude-sonnet-4", Name: "Claude Sonnet 4", Provider: "openrouter", Context: "200K"},

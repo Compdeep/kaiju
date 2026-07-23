@@ -319,6 +319,22 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		visionImgs = a.uploadProc.SessionImageDataURIs(req.SessionID)
 	}
 
+	// Vision precedence over chat mode. makeen marks plain conversation with
+	// chat_mode=true, but the chat model may be a tool-less roleplay fine-tune that
+	// can't see images (e.g. Euryale). If this turn carries images and the chat
+	// model isn't vision-capable, don't let chat_mode shadow the vision lane — hand
+	// the turn to the configured vision model below, so an attached image is
+	// actually read instead of silently dropped. A vision-capable chat model keeps
+	// the turn and the images ride along in the chat lane.
+	if req.ChatMode && len(visionImgs) > 0 {
+		if _, cm := a.resolveChat(req); !agent.IsVisionModel(cm) {
+			if _, vm := a.resolveVision(req); vm != "" {
+				log.Printf("[vision] chat model %q can't see images; routing %d image(s) to the vision lane instead of chat", cm, len(visionImgs))
+				req.ChatMode = false
+			}
+		}
+	}
+
 	// Chat lane. When chat mode is on, answer with a direct completion — no
 	// planner/DAG/tools — so plain conversation and non-tool models (roleplay
 	// fine-tunes) work. Takes precedence over the vision lane; if the session has
@@ -412,6 +428,12 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 
 	if len(visionImgs) > 0 {
 		if vp, vm := a.resolveVision(req); vm != "" {
+			// Carry recent conversation so multi-turn image chats keep context —
+			// the chat lane loads this too, and a turn re-routed here from chat_mode
+			// (see the precedence guard above) would otherwise lose its history.
+			if memMgr != nil && len(trigger.History) == 0 && req.SessionID != "" {
+				trigger.History, _ = memMgr.LoadChatHistory(ctx, req.SessionID, 40)
+			}
 			visionSystem := agent.ComposeSystemPrompt(a.agent.SoulPrompt(), prompt.Vision)
 			msgs := agent.BuildMessagesWithHistory(visionSystem, req.Query, trigger.History)
 			llm.AttachImages(msgs, visionImgs)

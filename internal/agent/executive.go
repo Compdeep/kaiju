@@ -798,6 +798,47 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			return nil, &ExecutiveConversationalError{}
 		}
 
+		// Re-plan on hallucinated tools. If the planner named a tool that isn't in
+		// the registry — e.g. it called a guidance SKILL like web_research_guide as
+		// if it were a tool — don't silently drop the step and collapse to a hollow
+		// "starting now…" direct answer. Tell the planner exactly which names aren't
+		// tools and which real tools it may use, and give it ONE chance to re-plan.
+		// Mirrors the parse-retry above; if the re-plan still isn't clean, we fall
+		// through to validatePlanSteps, which drops leftovers and does the old
+		// conversational fallback only when nothing valid remains.
+		if unknown := a.unknownToolNames(steps); len(unknown) > 0 {
+			log.Printf("[dag] executive planned non-existent tool(s) %v — asking it to re-plan with real tools", unknown)
+			correction := fmt.Sprintf(
+				"Error: %s not callable tools — they may be skills or capabilities, not tools. "+
+					"Call plan() again using ONLY real tools from this list: %s. "+
+					"For researching the web, use web_search and web_fetch as steps.",
+				quoteList(unknown), strings.Join(relevant, ", "))
+			replanMessages := append(messages,
+				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
+				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: correction},
+			)
+			replanResp, replanErr := a.completeHeavy(ctx, &llm.ChatRequest{
+				Messages:    replanMessages,
+				Tools:       []llm.ToolDef{a.executiveToolDef()},
+				ToolChoice:  llm.ForceToolChoice("plan"),
+				Temperature: 0.1,
+				MaxTokens:   a.cfg.MaxTokens,
+			})
+			if replanErr == nil && len(replanResp.Choices) > 0 && len(replanResp.Choices[0].Message.ToolCalls) > 0 {
+				rtc := replanResp.Choices[0].Message.ToolCalls[0]
+				var replanned executiveCallPayload
+				if perr := parseExecutivePayload(fixComputeStepParams(rtc.Function.Arguments), &replanned); perr == nil && len(replanned.Steps) > 0 {
+					log.Printf("[dag] executive re-planned after hallucination: %s", Text.TruncateLog(rtc.Function.Arguments, 500))
+					steps = replanned.Steps
+					payload = replanned // adopt the re-plan's intent too
+				} else {
+					log.Printf("[dag] executive re-plan produced no usable steps (perr=%v) — validating original", perr)
+				}
+			} else {
+				log.Printf("[dag] executive re-plan call failed (%v) — validating original", replanErr)
+			}
+		}
+
 		isAuto := trigger.Intent() == gates.IntentAuto
 
 		// Infer intent from the payload name by resolving it through the
@@ -839,6 +880,37 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
  * param: trigger - the original trigger for scope checking.
  * return: validated PlanResult or error.
  */
+// unknownToolNames returns the distinct step tools that don't exist in the
+// registry (skipping the "gap" pseudo-tool). It's the pre-execution existence
+// check: a non-empty result means the planner named something callable that
+// isn't — the signal to re-plan rather than drop-and-fall-back.
+func (a *Agent) unknownToolNames(steps []PlanStep) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range steps {
+		if s.Tool == "" || s.Tool == "gap" || seen[s.Tool] {
+			continue
+		}
+		if _, ok := a.registry.Get(s.Tool); !ok {
+			seen[s.Tool] = true
+			out = append(out, s.Tool)
+		}
+	}
+	return out
+}
+
+// quoteList renders names as `a`, `b` is/are… for a readable correction message.
+func quoteList(names []string) string {
+	q := make([]string, len(names))
+	for i, n := range names {
+		q[i] = "\"" + n + "\""
+	}
+	if len(names) == 1 {
+		return q[0] + " is"
+	}
+	return strings.Join(q, ", ") + " are"
+}
+
 func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent gates.Intent, trigger Trigger, preflight *PreflightResult) (*PlanResult, error) {
 	// Extract gaps and filter unknown tools
 	var gaps []string

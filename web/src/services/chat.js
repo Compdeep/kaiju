@@ -257,17 +257,38 @@ export async function send(text) {
   // Clear the chip strip — files stay on disk; the agent has the paths.
   sendingSess.attachments = []
 
+  // Idle watchdog. A long agent run is fine as long as it keeps making progress;
+  // what we want to stop is a genuinely STALLED request (a hung LLM/tool call, a
+  // dropped connection). We fingerprint DAG activity — node count, node states,
+  // and the streaming verdict length — and abort only if NOTHING changes for
+  // IDLE_MS. Node start/complete events and the token-streamed aggregator keep
+  // the fingerprint moving on a healthy run, so this never clips active work.
+  const IDLE_MS = 120000 // 2 min of zero progress ⇒ stalled
+  const idleController = new AbortController()
+  const fingerprint = () =>
+    dag.nodes.length + '|' + (dag.streamingVerdict || '').length + '|' + dag.nodes.map(n => n.state).join(',')
+  let lastFp = fingerprint()
+  let lastMoveAt = Date.now()
+  const idleTimer = setInterval(() => {
+    const fp = fingerprint()
+    if (fp !== lastFp) { lastFp = fp; lastMoveAt = Date.now(); return }
+    if (Date.now() - lastMoveAt > IDLE_MS) { idleController.abort(); clearInterval(idleTimer) }
+  }, 5000)
+
   try {
     const data = await api.post('/api/v1/execute', {
       query: queryWithAttachments,
       session_id: sendingSid,
       intent: s.intent,
-      // Chat is the front door: every turn runs the chat lane. The tuned
-      // classifier decides whether it needs the agent (which streams its steps
-      // into the DAG trace below) and which chat tools are available comes from
-      // the instance config (Settings). The old direct-vs-agent toggle is gone.
-      chat_mode: true,
-    })
+      // The chat toggle picks the lane. ON ⇒ chat_mode ⇒ the chat lane: a direct
+      // reply from the chat model (e.g. a roleplay tune). OFF ⇒ the agent, and we
+      // send execution_mode=autonomous so it ALWAYS plans — skipping the
+      // chat-vs-investigate classifier that would otherwise short-circuit a real
+      // task to a tool-less reply. So "agent" reliably means planner + tools + a
+      // DAG every time, never Euryale.
+      chat_mode: s.chatMode || undefined,
+      execution_mode: s.chatMode ? undefined : 'autonomous',
+    }, { signal: idleController.signal })
     const msg = {
       role: 'assistant',
       content: data.error ? `[error] ${data.error}` : (data.verdict || dag.streamingVerdict || 'No response'),
@@ -279,6 +300,7 @@ export async function send(text) {
   } catch (err) {
     sendingSess.messages.push({ role: 'assistant', content: `[error] ${err.message}` })
   } finally {
+    clearInterval(idleTimer)
     sendingSess.loading = false
     dag.interjectMode = false
     dag.interjections = []

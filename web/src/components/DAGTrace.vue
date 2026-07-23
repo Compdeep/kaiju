@@ -37,8 +37,8 @@
             <span class="t-pipe">│</span>
             <span v-if="item.inWave" class="t-wf">├</span>
             <span :class="['t-ty', item.node.type, { 'is-skill': item.node.source === 'skillmd' }]">{{ item.node.source === 'skillmd' ? 'SKI' : tyLabel(item.node.type) }}</span>
-            <span :class="['t-name', { 'is-skill': item.node.source === 'skillmd' }]">{{ item.node.tag || item.node.tool || item.node.id }}</span>
-            <span v-if="item.node.params" class="t-params">[{{ compactParams(item.node.params) }}]</span>
+            <span :class="['t-name', { 'is-skill': item.node.source === 'skillmd' }]">{{ item.node.type === 'tool' ? '[' + (item.node.tool || item.node.tag || item.node.id) + ']' : (item.node.tag || item.node.tool || item.node.id) }}</span>
+            <span v-if="item.node.params" class="t-params">→ {{ '{' + compactParams(item.node.params) + '}' }}</span>
             <span v-if="item.node.summary" class="t-summary">{{ item.node.summary }}</span>
             <span class="t-ms">{{ item.node.ms || 0 }}ms</span>
             <span v-if="item.node.tokens_in || item.node.tokens_out" class="t-tokens">{{ fmtTokens((item.node.tokens_in || 0) + (item.node.tokens_out || 0)) }}tok</span>
@@ -317,7 +317,7 @@ function stChr(s) { return { running: '\u25B8', resolved: '\u2713', failed: '\u2
  * @param {string} t - Node type (planner, aggregator, skill, etc.)
  * @returns {string} Three-letter type label
  */
-function tyLabel(t) { return { executive:'EXE', aggregator:'AGG', tool:'TLL', compute:'CMP', reflection:'RFL', observer:'OBS', micro_planner:'MPL', interjection:'INJ', actuator:'ACT', holmes:'🕵️' }[t] || '???' }
+function tyLabel(t) { return { executive:'EXE', aggregator:'AGG', tool:'TOOL', compute:'CMP', reflection:'RFL', observer:'OBS', micro_planner:'MPL', interjection:'INJ', actuator:'ACT', holmes:'🕵️' }[t] || '???' }
 
 /**
  * desc: Truncate a string to a maximum length, appending an ellipsis if needed
@@ -384,7 +384,7 @@ function parseRCA(result) {
 .t-wf { color: var(--accent); opacity: 0.4; flex-shrink: 0; width: 8px; }
 
 /* Type — now before name */
-.t-ty { width: 26px; flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.t-ty { width: 34px; flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 .t-ty.executive, .t-ty.aggregator { color: var(--accent); }
 .t-ty.reflection, .t-ty.observer, .t-ty.micro_planner { color: var(--accent-warm); }
 .t-ty.tool { color: var(--text-muted); }

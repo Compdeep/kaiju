@@ -305,12 +305,16 @@ function onVisionProviderChange() {
 }
 
 /**
- * desc: Models for the selected chat provider (any model — no capability filter).
+ * desc: Models for the selected chat provider. Prefer the chat-flagged tunes
+ *   (conversation / roleplay) so the list stays relevant; if a provider has none
+ *   flagged, fall back to all its models so nothing is hidden.
  * @returns {Array<Object>}
  */
 const chatModels = computed(() => {
   const p = chatProvider.value || cfg.value.llm.provider
-  return allModels.value.filter(m => m.provider === p)
+  const all = allModels.value.filter(m => m.provider === p)
+  const chatOnly = all.filter(m => m.chat)
+  return chatOnly.length ? chatOnly : all
 })
 
 /**

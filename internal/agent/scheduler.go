@@ -93,7 +93,7 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
  *         2. Wait for a completion
  *         3. Handle the completion based on node type:
  *            - Tool: record result, then mode-specific post-processing
- *            - Reflection/Interjection: parse decision (continue/conclude/investigate)
+ *            - Reflection/Interjection: parse decision (continue/replan/conclude)
  *            - Observer: parse action (continue/inject/cancel/reflect)
  *            - MicroPlanner: graft replacement nodes for failed tools
  *         4. Check for human interjection (all modes)
@@ -120,6 +120,33 @@ type scheduleOutcome struct {
 	Intent              gates.Intent
 	ReflectionVerdict   string // non-empty if reflection concluded with a full verdict
 	ReflectionAggregate *bool  // reflector's recommendation: true = needs aggregator, false = verdict is complete
+}
+
+// scaleReplanCap raises the replan ceiling to match the difficulty the executive
+// revealed in its INITIAL plan — the plan itself is the difficulty signal, so no
+// extra LLM call and no self-estimate. `base` (the configured cap) is a floor;
+// bigger plans and compute steps (code generation / project scaffolding) each add
+// headroom, clamped to a hard ceiling so a huge plan can't uncap the run.
+//
+// A 2-step lookup keeps the base; a 20-step or compute-heavy build earns several
+// more expand rounds. Note the replan cap is only one budget lever — wall clock
+// and LLM/node budgets still bound the run independently.
+func scaleReplanCap(base int, steps []PlanStep) int {
+	extra := len(steps) / 4
+	for _, s := range steps {
+		if s.Tool == "compute" || s.Type == "compute" {
+			extra++
+		}
+	}
+	ceiling := 12
+	if base > ceiling {
+		ceiling = base
+	}
+	capped := base + extra
+	if capped > ceiling {
+		capped = ceiling
+	}
+	return capped
 }
 
 func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *Graph, budget *Budget) (*scheduleOutcome, error) {
@@ -446,10 +473,29 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		maxInvestigations = 1
 	}
 	investigationCount := 0
+	// Replan is the graph's growth path — a wave succeeds and reveals more work
+	// (expand), or a failure needs a debug step (repair). Capped so a run can't
+	// grow forever; the diminishing→conclude brake below is the soft backstop.
+	// The cap is the configured base (a floor) auto-scaled UP by how hard the
+	// executive's initial plan looks: a bigger / compute-heavier plan gets more
+	// room to expand. The plan IS the difficulty signal — no extra LLM call.
+	maxReplans := a.cfg.MaxReplans
+	if maxReplans <= 0 {
+		maxReplans = 3
+	}
+	if planResult != nil {
+		scaled := scaleReplanCap(maxReplans, planResult.Steps)
+		if scaled != maxReplans {
+			log.Printf("[dag] replan cap auto-scaled %d → %d (%d plan steps)", maxReplans, scaled, len(planResult.Steps))
+		}
+		maxReplans = scaled
+	}
+	replanCount := 0
+	schedulerStart := time.Now()
 	// diminishingStreak tracks consecutive reflector passes that reported
 	// progress=diminishing. Two in a row downgrades the current decision
-	// from "investigate" to "conclude" so we don't spawn fresh Holmes
-	// cycles when fixes aren't moving the needle.
+	// from "replan" to "conclude" so we don't spawn fresh debug/expand waves
+	// when work isn't moving the needle.
 	diminishingStreak := 0
 	// debuggerInflight is declared above (alongside other top-level state)
 	// so injectBatchReflection can close over it.
@@ -507,11 +553,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					appendWorklog(a.cfg.MetadataDir, graph.SessionID, dbg.Tag, "FIXED", summary)
 				}
 			}
-			log.Printf("[dag] injecting reflection (%d tool completions since last reflect, investigation %d/%d)", workSinceReflection, investigationCount, maxInvestigations)
+			log.Printf("[dag] injecting reflection (%d tool completions since last reflect, investigation %d/%d, replan %d/%d)", workSinceReflection, investigationCount, maxInvestigations, replanCount, maxReplans)
+			budgetLine := fmt.Sprintf("replan round %d of %d, debug round %d of %d, %s elapsed.",
+				replanCount, maxReplans, investigationCount, maxInvestigations, time.Since(schedulerStart).Round(time.Second))
 			rNode := &Node{
 				Type:   NodeReflection,
 				Tag:    "reflect",
-				Params: map[string]any{"investigation_count": investigationCount},
+				Params: map[string]any{"investigation_count": investigationCount, "budget": budgetLine},
 			}
 			rID := graph.AddNode(rNode)
 			graph.SetState(rID, StateRunning)
@@ -867,6 +915,18 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				if err := ParseLLMJSON(comp.Result, &mpOutput); err != nil {
 					log.Printf("[dag] debugger parse failed: %v", err)
 				} else if len(mpOutput.Nodes) > 0 {
+					// Safety: a fix plan must never contain a `debug` step — that
+					// would recurse (debug → microplanner → debug). Drop any.
+					filtered := mpOutput.Nodes[:0]
+					for _, s := range mpOutput.Nodes {
+						if s.Tool == debugToolName {
+							log.Printf("[dag] dropping `debug` step from debugger plan (no debug-in-debug)")
+							continue
+						}
+						filtered = append(filtered, s)
+					}
+					mpOutput.Nodes = filtered
+
 					log.Printf("[dag] debugger diagnosis: %s (%d steps)", Text.TruncateLog(mpOutput.Summary, 200), len(mpOutput.Nodes))
 					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "DEBUG_PLAN", fmt.Sprintf("%d steps: %s", len(mpOutput.Nodes), Text.TruncateLog(mpOutput.Summary, 150)))
 
@@ -953,16 +1013,17 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				} else {
 					// Progress classification brake — only "diminishing" has
 					// scheduler-visible effect. Two consecutive diminishing
-					// waves downgrade investigate→conclude so Holmes cycles
-					// stop spawning when fixes aren't moving the validator
-					// set. Empty / unknown / "productive" resets the streak.
+					// waves downgrade investigate/replan→conclude so Holmes
+					// cycles stop spawning and the graph stops expanding when
+					// work isn't moving the needle. Empty / unknown /
+					// "productive" resets the streak.
 					switch ref.Progress {
 					case "diminishing":
 						diminishingStreak++
 						log.Printf("[reflector:diminishing] streak=%d (decision=%q): %s", diminishingStreak, ref.Decision, Text.TruncateLog(ref.Summary, 160))
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "DIMINISHING", fmt.Sprintf("streak=%d | %s", diminishingStreak, Text.TruncateLog(ref.Summary, 180)))
-						if diminishingStreak >= 2 && ref.Decision == "investigate" {
-							log.Printf("[reflector:diminishing] streak hit 2 — downgrading investigate→conclude")
+						if diminishingStreak >= 2 && ref.Decision == "replan" {
+							log.Printf("[reflector:diminishing] streak hit 2 — downgrading %s→conclude", ref.Decision)
 							ref.Decision = "conclude"
 							if ref.Aggregate == nil {
 								t := true
@@ -993,6 +1054,103 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							workSinceReflection = 1 // prevent the "no work" break
 						}
 
+					case "replan":
+						// EXPAND: a wave succeeded and revealed the next move. Re-invoke
+						// the executive to plan the next steps, graft them, keep looping.
+						// This is the growth path that mirrors investigate's REPAIR path —
+						// but with a diagnosis of SUCCESS ("here's what to do next") rather
+						// than failure. The failure pipeline is untouched.
+						graph.SetResult(comp.NodeID, comp.Result)
+						budget.ResetWaveCounters()
+
+						next := ref.Next
+						if next == "" {
+							next = ref.Summary
+						}
+
+						// concludeReplan collapses the run to a verdict when replan can't
+						// or shouldn't continue (cap hit, no budget, executive error, no
+						// new steps). Named what's missing rather than expanding further.
+						concludeReplan := func(reason, verdict string) {
+							if verdict == "" {
+								verdict = ref.Verdict
+							}
+							if verdict == "" {
+								verdict = ref.Summary
+							}
+							log.Printf("[dag] replan → conclude (%s)", reason)
+							appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "REPLAN_STOP", fmt.Sprintf("%s | %s", reason, Text.TruncateLog(verdict, 180)))
+							graph.SetResult(comp.NodeID, verdict)
+							graph.SkipAllPending()
+							reflectionConcluded = true
+							reflectionVerdict = verdict
+							if ref.Aggregate != nil {
+								reflectionAggregate = ref.Aggregate
+							} else {
+								t := true
+								reflectionAggregate = &t
+							}
+						}
+
+						// Hard cap: the graph can't expand forever.
+						if replanCount >= maxReplans {
+							concludeReplan(fmt.Sprintf("replan cap %d reached", maxReplans), "")
+							break
+						}
+						if budget.LLMRemaining() <= 2 || !budget.TrySpawnNode("", true) {
+							concludeReplan("no LLM budget for replan", "")
+							break
+						}
+						replanCount++
+						log.Printf("[dag] reflection: replan #%d/%d — %s", replanCount, maxReplans, Text.TruncateLog(next, 200))
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "REPLAN", fmt.Sprintf("#%d/%d | %s", replanCount, maxReplans, Text.TruncateLog(next, 200)))
+
+						// Anchor the user's goal verbatim (formatTrigger inside the
+						// executive); hand it a generic frame: what's already done
+						// (worklog) + the reflector's `next`. The executive decides HOW.
+						frame := fmt.Sprintf(
+							"\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n\nPlan ONLY the next steps needed to close this gap and answer the original request above. Wire new steps against prior results with ${step.N.field} where useful.\n\nIf the next move is to FIX a FAILURE, plan a single `debug` step (a leaf, no dependents) with the failure — exact error text, file paths, module names — in its `problem` param; the debugger diagnoses the root cause and applies the fix, and the following re-plan handles any follow-on work. If the request is already fully answered by the worklog, return an empty plan.",
+							next)
+
+						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "running", Tag: "replan"}})
+						replanResult, rerr := a.runExecutive(ctx, trigger, graph, frame)
+						if rerr != nil {
+							// Executive answered directly (no tools needed) → that answer IS the verdict.
+							var convErr *ExecutiveConversationalError
+							if errors.As(rerr, &convErr) {
+								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "replan direct"}})
+								concludeReplan("executive answered directly", convErr.Text)
+								break
+							}
+							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "failed", Tag: "replan", Error: rerr.Error()}})
+							concludeReplan(fmt.Sprintf("replan executive failed: %v", rerr), "")
+							break
+						}
+						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "replan"}})
+
+						newNodes, gerr := planStepsToNodes(replanResult.Steps, graph, budget, a.registry, dagMode)
+						if gerr != nil {
+							concludeReplan(fmt.Sprintf("replan graft failed: %v", gerr), "")
+							break
+						}
+						grafted := 0
+						for _, nn := range newNodes {
+							if nn != nil {
+								nn.SpawnedBy = comp.NodeID
+								graph.AddChild(comp.NodeID, nn.ID)
+								grafted++
+							}
+						}
+						if grafted == 0 {
+							// Nothing new to run (all steps deduped/dropped) — the goal
+							// is as answered as it's going to get. Conclude on it.
+							concludeReplan("executive returned no new steps", "")
+							break
+						}
+						log.Printf("[dag] replan #%d grafted %d new node(s)", replanCount, grafted)
+						workSinceReflection = 1 // ensure the next quiescence reflects instead of breaking
+						launchReady()
+
 					case "conclude":
 						graph.SetResult(comp.NodeID, ref.Verdict)
 						graph.SkipAllPending()
@@ -1002,69 +1160,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						log.Printf("[dag] reflection: conclude early (%s)", ref.Reason)
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONCLUDE", Text.TruncateLog(ref.Reason, 200))
 
-					case "investigate":
-						investigationCount++
-						graph.SetResult(comp.NodeID, comp.Result)
-						skipped := graph.SkipAllPending()
-						budget.ResetWaveCounters()
-
-						// Use Summary with Reason as fallback
-						summary := ref.Summary
-						if summary == "" {
-							summary = ref.Reason
-						}
-						problem := ref.Problem
-						if problem == "" {
-							problem = summary
-						}
-
-						log.Printf("[dag] reflection: investigate #%d (%s), skipped %d pending", investigationCount, summary, skipped)
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "INVESTIGATE", fmt.Sprintf("#%d, skipped %d pending | %s", investigationCount, skipped, Text.TruncateLog(summary, 200)))
-
-						// Holmes fires on EVERY investigation regardless of plan
-						// shape. The old gate skipped non-compute investigations
-						// because the prior microplanner would invent fictional
-						// code fixes. Holmes is read-only — it can investigate
-						// any failure type (ops, research, code) without risk.
-						// If the resulting RCA isn't actionable by the microplanner
-						// (e.g., a research query whose root cause is "the source
-						// site is down"), the microplanner will produce a no-op
-						// plan and the next reflection cycle concludes naturally.
-
-						// Dispatch to Holmes — the ReAct investigator phase. Holmes
-						// gathers evidence with read-only tools, forms hypotheses, and
-						// emits a structured RCA. The microplanner only fires after
-						// Holmes concludes (handled in the NodeHolmes completion
-						// branch below). This is the "investigate before fixing" rule:
-						// every investigate decision goes through diagnosis first, no shortcuts.
-						if budget.TrySpawnNode("", true) {
-							// Snapshot currently-failed node IDs so we can mark them
-							// superseded once the eventual fix succeeds. We carry this
-							// forward through Holmes to the microplanner via the
-							// addressingFailures map keyed by investigationCount.
-							var addressing []string
-							for _, fn := range graph.FailedNodes() {
-								addressing = append(addressing, fn.ID)
-							}
-							addressingByInvestigation[investigationCount] = addressing
-
-							maxIter := a.cfg.MaxHolmesIters
-							if maxIter <= 0 {
-								maxIter = 5
-							}
-							sNode, err := spawnFirstHolmes(graph, problem, comp.NodeID, investigationCount, maxIter)
-							if err != nil {
-								log.Printf("[dag] holmes setup failed: %v", err)
-							} else {
-								inflight++
-								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: sNode.ID, Node: graph.SnapshotNode(sNode.ID)})
-								go a.fireHolmes(ctx, sNode, graph, budget, completionCh, trigger, intent)
-								debuggerInflight = true
-								log.Printf("[dag] dispatched holmes %s (iter 1/%d): %s", sNode.ID, maxIter, Text.TruncateLog(problem, 200))
-							}
-						} else {
-							log.Printf("[dag] no budget for holmes, investigation stalled")
-						}
+						// NOTE: `investigate` is gone as a reflection decision. Repair
+						// now flows through the SAME door as expand: the reflector
+						// emits `replan`, the executive plans a `debug` super-tool
+						// step, and the Holmes investigation is grafted when that
+						// debug node completes (see the debug graft in the
+						// tool-completion branch below). parseReflectionOutput
+						// coerces any stray "investigate" → "replan" for safety.
 					}
 				}
 
@@ -1198,6 +1300,65 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							log.Printf("[dag] auto-grafted health check %s for service %s (port %s)", hID, svcResult.Name, port)
 							appendWorklog(a.cfg.MetadataDir, graph.SessionID, svcResult.Name, "SERVICE_START", fmt.Sprintf("pid %d, health check grafted on port %s", svcResult.PID, port))
 							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: hID, Node: graph.SnapshotNode(hID)})
+						}
+					}
+				}
+
+				// ── Debug super-tool graft ──
+				// A resolved `debug` tool node is the executive-planned trigger
+				// for a Holmes investigation. Its result is a {type:"debug",
+				// problem} envelope. Graft the first Holmes iteration here (in
+				// the main loop — no race), parented to the debug node; the
+				// existing NodeHolmes → microplanner → validator handlers drive
+				// the fix to completion, fully visible in the DAG. This is the
+				// REPAIR path flowing through the SAME door as expand:
+				// reflect.replan → executive plans `debug` → this graft. We do
+				// NOT SkipAllPending — debug is a planned leaf, and independent
+				// sibling work should keep running.
+				if node.Type == NodeTool && node.ToolName == debugToolName {
+					var dbg struct {
+						Type    string `json:"type"`
+						Problem string `json:"problem"`
+					}
+					if json.Unmarshal([]byte(comp.Result), &dbg) == nil && dbg.Type == "debug" {
+						problem := dbg.Problem
+						if problem == "" {
+							// Synthesize a brief from the current failures.
+							var fails []string
+							for _, fn := range graph.FailedNodes() {
+								if fn.Error != nil {
+									fails = append(fails, fmt.Sprintf("%s: %s", fn.Tag, fn.Error.Error()))
+								}
+							}
+							problem = "a step failed; diagnose the root cause. " + strings.Join(fails, " | ")
+						}
+						if budget.TrySpawnNode("", true) {
+							investigationCount++
+							// Snapshot currently-failed node IDs so they can be
+							// marked superseded once the fix succeeds — same
+							// machinery the old investigate branch used.
+							var addressing []string
+							for _, fn := range graph.FailedNodes() {
+								addressing = append(addressing, fn.ID)
+							}
+							addressingByInvestigation[investigationCount] = addressing
+
+							maxIter := a.cfg.MaxHolmesIters
+							if maxIter <= 0 {
+								maxIter = 5
+							}
+							sNode, err := spawnFirstHolmes(graph, problem, comp.NodeID, investigationCount, maxIter)
+							if err != nil {
+								log.Printf("[dag] holmes setup failed (debug node %s): %v", comp.NodeID, err)
+							} else {
+								inflight++
+								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: sNode.ID, Node: graph.SnapshotNode(sNode.ID)})
+								go a.fireHolmes(ctx, sNode, graph, budget, completionCh, trigger, intent)
+								debuggerInflight = true
+								log.Printf("[dag] debug node %s dispatched holmes %s (iter 1/%d): %s", comp.NodeID, sNode.ID, maxIter, Text.TruncateLog(problem, 200))
+							}
+						} else {
+							log.Printf("[dag] no budget for holmes from debug node %s", comp.NodeID)
 						}
 					}
 				}

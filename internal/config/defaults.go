@@ -38,6 +38,7 @@ func Default() *Config {
 			MaxObserverCalls: 50,
 			BatchSize:        5,
 			MaxInvestigations: 5,
+			MaxReplans:        3,
 			MaxConcurrent:    3,
 			ExecutionMode:    "interactive",
 			// Default the routing decision to a small capable model so "does this

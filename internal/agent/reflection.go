@@ -15,14 +15,16 @@ import (
 
 /*
  * reflectionOutput is the structured response from a reflection checkpoint.
- * desc: Contains the reflection decision (continue/conclude/investigate),
- *       optional verdict text, and the problem statement passed to Holmes.
+ * desc: Contains the reflection decision (continue/replan/conclude), optional
+ *       verdict text, and the `next` move handed to the executive on replan.
+ *       A stray "investigate" (removed decision) is coerced to "replan".
  */
 type reflectionOutput struct {
-	Decision   string          `json:"decision"`            // "continue", "conclude", "investigate"
+	Decision   string          `json:"decision"`            // "continue", "replan", "conclude" ("investigate" coerced → "replan")
 	Progress   string          `json:"progress,omitempty"`  // "productive", "diminishing", "stuck" — scheduler-consumed; "" defaults to productive
 	Summary    string          `json:"summary"`             // status description
 	Problem    string          `json:"problem,omitempty"`   // only for investigate: what's wrong (passed to Holmes)
+	Next       string          `json:"next,omitempty"`      // only for replan: the concrete next step the executive should plan (steps succeeded and revealed more work)
 	RawVerdict json.RawMessage `json:"verdict"`             // only for conclude — may be string or object
 	Verdict    string          `json:"-"`                   // parsed from RawVerdict
 	Reason     string          `json:"reason"`              // backward compat — used as Summary fallback
@@ -51,7 +53,11 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// punt to other apps" cluster and takes the easy "conclude · too complex"
 	// exit on hard queries.
 	sysPrompt := ComposeSystemPrompt(a.soulPrompt, fmt.Sprintf(prompt.Reflector, a.FormatRule())) + a.fleetSection()
-	userPrompt := assembleReflectorPrompt(graph, gateCtx, trigger)
+	// The scheduler stamps a plain-English budget line ("replan round 2 of 3,
+	// 3m40s elapsed") into the reflection node's params so the reflector can
+	// self-regulate. Empty for reflection sites that don't set it.
+	budgetLine, _ := rNode.Params["budget"].(string)
+	userPrompt := assembleReflectorPrompt(graph, gateCtx, trigger, budgetLine)
 
 	messages := []llm.Message{
 		{Role: "system", Content: sysPrompt},
@@ -122,14 +128,26 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 }
 
 // assembleReflectorPrompt builds the reflector's user message from a gate
-// response. Sections: Original Request, Graph Summary, FAILURES DETECTED,
-// Evidence, Previous Debug Attempts.
-func assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, trigger Trigger) string {
+// response. Sections: Original Request, Budget, Graph Summary, FAILURES
+// DETECTED, Evidence, Previous Debug Attempts. `budgetLine` is an optional
+// plain-English budget line the scheduler passes so the reflector knows its
+// position (replan round X of Y, elapsed) and self-regulates.
+func assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, trigger Trigger, budgetLine string) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Original Request\n\n")
 	sb.WriteString(formatTrigger(trigger))
 	sb.WriteString("\n\n")
+
+	// Budget-in-English — tells the reflector how many replan/investigate
+	// rounds it has spent and how much wall clock is gone, so it stops
+	// expanding when rounds stop paying off (a soft brake ahead of the hard
+	// caps in the scheduler).
+	if budgetLine != "" {
+		sb.WriteString("## Budget\n\n")
+		sb.WriteString(budgetLine)
+		sb.WriteString("\n\n")
+	}
 
 	// Graph summary — quick counts
 	if graph != nil {
@@ -234,7 +252,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	userBuf.WriteString(humanMsg)
 	userBuf.WriteString("\n\n")
 	userBuf.WriteString(fmt.Sprintf("## Intent Level\n\n%s\n\n", resolvedIntent.String()))
-	userBuf.WriteString(assembleReflectorPrompt(graph, gateCtx, trigger))
+	userBuf.WriteString(assembleReflectorPrompt(graph, gateCtx, trigger, ""))
 
 	messages := []llm.Message{
 		{Role: "system", Content: sysPrompt},
@@ -323,8 +341,19 @@ func parseReflectionOutput(raw string) (*reflectionOutput, error) {
 		}
 	}
 
+	// `investigate` was removed as a decision — repair now flows through
+	// `replan` → the executive plans a `debug` super-tool step. Coerce any
+	// stray "investigate" (an old prompt or model) into `replan`, carrying its
+	// problem statement into `next` so the executive still gets the failure.
+	if output.Decision == "investigate" {
+		output.Decision = "replan"
+		if output.Next == "" {
+			output.Next = output.Problem
+		}
+	}
+
 	switch output.Decision {
-	case "continue", "conclude", "investigate":
+	case "continue", "replan", "conclude":
 		// valid
 	default:
 		return nil, fmt.Errorf("unknown reflection decision: %q", output.Decision)

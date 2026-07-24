@@ -338,6 +338,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		MaxObserverCalls:  cfg.Agent.MaxObserverCalls,
 		BatchSize:         cfg.Agent.BatchSize,
 		MaxInvestigations: cfg.Agent.MaxInvestigations,
+		MaxReplans:        cfg.Agent.MaxReplans,
 		MaxConcurrentInvestigations: cfg.Agent.MaxConcurrent,
 		DisableCoding:     cfg.Agent.DisableCoding,
 		ExecutionMode:     cfg.Agent.ExecutionMode,
@@ -399,6 +400,12 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		// gate it on the same config flag. Decouple later if we want file
 		// edits without full compute capability.
 		reg.Replace(agent.NewEditFileTool(ag), "builtin")
+		// debug is the REPAIR super-tool (Holmes RCA → microplanner fix →
+		// validators). Its fix rides the same Coder pipeline, so gate it on the
+		// same flag — with coding disabled there's nothing to fix. Unlike the
+		// agent tool it IS visible to the planner: the executive plans a `debug`
+		// step when a re-plan is triggered by a failure.
+		reg.Replace(agent.NewDebugTool(ag), "builtin")
 	}
 	if cfg.Tools.Bash.Enabled {
 		reg.Replace(kaijutools.NewBash(cfg.Tools.Bash.Shell, cfg.Agent.Workspace), "builtin")

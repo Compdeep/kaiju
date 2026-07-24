@@ -75,21 +75,21 @@ func reflectorToolDef() llm.ToolDef {
 				"properties": {
 					"decision": {
 						"type": "string",
-						"enum": ["continue", "conclude", "investigate"],
+						"enum": ["continue", "replan", "conclude"],
 						"description": "What to do next."
 					},
 					"progress": {
 						"type": "string",
 						"enum": ["productive", "diminishing"],
-						"description": "How the recent cycles are trending. Defaults to 'productive' if unsure. Two consecutive 'diminishing' waves downgrade investigate→conclude; see prompt for rules."
+						"description": "How the recent cycles are trending. Defaults to 'productive' if unsure. Two consecutive 'diminishing' waves downgrade replan→conclude; see prompt for rules."
 					},
 					"summary": {
 						"type": "string",
 						"description": "What happened, current state, and SPECIFIC error messages from failures (exact module names, paths, error text)."
 					},
-					"problem": {
+					"next": {
 						"type": "string",
-						"description": "Only if investigate: the root problem for Holmes — include exact error messages, file paths, module names from the failure output."
+						"description": "Only if replan: the concrete next move. SUCCESS lead → e.g. 'fetch the 3 URLs the searches surfaced'. FAILURE to fix → describe the failure with exact error text, file paths, module names (the executive will plan a debug step to diagnose + fix it). Name the move, not the tool call."
 					},
 					"verdict": {
 						"type": "string",

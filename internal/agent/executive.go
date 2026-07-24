@@ -521,8 +521,8 @@ func (e *ExecutiveConversationalError) Error() string {
  * param: trigger - the investigation trigger.
  * return: PlanResult pointer with steps and intent, or error.
  */
-func (a *Agent) runExecutive(ctx context.Context, trigger Trigger, graph *Graph) (*PlanResult, error) {
-	return a.runExecutiveNative(ctx, trigger, graph)
+func (a *Agent) runExecutive(ctx context.Context, trigger Trigger, graph *Graph, replanFrame ...string) (*PlanResult, error) {
+	return a.runExecutiveNative(ctx, trigger, graph, replanFrame...)
 }
 
 // ── Plan tool schema for native function calling mode ──────────────────────
@@ -637,7 +637,7 @@ func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
  * param: trigger - the investigation trigger.
  * return: PlanResult pointer with steps and intent, or error.
  */
-func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *Graph) (*PlanResult, error) {
+func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *Graph, replanFrame ...string) (*PlanResult, error) {
 	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
 	log.Printf("[dag] executive (native) sees %d tools: %v", len(relevant), relevant)
 	if len(a.skillGuidance) > 0 {
@@ -663,6 +663,13 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	userQuery := formatTrigger(trigger)
 	if graph != nil && graph.Preflight != nil && graph.Preflight.Context != "" {
 		userQuery += "\n\n## Context\n" + graph.Preflight.Context
+	}
+	// Re-plan frame (optional): the reflector chose `replan` and the scheduler
+	// passed a generic frame describing the gap + what's already done. Appended
+	// here — above the worklog block below — so its "worklog below" reference is
+	// accurate and the user's goal stays verbatim at the top.
+	if len(replanFrame) > 0 && replanFrame[0] != "" {
+		userQuery += replanFrame[0]
 	}
 	var toolIndex string
 	if graph != nil && graph.Context != nil {

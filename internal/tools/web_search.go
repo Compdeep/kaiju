@@ -147,7 +147,26 @@ func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string,
 		return "", fmt.Errorf("web_search: %w", err)
 	}
 
-	b, _ := json.Marshal(map[string]any{"results": results, "query": query})
+	// Ground the results before they reach the planner: HEAD-validate each URL,
+	// drop dead + duplicate ones, keep only reachable sources. A dead URL that
+	// slips through becomes a fabricated citation — the model "fetches" a 404 and
+	// invents content. Filtering here means the planner only ever web_fetches
+	// URLs that actually resolve.
+	total := len(results)
+	results = w.filterReachable(ctx, results)
+	if dropped := total - len(results); dropped > 0 {
+		log.Printf("[web_search] %q: %d/%d results dropped (dead/duplicate), %d reachable", query, dropped, total, len(results))
+	}
+
+	// Never emit a bare `null` — an empty results field serializes to
+	// "results": null and the model hallucinates URLs to fill it. Always return
+	// an explicit [] plus a note so "no results" reads as "no results".
+	payload := map[string]any{"query": query, "results": results}
+	if len(results) == 0 {
+		payload["results"] = []searchResult{}
+		payload["note"] = "no reachable results for this query — do not invent URLs; try a different query or report that nothing was found"
+	}
+	b, _ := json.Marshal(payload)
 	return string(b), nil
 }
 
@@ -323,6 +342,111 @@ type searchResult struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Snippet string `json:"snippet"`
+}
+
+// urlCheckTimeout bounds each per-URL liveness probe so one slow host can't
+// stall the whole search.
+const urlCheckTimeout = 5 * time.Second
+
+/*
+ * filterReachable dedups result URLs and HEAD-validates each one concurrently,
+ * returning only the reachable, unique results in their original rank order.
+ * desc: This is the grounding gate between the scraper and the planner. Dead and
+ *       duplicate URLs are dropped here so the planner only ever web_fetches URLs
+ *       that resolve — a dead URL reaching the planner is what produced fabricated
+ *       citations (a "verified" 404). Returns a non-nil slice (never null). May
+ *       return fewer than requested; there is no backfill.
+ * param: ctx - parent context (each probe gets its own sub-timeout).
+ * param: results - raw scraped results, in rank order.
+ * return: the reachable, deduped subset.
+ */
+func (w *WebSearch) filterReachable(ctx context.Context, results []searchResult) []searchResult {
+	// Dedup by normalized URL, preserving rank order.
+	seen := make(map[string]bool, len(results))
+	deduped := make([]searchResult, 0, len(results))
+	for _, r := range results {
+		key := normalizeURL(r.URL)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		deduped = append(deduped, r)
+	}
+
+	// Probe every candidate concurrently — they target different hosts, so the
+	// search rate limiter (which guards the search engine) doesn't apply.
+	keep := make([]bool, len(deduped))
+	var wg sync.WaitGroup
+	for i := range deduped {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			keep[i] = w.urlReachable(ctx, deduped[i].URL)
+		}(i)
+	}
+	wg.Wait()
+
+	out := make([]searchResult, 0, len(deduped))
+	for i, r := range deduped {
+		if keep[i] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+/*
+ * urlReachable probes a URL with HEAD and decides whether it's a usable source.
+ * desc: Drops only URLs that are definitively dead — a transport failure
+ *       (DNS/connection/TLS/timeout) or a 404/410. Everything else is KEPT,
+ *       including the 405-keep rule: many servers reject HEAD with 405/501 but
+ *       serve GET fine, so method-not-allowed is NOT a dead signal. Redirects
+ *       are followed by the shared client, so a 3xx that lands on a live page
+ *       reads as reachable.
+ * param: ctx - parent context; a per-probe timeout is layered on top.
+ * param: rawURL - the candidate URL.
+ * return: true to keep, false to drop.
+ */
+func (w *WebSearch) urlReachable(ctx context.Context, rawURL string) bool {
+	cctx, cancel := context.WithTimeout(ctx, urlCheckTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(cctx, http.MethodHead, rawURL, nil)
+	if err != nil {
+		return false // unparseable URL — drop
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return false // DNS failure, connection refused, TLS error, timeout — dead
+	}
+	resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusNotFound, http.StatusGone: // 404, 410 — definitively dead
+		return false
+	default:
+		// 2xx/3xx = live; 405/501 = HEAD refused but likely GET-able (405-keep);
+		// 403/429/5xx = blocked or transiently down, NOT proof the page is gone,
+		// so keep rather than false-drop a real source.
+		return true
+	}
+}
+
+// normalizeURL builds a dedup key from a URL: lowercased host + path (trailing
+// slash trimmed) + query. Scheme and fragment are ignored so http/https and
+// #anchor variants of the same page collapse to one.
+func normalizeURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return strings.TrimSpace(raw)
+	}
+	key := strings.ToLower(u.Host) + strings.TrimRight(u.Path, "/")
+	if u.RawQuery != "" {
+		key += "?" + u.RawQuery
+	}
+	return key
 }
 
 func parseDDGResults(html string, max int) []searchResult {

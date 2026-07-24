@@ -159,6 +159,7 @@ type Config struct {
 	MaxObserverCalls int  // separate budget for observer LLM calls (default: 50)
 	BatchSize    int   // nodes completed before injecting reflection in nReflect mode (default: 5)
 	MaxInvestigations int // max investigation cycles (Holmes + fix attempts) before forcing conclude (default: 1)
+	MaxReplans int // max EXPAND replan cycles (successful wave → executive plans next steps) before forcing conclude (default: 3)
 	MaxHolmesIters int // max ReAct iterations per Holmes investigation (default: 5)
 	ExecutionMode  string // "interactive" (chat allowed) or "autonomous" (always investigate)
 	DAGWallClock   time.Duration

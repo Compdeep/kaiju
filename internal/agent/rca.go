@@ -112,13 +112,13 @@ type HolmesTurn struct {
 
 /*
  * spawnFirstHolmes creates the very first Holmes node for an investigation
- * and seeds its state with the problem statement from the reflector.
- * desc: Called by the scheduler when the reflector classifies "investigate".
- *       The returned node is added to the graph but NOT yet fired — the
- *       caller does that. This keeps state construction in one place
- *       (rca.go) and scheduler logic separate.
+ * and seeds its state with the problem statement.
+ * desc: Called by the scheduler when a `debug` super-tool node completes (the
+ *       executive-planned trigger for repair). The returned node is added to
+ *       the graph but NOT yet fired — the caller does that. This keeps state
+ *       construction in one place (rca.go) and scheduler logic separate.
  * param: graph - the investigation graph.
- * param: problem - the symptom blob from the reflector.
+ * param: problem - the symptom blob (the debug node's `problem` param).
  * param: parentID - node ID of the reflection that triggered Holmes.
  * param: investigationCount - which investigation cycle this is (for tagging).
  * param: maxIter - iteration cap from agent config.
@@ -715,6 +715,12 @@ func assembleHolmesPrompt(state *HolmesState, trigger Trigger, a *Agent, intent 
 		sb.WriteString("## Available Tools\n\n")
 		sb.WriteString("Use these for diagnostic READS only. Do NOT mutate state.\n\n")
 		for _, name := range a.registry.List() {
+			// Never offer `debug` to Holmes — a debug investigation must not
+			// spawn another debug (Holmes is read-only diagnosis; the fix comes
+			// from the microplanner afterward). Mirrors the agent-tool exclusion.
+			if name == debugToolName {
+				continue
+			}
 			sk, ok := a.registry.Get(name)
 			if !ok {
 				continue

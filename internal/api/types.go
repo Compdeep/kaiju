@@ -28,10 +28,10 @@ type ExecuteRequest struct {
 	ChatMode     bool   `json:"chat_mode,omitempty"`
 	ChatProvider string `json:"chat_provider,omitempty"`
 	ChatModel    string `json:"chat_model,omitempty"`
-	// ChatTools is the explicit, API-driven tool allowlist for the chat lane.
-	// Empty ⇒ pure chat (no tools). When set, the chat turn may call ONLY these
-	// tools (a bounded reason-act loop, still no planner); the list is also the
-	// execution permission, so the lane never inherits a broader tool scope.
+	// ChatTools is the tool palette available to the agent IF a chat turn escalates
+	// (see Agent). It does NOT enable a chat-model tool loop — the chat lane itself
+	// is tool-less. The signed token grant, not this field, is the authority on
+	// which tools an escalated run may reach.
 	ChatTools []string `json:"chat_tools,omitempty"`
 	// Agent permits chat→agent escalation. nil (omitted) ⇒ DEFAULT: allowed — the
 	// router may route this turn to the agent when it needs more than a
@@ -55,8 +55,8 @@ type ActionInfo struct {
 // ExecuteResponse is returned from POST /api/v1/execute.
 type ExecuteResponse struct {
 	Verdict    string       `json:"verdict"`
-	Actions    []ActionInfo `json:"actions,omitempty"`    // recommended follow-up actions (caller decides)
-	Gaps       []string     `json:"gaps,omitempty"`       // capability gaps (missing tools)
+	Actions    []ActionInfo `json:"actions,omitempty"` // recommended follow-up actions (caller decides)
+	Gaps       []string     `json:"gaps,omitempty"`    // capability gaps (missing tools)
 	DAGID      string       `json:"dag_id,omitempty"`
 	Nodes      int          `json:"nodes"`
 	LLMCalls   int          `json:"llm_calls"`

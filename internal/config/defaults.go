@@ -16,39 +16,36 @@ func Default() *Config {
 			MaxTokens:   4096,
 		},
 		Chat: ChatConfig{
-			// The default chat model MUST support tool calling, because Tools below
-			// defaults to web_fetch + agent: offering a tool to a model that can't
-			// use one hard-fails the turn. gpt-4o-mini is tool-capable and cheap;
-			// a deployment that prefers another model (e.g. a cost-effective Qwen)
-			// overrides this in its config file. Leaving it empty would fall back to
-			// the reasoning model, which isn't guaranteed tool-capable.
+			// Tools below is the palette an escalated agent may use; a tool-capable
+			// model is preferred. gpt-4o-mini is tool-capable and cheap; a deployment
+			// that prefers another model (e.g. a cost-effective Qwen) overrides this.
+			// Leaving it empty falls back to the reasoning model.
 			Provider: "openai",
 			Model:    "gpt-4o-mini",
-			// Agent enabled by default: chat can look things up (web_fetch) and
-			// delegate deep, multi-step work to the full agent. A request that
-			// sends its own chat_tools overrides this.
-			Tools: []string{"web_fetch", "agent"},
+			// web_fetch by default: the palette available to an escalated agent. A
+			// request that sends its own chat_tools overrides this.
+			Tools: []string{"web_fetch"},
 		},
 		Agent: AgentConfig{
-			DAGEnabled:       true,
-			DAGMode:          "orchestrator",
-			MaxNodes:         100,
-			MaxPerSkill:      10,
-			MaxLLMCalls:      20,
-			MaxObserverCalls: 50,
-			BatchSize:        5,
+			DAGEnabled:        true,
+			DAGMode:           "orchestrator",
+			MaxNodes:          100,
+			MaxPerSkill:       10,
+			MaxLLMCalls:       20,
+			MaxObserverCalls:  50,
+			BatchSize:         5,
 			MaxInvestigations: 5,
 			MaxReplans:        3,
-			MaxConcurrent:    3,
-			ExecutionMode:    "interactive",
+			MaxConcurrent:     3,
+			ExecutionMode:     "interactive",
 			// Default the routing decision to a small capable model so "does this
 			// need the agent?" is reliable. Overridable everywhere.
-			RouteProvider:    "openai",
-			RouteModel:       "gpt-5-mini",
-			WallClockSec:     180,
-			MaxTurns:         15,
-			RateLimit:        100,
-			SafetyLevel:      100,
+			RouteProvider:     "openai",
+			RouteModel:        "gpt-5-mini",
+			WallClockSec:      180,
+			MaxTurns:          15,
+			RateLimit:         100,
+			SafetyLevel:       100,
 			DataDir:           "~/.kaiju",
 			Workspace:         "", // defaults to ~/.kaiju/workspace (resolved in config.resolve)
 			ClassifierEnabled: &classifierOn,

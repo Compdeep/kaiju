@@ -15,22 +15,14 @@ type ChatTurn struct {
 	Model    string
 	History  []llm.Message
 	Query    string
-	// ToolNames is the request's API-driven tool allowlist. It drives ROUTING, not
-	// chat-lane execution: if it names any real tool, Chat sends the turn to the
-	// agent path (the chat lane itself is tool-less). Empty ⇒ pure chat.
-	ToolNames []string
-	Images    []string // data URIs; attached only if Model is vision-capable
-	Scope     *ResolvedScope
-	AlertID   string
-	MaxTurns  int
+	Images   []string // data URIs; attached only if Model is vision-capable
+	Scope    *ResolvedScope
+	AlertID  string
+	MaxTurns int
 	// SessionID correlates a routed agent sub-run's step events back to this
 	// conversation so the UI can show the agent working live. It is used for event
 	// attribution only — the sub-run writes no memory to it.
 	SessionID string
-	// MaxIntent is the resolved IGX safety rank for this turn (already capped by
-	// JWT/scope by the caller). nil ⇒ the registry default. It rides along on Base
-	// to gate an agent sub-run's tools.
-	MaxIntent *int
 	// Agent permits escalation: nil/true ⇒ the router MAY escalate this turn to the
 	// agent; false ⇒ stays in chat, never escalates. From the request's `agent`
 	// field. (Run the agent directly via execute mode, not this flag.)
@@ -74,7 +66,7 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// agent directly, callers use execute mode (chat_mode=false), not this lane.
 	// ChatTools is the palette the agent uses if it escalates, never the trigger.
 	mayEscalate := t.Agent == nil || *t.Agent
-	if mayEscalate && a.RouteChat(ctx, t.AlertID, t.Query, t.History) == "investigate" {
+	if mayEscalate && a.routeQuery(ctx, t.AlertID, t.Query, t.History) == "investigate" {
 		// Chat answers can be long. Force the aggregator (agg_mode=2, reasoning
 		// lane, full synthesis budget) so a reflection-concluded run doesn't hand
 		// back the 1024-token-capped reflection verdict truncated mid-sentence.
@@ -83,7 +75,6 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		return ChatResult{Content: verdict, Nodes: nodes, LLMCalls: llmCalls}, err
 	}
 	// Tool-less conversation.
-	t.ToolNames = nil
 	return a.Converse(ctx, t)
 }
 

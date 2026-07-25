@@ -19,9 +19,9 @@ import (
 	"github.com/Compdeep/kaiju/internal/api"
 	"github.com/Compdeep/kaiju/internal/auth"
 	"github.com/Compdeep/kaiju/internal/channels"
-	kaijuclr "github.com/Compdeep/kaiju/internal/clearance"
 	"github.com/Compdeep/kaiju/internal/channels/cli"
 	"github.com/Compdeep/kaiju/internal/channels/web"
+	kaijuclr "github.com/Compdeep/kaiju/internal/clearance"
 	"github.com/Compdeep/kaiju/internal/compat/ipc"
 	"github.com/Compdeep/kaiju/internal/compat/protocol"
 	"github.com/Compdeep/kaiju/internal/config"
@@ -30,8 +30,8 @@ import (
 	"github.com/Compdeep/kaiju/internal/memory"
 	"github.com/Compdeep/kaiju/internal/plugins"
 	"github.com/Compdeep/kaiju/internal/skillhub"
-	"github.com/Compdeep/kaiju/internal/workspace"
 	kaijutools "github.com/Compdeep/kaiju/internal/tools"
+	"github.com/Compdeep/kaiju/internal/workspace"
 )
 
 var version = "dev"
@@ -70,7 +70,6 @@ func main() {
 		os.Exit(1)
 	}
 }
-
 
 func printUsage() {
 	fmt.Println(`kaiju — general-purpose AI assistant
@@ -315,36 +314,36 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	}
 
 	agentCfg := agent.Config{
-		LLMEndpoint:       cfg.LLM.Endpoint,
-		LLMAPIKey:         cfg.LLM.APIKey,
-		LLMModel:          cfg.LLM.Model,
-		Providers:         buildProviderCreds(cfg.Providers),
-		MaxTurns:          cfg.Agent.MaxTurns,
-		Temperature:       cfg.LLM.Temperature,
-		MaxTokens:         cfg.LLM.MaxTokens,
-		RateLimit:         cfg.Agent.RateLimit,
-		NodeClearance:     cfg.Agent.SafetyLevel,
-		NodeRole:          "node",
-		DataDir:           cfg.Agent.DataDir,
-		Workspace:         cfg.Agent.Workspace,
-		MetadataDir:       cfg.Agent.MetadataDir,
-		CLIMode:           cfg.Agent.CLIMode,
-		NodeID:            "kaiju-local",
-		DAGEnabled:        cfg.Agent.DAGEnabled,
-		DAGMode:           cfg.Agent.DAGMode,
-		MaxNodes:          cfg.Agent.MaxNodes,
-		MaxPerSkill:       cfg.Agent.MaxPerSkill,
-		MaxLLMCalls:       cfg.Agent.MaxLLMCalls,
-		MaxObserverCalls:  cfg.Agent.MaxObserverCalls,
-		BatchSize:         cfg.Agent.BatchSize,
-		MaxInvestigations: cfg.Agent.MaxInvestigations,
-		MaxReplans:        cfg.Agent.MaxReplans,
+		LLMEndpoint:                 cfg.LLM.Endpoint,
+		LLMAPIKey:                   cfg.LLM.APIKey,
+		LLMModel:                    cfg.LLM.Model,
+		Providers:                   buildProviderCreds(cfg.Providers),
+		MaxTurns:                    cfg.Agent.MaxTurns,
+		Temperature:                 cfg.LLM.Temperature,
+		MaxTokens:                   cfg.LLM.MaxTokens,
+		RateLimit:                   cfg.Agent.RateLimit,
+		NodeClearance:               cfg.Agent.SafetyLevel,
+		NodeRole:                    "node",
+		DataDir:                     cfg.Agent.DataDir,
+		Workspace:                   cfg.Agent.Workspace,
+		MetadataDir:                 cfg.Agent.MetadataDir,
+		CLIMode:                     cfg.Agent.CLIMode,
+		NodeID:                      "kaiju-local",
+		DAGEnabled:                  cfg.Agent.DAGEnabled,
+		DAGMode:                     cfg.Agent.DAGMode,
+		MaxNodes:                    cfg.Agent.MaxNodes,
+		MaxPerSkill:                 cfg.Agent.MaxPerSkill,
+		MaxLLMCalls:                 cfg.Agent.MaxLLMCalls,
+		MaxObserverCalls:            cfg.Agent.MaxObserverCalls,
+		BatchSize:                   cfg.Agent.BatchSize,
+		MaxInvestigations:           cfg.Agent.MaxInvestigations,
+		MaxReplans:                  cfg.Agent.MaxReplans,
 		MaxConcurrentInvestigations: cfg.Agent.MaxConcurrent,
-		DisableCoding:     cfg.Agent.DisableCoding,
-		ExecutionMode:     cfg.Agent.ExecutionMode,
-		DAGWallClock:      time.Duration(cfg.Agent.WallClockSec) * time.Second,
-		ComputeTimeout:    time.Duration(cfg.Tools.Compute.TimeoutSec) * time.Second,
-		ClassifierEnabled: classifierEnabled,
+		DisableCoding:               cfg.Agent.DisableCoding,
+		ExecutionMode:               cfg.Agent.ExecutionMode,
+		DAGWallClock:                time.Duration(cfg.Agent.WallClockSec) * time.Second,
+		ComputeTimeout:              time.Duration(cfg.Tools.Compute.TimeoutSec) * time.Second,
+		ClassifierEnabled:           classifierEnabled,
 	}
 
 	// Bootstrap workspace on first run
@@ -654,11 +653,9 @@ func runChat() {
 				Model:     cm,
 				History:   history,
 				Query:     msg.Text,
-				ToolNames: toolNames,
 				Scope:     scope,
 				AlertID:   fmt.Sprintf("cli-%d", time.Now().UnixNano()),
 				SessionID: sessionID,
-				MaxIntent: maxIntent,
 				// Base is copied for an escalated agent sub-run. Carry the session,
 				// history, and intent; leave models empty so it uses the configured
 				// reasoning/executor lanes (the CLI does no per-request model routing).

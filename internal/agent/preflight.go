@@ -65,11 +65,16 @@ type preflightRaw struct {
  * never loads the skills it won't use. Fails safe to "investigate" so a real
  * request is never misrouted to chat.
  */
-func (a *Agent) routeQuery(ctx context.Context, alertID, query string) string {
+func (a *Agent) routeQuery(ctx context.Context, alertID, query string, history []llm.Message) string {
 	started := time.Now()
 	trace := LLMTrace{AlertID: alertID, NodeType: "preflight", Tag: "route", Started: started, System: prompt.Route, User: query}
+	// Give the router just enough context to interpret a terse follow-up, then the
+	// current message. See routeContext for what's included (summary + last turn).
+	msgs := []llm.Message{{Role: "system", Content: prompt.Route}}
+	msgs = append(msgs, routeContext(history)...)
+	msgs = append(msgs, llm.Message{Role: "user", Content: query})
 	resp, err := a.completeRoute(ctx, &llm.ChatRequest{
-		Messages:    []llm.Message{{Role: "system", Content: prompt.Route}, {Role: "user", Content: query}},
+		Messages:    msgs,
 		Tools:       []llm.ToolDef{routeToolDef()},
 		ToolChoice:  "required",
 		Temperature: 0.0,
@@ -111,6 +116,37 @@ func (a *Agent) routeQuery(ctx context.Context, alertID, query string) string {
 	default:
 		return "chat"
 	}
+}
+
+// routeContext returns a MINIMAL slice of chat history for the router: the running
+// "[Conversation summary]" system message (if compaction produced one) plus the
+// previous user↔assistant exchange, the assistant reply capped. History ends with
+// the CURRENT user message, so that last entry is dropped (it's passed separately
+// as the query). Enough to resolve terse follow-ups ("try again", "now compare
+// them") without bloating a 16-token classification.
+func routeContext(history []llm.Message) []llm.Message {
+	if len(history) <= 1 {
+		return nil
+	}
+	var out []llm.Message
+	for _, m := range history {
+		if m.Role == "system" && strings.HasPrefix(m.Content, "[Conversation summary]") {
+			out = append(out, m)
+			break
+		}
+	}
+	prior := history[:len(history)-1] // drop the current user message
+	start := len(prior) - 2
+	if start < 0 {
+		start = 0
+	}
+	for _, m := range prior[start:] {
+		if m.Role == "assistant" && len(m.Content) > 500 {
+			m.Content = m.Content[:500] + "…"
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // The fused preflightQuery wrapper (route + classify in one call) was split: the

@@ -141,7 +141,7 @@
               </div>
               <div class="form-group">
                 <label>tools chat can use</label>
-                <div class="model-desc">enable <strong>agent</strong> to let chat run multi-step work; <strong>web_fetch</strong> for quick lookups. Others are advanced.</div>
+                <div class="model-desc">the palette the agent uses when chat hands off multi-step work (it escalates automatically). <strong>web_fetch</strong> covers quick lookups; others are advanced.</div>
                 <div class="tool-picker">
                   <label v-for="t in availableTools" :key="t.name" class="tool-chk" :title="t.description">
                     <input type="checkbox" :checked="chatToolsHas(t.name)" @change="toggleChatTool(t.name)" />

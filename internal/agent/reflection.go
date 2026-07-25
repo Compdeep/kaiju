@@ -232,17 +232,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	var toolSection strings.Builder
 	toolSection.WriteString("\n## Available Tools (for re-investigation)\n")
 	toolSection.WriteString(fmt.Sprintf("Only tools with impact ≤ %d (%s) will succeed.\n\n", int(resolvedIntent), resolvedIntent))
-	for _, name := range a.registry.List() {
-		skill, ok := a.registry.Get(name)
-		if !ok {
-			continue
-		}
-		rank := a.intentRegistry.ResolveToolIntent(name, skill, nil)
-		if rank > int(resolvedIntent) {
-			continue
-		}
-		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
-	}
+	a.toolSectionLines(&toolSection, int(resolvedIntent), agentToolName)
 
 	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Interjection) + toolSection.String() + a.fleetSection()
 

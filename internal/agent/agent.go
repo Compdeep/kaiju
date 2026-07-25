@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,7 +39,6 @@ type IPCSender interface {
 	Send(env ipc.Envelope) error
 }
 
-
 /*
  * ResolvedScope defines the effective tool permissions for a request.
  * desc: nil means full access (local CLI user, backward-compatible).
@@ -58,27 +59,27 @@ type ResolvedScope struct {
  *       access scope, session ID, and conversation history.
  */
 type Trigger struct {
-	Type      string          `json:"type"`       // "chat_query", "api_query", "scheduled", "event", "command"
-	AlertID   string          `json:"alert_id"`
-	Data      json.RawMessage `json:"data"`
-	Source    string          `json:"source"`      // peer ID or "local"
-	DAGMode   string          `json:"dag_mode"`    // optional override: "reflect", "nReflect", "orchestrator"
-	DataDir   string          `json:"data_dir"`    // override data dir for retrieval skills (relay/gateway use temp path)
-	MaxIntent *int            `json:"max_intent,omitempty"` // optional IGX cap (can only lower intent, never escalate)
-	Scope     *ResolvedScope  `json:"scope,omitempty"`      // tool access scope (nil = full access)
-	SessionID string          `json:"session_id,omitempty"` // conversation session for memory
-	History   []llm.Message   `json:"history,omitempty"`    // conversation history
-	AggMode       int    `json:"agg_mode,omitempty"`        // 0=skip aggregator, 1=executor model (default), 2=reasoning model
-	ExecutionMode string `json:"execution_mode,omitempty"` // per-request override: "interactive" or "autonomous"
+	Type          string          `json:"type"` // "chat_query", "api_query", "scheduled", "event", "command"
+	AlertID       string          `json:"alert_id"`
+	Data          json.RawMessage `json:"data"`
+	Source        string          `json:"source"`                   // peer ID or "local"
+	DAGMode       string          `json:"dag_mode"`                 // optional override: "reflect", "nReflect", "orchestrator"
+	DataDir       string          `json:"data_dir"`                 // override data dir for retrieval skills (relay/gateway use temp path)
+	MaxIntent     *int            `json:"max_intent,omitempty"`     // optional IGX cap (can only lower intent, never escalate)
+	Scope         *ResolvedScope  `json:"scope,omitempty"`          // tool access scope (nil = full access)
+	SessionID     string          `json:"session_id,omitempty"`     // conversation session for memory
+	History       []llm.Message   `json:"history,omitempty"`        // conversation history
+	AggMode       int             `json:"agg_mode,omitempty"`       // 0=skip aggregator, 1=executor model (default), 2=reasoning model
+	ExecutionMode string          `json:"execution_mode,omitempty"` // per-request override: "interactive" or "autonomous"
 	// Per-request model routing (all optional; empty ⇒ configured default).
 	// Provider is a name in cfg.Providers; Model is that provider's model id.
 	// Heavy lane = executive/aggregator/reasoning; Light lane = the executor
 	// (classify/route/reflect/observe). Keys are never carried here.
-	Provider         string `json:"provider,omitempty"`
-	Model            string `json:"model,omitempty"`
-	ExecutorProvider string `json:"executor_provider,omitempty"`
-	ExecutorModel    string `json:"executor_model,omitempty"`
-	HeartbeatThreshold int `json:"heartbeat_threshold,omitempty"` // consecutive stuck ticks before kernel interjects (0 = default 3; raise for long-running work like downloads)
+	Provider           string `json:"provider,omitempty"`
+	Model              string `json:"model,omitempty"`
+	ExecutorProvider   string `json:"executor_provider,omitempty"`
+	ExecutorModel      string `json:"executor_model,omitempty"`
+	HeartbeatThreshold int    `json:"heartbeat_threshold,omitempty"` // consecutive stuck ticks before kernel interjects (0 = default 3; raise for long-running work like downloads)
 }
 
 /*
@@ -129,15 +130,15 @@ func (t Trigger) Intent() gates.Intent {
  *       DAG engine parameters, embedding configuration, and paths.
  */
 type Config struct {
-	LLMEndpoint   string
-	LLMAPIKey     string
-	LLMModel      string
+	LLMEndpoint string
+	LLMAPIKey   string
+	LLMModel    string
 	// Providers is the credential catalog for per-request model routing,
 	// keyed by provider name (openai, anthropic, openrouter, selfhosted, …).
 	// Built into one llm.Client per provider at boot; a request selects a
 	// provider+model and kaiju routes to the matching keyed client. Keys live
 	// only here — requests carry a selection, never a key.
-	Providers map[string]ProviderCreds
+	Providers     map[string]ProviderCreds
 	MaxTurns      int
 	Temperature   float64
 	MaxTokens     int
@@ -145,24 +146,24 @@ type Config struct {
 	NodeClearance int    // IGX clearance (0 = default 1)
 	NodeRole      string // "node" or "coordinator"
 	DataDir       string
-	Workspace     string    // where files are written (cwd in CLI mode, sandbox in web mode)
-	MetadataDir   string    // where blueprints, worklog, sessions live (.kaiju/ in CLI, same as workspace in web)
-	CLIMode       bool      // true = workspace is cwd, no project/ prefix, .kaiju/ for metadata
+	Workspace     string // where files are written (cwd in CLI mode, sandbox in web mode)
+	MetadataDir   string // where blueprints, worklog, sessions live (.kaiju/ in CLI, same as workspace in web)
+	CLIMode       bool   // true = workspace is cwd, no project/ prefix, .kaiju/ for metadata
 	NodeID        string
 
 	// DAG engine (optimistic parallel investigation)
-	DAGEnabled   bool
-	DAGMode      string // "reflect", "nReflect", "orchestrator" (default: "orchestrator")
-	MaxNodes     int
-	MaxPerSkill  int
-	MaxLLMCalls  int
-	MaxObserverCalls int  // separate budget for observer LLM calls (default: 50)
-	BatchSize    int   // nodes completed before injecting reflection in nReflect mode (default: 5)
-	MaxInvestigations int // max investigation cycles (Holmes + fix attempts) before forcing conclude (default: 1)
-	MaxReplans int // max EXPAND replan cycles (successful wave → executive plans next steps) before forcing conclude (default: 3)
-	MaxHolmesIters int // max ReAct iterations per Holmes investigation (default: 5)
-	ExecutionMode  string // "interactive" (chat allowed) or "autonomous" (always investigate)
-	DAGWallClock   time.Duration
+	DAGEnabled                  bool
+	DAGMode                     string // "reflect", "nReflect", "orchestrator" (default: "orchestrator")
+	MaxNodes                    int
+	MaxPerSkill                 int
+	MaxLLMCalls                 int
+	MaxObserverCalls            int    // separate budget for observer LLM calls (default: 50)
+	BatchSize                   int    // nodes completed before injecting reflection in nReflect mode (default: 5)
+	MaxInvestigations           int    // max investigation cycles (Holmes + fix attempts) before forcing conclude (default: 1)
+	MaxReplans                  int    // max EXPAND replan cycles (successful wave → executive plans next steps) before forcing conclude (default: 3)
+	MaxHolmesIters              int    // max ReAct iterations per Holmes investigation (default: 5)
+	ExecutionMode               string // "interactive" (chat allowed) or "autonomous" (always investigate)
+	DAGWallClock                time.Duration
 	MaxConcurrentInvestigations int // scheduler worker-pool size; 0 => defaultConcurrency (1). Raise once per-principal fairness lands.
 
 	// Embeddings (semantic skill routing)
@@ -229,9 +230,9 @@ type ClearanceChecker interface {
  *       embeddings, skill watching, fleet context, and live DAG streaming.
  */
 type Agent struct {
-	cfg         Config
-	llm         *llm.Client     // reasoning model (executive, aggregator, classifier)
-	executor    *llm.Client     // executor model (reflection, observer, micro-planner)
+	cfg      Config
+	llm      *llm.Client // reasoning model (executive, aggregator, classifier)
+	executor *llm.Client // executor model (reflection, observer, micro-planner)
 	// providerClients holds one client per configured provider for per-request
 	// model routing (see model_route.go). Nil/empty ⇒ routing off, everything
 	// uses llm/executor as today.
@@ -241,42 +242,42 @@ type Agent struct {
 	visionProvider string
 	visionModel    string
 	// Chat lane default — direct completion, no planner/tools. Empty ⇒ reasoning.
-	chatProvider string
-	chatModel    string
-	chatTools    []string
-	routeProvider string
-	routeModel    string
-	registry    *tools.Registry
-	gate        *gates.Gate
-	clearanceCheck ClearanceChecker // external authorization (nil = no check)
-	clearance         *localClearance // IGX node clearance
-	clearanceExplicit bool            // true if cfg.NodeClearance was set; false means we're on the bootstrap default
-	memory      *Memory
-	gossip      GossipPublisher
-	ipc         IPCSender
-	triggers    chan Trigger
-	embedStore  *EmbeddingStore // nil if embeddings disabled
-	embedClient *llm.Client    // nil if embeddings disabled
+	chatProvider      string
+	chatModel         string
+	chatTools         []string
+	routeProvider     string
+	routeModel        string
+	registry          *tools.Registry
+	gate              *gates.Gate
+	clearanceCheck    ClearanceChecker // external authorization (nil = no check)
+	clearance         *localClearance  // IGX node clearance
+	clearanceExplicit bool             // true if cfg.NodeClearance was set; false means we're on the bootstrap default
+	memory            *Memory
+	gossip            GossipPublisher
+	ipc               IPCSender
+	triggers          chan Trigger
+	embedStore        *EmbeddingStore // nil if embeddings disabled
+	embedClient       *llm.Client     // nil if embeddings disabled
 
-	soulPrompt    string // from SOUL.md → BOOT.md body → default
-	skillWatcher  *skillmd.Watcher
-	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
-	fleet         FleetContextProvider // nil on standalone nodes
-	capabilities  CapabilityRegistry   // composable prompt cards
-	intentRegistry *IntentRegistry     // DB-backed intent registry; loaded at startup
+	soulPrompt     string // from SOUL.md → BOOT.md body → default
+	skillWatcher   *skillmd.Watcher
+	skillGuidance  map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
+	fleet          FleetContextProvider        // nil on standalone nodes
+	capabilities   CapabilityRegistry          // composable prompt cards
+	intentRegistry *IntentRegistry             // DB-backed intent registry; loaded at startup
 	// Per-investigation state (active skill cards, preflight result) lives on the
 	// Graph (Graph.ActiveCards / Graph.Preflight), not on the Agent — concurrent
 	// investigations each carry their own Graph, so nothing here is shared or raced.
-	eventStore    *store.Store          // nil if no event store
+	eventStore *store.Store // nil if no event store
 
-	kernel        *Kernel          // core runtime — owns the scheduler + investigation lifecycle
+	kernel *Kernel // core runtime — owns the scheduler + investigation lifecycle
 
 	// DAG observation (live thought process streaming). Subscribers receive every
 	// investigation's events; each event is tagged with its own Graph's SessionID
 	// at emission, so consumers can route by session.
-	dagMu      sync.RWMutex
-	dagSubs    map[int]chan DAGEvent // subscriber ID → channel
-	dagSubID   int
+	dagMu    sync.RWMutex
+	dagSubs  map[int]chan DAGEvent // subscriber ID → channel
+	dagSubID int
 }
 
 /*
@@ -633,6 +634,32 @@ func (a *Agent) relevantTools(ctx context.Context, triggerText string, scope *Re
 	return filtered
 }
 
+// toolSectionLines appends the body of an "## Available Tools" section to sb — one
+// bullet "- **name**: desc — `params`" per registered tool whose resolved intent
+// rank is within `intent`. Names in `exclude` are skipped: the self-spawn guards
+// (agent everywhere; debug for Holmes) live here so every DAG node that lists tools
+// to a model applies them the same way the executive's relevantTools does. The
+// caller writes its own header/caption; this writes only the tool bullets.
+func (a *Agent) toolSectionLines(sb *strings.Builder, intent int, exclude ...string) {
+	skip := make(map[string]bool, len(exclude))
+	for _, n := range exclude {
+		skip[n] = true
+	}
+	for _, name := range a.registry.List() {
+		if skip[name] {
+			continue
+		}
+		sk, ok := a.registry.Get(name)
+		if !ok {
+			continue
+		}
+		if a.intentRegistry.ResolveToolIntent(name, sk, nil) > intent {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, sk.Description(), string(sk.Parameters())))
+	}
+}
+
 /*
  * Interject sends a user message to an active investigation.
  * desc: Non-blocking enqueue of a human message for injection into the
@@ -960,4 +987,3 @@ func (a *Agent) UpdateGate(rateLimit, maxTurns *int, lockdown *bool) {
 		a.gate.SetLockdown(*lockdown)
 	}
 }
-

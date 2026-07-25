@@ -21,8 +21,8 @@ import (
 type observerOutput struct {
 	Action string     `json:"action"` // "continue", "inject", "cancel", "reflect"
 	Reason string     `json:"reason"`
-	Nodes  []PlanStep `json:"nodes"`    // set when action == "inject"
-	Cancel []string   `json:"cancel"`   // tags/IDs to cancel when action == "cancel"
+	Nodes  []PlanStep `json:"nodes"`  // set when action == "inject"
+	Cancel []string   `json:"cancel"` // tags/IDs to cancel when action == "cancel"
 }
 
 // defaultObserverRolePrompt moved to prompt.Observer
@@ -111,19 +111,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	var toolSection strings.Builder
 	toolSection.WriteString("\n## Available Tools (for injection)\n")
 	toolSection.WriteString(fmt.Sprintf("Only tools with impact ≤ %d (%s) will succeed.\n\n", int(resolvedIntent), resolvedIntent))
-	for _, name := range a.registry.List() {
-		skill, ok := a.registry.Get(name)
-		if !ok {
-			continue
-		}
-		// Resolve through the intent registry (honors DB pins;
-		// compiled Impact() already returns ranks on the same scale).
-		rank := a.intentRegistry.ResolveToolIntent(name, skill, nil)
-		if rank > int(resolvedIntent) {
-			continue
-		}
-		toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, skill.Description(), string(skill.Parameters())))
-	}
+	a.toolSectionLines(&toolSection, int(resolvedIntent), agentToolName)
 
 	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Observer) + toolSection.String() + a.fleetSection()
 	userPrompt := sb.String()

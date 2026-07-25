@@ -305,16 +305,17 @@ function onVisionProviderChange() {
 }
 
 /**
- * desc: Models for the selected chat provider. Prefer the chat-flagged tunes
- *   (conversation / roleplay) so the list stays relevant; if a provider has none
- *   flagged, fall back to all its models so nothing is hidden.
+ * desc: Models for the selected chat provider. The chat lane is tool-less, so ANY
+ *   model works there — show the full provider list (like the executor picker),
+ *   with the chat-flagged tunes (RP / uncensored / conversation) sorted to the top
+ *   for relevance.
  * @returns {Array<Object>}
  */
 const chatModels = computed(() => {
   const p = chatProvider.value || cfg.value.llm.provider
-  const all = allModels.value.filter(m => m.provider === p)
-  const chatOnly = all.filter(m => m.chat)
-  return chatOnly.length ? chatOnly : all
+  return allModels.value
+    .filter(m => m.provider === p)
+    .sort((a, b) => (b.chat ? 1 : 0) - (a.chat ? 1 : 0))
 })
 
 /**

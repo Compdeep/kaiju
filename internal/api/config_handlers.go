@@ -328,8 +328,8 @@ var allModels = []modelInfo{
 
 	// Qwen — non-thinking instruct (good for the reasoning/executor lanes: tools + no <think>)
 	{ID: "qwen/qwen3-max", Name: "Qwen3 Max (flagship)", Provider: "openrouter", Context: "262K"},
-	{ID: "qwen/qwen3-235b-a22b-2507", Name: "Qwen3 235B 2507 (non-thinking)", Provider: "openrouter", Context: "262K"},
-	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Name: "Qwen3 30B 2507 (non-thinking)", Provider: "openrouter", Context: "131K"},
+	{ID: "qwen/qwen3-235b-a22b-2507", Name: "Qwen3 235B 2507 (non-thinking)", Provider: "openrouter", Context: "262K", Chat: true},
+	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Name: "Qwen3 30B 2507 (non-thinking)", Provider: "openrouter", Context: "131K", Chat: true},
 	// Qwen3 (thinking variants)
 	{ID: "qwen/qwen3-235b-a22b", Name: "Qwen3 235B", Provider: "openrouter", Context: "128K"},
 	{ID: "qwen/qwen3-30b-a3b", Name: "Qwen3 30B", Provider: "openrouter", Context: "128K"},
@@ -358,6 +358,11 @@ var allModels = []modelInfo{
 	{ID: "nousresearch/hermes-4-405b", Name: "Hermes 4 405B (permissive)", Provider: "openrouter", Context: "131K", Chat: true},
 	{ID: "cognitivecomputations/dolphin-mistral-24b-venice-edition", Name: "Dolphin Venice 24B (uncensored)", Provider: "openrouter", Context: "128K", Chat: true},
 	{ID: "thedrummer/skyfall-36b-v2", Name: "Skyfall 36B (RP)", Provider: "openrouter", Context: "32K", Chat: true},
+	// Chinese frontier MoEs — large, high quality, low Western refusal (they carry
+	// their own China-political guardrails). Assistant-tuned rather than RP tunes,
+	// but permissive and much smarter than a small "uncensored" fine-tune.
+	{ID: "z-ai/glm-4.6", Name: "GLM-4.6 (large · permissive)", Provider: "openrouter", Context: "204K", Chat: true},
+	{ID: "z-ai/glm-4.5-air", Name: "GLM-4.5 Air (permissive · cheap)", Provider: "openrouter", Context: "131K", Chat: true},
 
 	// OpenRouter — other popular models
 	{ID: "anthropic/claude-sonnet-4", Name: "Claude Sonnet 4", Provider: "openrouter", Context: "200K"},

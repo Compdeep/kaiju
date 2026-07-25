@@ -346,6 +346,15 @@ var allModels = []modelInfo{
 	{ID: "qwen/qwen-2.5-vl-72b-instruct", Name: "Qwen 2.5 VL 72B (Vision)", Provider: "openrouter", Context: "128K", Vision: true},
 	{ID: "qwen/qwen-2.5-vl-7b-instruct", Name: "Qwen 2.5 VL 7B (Vision)", Provider: "openrouter", Context: "32K", Vision: true},
 
+	// Tool-capable reasoning / executor models (call tools — safe for the planner).
+	// Kimi K2 is a top agentic tool-caller; the smaller ones are cheap executors.
+	{ID: "moonshotai/kimi-k2", Name: "Kimi K2 (agentic · best tool-use)", Provider: "openrouter", Context: "131K"},
+	{ID: "moonshotai/kimi-k2-0905", Name: "Kimi K2 0905 (agentic · 262K)", Provider: "openrouter", Context: "262K"},
+	{ID: "deepseek/deepseek-v3.2", Name: "DeepSeek V3.2 (strong · cheap)", Provider: "openrouter", Context: "163K"},
+	{ID: "mistralai/mistral-small-3.2-24b-instruct", Name: "Mistral Small 3.2 24B (cheap executor)", Provider: "openrouter", Context: "256K"},
+	{ID: "qwen/qwen3-coder-30b-a3b-instruct", Name: "Qwen3 Coder 30B (clean tool JSON)", Provider: "openrouter", Context: "262K"},
+	{ID: "qwen/qwen3.7-plus", Name: "Qwen3.7 Plus (flagship · unverified)", Provider: "openrouter", Context: "1M"},
+
 	// Roleplay / creative / uncensored fine-tunes — NO tool-calling; use the chat
 	// lane, not the planner (they 404 on tools). Good for conversation / RP.
 	// Chat:true surfaces them in the settings chat-model picker.

@@ -33,6 +33,13 @@ type ExecuteRequest struct {
 	// tools (a bounded reason-act loop, still no planner); the list is also the
 	// execution permission, so the lane never inherits a broader tool scope.
 	ChatTools []string `json:"chat_tools,omitempty"`
+	// Agent permits chat→agent escalation. nil (omitted) ⇒ DEFAULT: allowed — the
+	// router may route this turn to the agent when it needs more than a
+	// conversational answer. false ⇒ pure chat, never escalates. true ⇒ explicit
+	// allow (same as default). ChatTools is the palette the agent uses if it runs.
+	// To run the agent directly, use execute mode (ChatMode=false), not this flag.
+	// Only consulted when ChatMode is true.
+	Agent *bool `json:"agent,omitempty"`
 	// Regenerate re-runs the last turn: the previous assistant reply is dropped
 	// and the last user message is answered again. Query is ignored (taken from
 	// history). Session-scoped and ownership-checked.

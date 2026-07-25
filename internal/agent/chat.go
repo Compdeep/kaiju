@@ -31,6 +31,10 @@ type ChatTurn struct {
 	// JWT/scope by the caller). nil ⇒ the registry default. It rides along on Base
 	// to gate an agent sub-run's tools.
 	MaxIntent *int
+	// Agent permits escalation: nil/true ⇒ the router MAY escalate this turn to the
+	// agent; false ⇒ stays in chat, never escalates. From the request's `agent`
+	// field. (Run the agent directly via execute mode, not this flag.)
+	Agent *bool
 	// Base is the request's Trigger. When the turn goes to the agent, the sub-run
 	// is a COPY of this — so it inherits everything the request specified (models,
 	// intent, scope, session, history) with nothing to thread by hand.
@@ -63,19 +67,14 @@ type ChatResult struct {
 // The agent's steps stream as DAG events for live progress; its models, intent,
 // scope, and history are inherited from the request's Base trigger.
 func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
-	agentOffered := false
-	wantsTool := false
-	for _, n := range t.ToolNames {
-		if n == agentToolName {
-			agentOffered = true // the "agent" marker is escalation permission, not a tool
-			continue
-		}
-		wantsTool = true
-	}
-	// Any real tool ⇒ the agent path. With no tool named, ask the classifier
-	// whether an offered agent should still pick this turn up (e.g. "investigate X"
-	// phrased as plain chat).
-	if wantsTool || (agentOffered && a.RouteChat(ctx, t.AlertID, t.Query) == "investigate") {
+	// Escalate to the agent only when this turn is PERMITTED to (t.Agent, default
+	// true — nil means allowed) AND the tuned router — reading the latest message in
+	// context (running summary + last exchange) — judges it needs more than a
+	// conversational answer. agent=false ⇒ pure chat, never escalates. To run the
+	// agent directly, callers use execute mode (chat_mode=false), not this lane.
+	// ChatTools is the palette the agent uses if it escalates, never the trigger.
+	mayEscalate := t.Agent == nil || *t.Agent
+	if mayEscalate && a.RouteChat(ctx, t.AlertID, t.Query, t.History) == "investigate" {
 		// Chat answers can be long. Force the aggregator (agg_mode=2, reasoning
 		// lane, full synthesis budget) so a reflection-concluded run doesn't hand
 		// back the 1024-token-capped reflection verdict truncated mid-sentence.

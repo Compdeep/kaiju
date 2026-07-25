@@ -400,6 +400,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			AlertID:   trigger.AlertID,
 			SessionID: req.SessionID,
 			MaxIntent: &intent, // resolved + JWT/scope-capped above; gates chat-lane tools
+			Agent:     req.Agent, // nil/true ⇒ escalation allowed; false ⇒ pure chat
 			// Base carries the whole request (models, intent, scope, session, history)
 			// so an escalated agent sub-run inherits it by value — nothing dropped.
 			Base: trigger,

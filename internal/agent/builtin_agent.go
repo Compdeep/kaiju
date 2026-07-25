@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
@@ -106,6 +107,6 @@ func (a *Agent) RunAgentTask(ctx context.Context, base Trigger, task string) (ve
 // RouteChat classifies a chat message with the tuned router (chat / meta /
 // investigate). The chat front door uses it to decide, reliably, whether a turn
 // needs the agent — instead of leaving that to the chat model's tool-choice.
-func (a *Agent) RouteChat(ctx context.Context, alertID, query string) string {
-	return a.routeQuery(ctx, alertID, query)
+func (a *Agent) RouteChat(ctx context.Context, alertID, query string, history []llm.Message) string {
+	return a.routeQuery(ctx, alertID, query, history)
 }

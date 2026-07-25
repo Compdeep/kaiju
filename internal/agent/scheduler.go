@@ -189,7 +189,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			pf.Mode = "investigate"
 		} else {
 			// Interactive: route first; chat & meta short-circuit before plan-prep.
-			switch a.routeQuery(ctx, trigger.AlertID, query) {
+			switch a.routeQuery(ctx, trigger.AlertID, query, trigger.History) {
 			case "chat":
 				pf = &PreflightResult{Mode: "chat"}
 			case "meta":

@@ -63,12 +63,12 @@ type RCAReport struct {
  * sees all results on the next iteration.
  */
 type holmesOutput struct {
-	Reasoning  string          `json:"reasoning"`           // Holmes-voice prose
-	Hypothesis string          `json:"hypothesis"`          // current working theory
-	Actions    []holmesAction  `json:"actions,omitempty"`   // parallel read-only diagnostics
-	Action     *holmesAction   `json:"action,omitempty"`    // legacy single-action form (normalized into Actions during parse)
-	Conclude   bool            `json:"conclude"`            // true when investigation is done
-	RCA        *RCAReport      `json:"rca,omitempty"`       // populated when Conclude is true
+	Reasoning  string         `json:"reasoning"`         // Holmes-voice prose
+	Hypothesis string         `json:"hypothesis"`        // current working theory
+	Actions    []holmesAction `json:"actions,omitempty"` // parallel read-only diagnostics
+	Action     *holmesAction  `json:"action,omitempty"`  // legacy single-action form (normalized into Actions during parse)
+	Conclude   bool           `json:"conclude"`          // true when investigation is done
+	RCA        *RCAReport     `json:"rca,omitempty"`     // populated when Conclude is true
 }
 
 type holmesAction struct {
@@ -83,14 +83,14 @@ type holmesAction struct {
  * full history on every call so its deductions build on prior evidence.
  */
 type HolmesState struct {
-	Problem             string         `json:"problem"`                        // original symptom from reflector
-	InvestigationCount  int            `json:"investigation_count"`            // which investigation cycle this Holmes run belongs to
-	Iter                int            `json:"iter"`                           // 1-indexed iteration counter
-	MaxIter             int            `json:"max_iter"`                       // termination cap
-	History             []HolmesTurn   `json:"history"`                        // every prior thought + action + observation
-	Hypotheses          []string       `json:"hypotheses"`                     // every theory tested so far (cycle detection)
-	LastActionNodeIDs   []string       `json:"last_action_node_ids,omitempty"` // node IDs of the most recent parallel actions
-	LastActionNodeID    string         `json:"last_action_node_id,omitempty"`  // DEPRECATED: single-action compat; read during migration, never written
+	Problem            string       `json:"problem"`                        // original symptom from reflector
+	InvestigationCount int          `json:"investigation_count"`            // which investigation cycle this Holmes run belongs to
+	Iter               int          `json:"iter"`                           // 1-indexed iteration counter
+	MaxIter            int          `json:"max_iter"`                       // termination cap
+	History            []HolmesTurn `json:"history"`                        // every prior thought + action + observation
+	Hypotheses         []string     `json:"hypotheses"`                     // every theory tested so far (cycle detection)
+	LastActionNodeIDs  []string     `json:"last_action_node_ids,omitempty"` // node IDs of the most recent parallel actions
+	LastActionNodeID   string       `json:"last_action_node_id,omitempty"`  // DEPRECATED: single-action compat; read during migration, never written
 }
 
 /*
@@ -100,14 +100,14 @@ type HolmesState struct {
  * iteration fires), one per action in the same order.
  */
 type HolmesTurn struct {
-	Iter         int             `json:"iter"`
-	Reasoning    string          `json:"reasoning"`
-	Hypothesis   string          `json:"hypothesis"`
-	Actions      []holmesAction  `json:"actions,omitempty"`
-	Observations []string        `json:"observations,omitempty"`
+	Iter         int            `json:"iter"`
+	Reasoning    string         `json:"reasoning"`
+	Hypothesis   string         `json:"hypothesis"`
+	Actions      []holmesAction `json:"actions,omitempty"`
+	Observations []string       `json:"observations,omitempty"`
 	// Legacy fields for backward compat with in-flight investigations
 	Action      *holmesAction `json:"action,omitempty"`
-	Observation string          `json:"observation,omitempty"`
+	Observation string        `json:"observation,omitempty"`
 }
 
 /*
@@ -714,23 +714,9 @@ func assembleHolmesPrompt(state *HolmesState, trigger Trigger, a *Agent, intent 
 	if a != nil {
 		sb.WriteString("## Available Tools\n\n")
 		sb.WriteString("Use these for diagnostic READS only. Do NOT mutate state.\n\n")
-		for _, name := range a.registry.List() {
-			// Never offer `debug` to Holmes — a debug investigation must not
-			// spawn another debug (Holmes is read-only diagnosis; the fix comes
-			// from the microplanner afterward). Mirrors the agent-tool exclusion.
-			if name == debugToolName {
-				continue
-			}
-			sk, ok := a.registry.Get(name)
-			if !ok {
-				continue
-			}
-			rank := a.intentRegistry.ResolveToolIntent(name, sk, nil)
-			if rank > int(intent) {
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, sk.Description(), string(sk.Parameters())))
-		}
+		// Exclude debug (Holmes must not spawn another debug) and agent (no nested
+		// agent) — the self-spawn guards, consistent with the executive's list.
+		a.toolSectionLines(&sb, int(intent), debugToolName, agentToolName)
 		sb.WriteString("\n")
 	}
 

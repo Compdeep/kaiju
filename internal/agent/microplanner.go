@@ -224,17 +224,7 @@ func assembleDebuggerPrompt(mpNode *Node, gateCtx *ContextResponse, trigger Trig
 	if a != nil {
 		var toolSection strings.Builder
 		toolSection.WriteString("## Available Tools\n\n")
-		for _, name := range a.registry.List() {
-			sk, ok := a.registry.Get(name)
-			if !ok {
-				continue
-			}
-			rank := a.intentRegistry.ResolveToolIntent(name, sk, nil)
-			if rank > int(intent) {
-				continue
-			}
-			toolSection.WriteString(fmt.Sprintf("- **%s**: %s — `%s`\n", name, sk.Description(), string(sk.Parameters())))
-		}
+		a.toolSectionLines(&toolSection, int(intent), agentToolName)
 		sb.WriteString(toolSection.String())
 	}
 

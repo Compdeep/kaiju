@@ -358,44 +358,15 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		if len(visionImgs) > 0 {
 			ctx = agent.WithVisionImages(ctx, visionImgs)
 		}
-		// The chat lane's tool permission IS the tool list (API-driven). A request
-		// may name its own chat_tools; if it sends none, fall back to the instance
-		// default (chat.tools config). Empty ⇒ pure chat. The list does NOT inherit
-		// the JWT's broader scope — a chat turn can only run the tools named here.
-		chatTools := req.ChatTools
-		if len(chatTools) == 0 {
-			chatTools = a.agent.ChatTools()
-		}
-		// Cap the named tools by the caller's JWT/DB scope: a chat request can only
-		// use tools the principal is actually allowed. Wildcard "*" (or nil scope)
-		// means unrestricted, so leave the list untouched; otherwise drop anything
-		// outside the allowlist. Without this a request could name a tool broader
-		// than its clearance and reach it via the chat lane.
-		if scope != nil && !scope.AllowedTools["*"] {
-			kept := chatTools[:0]
-			for _, name := range chatTools {
-				if scope.AllowedTools[name] {
-					kept = append(kept, name)
-				}
-			}
-			chatTools = kept
-		}
-		var chatScope *agent.ResolvedScope
-		if len(chatTools) > 0 {
-			chatScope = &agent.ResolvedScope{AllowedTools: map[string]bool{}}
-			for _, name := range chatTools {
-				chatScope.AllowedTools[name] = true
-			}
-		}
-		// Chat front door: the classifier (not the model) decides whether this turn
-		// needs the agent. Same routing for every surface (API, CLI) lives in Chat.
+		// Chat front door: the router (not tool presence) decides whether this turn
+		// needs the agent. An escalated run's tools come from the JWT grant scope on
+		// the trigger, not a per-chat list. Same routing for every surface.
 		res, cerr := a.agent.Chat(ctx, agent.ChatTurn{
 			Provider:  cp,
 			Model:     cm,
 			History:   history,
 			Query:     req.Query,
 			Images:    visionImgs,
-			Scope:     chatScope,
 			AlertID:   trigger.AlertID,
 			SessionID: req.SessionID,
 			Agent:     req.Agent, // nil/true ⇒ escalation allowed; false ⇒ pure chat

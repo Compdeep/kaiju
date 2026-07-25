@@ -422,11 +422,6 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		}), "builtin")
 	}
 
-	// Agent tool: lets the chat lane delegate deep, multi-step work to the full
-	// executive. Always registered; kept out of the planner's own toolset
-	// (relevantTools) so it can only be invoked by a lane that names it.
-	reg.Replace(agent.NewAgentTool(ag), "builtin")
-
 	// Vision tool: lets the planner read an image mid-plan (a fetched screenshot,
 	// an uploaded photo) via the vision model. Only register it when a vision model
 	// is configured — without one it could only ever error.
@@ -633,14 +628,6 @@ func runChat() {
 				history, _ = memMgr.LoadChatHistory(ctx, sessionID, 40)
 			}
 			cp, cm := ag.ChatModel()
-			toolNames := ag.ChatTools()
-			var scope *agent.ResolvedScope
-			if len(toolNames) > 0 {
-				scope = &agent.ResolvedScope{AllowedTools: map[string]bool{}}
-				for _, n := range toolNames {
-					scope.AllowedTools[n] = true
-				}
-			}
 			// Apply the CLI /intent selection so the safety level gates chat tools
 			// and any escalated agent run, just like the API/UI.
 			var maxIntent *int
@@ -653,7 +640,6 @@ func runChat() {
 				Model:     cm,
 				History:   history,
 				Query:     msg.Text,
-				Scope:     scope,
 				AlertID:   fmt.Sprintf("cli-%d", time.Now().UnixNano()),
 				SessionID: sessionID,
 				// Base is copied for an escalated agent sub-run. Carry the session,

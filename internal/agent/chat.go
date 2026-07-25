@@ -16,7 +16,6 @@ type ChatTurn struct {
 	History  []llm.Message
 	Query    string
 	Images   []string // data URIs; attached only if Model is vision-capable
-	Scope    *ResolvedScope
 	AlertID  string
 	MaxTurns int
 	// SessionID correlates a routed agent sub-run's step events back to this

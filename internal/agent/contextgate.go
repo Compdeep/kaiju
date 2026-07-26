@@ -90,6 +90,7 @@ type SourceSpec struct {
 	Name      string
 	Params    map[string]any
 	TailTrunc bool // when true, truncation keeps the END of the content (newest entries) instead of the beginning
+	Weight    int  // relative share in fairShareAllocate (default 1). Higher = more of the shared budget — e.g. node results (the payload: URLs + evidence) outrank the worklog.
 }
 
 // ContextResponse is what callers receive from Get().
@@ -267,44 +268,64 @@ func fairShareAllocate(sources []loadedSource, budget int) ([]string, []string) 
 
 	allocated := make([]string, n)
 	settled := make([]bool, n)
+	weight := make([]int, n)
 	var trimmed []string
 
+	// Weighted shares: a source with Weight w gets w/ΣW of the remaining budget.
+	// Default weight is 1 (equal fair-share, the old behaviour); node results run
+	// at 3 so the worklog can't halve the URLs + evidence the next frame needs.
 	remaining := budget
-	unsettled := n
-
-	// Iterate until all sources are settled. Each pass settles at least one
-	// source (any that fit within their share), so this converges in ≤ n passes.
-	for unsettled > 0 {
-		share := remaining / unsettled
-		if share <= 0 {
-			share = 0
+	unsettledW := 0
+	for i, s := range sources {
+		w := s.spec.Weight
+		if w <= 0 {
+			w = 1
 		}
+		weight[i] = w
+		if s.content == "" {
+			settled[i] = true // nothing to allocate
+		} else {
+			unsettledW += w
+		}
+	}
+	shareOf := func(i int) int {
+		if unsettledW <= 0 {
+			return 0
+		}
+		return remaining * weight[i] / unsettledW
+	}
+
+	// Iterate until all sources are settled. Each pass settles at least one source
+	// (any that fits its weighted share, returning surplus), so it converges.
+	for {
 		progress := false
+		anyUnsettled := false
 		for i, s := range sources {
-			if settled[i] || s.content == "" {
-				if !settled[i] {
-					settled[i] = true
-					unsettled--
-					progress = true
-				}
+			if settled[i] {
 				continue
 			}
-			if len(s.content) <= share {
-				// Fits within share — settle it, surplus goes back to pool.
+			if len(s.content) <= shareOf(i) {
+				// Fits within its share — settle it, surplus goes back to the pool.
 				allocated[i] = s.content
 				remaining -= len(s.content)
+				unsettledW -= weight[i]
 				settled[i] = true
-				unsettled--
 				progress = true
+			} else {
+				anyUnsettled = true
 			}
 		}
+		if !anyUnsettled {
+			break
+		}
 		if !progress {
-			// No source fit within its share this pass. Truncate all
-			// remaining sources to their share.
+			// No remaining source fit its share this pass. Truncate each to its
+			// weighted share (proportional split of the remaining budget).
 			for i, s := range sources {
-				if settled[i] || s.content == "" {
+				if settled[i] {
 					continue
 				}
+				share := shareOf(i)
 				if share < gateMinChunk {
 					// Not worth truncating — drop entirely.
 					allocated[i] = ""
@@ -320,11 +341,9 @@ func fairShareAllocate(sources []loadedSource, budget int) ([]string, []string) 
 						// Keep the beginning (default).
 						allocated[i] = s.content[:cut] + gateTruncMarker
 					}
-					remaining -= len(allocated[i])
 				}
 				trimmed = append(trimmed, s.spec.Name)
 				settled[i] = true
-				unsettled--
 			}
 			break
 		}
@@ -634,7 +653,9 @@ func Worklog(lines int, filter string) SourceSpec {
 // NodeReturns returns a spec for previously-executed node results.
 // filter: "all"|"failures".
 func NodeReturns(filter string) SourceSpec {
-	return SourceSpec{Name: SourceNodeReturns, Params: map[string]any{"filter": filter}}
+	// Weight 3: node results (the real URLs + evidence the next frame plans from)
+	// take the lion's share of a shared budget; the worklog is secondary.
+	return SourceSpec{Name: SourceNodeReturns, Params: map[string]any{"filter": filter}, Weight: 3}
 }
 
 // NodeReturnsTyped narrows by node tool name (e.g. ["bash","compute"]).
@@ -642,7 +663,7 @@ func NodeReturnsTyped(filter string, types []string) SourceSpec {
 	return SourceSpec{Name: SourceNodeReturns, Params: map[string]any{
 		"filter": filter,
 		"types":  types,
-	}}
+	}, Weight: 3}
 }
 
 // WorkspaceTree returns a spec for the workspace file tree at the given depth.

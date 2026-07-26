@@ -24,6 +24,7 @@ import (
 type Message struct {
 	Role       string        `json:"role"`                   // "system", "user", "assistant", "tool"
 	Content    string        `json:"content,omitempty"`
+	Reasoning  string        `json:"reasoning,omitempty"`    // hidden reasoning from thinking models (reasoning field + lifted <think>…</think>)
 	Parts      []ContentPart `json:"-"`                      // multimodal parts; overrides Content when set
 	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"` // set when role == "tool"
@@ -310,7 +311,7 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 // CompleteStream streams a chat completion and calls onChunk for each text
 // delta, returning the full accumulated text. Thin wrapper over
 // CompleteStreamResp for callers that only need the text.
-func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk func(chunk string)) (string, error) {
+func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (string, error) {
 	resp, err := c.CompleteStreamResp(ctx, req, onChunk)
 	if err != nil {
 		return "", err
@@ -329,7 +330,7 @@ func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk f
 // through the same token counter as a non-streamed call. Returns a ChatResponse
 // shaped exactly like Complete's, so callers can treat streamed and non-streamed
 // turns identically.
-func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChunk func(chunk string)) (*ChatResponse, error) {
+func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (*ChatResponse, error) {
 	if req.Model == "" {
 		req.Model = c.model
 	}
@@ -360,6 +361,7 @@ func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChu
 	}
 
 	var content strings.Builder
+	var reasoning strings.Builder
 	toolsByIndex := map[int]*ToolCall{}
 	var order []int // tool-call indices in first-seen order
 	var usage Usage
@@ -381,6 +383,7 @@ func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChu
 			Choices []struct {
 				Delta struct {
 					Content   string `json:"content"`
+					Reasoning string `json:"reasoning"`
 					ToolCalls []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
@@ -408,10 +411,16 @@ func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChu
 		if ch.FinishReason != "" {
 			finish = ch.FinishReason
 		}
+		if ch.Delta.Reasoning != "" {
+			reasoning.WriteString(ch.Delta.Reasoning)
+			if onChunk != nil {
+				onChunk(ch.Delta.Reasoning, "reasoning")
+			}
+		}
 		if ch.Delta.Content != "" {
 			content.WriteString(ch.Delta.Content)
 			if onChunk != nil {
-				onChunk(ch.Delta.Content)
+				onChunk(ch.Delta.Content, "content")
 			}
 		}
 		// Tool calls stream as indexed deltas: id/name arrive once, arguments in
@@ -449,14 +458,54 @@ func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChu
 	for _, idx := range order {
 		toolCalls = append(toolCalls, *toolsByIndex[idx])
 	}
+	finalContent := content.String()
+	reasonStr := reasoning.String()
+	// Some models stream reasoning inline as <think>…</think> in the content
+	// (rather than a reasoning field). Lift it out so content stays clean and the
+	// thinking is captured either way.
+	if clean, think := extractThink(finalContent); think != "" {
+		finalContent = clean
+		if reasonStr != "" {
+			reasonStr += "\n"
+		}
+		reasonStr += think
+	}
 	return &ChatResponse{
 		Choices: []Choice{{
 			Index:        0,
-			Message:      Message{Role: "assistant", Content: content.String(), ToolCalls: toolCalls},
+			Message:      Message{Role: "assistant", Content: finalContent, Reasoning: reasonStr, ToolCalls: toolCalls},
 			FinishReason: finish,
 		}},
 		Usage: usage,
 	}, nil
+}
+
+// extractThink lifts <think>…</think> blocks out of s, returning the cleaned text
+// (blocks removed) and the concatenated thinking. Handles multiple blocks and an
+// unterminated trailing <think> (streamed but cut off).
+func extractThink(s string) (clean, think string) {
+	if !strings.Contains(s, "<think>") {
+		return s, ""
+	}
+	var out, th strings.Builder
+	rest := s
+	for {
+		i := strings.Index(rest, "<think>")
+		if i < 0 {
+			out.WriteString(rest)
+			break
+		}
+		out.WriteString(rest[:i])
+		rest = rest[i+len("<think>"):]
+		j := strings.Index(rest, "</think>")
+		if j < 0 {
+			th.WriteString(rest) // unterminated → treat remainder as thinking
+			break
+		}
+		th.WriteString(rest[:j])
+		rest = rest[j+len("</think>"):]
+	}
+	return strings.TrimSpace(out.String()), strings.TrimSpace(th.String())
 }
 
 // EmbedRequest is the body for POST /v1/embeddings.

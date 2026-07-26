@@ -14,6 +14,7 @@ export const useDagStore = defineStore('dag', () => {
         previousNodes: [],
         running: false,
         streamingVerdict: '',
+        streamingReasoning: '',
         interjectMode: false,
         interjections: [],
       }))
@@ -40,6 +41,10 @@ export const useDagStore = defineStore('dag', () => {
     get: () => _active()?.streamingVerdict || '',
     set: (v) => { if (_active()) _active().streamingVerdict = v }
   })
+  const streamingReasoning = computed({
+    get: () => _active()?.streamingReasoning || '',
+    set: (v) => { if (_active()) _active().streamingReasoning = v }
+  })
   const interjectMode = computed({
     get: () => _active()?.interjectMode || false,
     set: (v) => { if (_active()) _active().interjectMode = v }
@@ -65,6 +70,7 @@ export const useDagStore = defineStore('dag', () => {
     if (s.nodes.length > 0) s.previousNodes = [...s.nodes]
     s.nodes = []
     s.streamingVerdict = ''
+    s.streamingReasoning = ''
   }
 
   /** Reset all state for a session. */
@@ -74,6 +80,7 @@ export const useDagStore = defineStore('dag', () => {
     if (s.nodes.length > 0) s.previousNodes = [...s.nodes]
     s.nodes = []
     s.streamingVerdict = ''
+    s.streamingReasoning = ''
     s.running = false
     s.interjectMode = false
     s.interjections = []
@@ -83,7 +90,7 @@ export const useDagStore = defineStore('dag', () => {
   function dropSession(sid) { sessions.delete(sid) }
 
   return {
-    activeSessionId, nodes, previousNodes, running, streamingVerdict,
+    activeSessionId, nodes, previousNodes, running, streamingVerdict, streamingReasoning,
     interjectMode, interjections,
     getSession, setActiveSession, archiveAndClear, reset, dropSession,
   }

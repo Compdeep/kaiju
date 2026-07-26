@@ -82,6 +82,13 @@ export function connect() {
           }
           break
 
+        case 'reasoning':
+          {
+            const ds = dag.getSession(sid)
+            if (ds && ev.text) ds.streamingReasoning += ev.text
+          }
+          break
+
         case 'node':
           if (ev.node) {
             const ds = dag.getSession(sid)

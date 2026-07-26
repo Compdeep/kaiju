@@ -76,8 +76,12 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 		Messages:    messages,
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   aggMaxTokens,
-	}, func(chunk string) {
-		a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: chunk})
+	}, func(chunk, kind string) {
+		evType := "verdict"
+		if kind == "reasoning" {
+			evType = "reasoning"
+		}
+		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
 	})
 
 	trace := LLMTrace{

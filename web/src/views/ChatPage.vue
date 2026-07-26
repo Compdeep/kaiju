@@ -97,6 +97,10 @@
             <span class="msg-author">kaiju</span>
             <span v-if="!dag.streamingVerdict" class="thinking-scan"></span>
           </div>
+          <details v-if="dag.streamingReasoning" class="thinking-panel" :open="!dag.streamingVerdict">
+            <summary><span class="think-dot"></span> thinking</summary>
+            <div class="thinking-body">{{ dag.streamingReasoning }}</div>
+          </details>
           <div v-if="dag.streamingVerdict" class="msg-content md" v-html="renderMd(dag.streamingVerdict)"></div>
         </div>
 
@@ -675,6 +679,42 @@ watch(() => sessions.sessionId, (newId) => {
   0% { background-position: 100% 0; opacity: 0.4; }
   50% { background-position: 0% 0; opacity: 1; }
   100% { background-position: 100% 0; opacity: 0.4; }
+}
+
+/* Reasoning ("thinking") panel — collapsible, shown while a thinking model reasons */
+.thinking-panel {
+  margin: 4px 0 10px;
+  border-left: 2px solid var(--accent);
+  background: rgba(129, 140, 248, 0.06);
+  border-radius: 0 6px 6px 0;
+}
+.thinking-panel > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--display);
+  letter-spacing: 0.08em;
+  user-select: none;
+}
+.thinking-panel > summary::-webkit-details-marker { display: none; }
+.thinking-panel .think-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); margin-right: 6px; vertical-align: middle;
+  box-shadow: 0 0 6px var(--accent); animation: think-pulse 1.4s ease-in-out infinite;
+}
+@keyframes think-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+.thinking-body {
+  padding: 2px 12px 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  max-height: 320px;
+  overflow-y: auto;
+  opacity: 0.85;
 }
 
 /* Spacer: creates breathing room below the last message when loading */

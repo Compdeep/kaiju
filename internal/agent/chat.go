@@ -111,9 +111,13 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		Messages:    messages,
 		Temperature: 0.7,
 		MaxTokens:   1024,
-	}, func(chunk string) {
+	}, func(chunk, kind string) {
 		if t.SessionID != "" {
-			a.broadcastDAGEvent(nil, DAGEvent{Type: "verdict", Text: chunk, SessionID: t.SessionID})
+			evType := "verdict"
+			if kind == "reasoning" {
+				evType = "reasoning"
+			}
+			a.broadcastDAGEvent(nil, DAGEvent{Type: evType, Text: chunk, SessionID: t.SessionID})
 		}
 	})
 	if err != nil {

@@ -381,16 +381,22 @@ var allModels = []modelInfo{
 	{ID: "anthropic/claude-haiku-4", Name: "Claude Haiku 4", Provider: "openrouter", Context: "200K"},
 	{ID: "openai/gpt-4o", Name: "GPT-4o", Provider: "openrouter", Context: "128K"},
 	{ID: "openai/gpt-4.1", Name: "GPT-4.1", Provider: "openrouter", Context: "1M"},
-	{ID: "openai/gpt-4.1-mini", Name: "GPT-4.1 Mini", Provider: "openrouter", Context: "1M"},
+	{ID: "openai/gpt-4.1-mini", Name: "GPT-4.1 Mini (router · recommended)", Provider: "openrouter", Context: "1M"},
 	{ID: "openai/gpt-4.1-nano", Name: "GPT-4.1 Nano", Provider: "openrouter", Context: "1M"},
 	{ID: "openai/gpt-4o-mini", Name: "GPT-4o Mini", Provider: "openrouter", Context: "128K"},
-	{ID: "openai/gpt-5-mini", Name: "GPT-5 Mini (router · reliable)", Provider: "openrouter", Context: "400K"},
-	{ID: "openai/gpt-5-nano", Name: "GPT-5 Nano (router · cheapest)", Provider: "openrouter", Context: "400K"},
+	// gpt-5-* are REASONING models — do NOT use for the route lane. The router
+	// caps output at 16 tokens; gpt-5 spends that on hidden reasoning and emits
+	// no tool call, so routeQuery fails safe to "chat" (silent under-escalation).
+	// Bench: gpt-5-mini 40% route-acc / 10% budget-fit; gpt-5-nano 0% fit. See
+	// docs/router-model-bench.md.
+	{ID: "openai/gpt-5-mini", Name: "GPT-5 Mini (reasoning · not for router)", Provider: "openrouter", Context: "400K"},
+	{ID: "openai/gpt-5-nano", Name: "GPT-5 Nano (reasoning · not for router)", Provider: "openrouter", Context: "400K"},
 	{ID: "openai/o3", Name: "o3", Provider: "openrouter", Context: "200K"},
 	{ID: "openai/o4-mini", Name: "o4 Mini", Provider: "openrouter", Context: "200K"},
 	{ID: "openai/codex-mini", Name: "Codex Mini", Provider: "openrouter", Context: "1M"},
 	{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "openrouter", Context: "1M"},
 	{ID: "google/gemini-2.5-flash", Name: "Gemini 2.5 Flash", Provider: "openrouter", Context: "1M"},
+	{ID: "google/gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash Lite (fast · router-capable)", Provider: "openrouter", Context: "1M"},
 	{ID: "meta-llama/llama-4-maverick", Name: "Llama 4 Maverick", Provider: "openrouter", Context: "1M"},
 	{ID: "meta-llama/llama-4-scout", Name: "Llama 4 Scout", Provider: "openrouter", Context: "512K"},
 	{ID: "deepseek/deepseek-r1", Name: "DeepSeek R1", Provider: "openrouter", Context: "64K"},

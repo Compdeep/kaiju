@@ -38,10 +38,13 @@ func Default() *Config {
 			MaxReplans:        3,
 			MaxConcurrent:     3,
 			ExecutionMode:     "interactive",
-			// Default the routing decision to a small capable model so "does this
-			// need the agent?" is reliable. Overridable everywhere.
+			// Default the routing decision to a small, NON-reasoning tool-caller so
+			// "does this need the agent?" is reliable within the router's 16-token
+			// budget. gpt-4.1-mini benched 100% route-acc / 100% budget-fit / ~700ms
+			// (a reasoning model like gpt-5-mini starves at 16 tokens → silent chat
+			// fallback). See docs/router-model-bench.md. Overridable everywhere.
 			RouteProvider:     "openrouter",
-			RouteModel:        "openai/gpt-5-mini",
+			RouteModel:        "openai/gpt-4.1-mini",
 			WallClockSec:      180,
 			MaxTurns:          15,
 			RateLimit:         100,

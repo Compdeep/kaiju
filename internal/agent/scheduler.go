@@ -316,7 +316,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						NodeReturns("all"),
 						Worklog(10, "all"),
 					),
-					MaxBudget: 8000,
+					MaxBudget: 32000,
 				})
 				if rctxErr != nil {
 					log.Printf("[dag] launchReady reflection context build failed: %v", rctxErr)
@@ -396,7 +396,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					NodeReturns("all"),
 					Worklog(20, "all"),
 				),
-				MaxBudget: 8000,
+				MaxBudget: 32000,
 			})
 			if ictxErr != nil {
 				log.Printf("[dag] interjection context build failed: %v", ictxErr)
@@ -456,7 +456,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				NodeReturns("all"),
 				Worklog(10, "all"),
 			),
-			MaxBudget: 8000,
+			MaxBudget: 32000,
 		})
 		if bctxErr != nil {
 			log.Printf("[dag] batch reflection context build failed: %v", bctxErr)
@@ -576,7 +576,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					NodeReturns("all"),
 					Worklog(10, "all"),
 				),
-				MaxBudget: 8000,
+				MaxBudget: 32000,
 			})
 			if rctxErr != nil {
 				log.Printf("[dag] reflection context build failed: %v", rctxErr)
@@ -659,7 +659,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 									NodeReturns("all"),
 									Worklog(10, "all"),
 								),
-								MaxBudget: 8000,
+								MaxBudget: 32000,
 							})
 							if octxErr != nil {
 								log.Printf("[dag] observer reflection context build failed: %v", octxErr)

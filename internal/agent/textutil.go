@@ -61,12 +61,14 @@ func (textNS) TailTruncate(s string, n int) string {
 
 /*
  * TruncateEvidence caps a result string for LLM synthesis input.
- * desc: Truncates to 2048 chars with a synthesis-specific suffix. Full results are preserved on the Node.
+ * desc: Truncates to 8000 chars with a synthesis-specific suffix. Full results are preserved on the Node.
+ *       8000 (not 2048) so a multi-result web_search keeps ALL its URLs — a tight
+ *       cap dropped later results' URLs, and a replan then hallucinated them.
  * param: s - the evidence string to truncate
  * return: the original or truncated string
  */
 func (textNS) TruncateEvidence(s string) string {
-	const maxLen = 2048
+	const maxLen = 8000
 	if len(s) <= maxLen {
 		return s
 	}

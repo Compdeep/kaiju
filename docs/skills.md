@@ -37,7 +37,7 @@ Different downstream components consume different sections of the selected skill
 
 | Consumer | Section read |
 |----------|--------------|
-| Planner (structured mode) | `## Planning Guidance`, `## When to Use`, `## Approach Selection` |
+| Executive (native planner) | `## Planning Guidance`, `## When to Use`, `## Approach Selection` |
 | Aggregator | `## Aggregator Guidance` (from capability cards) |
 | ReAct loop | full body of active capability cards |
 | Compute architect | `## Architect Guidance` (from any active guidance skill) |
@@ -112,5 +112,5 @@ Merging them would require migrating the 4 capability cards to SkillMD format an
 
 ## Related docs
 
-- `docs/compute.md` — how compute consumes architect/coder guidance
+- the `compute` tool pipeline (see `architecture.md`) — how compute consumes architect/coder guidance
 - `docs/architecture.md` — high-level placement in the agent flow

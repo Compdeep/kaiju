@@ -18,8 +18,8 @@ User: "delete /tmp/test.txt"          ← human sets intent (e.g. "operate" = 10
 │                                                                     │
 │ The LLM imagines the command. It has no say in what happens next.   │
 └──────────────────────────┬──────────────────────────────────────────┘
-                           │  JSON plan (structured) or
-                           │  tool_use response (native)
+                           │  tool_use plan produced by
+                           │  native function calling
                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │ SCHEDULER                                                           │
@@ -61,7 +61,7 @@ Impact resolution is two-layered:
 
 This means admins can reclassify any tool's impact without touching Go code — a `bash` that defaults to `override` can be pinned to `operate` for a particular deployment by setting the DB override. See `docs/intents.md` for the admin workflow.
 
-This is identical for both planner modes (structured JSON and native function calling). The gate sees the same data either way: a tool name and parameters. It doesn't know or care how the plan was produced.
+The gate sees the same data regardless of how the plan was produced — a tool name and parameters — and doesn't know or care about the mechanism. (The planner is the native-function-calling Executive; the older structured-JSON planner mode has been removed.)
 
 ```
 ┌─────────────────────────────────────────────────────────┐

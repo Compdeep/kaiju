@@ -1358,7 +1358,12 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 			break // truncated by budget
 		}
 		for _, depIdx := range s.DependsOn {
-			if depIdx < len(nodeIDs) && nodeIDs[depIdx] != "" {
+			// Never wire a node to itself. A replan frequently emits a stale
+			// depends_on:[0] on its own FIRST step — a reference to a prior-frame
+			// search that this plan-local index can't reach. A self-edge makes the
+			// node wait on itself, so it's cascaded to StateSkipped and the reflector
+			// re-plans the same fetch forever (the observed web_fetch loop).
+			if depIdx < len(nodeIDs) && nodeIDs[depIdx] != "" && nodeIDs[depIdx] != nodeIDs[i] {
 				nodes[i].DependsOn = append(nodes[i].DependsOn, nodeIDs[depIdx])
 			}
 		}

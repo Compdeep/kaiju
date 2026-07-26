@@ -347,14 +347,7 @@ func (g *Graph) nodeInfo(n *Node) *NodeInfo {
 		info.Summary = nodeSummary(n)
 	}
 	if n.Params != nil {
-		// Compact params summary (first 80 chars of JSON)
-		if b, err := json.Marshal(n.Params); err == nil {
-			s := string(b)
-			if len(s) > 80 {
-				s = s[:80] + "…"
-			}
-			info.Params = s
-		}
+		info.Params = compactParams(n.Params)
 	}
 	if len(n.Actions) > 0 {
 		info.Actions = n.Actions
@@ -381,6 +374,34 @@ func (g *Graph) nodeInfo(n *Node) *NodeInfo {
 		}
 	}
 	return info
+}
+
+// compactParams builds the short params line shown in the trace tree. It LEADS with
+// the identifying value (a web_fetch's url, a web_search's query) so it survives the
+// length cap — json.Marshal sorts keys alphabetically, which otherwise buries the
+// url behind "focus" and the frontend shows only the tool name. Falls back to
+// compact JSON for tools without a url/query.
+func compactParams(params map[string]any) string {
+	if u, ok := params["url"].(string); ok && u != "" {
+		return capStr(u, 200)
+	}
+	if q, ok := params["query"].(string); ok && q != "" {
+		return `"query":"` + capStr(q, 160) + `"`
+	}
+	if b, err := json.Marshal(params); err == nil {
+		return capStr(string(b), 120)
+	}
+	return ""
+}
+
+// capStr caps s to n runes (rune-safe so it never splits a multi-byte char),
+// appending an ellipsis when truncated.
+func capStr(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 /*

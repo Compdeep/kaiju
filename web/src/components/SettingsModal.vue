@@ -49,7 +49,7 @@
                 <div class="form-group">
                   <label>model</label>
                   <select v-model="cfg.llm.model" @change="patchConfig">
-                    <option v-for="m in reasoningModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                    <option v-for="m in reasoningModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
                   </select>
                 </div>
               </div>
@@ -79,7 +79,7 @@
                   <label>model</label>
                   <select v-model="cfg.executor.model" @change="patchConfig">
                     <option value="">same as reasoning</option>
-                    <option v-for="m in executorModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                    <option v-for="m in executorModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
                   </select>
                 </div>
               </div>
@@ -107,7 +107,7 @@
                   <label>model</label>
                   <select v-model="cfg.agent.route_model" @change="patchConfig">
                     <option value="">same as executor</option>
-                    <option v-for="m in routeModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                    <option v-for="m in routeModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
                   </select>
                 </div>
               </div>
@@ -135,7 +135,7 @@
                   <label>model</label>
                   <select v-model="cfg.vision.model" @change="patchConfig">
                     <option value="">none</option>
-                    <option v-for="m in visionModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                    <option v-for="m in visionModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
                   </select>
                 </div>
               </div>
@@ -163,7 +163,7 @@
                   <label>model</label>
                   <select v-model="cfg.chat.model" @change="patchConfig">
                     <option value="">same as reasoning</option>
-                    <option v-for="m in chatModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                    <option v-for="m in chatModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
                   </select>
                 </div>
               </div>
@@ -278,7 +278,8 @@ const ENDPOINTS = {
  */
 const reasoningModels = computed(() => {
   const p = cfg.value.llm.provider
-  return allModels.value.filter(m => m.provider === p)
+  // Reasoning lane drives the planner (forced plan() tool call) → must call tools.
+  return allModels.value.filter(m => m.provider === p && m.tools)
 })
 
 /**
@@ -287,7 +288,10 @@ const reasoningModels = computed(() => {
  */
 const executorModels = computed(() => {
   const p = execProvider.value || cfg.value.llm.provider
-  return allModels.value.filter(m => m.provider === p)
+  // Executor lane runs the small forced tool-call classifiers (preflight/reflect/
+  // observer). Only tool_call_ok models survive the tight budget — a thinking model
+  // here starves and returns nothing (the flat-DAG bug). See router-model-bench.
+  return allModels.value.filter(m => m.provider === p && m.tool_call_ok)
 })
 
 /**
@@ -364,8 +368,23 @@ function onChatProviderChange() {
  */
 const routeModels = computed(() => {
   const p = routeProvider.value || execProvider.value || cfg.value.llm.provider
-  return allModels.value.filter(m => m.provider === p)
+  // Router = a 16-token forced tool call → only tool_call_ok models. A thinking
+  // model here emits no tool call and silently falls back to "chat".
+  return allModels.value.filter(m => m.provider === p && m.tool_call_ok)
 })
+
+/**
+ * desc: Legible dropdown label — name plus params / thinking / tool-call badges so
+ *   the choice isn't a bare slug. "tools✓" means bench-verified tool-call-ok.
+ * @returns {string}
+ */
+function modelLabel(m) {
+  const t = []
+  if (m.params && m.params !== '?') t.push(m.params)
+  if (m.thinking) t.push('thinking')
+  if (m.tool_call_ok) t.push(m.verified ? 'tools✓' : 'tools')
+  return t.length ? `${m.name} · ${t.join(' · ')}` : m.name
+}
 function onRouteProviderChange() {
   cfg.value.agent.route_provider = routeProvider.value
   cfg.value.agent.route_model = routeProvider.value && routeModels.value.length ? routeModels.value[0].id : ''

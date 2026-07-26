@@ -354,6 +354,8 @@ var allModels = []modelInfo{
 	{ID: "mistralai/mistral-small-3.2-24b-instruct", Name: "Mistral Small 3.2 24B (cheap executor)", Provider: "openrouter", Context: "256K"},
 	{ID: "qwen/qwen3-coder-30b-a3b-instruct", Name: "Qwen3 Coder 30B (clean tool JSON)", Provider: "openrouter", Context: "262K"},
 	{ID: "qwen/qwen3.7-plus", Name: "Qwen3.7 Plus (flagship · unverified)", Provider: "openrouter", Context: "1M"},
+	{ID: "xiaomi/mimo-v2.5", Name: "MiMo v2.5 (cheap executor · unverified)", Provider: "openrouter", Context: "1M"},
+	{ID: "xiaomi/mimo-v2.5-pro", Name: "MiMo v2.5 Pro (unverified)", Provider: "openrouter", Context: "1M"},
 
 	// Roleplay / creative / uncensored fine-tunes — NO tool-calling; use the chat
 	// lane, not the planner (they 404 on tools). Good for conversation / RP.

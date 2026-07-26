@@ -40,8 +40,8 @@ func Default() *Config {
 			ExecutionMode:     "interactive",
 			// Default the routing decision to a small capable model so "does this
 			// need the agent?" is reliable. Overridable everywhere.
-			RouteProvider:     "openai",
-			RouteModel:        "gpt-5-mini",
+			RouteProvider:     "openrouter",
+			RouteModel:        "openai/gpt-5-mini",
 			WallClockSec:      180,
 			MaxTurns:          15,
 			RateLimit:         100,

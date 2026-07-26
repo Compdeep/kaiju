@@ -1,6 +1,7 @@
 package api
 
 import (
+	_ "embed"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -263,19 +264,40 @@ func (c *ConfigAPI) saveToDisk() error {
 type modelInfo struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
+	Family   string `json:"family,omitempty"`  // e.g. "qwen3", "gpt-4.1", "gemini"
+	Params   string `json:"params,omitempty"`  // e.g. "30B-A3B", "8B", "235B-A22B"
+	Version  string `json:"version,omitempty"` // e.g. "2507", "3.3"
 	Provider string `json:"provider"`
 	Context  string `json:"context,omitempty"`
+	// Thinking marks a reasoning model that emits hidden reasoning tokens before
+	// its output. Fine for open-ended generation (answer/chat), but it starves on
+	// small forced tool calls — see ToolCallOK.
+	Thinking bool `json:"thinking"`
+	// Tools reports whether the model can call tools at all.
+	Tools bool `json:"tools"`
+	// ToolCallOK reports whether the model reliably emits a SMALL forced tool call
+	// (router @16 tok / executor @256 tok). This is the router/executor-lane gate:
+	// a thinking model usually fails it (burns the budget reasoning → no tool call).
+	ToolCallOK bool `json:"tool_call_ok"`
+	// Verified is true when ToolCallOK was measured by the bench (docs/router-model-bench.md)
+	// rather than inferred from the model family.
+	Verified bool `json:"verified"`
 	// Available reports whether this model's provider is configured with a key
-	// in kaiju's providers block, i.e. whether the host can actually route to
-	// it. The host (makeen) filters the catalog to available ∩ org-enabled.
+	// in kaiju's providers block. Computed at serve time, not stored in the catalog.
 	Available bool `json:"available"`
-	// Vision reports whether the model accepts image input — the UI shows an
-	// attach affordance and the agent may pass uploaded images to it.
+	// Vision reports whether the model accepts image input.
 	Vision bool `json:"vision,omitempty"`
-	// Chat marks a model as suited to the chat lane (conversation / roleplay /
-	// creative tunes with no tool-calling). The settings UI filters the chat-model
-	// picker to these so the list stays relevant instead of showing every model.
+	// Chat marks a model suited to the chat lane (conversation / roleplay tunes).
 	Chat bool `json:"chat,omitempty"`
+	// Roles lists the lanes this model is suitable for: answer, planner, executor,
+	// router, chat, vision. The UI filters each lane's picker by role.
+	Roles []string `json:"roles,omitempty"`
+}
+
+// modelCatalog is the on-disk shape of models.json.
+type modelCatalog struct {
+	Version int         `json:"version"`
+	Models  []modelInfo `json:"models"`
 }
 
 /*
@@ -304,113 +326,22 @@ func (c *ConfigAPI) handleListModels(w http.ResponseWriter, _ *http.Request) {
 	jsonResponse(w, out, http.StatusOK)
 }
 
-// allModels is the supported model catalog.
-var allModels = []modelInfo{
-	// OpenAI
-	{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Context: "128K"},
-	{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Provider: "openai", Context: "128K"},
-	{ID: "gpt-4.1", Name: "GPT-4.1", Provider: "openai", Context: "1M"},
-	{ID: "gpt-4.1-mini", Name: "GPT-4.1 Mini", Provider: "openai", Context: "1M"},
-	{ID: "gpt-4.1-nano", Name: "GPT-4.1 Nano", Provider: "openai", Context: "1M"},
-	{ID: "o3", Name: "o3", Provider: "openai", Context: "200K"},
-	{ID: "o3-mini", Name: "o3 Mini", Provider: "openai", Context: "200K"},
-	{ID: "o4-mini", Name: "o4 Mini", Provider: "openai", Context: "200K"},
-	{ID: "codex-mini", Name: "Codex Mini", Provider: "openai", Context: "1M"},
+// allModels is the supported model catalog, loaded from the embedded models.json.
+// Operators may override the file from data_dir/models.json in a future revision;
+// for now the embedded JSON is the single source of truth (edit models.json).
+//
+//go:embed models.json
+var modelsJSON []byte
 
-	// Anthropic
-	{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Provider: "anthropic", Context: "200K"},
-	{ID: "claude-opus-4-20250514", Name: "Claude Opus 4", Provider: "anthropic", Context: "200K"},
-	{ID: "claude-haiku-4-20250414", Name: "Claude Haiku 4", Provider: "anthropic", Context: "200K"},
+var allModels = loadModels()
 
-	// Google
-	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "google", Context: "1M"},
-	{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Provider: "google", Context: "1M"},
-
-	// Qwen — non-thinking instruct (good for the reasoning/executor lanes: tools + no <think>)
-	{ID: "qwen/qwen3-max", Name: "Qwen3 Max (flagship)", Provider: "openrouter", Context: "262K"},
-	{ID: "qwen/qwen3-235b-a22b-2507", Name: "Qwen3 235B 2507 (non-thinking)", Provider: "openrouter", Context: "262K", Chat: true},
-	{ID: "qwen/qwen3-30b-a3b-instruct-2507", Name: "Qwen3 30B 2507 (non-thinking)", Provider: "openrouter", Context: "131K", Chat: true},
-	// Qwen3 (thinking variants)
-	{ID: "qwen/qwen3-235b-a22b", Name: "Qwen3 235B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen3-30b-a3b", Name: "Qwen3 30B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen3-32b", Name: "Qwen3 32B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen3-14b", Name: "Qwen3 14B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen3-8b", Name: "Qwen3 8B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen3-4b", Name: "Qwen3 4B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen3-1.7b", Name: "Qwen3 1.7B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen3-0.6b", Name: "Qwen3 0.6B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwq-32b", Name: "QwQ 32B (Reasoning)", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen-2.5-coder-32b-instruct", Name: "Qwen 2.5 Coder 32B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen-2.5-72b-instruct", Name: "Qwen 2.5 72B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen-2.5-7b-instruct", Name: "Qwen 2.5 7B", Provider: "openrouter", Context: "128K"},
-	{ID: "qwen/qwen-2.5-vl-72b-instruct", Name: "Qwen 2.5 VL 72B (Vision)", Provider: "openrouter", Context: "128K", Vision: true},
-	{ID: "qwen/qwen-2.5-vl-7b-instruct", Name: "Qwen 2.5 VL 7B (Vision)", Provider: "openrouter", Context: "32K", Vision: true},
-
-	// Tool-capable reasoning / executor models (call tools — safe for the planner).
-	// Kimi K2 is a top agentic tool-caller; the smaller ones are cheap executors.
-	{ID: "moonshotai/kimi-k2", Name: "Kimi K2 (agentic · best tool-use)", Provider: "openrouter", Context: "131K"},
-	{ID: "moonshotai/kimi-k2-0905", Name: "Kimi K2 0905 (agentic · 262K)", Provider: "openrouter", Context: "262K"},
-	{ID: "deepseek/deepseek-v3.2", Name: "DeepSeek V3.2 (strong · cheap)", Provider: "openrouter", Context: "163K"},
-	{ID: "mistralai/mistral-small-3.2-24b-instruct", Name: "Mistral Small 3.2 24B (cheap executor)", Provider: "openrouter", Context: "256K"},
-	{ID: "qwen/qwen3-coder-30b-a3b-instruct", Name: "Qwen3 Coder 30B (clean tool JSON)", Provider: "openrouter", Context: "262K"},
-	{ID: "qwen/qwen3.7-plus", Name: "Qwen3.7 Plus (flagship · unverified)", Provider: "openrouter", Context: "1M"},
-	{ID: "xiaomi/mimo-v2.5", Name: "MiMo v2.5 (cheap executor · unverified)", Provider: "openrouter", Context: "1M"},
-	{ID: "xiaomi/mimo-v2.5-pro", Name: "MiMo v2.5 Pro (unverified)", Provider: "openrouter", Context: "1M"},
-
-	// Roleplay / creative / uncensored fine-tunes — NO tool-calling; use the chat
-	// lane, not the planner (they 404 on tools). Good for conversation / RP.
-	// Chat:true surfaces them in the settings chat-model picker.
-	{ID: "sao10k/l3.3-euryale-70b", Name: "Euryale L3.3 70B (RP · best quality)", Provider: "openrouter", Context: "131K", Chat: true},
-	{ID: "sao10k/l3.1-euryale-70b", Name: "Euryale L3.1 70B (RP · prior gen)", Provider: "openrouter", Context: "131K", Chat: true},
-	{ID: "thedrummer/cydonia-24b-v4.1", Name: "Cydonia 24B (RP · fast)", Provider: "openrouter", Context: "131K", Chat: true},
-	{ID: "deepseek/deepseek-chat-v3.1", Name: "DeepSeek V3.1 (RP · most reliable)", Provider: "openrouter", Context: "164K", Chat: true},
-	{ID: "anthracite-org/magnum-v4-72b", Name: "Magnum v4 72B (RP)", Provider: "openrouter", Context: "16K", Chat: true},
-	{ID: "nousresearch/hermes-4-70b", Name: "Hermes 4 70B (permissive)", Provider: "openrouter", Context: "131K", Chat: true},
-	{ID: "nousresearch/hermes-4-405b", Name: "Hermes 4 405B (permissive)", Provider: "openrouter", Context: "131K", Chat: true},
-	{ID: "cognitivecomputations/dolphin-mistral-24b-venice-edition", Name: "Dolphin Venice 24B (uncensored)", Provider: "openrouter", Context: "128K", Chat: true},
-	{ID: "thedrummer/skyfall-36b-v2", Name: "Skyfall 36B (RP)", Provider: "openrouter", Context: "32K", Chat: true},
-	// Chinese frontier MoEs — large, high quality, low Western refusal (they carry
-	// their own China-political guardrails). Assistant-tuned rather than RP tunes,
-	// but permissive and much smarter than a small "uncensored" fine-tune.
-	{ID: "z-ai/glm-4.6", Name: "GLM-4.6 (large · permissive)", Provider: "openrouter", Context: "204K", Chat: true},
-	{ID: "z-ai/glm-4.5-air", Name: "GLM-4.5 Air (permissive · cheap)", Provider: "openrouter", Context: "131K", Chat: true},
-
-	// OpenRouter — other popular models
-	{ID: "anthropic/claude-sonnet-4", Name: "Claude Sonnet 4", Provider: "openrouter", Context: "200K"},
-	{ID: "anthropic/claude-opus-4", Name: "Claude Opus 4", Provider: "openrouter", Context: "200K"},
-	{ID: "anthropic/claude-haiku-4", Name: "Claude Haiku 4", Provider: "openrouter", Context: "200K"},
-	{ID: "openai/gpt-4o", Name: "GPT-4o", Provider: "openrouter", Context: "128K"},
-	{ID: "openai/gpt-4.1", Name: "GPT-4.1", Provider: "openrouter", Context: "1M"},
-	{ID: "openai/gpt-4.1-mini", Name: "GPT-4.1 Mini (router · recommended)", Provider: "openrouter", Context: "1M"},
-	{ID: "openai/gpt-4.1-nano", Name: "GPT-4.1 Nano", Provider: "openrouter", Context: "1M"},
-	{ID: "openai/gpt-4o-mini", Name: "GPT-4o Mini", Provider: "openrouter", Context: "128K"},
-	// gpt-5-* are REASONING models — do NOT use for the route lane. The router
-	// caps output at 16 tokens; gpt-5 spends that on hidden reasoning and emits
-	// no tool call, so routeQuery fails safe to "chat" (silent under-escalation).
-	// Bench: gpt-5-mini 40% route-acc / 10% budget-fit; gpt-5-nano 0% fit. See
-	// docs/router-model-bench.md.
-	{ID: "openai/gpt-5-mini", Name: "GPT-5 Mini (reasoning · not for router)", Provider: "openrouter", Context: "400K"},
-	{ID: "openai/gpt-5-nano", Name: "GPT-5 Nano (reasoning · not for router)", Provider: "openrouter", Context: "400K"},
-	{ID: "openai/o3", Name: "o3", Provider: "openrouter", Context: "200K"},
-	{ID: "openai/o4-mini", Name: "o4 Mini", Provider: "openrouter", Context: "200K"},
-	{ID: "openai/codex-mini", Name: "Codex Mini", Provider: "openrouter", Context: "1M"},
-	{ID: "google/gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "openrouter", Context: "1M"},
-	{ID: "google/gemini-2.5-flash", Name: "Gemini 2.5 Flash", Provider: "openrouter", Context: "1M"},
-	{ID: "google/gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash Lite (fast · router-capable)", Provider: "openrouter", Context: "1M"},
-	{ID: "meta-llama/llama-4-maverick", Name: "Llama 4 Maverick", Provider: "openrouter", Context: "1M"},
-	{ID: "meta-llama/llama-4-scout", Name: "Llama 4 Scout", Provider: "openrouter", Context: "512K"},
-	{ID: "deepseek/deepseek-r1", Name: "DeepSeek R1", Provider: "openrouter", Context: "64K"},
-	{ID: "deepseek/deepseek-chat-v3-0324", Name: "DeepSeek V3", Provider: "openrouter", Context: "64K"},
-	{ID: "deepseek/deepseek-r1-0528", Name: "DeepSeek R1 0528", Provider: "openrouter", Context: "64K"},
-	{ID: "mistralai/mistral-large", Name: "Mistral Large", Provider: "openrouter", Context: "128K"},
-	{ID: "mistralai/codestral", Name: "Codestral", Provider: "openrouter", Context: "256K"},
-	{ID: "x-ai/grok-3", Name: "Grok 3", Provider: "openrouter", Context: "128K"},
-	{ID: "x-ai/grok-3-mini", Name: "Grok 3 Mini", Provider: "openrouter", Context: "128K"},
-	{ID: "cohere/command-a", Name: "Command A", Provider: "openrouter", Context: "256K"},
-
-	// Local (Ollama)
-	{ID: "llama3.1:8b", Name: "Llama 3.1 8B (local)", Provider: "ollama"},
-	{ID: "qwen3:8b", Name: "Qwen3 8B (local)", Provider: "ollama"},
-	{ID: "deepseek-r1:14b", Name: "DeepSeek R1 14B (local)", Provider: "ollama"},
-	{ID: "codestral:latest", Name: "Codestral (local)", Provider: "ollama"},
+// loadModels parses the embedded model catalog. On a malformed file it returns an
+// empty list (handleListModels then serves nothing) rather than panicking at init.
+func loadModels() []modelInfo {
+	var cat modelCatalog
+	if err := json.Unmarshal(modelsJSON, &cat); err != nil {
+		log.Printf("[api] model catalog: parse failed, catalog empty: %v", err)
+		return nil
+	}
+	return cat.Models
 }

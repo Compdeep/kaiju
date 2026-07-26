@@ -384,6 +384,8 @@ var allModels = []modelInfo{
 	{ID: "openai/gpt-4.1-mini", Name: "GPT-4.1 Mini", Provider: "openrouter", Context: "1M"},
 	{ID: "openai/gpt-4.1-nano", Name: "GPT-4.1 Nano", Provider: "openrouter", Context: "1M"},
 	{ID: "openai/gpt-4o-mini", Name: "GPT-4o Mini", Provider: "openrouter", Context: "128K"},
+	{ID: "openai/gpt-5-mini", Name: "GPT-5 Mini (router · reliable)", Provider: "openrouter", Context: "400K"},
+	{ID: "openai/gpt-5-nano", Name: "GPT-5 Nano (router · cheapest)", Provider: "openrouter", Context: "400K"},
 	{ID: "openai/o3", Name: "o3", Provider: "openrouter", Context: "200K"},
 	{ID: "openai/o4-mini", Name: "o4 Mini", Provider: "openrouter", Context: "200K"},
 	{ID: "openai/codex-mini", Name: "Codex Mini", Provider: "openrouter", Context: "1M"},

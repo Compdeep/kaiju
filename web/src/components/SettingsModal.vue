@@ -85,6 +85,34 @@
               </div>
             </div>
 
+            <!-- Router Model (chat-vs-investigate classifier) -->
+            <div class="model-section">
+              <div class="model-label">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="12" r="3"/><path d="M9 6h6a3 3 0 0 1 3 3M9 18h6a3 3 0 0 0 3-3"/></svg>
+                router
+              </div>
+              <div class="model-desc">decides chat vs. agent each turn — a small, reliable classifier (e.g. GPT-5 Mini) routes best</div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>provider</label>
+                  <select v-model="routeProvider" @change="onRouteProviderChange">
+                    <option value="">same as executor</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="ollama">Ollama</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>model</label>
+                  <select v-model="cfg.agent.route_model" @change="patchConfig">
+                    <option value="">same as executor</option>
+                    <option v-for="m in routeModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <!-- Vision Model -->
             <div class="model-section">
               <div class="model-label">
@@ -220,6 +248,7 @@ const apiKey = ref('')
 const execProvider = ref('')
 const visionProvider = ref('')
 const chatProvider = ref('')
+const routeProvider = ref('')
 const availableTools = ref([])
 
 /** desc: is a tool in the chat allowlist? */
@@ -329,6 +358,21 @@ function onChatProviderChange() {
 }
 
 /**
+ * desc: Models for the selected router provider (the chat-vs-investigate classifier).
+ *   Empty provider ⇒ falls back to the executor lane.
+ * @returns {Array<Object>}
+ */
+const routeModels = computed(() => {
+  const p = routeProvider.value || execProvider.value || cfg.value.llm.provider
+  return allModels.value.filter(m => m.provider === p)
+})
+function onRouteProviderChange() {
+  cfg.value.agent.route_provider = routeProvider.value
+  cfg.value.agent.route_model = routeProvider.value && routeModels.value.length ? routeModels.value[0].id : ''
+  patchConfig()
+}
+
+/**
  * desc: Persist the current LLM, executor, and agent configuration to the server
  * @returns {Promise<void>}
  */
@@ -364,11 +408,13 @@ onMounted(async () => {
     if (!cfg.value.executor) cfg.value.executor = { provider: '', model: '' }
     if (!cfg.value.vision) cfg.value.vision = { provider: '', model: '' }
     if (!cfg.value.chat) cfg.value.chat = { provider: '', model: '' }
+    if (!cfg.value.agent) cfg.value.agent = {}
     if (!Array.isArray(cfg.value.chat.tools)) cfg.value.chat.tools = []
     try { availableTools.value = await api.get('/api/v1/tools') } catch {}
     execProvider.value = cfg.value.executor.provider || ''
     visionProvider.value = cfg.value.vision.provider || ''
     chatProvider.value = cfg.value.chat.provider || ''
+    routeProvider.value = cfg.value.agent.route_provider || ''
     allModels.value = m
   } catch (err) { console.error('settings load:', err) }
   // Load intent registry — the sole source of truth for the default-safety

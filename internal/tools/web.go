@@ -95,11 +95,46 @@ func (w *WebFetch) Parameters() json.RawMessage {
 			"focus": {"type": "string", "description": "For summary mode: what to extract (e.g. 'pricing and shipping policies', 'key competitors')"},
 			"method": {"type": "string", "description": "HTTP method (default: GET)", "enum": ["GET", "POST"]},
 			"body": {"type": "string", "description": "Request body (for POST)"},
-			"headers": {"type": "object", "description": "Additional HTTP headers", "additionalProperties": {"type": "string"}}
+			"headers": {"type": "object", "description": "Additional HTTP headers (override the browser defaults). Rarely needed — a full browser header set is sent automatically.", "additionalProperties": {"type": "string"}},
+			"referer": {"type": "string", "description": "The page this URL was found on — set it to where you got the link (the search-results page, or the site's own homepage like https://example.com/). Many sites return 403 for requests with a blank referer; supplying a plausible one often gets through. Optional but recommended when fetching a ${step.N.results.M.url} from a search."}
 		},
 		"required": ["url"],
 		"additionalProperties": false
 	}`)
+}
+
+/*
+ * setBrowserHeaders stamps a coherent desktop-Chrome (Linux) request fingerprint.
+ * desc: A large share of 403s are naive bot-blocks keyed on the User-Agent or a
+ *       blank referer. We send a full, internally-consistent header set — UA,
+ *       sec-ch-ua client hints, and Sec-Fetch-* — because anti-bot filters flag
+ *       a lone browser UA with no matching client hints as MORE bot-like, not
+ *       less. Deliberately no Accept-Encoding: leaving it unset lets Go's
+ *       transport add gzip and transparently decompress; setting br/gzip here
+ *       would hand the format handlers undecoded bytes. This does NOT defeat
+ *       TLS/HTTP-2 fingerprinting (Cloudflare/Akamai) or JS challenges.
+ * param: req - the request to stamp (headers set in place).
+ * param: referer - the page the URL was found on; "" leaves Referer unset.
+ */
+func setBrowserHeaders(req *http.Request, referer string) {
+	h := req.Header
+	h.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	h.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+	h.Set("Accept-Language", "en-US,en;q=0.9")
+	h.Set("sec-ch-ua", `"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"`)
+	h.Set("sec-ch-ua-mobile", "?0")
+	h.Set("sec-ch-ua-platform", `"Linux"`)
+	h.Set("Sec-Fetch-Dest", "document")
+	h.Set("Sec-Fetch-Mode", "navigate")
+	h.Set("Sec-Fetch-User", "?1")
+	h.Set("Upgrade-Insecure-Requests", "1")
+	if referer != "" {
+		h.Set("Referer", referer)
+		// A link followed from another origin is a cross-site navigation.
+		h.Set("Sec-Fetch-Site", "cross-site")
+	} else {
+		h.Set("Sec-Fetch-Site", "none")
+	}
 }
 
 /*
@@ -140,7 +175,13 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 	if err != nil {
 		return "", fmt.Errorf("web_fetch: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Kaiju/1.0)")
+	// Present a coherent desktop-Chrome fingerprint. These headers must stay
+	// internally consistent (UA ↔ sec-ch-ua ↔ platform) — anti-bot filters flag
+	// mismatched sets, so we set them as one block rather than a lone UA. The
+	// referer is the one piece the planner knows from context (where the link
+	// came from); a caller-supplied `headers` value still overrides any of these.
+	referer, _ := params["referer"].(string)
+	setBrowserHeaders(req, referer)
 	if headers, ok := params["headers"].(map[string]any); ok {
 		for k, v := range headers {
 			if vs, ok := v.(string); ok {

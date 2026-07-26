@@ -88,7 +88,7 @@ When an explicit intent IS set (via CLI, UI, or API), the preflight inference is
 Both preflight and planner pull intent descriptions from the registry at call time:
 
 - **Preflight prompt**: the `intent` field in its output schema lists all registered intent names as an enum, and the description section under `**intent**` is generated from `registry.PromptBlock()`.
-- **Planner prompt (structured mode)**: the `## Intent-Gated Execution` section is generated from the registry. Shows allowed levels (filtered by scope cap) and the gate enforcement rule.
+- **Executive planner prompt**: the `## Intent-Gated Execution` section is generated from the registry. Shows allowed levels (filtered by scope cap) and the gate enforcement rule.
 
 Adding a custom intent and restarting kaiju makes it immediately visible to the LLM. No prompt edits required.
 

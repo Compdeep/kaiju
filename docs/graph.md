@@ -9,41 +9,63 @@ Every kaiju investigation is a DAG. Components emit nodes, the scheduler fires t
                  │   Query     │
                  └──────┬──────┘
                         ▼
-                 ┌─────────────┐
-                 │  Preflight  │  classifies query → skills, mode, intent
-                 └──────┬──────┘
+                 ┌───────────────────────┐
+                 │  routeQuery (ROUTE)    │  cheap 16-token forced tool call, temp 0
+                 │  chat / meta /         │  fails safe to CHAT on any error/refusal
+                 │  investigate           │
+                 └──────┬────────────────┘
+             chat/meta  │  investigate
+             (short-    │
+              circuit)  ▼
+                 ┌───────────────────────┐
+                 │  classifyInvestigate  │  skills · mode · intent ·
+                 │  (preflight)          │  required_categories · context · compute_mode
+                 └──────┬────────────────┘
                         ▼
                  ┌─────────────┐
-                 │  Executive  │  emits the initial DAG (planStepsToNodes)
-                 └──────┬──────┘
+                 │  Executive  │  native planner — pinned to emit plan()
+                 └──────┬──────┘  (the structured-JSON planner mode was removed)
                         ▼
     ┌──────────────────────────────────────────────┐
-    │  Scheduler                                   │
-    │    walks the Graph in topological order      │
-    │    fires ready Nodes via the Dispatcher      │
-    │    waits on batch completions                │
+    │  Scheduler                                    │
+    │    walks the Graph in dependency waves        │
+    │    fires ready Nodes via the Dispatcher       │
+    │    injects a Reflector between waves           │
     └──────┬───────────────────────────────┬───────┘
            │                               │
            ▼                               ▼
     ┌─────────────┐                ┌──────────────┐
-    │ Dispatcher  │ → tool.Execute │  Reflector   │ decides:
-    │ (per Node)  │                │              │  continue | conclude | investigate
+    │ Dispatcher  │ → tool.Execute │  Reflector   │ decides (3-way):
+    │ (per Node)  │                │              │  continue | replan | conclude
     └─────────────┘                └──────┬───────┘
-                                          │ investigate
+                                          │
+              ┌───────────────────────────┼───────────────────────────┐
+              │ continue                  │ replan                     │ conclude
+              ▼                           ▼                            ▼
+        fire next wave          Executive re-plans               Aggregator
+                                (fresh replan frame)         (or verdict verbatim)
+                                          │
+                    ┌─────────────────────┴─────────────────────┐
+                    │ a SUCCESS revealed the next move → new     │
+                    │   steps                                    │
+                    │ a step FAILED → the Executive plans a      │
+                    │   `debug` step ↓                           │
+                    └─────────────────────┬─────────────────────┘
                                           ▼
                                    ┌──────────────┐
-                                   │   Holmes     │  ReAct investigation → RCAReport
+                                   │ debug (tool) │  scheduler grafts Holmes →
                                    └──────┬───────┘
                                           ▼
                                    ┌──────────────┐
-                                   │  Debugger /  │  plans fix steps (graft onto Graph)
-                                   │ Microplanner │
+                                   │   Holmes     │  read-only root-cause of the FAILED step
+                                   └──────┬───────┘
+                                          ▼
+                                   ┌──────────────┐
+                                   │ Microplanner │  RCA → fix steps (grafted onto Graph)
                                    └──────────────┘
-                        ▼ (reflector: conclude)
-                 ┌─────────────┐
-                 │ Aggregator  │  synthesises the final answer for the user
-                 └─────────────┘
 ```
+
+Repair is not a separate lane. A failure flows through the *same* door as an expansion: the reflector returns `replan`, the Executive plans a `debug` super-tool step, and when that node resolves the scheduler grafts the first Holmes iteration onto it. There is no `investigate → Holmes → Debugger` shortcut anymore.
 
 ## Graph data model
 
@@ -53,7 +75,8 @@ Every kaiju investigation is a DAG. Components emit nodes, the scheduler fires t
 type Graph struct {
     Nodes        []*Node
     Context      *ContextGate
-    ActiveCards  []string        // skills selected by Preflight
+    Preflight    *PreflightResult // per-investigation classify output
+    ActiveCards  []string         // skills selected by classifyInvestigate
     SessionID    string
     // ...
 }
@@ -61,12 +84,12 @@ type Graph struct {
 type Node struct {
     ID         string
     Tag        string            // short human label
-    Type       NodeType          // NodeTool | NodeCompute | NodeReflector | ...
+    Type       NodeType          // NodeTool | NodeCompute | NodeReflection | NodeHolmes | ...
     ToolName   string            // empty for non-tool nodes
-    Params     map[string]any    // ${node.<id>(.field)?} placeholders inside string values are substituted by fireNode before execution
+    Params     map[string]any    // ${node.<id>(.field)?} placeholders inside string values are substituted by the dispatcher before execution
     DependsOn  []string
     Result     string            // JSON or plain text emitted by the tool
-    State      NodeState         // StateReady | StateResolved | StateFailed | StateSkipped
+    State      NodeState         // StatePending | StateRunning | StateResolved | StateFailed | StateSkipped
     SpawnedBy  string            // parent node when grafted
     StartedAt  time.Time
     EndedAt    time.Time
@@ -74,31 +97,46 @@ type Node struct {
 }
 ```
 
+The `NodeType` enum is `NodeTool | NodeCompute | NodeExecutive | NodeMicroPlanner | NodeAggregator | NodeActuator | NodeReflection | NodeObserver | NodeInterjection | NodeHolmes`.
+
 Dependency injection is expressed inline as `${step.N(.field)?}` placeholders inside string-valued params. The Executive emits them at plan time; `planStepsToNodes` rewrites them to `${node.<id>(.field)?}` once the per-node IDs are minted; the dispatcher substitutes them at fire time from `dep.Result`.
 
-Nodes can be grafted onto the Graph at runtime — architect grafts coder/bash children, the microplanner grafts fix steps after Holmes concludes. `SpawnedBy` records the parent so the scheduler can hoist child results back onto the parent.
+Nodes can be grafted onto the Graph at runtime — the architect grafts coder/bash children, a resolved `debug` node grafts the first Holmes iteration, and the microplanner grafts fix steps after Holmes concludes. `SpawnedBy` records the parent so the scheduler can hoist child results back onto the parent.
 
 ## Components
 
 ### Preflight
 
-`internal/agent/preflight.go`. One LLM call made before the Executive. Classifies the query in a single shot:
+`internal/agent/preflight.go`. Two separable jobs run at the front of every interactive investigation.
+
+**Stage 1 — routeQuery (the cheap first pass).** `routeQuery` fires the `ROUTE` prompt (`prompt.Route`) as a tiny forced `route()` tool call: `ToolChoice: "required"`, `Temperature: 0.0`, `MaxTokens: 16`, on the dedicated route lane (falls back to the executor/light lane). It classifies the *latest* message into one mode and nothing else:
+
+```
+mode: "chat" | "meta" | "investigate"
+```
+
+It carries only a minimal slice of history (`routeContext` — the running conversation summary, if any, plus the previous turn) so a terse follow-up like "try again" inherits the nature of the turn it continues. **It fails safe to `chat`**: on any classifier failure — the model errored, refused, or returned unparseable output — `routeQuery` returns `"chat"`, which the ROUTE prompt itself calls the default. Escalating to the agent is a positive decision, not what happens when the router trips (an aligned model that balks at edge content was wrongly forced onto the agent path when the fallback was `investigate`).
+
+`chat` and `meta` short-circuit here — the scheduler skips the classify + skill-manifest cost and the executive entirely (`ExecutiveConversationalError`). Only `investigate` pays for Stage 2. (Autonomous mode skips routing entirely — its result would only be discarded — and runs Stage 2 directly with `mode` forced to `investigate`.)
+
+**Stage 2 — classifyInvestigate (the plan-prep pass).** On `investigate`, one executor-model call runs the `PREFLIGHT` prompt and emits the structured metadata the planner and downstream components consume:
 
 ```json
 {
   "skills":              ["webdeveloper", "python"],
   "mode":                "chat" | "meta" | "investigate",
-  "intent":              0 | 1 | 2,
-  "required_categories": ["network", "filesystem"],
-  "compute_mode":        "deep" | "shallow" | ""
+  "intent":              "<intent name from the registry>",
+  "required_categories": ["network", "filesystem", "compute", "process", "info"],
+  "context":             "paragraph quoting every concrete identifier (URLs, paths, selectors, constants) verbatim",
+  "compute_mode":        "" | "shallow" | "deep"
 }
 ```
 
-Outputs flow into the Executive's prompt as context. `mode=chat` or `mode=meta` short-circuits the planner and answers directly via the aggregator.
+The skill manifest is built here (only reached on the investigate path). `intent` resolves against the intent registry; `context` is the ONLY channel by which concrete identifiers from chat history reach the Coder/Executive/microplanner, so the prompt forces verbatim quoting. Any missing or malformed field falls back to a safe default (`validatePreflight` / `defaultPreflight`). The result lands on the Graph (`graph.Preflight`, `graph.ActiveCards`) — per-investigation, so concurrent runs never clobber each other.
 
 ### Executive
 
-`internal/agent/executive.go`. The top-level planner. Emits the initial DAG as JSON:
+`internal/agent/executive.go`. The top-level planner. It runs via **native function calling only** — the old structured-JSON planner mode was removed (modern models all support native tool calling and it parses more reliably). The model is **pinned to emit a single `plan()` tool call** (`ToolChoice: llm.ForceToolChoice("plan")`), not "call some tool" — a weak reasoning model otherwise emits a bare `web_search`/`web_fetch` call and hard-fails. The plan is the entire DAG as the tool argument:
 
 ```json
 {"steps": [
@@ -108,18 +146,18 @@ Outputs flow into the Executive's prompt as context. `mode=chat` or `mode=meta` 
 ]}
 ```
 
-Prompt is assembled in `buildExecutivePrompt`. Key inputs it sees:
+Prompt is assembled in the executive system-prompt path. Key inputs it sees:
 
 - **Workspace tree** — `WorkspaceTree(5)`, BFS-walked, capped at 120 entries (`scanWorkspaceTree` in `utils.go`).
-- **Preflight output** — required tool categories, compute_mode.
-- **Tool catalogue** — every registered tool's name, description, and `Parameters()` schema.
-- **Skills** — role-specific guidance sections resolved from Preflight's chosen skill cards.
+- **Preflight output** — the `context` paragraph, required tool categories, `compute_mode`, inferred intent.
+- **Tool catalogue** — every registered tool's name, description, and `Parameters()` schema (plus output schemas so `${step.N.field}` placeholders can be wired against correct result shapes).
+- **Skills** — role-specific guidance sections resolved from the classify pass's chosen skill cards.
 
 Output is validated by `validatePlanSteps`:
 - Unknown tool names → the step is dropped with a log line.
 - All gaps, no valid tools → `ExecutiveConversationalError` surfaces the gap text to the user.
 
-The Executive does not re-plan. Recovery from execution failures is the Reflector/Holmes/Microplanner loop below.
+**The Executive DOES re-plan.** When the reflector returns `replan`, the scheduler re-invokes `runExecutive` with a **replan frame** appended to the user query. That frame is a fresh sandbox: prior results have ALREADY FINISHED and are pasted into the worklog as literal DATA, so the new plan must reference those values *literally* (paste the actual URL/text) and set `depends_on: []` for anything already done. Crucially, `${step.N}` and `depends_on:[N]` indices in a replan are **plan-local** — they address only the NEW steps in *this* plan, never the concluded ones. `planStepsToNodes` / `rewriteStepTemplates` enforce this: an index that would point at a prior-frame node (or at the node itself) is left as an unresolved placeholder rather than wired into a dead/self edge (the old bug where a stale `depends_on:[0]` made a node wait on itself, get skipped, and re-plan the same fetch forever). If the replan move is to fix a failure, the frame instructs the Executive to plan a single `debug` step (a leaf) carrying the failure text.
 
 ### Scheduler
 
@@ -130,10 +168,16 @@ The Executive does not re-plan. Recovery from execution failures is the Reflecto
 3. Wait for the batch to complete (success or failure).
 4. Between waves, inject a Reflector node so the classifier can steer.
 
+Reflection *timing* depends on the DAG mode (`dag.go`: `DAGModeReflect` / `DAGModeNReflect` / `DAGModeOrchestrator`):
+- **reflect** — reflections are structural (forced serialization; the reflector gates downstream waves).
+- **nReflect** — true DAG scheduling; a reflection is injected every `BatchSize` tool completions.
+- **orchestrator** — true DAG scheduling plus a lightweight per-node observer LLM spawned after each tool completes.
+
 The Scheduler also owns:
-- **Budget** (`MaxNodes`, `MaxLLMCalls`). Each LLM-bearing node decrements. Exhaustion prunes downstream work.
-- **Graft hooks** — compute's architect output spawns setup/coder/execute/service nodes as children. Service starts spawn an auto-grafted health check.
-- **Cascade prune** — when a node fails and no Holmes investigation recovers it, its dependent subtree is marked `StateSkipped` so the reflector knows those results never exist.
+- **Budget** (`MaxNodes`, `MaxLLMCalls`, plus replan/debug round caps `maxReplans` / `maxInvestigations`). Each LLM-bearing node decrements. Exhaustion prunes downstream work.
+- **Graft hooks** — the architect's compute output spawns setup/coder/execute/service nodes as children; a service start spawns an auto-grafted health check; a resolved **`debug`** node grafts the first Holmes iteration (`spawnFirstHolmes`); a concluded Holmes grafts the **microplanner**, whose fix steps are grafted in turn (and validators are re-grafted after them).
+- **Cascade prune** — when a node fails and no debug cycle recovers it, its dependent subtree is marked `StateSkipped` so the reflector knows those results never exist.
+- **Diminishing-returns brake** — two consecutive reflector `diminishing` rounds downgrade a `replan` to `conclude`, so debug/expand waves stop being spawned when fixes aren't moving the answer forward.
 
 ### Dispatcher
 
@@ -149,80 +193,107 @@ Responsibilities, in order:
 3. **Validate direct params** — `validateDirectParams`. Every key in `n.Params` must be either declared in the tool's schema or allowed by `additionalProperties`. Unknown keys (e.g. `bash({command, cwd})` where bash has no `cwd`) → fail the step. Each tool declares its own strictness via its schema; the validator just reads it.
 4. **Throttle** — per-tool cooldown via `toolThrottle`.
 5. **Gate** — scope check, rate limit, IGX triad check (impact ≤ min(intent, clearance, scope cap)), external clearance if configured.
-6. **Dispatch** — `ContextualExecutor.ExecuteWithContext(ec, params)` when implemented (compute, edit_file), plain `Execute(ctx, params)` otherwise.
+6. **Dispatch** — `ContextualExecutor.ExecuteWithContext(ec, params)` when implemented (compute, edit_file, debug), plain `Execute(ctx, params)` otherwise.
 7. **Audit + side-effect record** — every attempt enters the audit log; non-zero-impact tools land in the event store.
-8. **Truncate** result to `maxToolResultLen` with head+tail preservation, except for ContextualExecutor results (those are structured pipeline data the scheduler parses).
+8. **Truncate** result to `maxToolResultLen` with head+tail preservation, except for ContextualExecutor results (those are structured pipeline data the scheduler parses — including the `{type:"debug"}` envelope that triggers the Holmes graft).
 
-Both failure modes — unknown direct param, malformed template — log a `[dispatch:reject]` line. Failures become `StateFailed` on the node; the existing Reflector → Holmes → Microplanner chain picks recovery.
+Both failure modes — unknown direct param, malformed template — log a `[dispatch:reject]` line. Failures become `StateFailed` on the node; recovery flows through the reflector `replan` → `debug` → Holmes → microplanner chain below.
 
 ### Reflector
 
-`internal/agent/reflection.go`. Between scheduler waves, or when a batch size threshold is hit, the reflector runs one LLM call that emits:
+`internal/agent/reflection.go`, prompt `=== REFLECTOR ===`. Between scheduler waves (or when a batch threshold is hit), one LLM call classifies the state into **one of three decisions** and emits:
 
 ```json
 {
-  "decision": "continue" | "conclude" | "investigate",
+  "decision": "continue" | "replan" | "conclude",
   "progress": "productive" | "diminishing",
-  "summary":  "...",
-  "verdict":  "...",           // only on conclude
-  "problem":  "...",           // only on investigate
-  "aggregate": true | false     // only on conclude
+  "summary":  "one paragraph: what happened, current state, exact error text",
+  "next":     "...",          // only on replan — the concrete next move
+  "verdict":  "...",          // only on conclude — final answer for the user
+  "aggregate": true | false   // only on conclude
 }
 ```
 
-Inputs the reflector sees come via `ContextGate`:
-- **Node Results** — resolved and failed nodes' outputs, gate-filtered.
-- **Execution Timeline** — worklog entries, recent-first.
-- **Previous Debug Attempts** — any prior microplanner summaries, so a stalled loop is visible.
+The verdict set is `continue | replan | conclude` — there is no `investigate` decision and no `aggregate` decision. `investigate` was removed; `parseReflectionOutput` coerces any stray `"investigate"` (from an old prompt or model) into `"replan"`, carrying its problem statement into `next`.
 
 Decisions steer the scheduler:
-- `continue` → fire the next wave.
-- `conclude` → stop scheduling. If `aggregate=true`, the Aggregator runs; otherwise `verdict` is the final answer verbatim.
-- `investigate` → spawn a Holmes node with `problem` as the investigation brief.
+- **continue** — work is still in flight; let the current plan finish.
+- **replan** — the graph needs to GROW and the goal isn't answered yet. Two shapes, same decision:
+  - *a success revealed the next move* — e.g. searches returned URLs → "fetch the 3 URLs the searches surfaced".
+  - *a step FAILED and needs fixing* — describe the failure (exact error text, file paths, module names) in `next`. The Executive then plans a `debug` step; the reflector names the move, the Executive plans HOW.
+- **conclude** — the goal is met, OR the request is too vague/underspecified to act on (ask the user to clarify instead of guessing). If `aggregate=false` the reflector's `verdict` is the final answer verbatim; if `aggregate=true` the Aggregator runs.
 
-`progress` is a scheduler-consumed signal. Two consecutive `diminishing` waves downgrade `investigate` to `conclude` so Holmes cycles stop being spawned when fixes aren't moving the validator set. `productive` (the default when unsure) resets the streak — unchanged behaviour.
+The prompt leans hard on the anti-hallucination rule: conclude ONLY when the evidence *answers* the goal — an unfetched URL or an un-followed lead is `replan`, never a confident guess from memory. Transient tool output (empty fetch, HTTP 5xx, timeout, rate limit), out-of-scope failures, and truly-unfixable environment failures are `conclude`, not `replan` — they don't belong in the debugger.
+
+Inputs the reflector sees (assembled by `assembleReflectorPrompt` via `ContextGate`): **Original Request**, a plain-English **Budget** line ("replan round 2 of 3, debug round 1 of 2, 3m40s elapsed"), a **Graph Summary** (resolved/failed/skipped/pending counts), **Node Results** (gate-filtered), the **Execution Timeline** (worklog, recent-first), and **Previous Debug Attempts** (prior microplanner summaries, so a stalled loop is visible — the next problem description MUST name a DIFFERENT root cause).
+
+`progress` is a scheduler-consumed signal: two consecutive `diminishing` rounds downgrade `replan → conclude`, so debug cycles stop being spawned when fixes aren't moving the state forward. `productive` (the default when unsure) resets the streak.
+
+### Debug super-tool
+
+`internal/agent/builtin_debug.go`. `debug` is the REPAIR super-tool — the Executive-planned door into the failure-handling pipeline. It mirrors `compute`: a thin tool interface over a DAG sub-structure the scheduler grafts.
+
+- **Impact** is `ImpactAffect` (write-capable — the microplanner fix edits files), so IGX gates it like compute; lanes below the required clearance can't invoke it.
+- **Params**: `{ "problem": "<exact error text, file paths, module names, what was being attempted>" }` — this is Holmes's investigation brief.
+- The tool itself does almost nothing. `ExecuteWithContext` echoes the problem into a `{type:"debug", problem}` envelope. The scheduler's tool-completion handler detects that marker and grafts the first Holmes iteration (`spawnFirstHolmes`) parented to the debug node; from there the `NodeHolmes → NodeMicroPlanner → validator` machinery drives the fix, fully visible in the DAG trace.
+- **One debug step per failure**, planned as a *leaf* (no dependents) — the next re-plan handles follow-on work once the fix lands. Independent sibling work keeps running (the graft does not skip pending nodes).
+- **No debug-in-debug**: `debug` is pruned from Holmes's and the microplanner's tool lists, and any `debug` step in a microplanner fix plan is dropped — a debug must never spawn another debug.
+
+Repair thus flows through the same door as expansion: `reflect.replan → Executive plans a `debug` step → this graft → Holmes → microplanner`.
 
 ### Holmes
 
-`internal/agent/rca.go`. A ReAct investigator. Iterates up to `MaxHolmesIters` (default 5). Each iteration runs the executor model with Watson's prior scratch + the problem statement and can:
+`internal/agent/rca.go`, prompt `=== HOLMES ===`. Holmes is a **read-only, Sherlock-style root-cause investigator of a FAILED STEP**. He is agnostic to what kind of work failed — a data fetch, a calculation, a file operation, a service action, a build. He is NOT the query planner and he never answers the user; he sits between the reflector (which classifies the symptom) and the microplanner (which prescribes the fix), and emits a structured root-cause analysis the microplanner consumes as authoritative.
 
-- Use any tool in scope (file_read, bash, web_fetch, etc.) to gather evidence.
-- Declare `conclude=true` when it believes the root cause is named.
+He runs as a ReAct loop, up to `MaxHolmesIters` (default 5). Each iteration is a real graph node (`NodeHolmes`), so the investigation is visible in the DAG trace: a Holmes LLM call picks read-only tools, they run as the next node depending on it, then Holmes fires again on the result. Each iteration can:
 
-On conclusion (either voluntary or budget-exhausted) it produces an `RCAReport`:
+- Use any *read-only* tool in scope (file_read, bash, web_fetch, service logs, etc.) to gather evidence. Holmes never writes, restarts, or mutates.
+- Declare `conclude=true` when the root cause is named — a *symptom* (a specific error at a specific file) is not a valid conclude; the cause is the upstream configuration/state that made the symptom inevitable, and the prompt requires verifying the upstream layer (bundler config, package.json/install log, .env, process list) before concluding.
+
+**Step 0 — is there a case at all?** Before iterating, Holmes scans the problem statement and fast-exits on iteration 1 (confidence `low`) if the "failure" isn't a real, in-scope, fixable bug:
+
+- **Out of scope** — the failure is in the agent's own infrastructure (`cmd/`, `internal/`, `.kaiju/`, an absolute system path) rather than the user's task.
+- **Transient tool** — empty/null from web_fetch/web_search, HTTP 5xx, timeout, rate limit → "retry/skip recommended".
+- **No crime** — no concrete error, no FAIL/ERROR tags, no explicit request to debug.
+- **Internal Kaiju plumbing** — the problem references `${step.N…}`, `depends_on`, `dispatch:reject`, `validator`, `template substitution`, etc. — a malformed-plan complaint, not a real-world bug.
+
+On conclusion (voluntary or budget-exhausted) it produces an `RCAReport`:
 
 ```go
 type RCAReport struct {
     RootCause         string
     Evidence          []string
-    Confidence        string
-    SuggestedStrategy string
-    AffectedFiles     []string   // populated when Holmes sees a pattern spanning multiple files
+    Confidence        string     // "high" | "medium" | "low"
+    SuggestedStrategy string     // a concrete one-sentence fix direction — a pointer, not a patch
+    AffectedFiles     []string   // every file likely to carry the same pattern
 }
 ```
 
-Budget-exhausted conclusions get a canned `SuggestedStrategy` marking the investigation as halted so downstream planners can treat the hypothesis as provisional.
+When the root cause is a *pattern* that likely repeats across sibling files (an export-style mismatch across router modules, a missing `type: module` across a directory), Holmes lists every affected file in `AffectedFiles` so the debugger batches the fix — one investigation per error class, not one per symptom. A budget-exhausted conclusion gets a canned `SuggestedStrategy` marking the investigation as halted so the microplanner can treat the hypothesis as provisional.
 
 ### Debugger / Microplanner
 
-`internal/agent/microplanner.go`. When Holmes reports an RCAReport, the Debugger plans the fix. Inputs include the RCA, the current blueprint (if any), the worklog, and the current workspace tree.
+`internal/agent/microplanner.go`, prompt `=== MICROPLANNER ===`. When Holmes concludes, the scheduler grafts the microplanner (a clean-room "debugger") to translate the RCA into a fix. It treats Holmes's `root_cause` and `evidence` as authoritative and does NOT re-diagnose. Inputs include the RCA, the current blueprint (if any), the worklog, and the workspace tree.
 
-Emits a `{"summary": ..., "nodes": [...]}` block. The nodes are regular Graph steps — same shape the Executive emits — and get grafted onto the Graph. They typically include:
+Emits a `{"summary": ..., "nodes": [...]}` block. The nodes are regular Graph steps — same shape the Executive emits — and get grafted onto the Graph as children of the microplanner node. They typically include:
 
-- **edit_file** steps for each affected file (one coder call per path — Holmes's `AffectedFiles` drives the fan-out).
+- **edit_file** steps for each affected file (one coder call per path — Holmes's `AffectedFiles` drives the fan-out; same-class errors are batched).
 - **bash** verification (curl the endpoint, run a test, parse output).
 - **service restart** when the fix changes a long-running process.
 
-The Debugger explicitly does NOT plan via compute for known-path edits — edit_file is the authoritative channel. Compute is reserved for value generation (see Compute subsystem below).
+Any `debug` step in the plan is dropped (no debug-in-debug). The microplanner explicitly does NOT plan via compute for known-path edits — edit_file is the authoritative channel; compute is reserved for value generation (see Compute subsystem below). After the fix nodes graft, the scheduler re-grafts any stored validators to prove the fix worked.
 
 ### Aggregator
 
-`internal/agent/aggregator.go`. Final LLM call. Synthesises the user-facing answer from the graph's Node Results and worklog. Two modes:
+`internal/agent/aggregator.go`, prompt `=== AGGREGATOR ===`. The final LLM call. It synthesises the user-facing answer from the graph's Node Results and worklog and cannot call tools — everything it writes is synthesis of prior node outputs.
 
-- **executor** (default) — one-shot summary.
-- **reasoning** — invoked when the reflector sets `aggregate=true` with a request for a more considered answer.
+Whether it runs, and on which lane, is driven by `agg_mode` (`-1` auto / `0` skip / `1` executor / `2` reasoning):
 
-The aggregator cannot call tools. Everything it writes is synthesis of prior node outputs.
+- When the reflector concluded with `aggregate=false`, the aggregator is **skipped** and the reflector's `verdict` is the final answer verbatim.
+- Otherwise it runs on the **reasoning (heavy) lane by default**. `aggregate=true` from the reflector routes here explicitly (`agg_mode=2`).
+- The **executor lane** is used only when `agg_mode=1` — including the forced case where the graph contains compute nodes (compute runs always need the aggregator for a properly formatted response).
+
+The aggregator is exempt from the budget — it always runs to give the user a response — and the prompt forbids inventing data, narrating prior-run actions as if they happened now, or passing internal Kaiju errors through to the user.
 
 ## Compute subsystem
 
@@ -269,7 +340,7 @@ Returns:
 }
 ```
 
-Each task is REQUIRED to have `task_files` (enforced by the architect's schema at `function_calls.go:345`). There is no filename-hallucination path in deep mode.
+Each task is REQUIRED to have `task_files` (enforced by the architect's schema at `function_calls.go`). There is no filename-hallucination path in deep mode.
 
 ### Coder
 
@@ -324,7 +395,9 @@ Dispatcher.fireNode:         substituteTemplates(n, graph)
 tool.Execute(ctx, n.Params)
 ```
 
-Substitution failures (referenced node not in graph, dep has no `Result`) fail the node with a descriptive error. Missing-field paths fall back to the whole `dep.Result` with a `[dispatch:resolve-fallback]` log line. Failures flow through the normal path: reflector → Holmes → microplanner replan. No new recovery machinery.
+Substitution failures (referenced node not in graph, dep has no `Result`) fail the node with a descriptive error. Missing-field paths fall back to the whole `dep.Result` with a `[dispatch:resolve-fallback]` log line. Failures flow through the normal path: reflector `replan` → a `debug` step → Holmes → microplanner. No new recovery machinery.
+
+On a **replan**, `${step.N}` and `depends_on:[N]` indices are plan-local — they address only the NEW steps in that plan. `rewriteStepTemplates` leaves any out-of-range or self-referencing index as an unresolved placeholder (rather than wiring a dead/self edge), because a replan frequently emits a stale `depends_on:[0]` pointing at a prior-frame node this plan can't reach.
 
 Validation rules:
 
@@ -335,11 +408,11 @@ Both direct-param rejection and template failures emit `[dispatch:reject]` log l
 
 ## Budgets
 
-Every LLM-bearing component decrements a counter in `Budget`. `MaxLLMCalls` is the global cap. Exhausting it before:
+Every LLM-bearing component decrements a counter in `Budget`. `MaxLLMCalls` is the global cap; `maxReplans` and `maxInvestigations` cap replan and debug rounds (the replan cap auto-scales with plan difficulty). Exhausting the budget before:
 
 - Reflector → a canned "budget exhausted" summary is written; no more waves.
-- Holmes → the investigation is marked halted with a provisional hypothesis (`SuggestedStrategy` says so) and hands off to the Debugger anyway.
-- Aggregator → the last reflector `verdict` is surfaced verbatim.
+- Holmes → the investigation is marked halted with a provisional hypothesis (`SuggestedStrategy` says so) and hands off to the microplanner anyway.
+- Aggregator → the last reflector `verdict` is surfaced verbatim (the aggregator itself is exempt and still runs when reached).
 
 `MaxNodes` caps the graph size. When a graft would push past it, the scheduler logs "budget exhausted, truncating plan" and skips the graft — partial completion over runaway spawn.
 
@@ -347,17 +420,21 @@ Every LLM-bearing component decrements a counter in `Budget`. `MaxLLMCalls` is t
 
 | file | responsibility |
 |---|---|
-| `internal/agent/dag.go` | Graph, Node, NodeState, topological ordering |
-| `internal/agent/scheduler.go` | wave execution, graft hooks, budget, cascade prune |
+| `internal/agent/dag.go` | Graph, Node, NodeType, NodeState, topological ordering, DAG modes |
+| `internal/agent/scheduler.go` | wave execution, graft hooks (debug/Holmes/microplanner), budget, cascade prune |
 | `internal/agent/dispatcher.go` | per-node execute: injection, throttle, gate, dispatch, audit |
 | `internal/agent/dispatcher_validation.go` | `validateDirectParams`, `validateParamRef`, `parseToolSchema` |
-| `internal/agent/preflight.go` | one-shot classifier |
-| `internal/agent/executive.go` | initial DAG planner |
-| `internal/agent/reflection.go` | between-wave classifier |
-| `internal/agent/rca.go` | Holmes ReAct investigator + RCAReport |
-| `internal/agent/microplanner.go` | debugger/microplanner fix planner |
+| `internal/agent/preflight.go` | `routeQuery` (cheap route) + `classifyInvestigate` (plan-prep) |
+| `internal/agent/executive.go` | native `plan()` planner + replan-frame re-plan + `planStepsToNodes` |
+| `internal/agent/reflection.go` | between-wave classifier: continue / replan / conclude |
+| `internal/agent/builtin_debug.go` | `debug` super-tool — the door that grafts Holmes |
+| `internal/agent/rca.go` | Holmes ReAct root-cause investigator + `spawnFirstHolmes` + RCAReport |
+| `internal/agent/microplanner.go` | clean-room debugger — RCA → fix plan |
 | `internal/agent/aggregator.go` | final answer synthesis |
 | `internal/agent/compute.go` | runCompute, computePlan, computeCode |
 | `internal/agent/builtin_compute.go` | ComputeTool schema + dispatch wrapper |
 | `internal/agent/builtin_edit_file.go` | EditFileTool — task_files-required wrapper over the coder |
 | `internal/agent/contextgate.go` | source selection for LLM prompt assembly |
+| `internal/agent/prompt/prompts.md` | ROUTE / PREFLIGHT / REFLECTOR / HOLMES / MICROPLANNER / AGGREGATOR prompts |
+</content>
+</invoke>

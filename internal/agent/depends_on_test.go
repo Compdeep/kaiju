@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -51,5 +52,27 @@ func TestPlanStepsToNodes_NoSelfDependency(t *testing.T) {
 	}
 	if len(nodes[0].DependsOn) != 0 {
 		t.Fatalf("first literal-URL fetch should have no deps, got %v", nodes[0].DependsOn)
+	}
+}
+
+// TestPlanStepsToNodes_TemplateSelfRefLeftUnresolved: the template side of the
+// same bug. A replan fetch whose url templates ${step.0…} on its OWN first step (a
+// stale reference to a prior-frame search) must not self-reference — no self-dep,
+// and the placeholder is left unresolved rather than rewritten to point at itself.
+func TestPlanStepsToNodes_TemplateSelfRefLeftUnresolved(t *testing.T) {
+	graph := NewGraph()
+	budget := NewBudget(100, 100, 100, 100, time.Minute)
+	steps := []PlanStep{
+		{Tool: "web_fetch", Params: map[string]any{"url": "${step.0.results.0.url}"}, Tag: "s1", DependsOn: FlexInts{0}},
+	}
+	nodes, err := planStepsToNodes(steps, graph, budget, nil)
+	if err != nil {
+		t.Fatalf("planStepsToNodes: %v", err)
+	}
+	if len(nodes[0].DependsOn) != 0 {
+		t.Fatalf("self-referential first step must have no deps, got %v", nodes[0].DependsOn)
+	}
+	if url, _ := nodes[0].Params["url"].(string); strings.Contains(url, nodes[0].ID) {
+		t.Fatalf("url must not be rewritten to reference this node itself (%s): %q", nodes[0].ID, url)
 	}
 }

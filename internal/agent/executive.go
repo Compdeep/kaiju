@@ -1372,6 +1372,9 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 		// implicit deps. Logs each substitution for trace visibility.
 		extraDeps := rewriteStepTemplates(nodes[i].Params, nodeIDs, nodes[i].ID, steps, registry)
 		for _, dep := range extraDeps {
+			if dep == nodes[i].ID {
+				continue // never self-depend (defensive; rewriteStepTemplates also guards this)
+			}
 			has := false
 			for _, d := range nodes[i].DependsOn {
 				if d == dep {
@@ -1418,8 +1421,14 @@ func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string,
 			m := stepTemplateRe.FindStringSubmatch(match)
 			idx, _ := strconv.Atoi(m[1])
 			field := m[2]
-			if idx < 0 || idx >= len(nodeIDs) || nodeIDs[idx] == "" {
-				log.Printf("[dag] template %s on %s references invalid step %d, leaving placeholder unresolved", match, owner, idx)
+			if idx < 0 || idx >= len(nodeIDs) || nodeIDs[idx] == "" || nodeIDs[idx] == owner {
+				// Out of range, or a SELF-reference. A node can't consume its own
+				// output, and a replan often points ${step.0…} at what is really a
+				// prior-frame (concluded) node this plan-local index can't reach.
+				// Leave the placeholder unresolved rather than wiring a dead/self
+				// edge — otherwise the node waits on itself, is skipped, and the
+				// reflector re-plans the same fetch forever.
+				log.Printf("[dag] template %s on %s references invalid/self step %d, leaving placeholder unresolved", match, owner, idx)
 				return match
 			}
 			depID := nodeIDs[idx]

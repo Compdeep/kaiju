@@ -803,6 +803,7 @@ func runServe() {
 	ag.SetChatModel(cfg.Chat.Provider, cfg.Chat.Model)
 	ag.SetChatTools(cfg.Chat.Tools)
 	ag.SetRouteModel(cfg.Agent.RouteProvider, cfg.Agent.RouteModel)
+	ag.SetAnswerModel(cfg.Agent.AnswerProvider, cfg.Agent.AnswerModel)
 	execMux := http.NewServeMux()
 	apiHandler.RegisterRoutes(execMux)
 	mux.Handle("/api/v1/execute", gateway.WithJWTAuth(jwtSvc)(execMux))

@@ -98,6 +98,8 @@ type configPatch struct {
 		MaxReplans        *int `json:"max_replans,omitempty"`
 		RouteProvider *string `json:"route_provider,omitempty"`
 		RouteModel    *string `json:"route_model,omitempty"`
+		AnswerProvider *string `json:"answer_provider,omitempty"`
+		AnswerModel    *string `json:"answer_model,omitempty"`
 	} `json:"agent,omitempty"`
 }
 
@@ -163,6 +165,16 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		if patch.Agent.RouteProvider != nil || patch.Agent.RouteModel != nil {
 			c.agent.SetRouteModel(c.cfg.Agent.RouteProvider, c.cfg.Agent.RouteModel)
 			log.Printf("[config] route model updated: provider=%s model=%s", c.cfg.Agent.RouteProvider, c.cfg.Agent.RouteModel)
+		}
+		if patch.Agent.AnswerProvider != nil {
+			c.cfg.Agent.AnswerProvider = *patch.Agent.AnswerProvider
+		}
+		if patch.Agent.AnswerModel != nil {
+			c.cfg.Agent.AnswerModel = *patch.Agent.AnswerModel
+		}
+		if patch.Agent.AnswerProvider != nil || patch.Agent.AnswerModel != nil {
+			c.agent.SetAnswerModel(c.cfg.Agent.AnswerProvider, c.cfg.Agent.AnswerModel)
+			log.Printf("[config] answer model updated: provider=%s model=%s", c.cfg.Agent.AnswerProvider, c.cfg.Agent.AnswerModel)
 		}
 	}
 

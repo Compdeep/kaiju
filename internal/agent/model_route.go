@@ -71,10 +71,11 @@ type ProviderCreds struct {
 	APIKey   string
 }
 
-// laneSelection is the per-request model choice for both lanes.
+// laneSelection is the per-request model choice for the lanes.
 type laneSelection struct {
-	heavyProvider, heavyModel string
-	lightProvider, lightModel string
+	heavyProvider, heavyModel   string
+	lightProvider, lightModel   string
+	answerProvider, answerModel string
 }
 
 type laneSelKey struct{}
@@ -91,10 +92,12 @@ func withLaneSelection(ctx context.Context, sel laneSelection) context.Context {
 // laneSelectionFromTrigger reads the per-request model choice off a Trigger.
 func laneSelectionFromTrigger(t Trigger) laneSelection {
 	return laneSelection{
-		heavyProvider: t.Provider,
-		heavyModel:    t.Model,
-		lightProvider: t.ExecutorProvider,
-		lightModel:    t.ExecutorModel,
+		heavyProvider:  t.Provider,
+		heavyModel:     t.Model,
+		lightProvider:  t.ExecutorProvider,
+		lightModel:     t.ExecutorModel,
+		answerProvider: t.AnswerProvider,
+		answerModel:    t.AnswerModel,
 	}
 }
 
@@ -128,6 +131,24 @@ func (a *Agent) lightLane(ctx context.Context) (*llm.Client, string) {
 		}
 	}
 	return a.executor, ""
+}
+
+// answerLane resolves the client+model that writes the FINAL answer (aggregator +
+// chat). Precedence: per-request answer selection → the pinned answer model in
+// config → the heavy/reasoning lane (so an unset answer lane behaves exactly as
+// before). Kept SEPARATE from the heavy lane so a user's answer model — which may
+// be a thinking model — never drives the planner's forced tool calls.
+func (a *Agent) answerLane(ctx context.Context) (*llm.Client, string) {
+	sel := laneSelFrom(ctx)
+	if sel.answerProvider != "" && sel.answerModel != "" {
+		if c := a.providerClients[sel.answerProvider]; c != nil {
+			return c, sel.answerModel
+		}
+	}
+	if a.answerModel != "" {
+		return a.clientFor(a.answerProvider), a.answerModel
+	}
+	return a.heavyLane(ctx)
 }
 
 // clientFor returns the connection for the named provider, or the default

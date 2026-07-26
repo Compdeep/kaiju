@@ -17,6 +17,8 @@ type ExecuteRequest struct {
 	Model            string `json:"model,omitempty"`             // heavy-lane model id
 	ExecutorProvider string `json:"executor_provider,omitempty"` // light-lane provider
 	ExecutorModel    string `json:"executor_model,omitempty"`    // light-lane model id
+	AnswerProvider   string `json:"answer_provider,omitempty"`   // answer-lane provider (aggregator + chat)
+	AnswerModel      string `json:"answer_model,omitempty"`      // answer-lane model id
 	// Vision lane: the model that answers questions about attached images
 	// directly (no planner/tools). Empty ⇒ the configured default vision model.
 	VisionProvider string `json:"vision_provider,omitempty"`

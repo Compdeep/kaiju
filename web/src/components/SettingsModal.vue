@@ -91,7 +91,7 @@
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="12" r="3"/><path d="M9 6h6a3 3 0 0 1 3 3M9 18h6a3 3 0 0 0 3-3"/></svg>
                 router
               </div>
-              <div class="model-desc">decides chat vs. agent each turn — a small, reliable classifier (e.g. GPT-5 Mini) routes best</div>
+              <div class="model-desc">decides chat vs. agent each turn — a small, reliable non-thinking tool-caller (e.g. GPT-4.1 Mini) routes best. Only tool-call-capable models are listed.</div>
               <div class="form-row">
                 <div class="form-group">
                   <label>provider</label>
@@ -108,6 +108,34 @@
                   <select v-model="cfg.agent.route_model" @change="patchConfig">
                     <option value="">same as executor</option>
                     <option v-for="m in routeModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Answer Model (the final answer the user hears) -->
+            <div class="model-section">
+              <div class="model-label">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                answer
+              </div>
+              <div class="model-desc">writes the final answer (the aggregator). Open-ended generation, so a thinking model is fine here — unlike the tool-calling lanes. Empty ⇒ same as reasoning.</div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>provider</label>
+                  <select v-model="answerProvider" @change="onAnswerProviderChange">
+                    <option value="">same as reasoning</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="ollama">Ollama</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>model</label>
+                  <select v-model="cfg.agent.answer_model" @change="patchConfig">
+                    <option value="">same as reasoning</option>
+                    <option v-for="m in answerModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
                   </select>
                 </div>
               </div>
@@ -242,13 +270,14 @@ import api from '../api/client'
 defineEmits(['close'])
 const settings = useSettingsStore()
 const tab = ref('models')
-const cfg = ref({ llm: { provider: '', model: '', endpoint: '' }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1 } })
+const cfg = ref({ llm: { provider: '', model: '', endpoint: '' }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1, route_provider: '', route_model: '', answer_provider: '', answer_model: '' } })
 const allModels = ref([])
 const apiKey = ref('')
 const execProvider = ref('')
 const visionProvider = ref('')
 const chatProvider = ref('')
 const routeProvider = ref('')
+const answerProvider = ref('')
 const availableTools = ref([])
 
 /** desc: is a tool in the chat allowlist? */
@@ -392,6 +421,22 @@ function onRouteProviderChange() {
 }
 
 /**
+ * desc: Models for the selected answer provider. The answer lane writes the final
+ *   answer (aggregator) — open-ended generation, no tool call — so ANY model works
+ *   here, including a thinking model. Empty provider ⇒ the reasoning provider.
+ * @returns {Array<Object>}
+ */
+const answerModels = computed(() => {
+  const p = answerProvider.value || cfg.value.llm.provider
+  return allModels.value.filter(m => m.provider === p)
+})
+function onAnswerProviderChange() {
+  cfg.value.agent.answer_provider = answerProvider.value
+  cfg.value.agent.answer_model = answerProvider.value && answerModels.value.length ? answerModels.value[0].id : ''
+  patchConfig()
+}
+
+/**
  * desc: Persist the current LLM, executor, and agent configuration to the server
  * @returns {Promise<void>}
  */
@@ -402,7 +447,14 @@ async function patchConfig() {
       executor: { provider: cfg.value.executor.provider || undefined, model: cfg.value.executor.model || undefined },
       vision: { provider: cfg.value.vision.provider, model: cfg.value.vision.model },
       chat: { provider: cfg.value.chat.provider, model: cfg.value.chat.model, tools: cfg.value.chat.tools || [] },
-      agent: { dag_mode: cfg.value.agent.dag_mode, executive_mode: cfg.value.agent.executive_mode, safety_level: cfg.value.agent.safety_level },
+      agent: {
+        dag_mode: cfg.value.agent.dag_mode,
+        safety_level: cfg.value.agent.safety_level,
+        route_provider: cfg.value.agent.route_provider,
+        route_model: cfg.value.agent.route_model,
+        answer_provider: cfg.value.agent.answer_provider,
+        answer_model: cfg.value.agent.answer_model,
+      },
     })
   } catch (err) { console.error('config patch:', err) }
 }
@@ -434,6 +486,7 @@ onMounted(async () => {
     visionProvider.value = cfg.value.vision.provider || ''
     chatProvider.value = cfg.value.chat.provider || ''
     routeProvider.value = cfg.value.agent.route_provider || ''
+    answerProvider.value = cfg.value.agent.answer_provider || ''
     allModels.value = m
   } catch (err) { console.error('settings load:', err) }
   // Load intent registry — the sole source of truth for the default-safety

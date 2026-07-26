@@ -79,6 +79,8 @@ type Trigger struct {
 	Model              string `json:"model,omitempty"`
 	ExecutorProvider   string `json:"executor_provider,omitempty"`
 	ExecutorModel      string `json:"executor_model,omitempty"`
+	AnswerProvider     string `json:"answer_provider,omitempty"`
+	AnswerModel        string `json:"answer_model,omitempty"`
 	HeartbeatThreshold int    `json:"heartbeat_threshold,omitempty"` // consecutive stuck ticks before kernel interjects (0 = default 3; raise for long-running work like downloads)
 }
 
@@ -247,6 +249,11 @@ type Agent struct {
 	chatTools         []string
 	routeProvider     string
 	routeModel        string
+	// Answer lane default — the model that writes the FINAL answer (aggregator +
+	// chat). Empty ⇒ the heavy/reasoning lane. Open-ended generation, so a thinking
+	// model is fine here (unlike the planner/executor/router tool-call lanes).
+	answerProvider    string
+	answerModel       string
 	registry          *tools.Registry
 	gate              *gates.Gate
 	clearanceCheck    ClearanceChecker // external authorization (nil = no check)
@@ -813,6 +820,20 @@ func (a *Agent) SetRouteModel(provider, model string) {
 // RouteModel returns the pinned routing model (provider, model).
 func (a *Agent) RouteModel() (provider, model string) {
 	return a.routeProvider, a.routeModel
+}
+
+// SetAnswerModel pins the model that writes the FINAL answer — the aggregator
+// (investigate path) and the chat lane. Empty ⇒ the heavy/reasoning lane. This is
+// the model a user perceives as "the AI"; it does open-ended generation, not tool
+// calls, so a thinking model is fine here. Live-applied.
+func (a *Agent) SetAnswerModel(provider, model string) {
+	a.answerProvider = provider
+	a.answerModel = model
+}
+
+// AnswerModel returns the pinned answer model (provider, model).
+func (a *Agent) AnswerModel() (provider, model string) {
+	return a.answerProvider, a.answerModel
 }
 
 /*

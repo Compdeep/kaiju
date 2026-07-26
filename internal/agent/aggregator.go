@@ -28,9 +28,12 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 }
 
 func (a *Agent) runAggregatorWithIntent(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
-	// Default aggregator path uses the heavy lane, routed to the host-selected
-	// provider when present (model_route.go).
-	client, model := a.heavyLane(ctx)
+	// The aggregator writes the FINAL answer, so it uses the ANSWER lane — kept
+	// separate from the heavy/planner lane so a user's answer model (which may be
+	// a thinking model) drives the answer without being handed to the planner.
+	// An unset answer lane falls back to the heavy lane (model_route.go), so this
+	// is behaviourally identical until an answer model is pinned.
+	client, model := a.answerLane(ctx)
 	return a.runAggregatorWithClient(ctx, trigger, graph, intent, history, client, model, gateCtx)
 }
 

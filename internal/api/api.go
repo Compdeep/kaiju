@@ -219,6 +219,8 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		Model:            req.Model,
 		ExecutorProvider: req.ExecutorProvider,
 		ExecutorModel:    req.ExecutorModel,
+		AnswerProvider:   req.AnswerProvider,
+		AnswerModel:      req.AnswerModel,
 	}
 
 	// ── Memory boundary (chat input) ──────────────────────────────────────

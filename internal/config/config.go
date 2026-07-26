@@ -127,6 +127,12 @@ type AgentConfig struct {
 	// background call pricier. Overridable via config, the config API, or the CLI.
 	RouteProvider     string      `json:"route_provider,omitempty"`
 	RouteModel        string      `json:"route_model,omitempty"`
+	// AnswerProvider/AnswerModel pin the model that writes the final answer — the
+	// aggregator + chat lane, i.e. "the AI" the user hears. Empty ⇒ the reasoning
+	// lane. It does open-ended generation (no tool calls), so a thinking model is
+	// fine here, unlike the planner/executor/router lanes.
+	AnswerProvider    string      `json:"answer_provider,omitempty"`
+	AnswerModel       string      `json:"answer_model,omitempty"`
 	WallClockSec      int         `json:"wall_clock_sec"`
 	MaxTurns          int         `json:"max_turns"`
 	RateLimit         int         `json:"rate_limit"`

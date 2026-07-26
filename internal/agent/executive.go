@@ -12,6 +12,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/internal/agent/prompt"
 	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
@@ -238,35 +239,11 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("\n\n")
 	}
 
-	sb.WriteString("You are the Executive Kernel of this computer. You serve a dual purpose:\n")
-	sb.WriteString("(1) Assist the user with questions, research, and conversation.\n")
-	sb.WriteString("(2) Plan and decompose tasks into discrete operations available below.\n")
-	sb.WriteString("    Plan in waves — each wave depends on the previous via depends_on.\n\n")
-	sb.WriteString("Either way, you always answer by calling `plan`, and every tool you use is a STEP inside that plan. Example — to look something up:\n")
-	sb.WriteString("  `plan({\"steps\": [{\"tool\": \"web_search\", \"params\": {\"query\": \"latest SpaceX launch date\"}, \"depends_on\": [], \"tag\": \"s1\"}]})`\n")
-	sb.WriteString("If you can answer straight away with no tools, plan empty steps with an `answer`:\n")
-	sb.WriteString("  `plan({\"steps\": [], \"answer\": \"Paris.\"})`\n\n")
-	sb.WriteString("## Wiring data between steps\n\n")
-	sb.WriteString("Every input goes in `params`. Each value is one of:\n")
-	sb.WriteString("- a LITERAL — a value you know now. `\"path\": \"uploads/data.csv\"`.\n")
-	sb.WriteString("- a PLACEHOLDER — `${step.N.field}`, which the dispatcher replaces with field `field` from step N's output before your step runs.\n\n")
-	sb.WriteString("`depends_on` is the CLOCK, not the data. It tells the scheduler to wait for step N. Whenever you write `${step.N...}` in params, also list N in `depends_on`.\n\n")
-	sb.WriteString("**Validator rule:** `depends_on:[N]` with no `${step.N...}` anywhere in params is REJECTED. If you only need sequencing without data, use `bash` (or another tool) — `compute`/`edit_file` always need data wired.\n\n")
-	sb.WriteString("## Placeholder syntax\n\n")
-	sb.WriteString("- `${step.N}` — full result of step N.\n")
-	sb.WriteString("- `${step.N.field}` — top-level field. Dot-path for nested: `${step.0.results.0.url}`.\n")
-	sb.WriteString("- Embedded mid-string: `\"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.0.results.0.url}'\"`.\n")
-	sb.WriteString("- Bare (entire value is the placeholder): `\"${step.N.field}\"` — preserves type (string, number, object, array passed through as-is).\n\n")
-	sb.WriteString("## Examples\n\n")
-	sb.WriteString("Step 0 is file_read of a CSV, step 1 is compute that processes it →\n")
-	sb.WriteString("  `{\"tool\":\"compute\",\"params\":{\"goal\":\"clean and rank rows\",\"mode\":\"shallow\",\"context.csv\":\"${step.0.content}\"},\"depends_on\":[0]}`\n\n")
-	sb.WriteString("Step 0 is web_search, step 1 is bash needing the URL inside a command →\n")
-	sb.WriteString("  `{\"tool\":\"bash\",\"params\":{\"command\":\"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.0.results.0.url}'\"},\"depends_on\":[0]}`\n\n")
-	sb.WriteString("## Anti-patterns\n\n")
-	sb.WriteString("- `depends_on:[0]` with no `${step.0...}` placeholder anywhere → REJECTED.\n")
-	sb.WriteString("- Literal placeholders like `<URL>`, `{{url}}`, `__step.0__` → not recognised.\n")
-	sb.WriteString("- Nested `{step, field}` JSON objects → placeholders are STRINGS only.\n\n")
-	sb.WriteString("Make good use of tools to gather real data and help the user. If no suitable tool exists, declare a gap.\n\n")
+	// Planning contract (identity + dependency-injection rules). Lives in the
+	// composable prompt package (prompt.Executive, section EXECUTIVE in
+	// prompts.md) so it is operator-overridable like every other role prompt.
+	sb.WriteString(prompt.Executive)
+	sb.WriteString("\n\n")
 
 	// Inject skill Planning Guidance sections. These are authoritative —
 	// if a skill says "use compute deep", the planner must follow that,

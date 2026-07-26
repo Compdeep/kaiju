@@ -33,6 +33,7 @@ var (
 	Soul         string
 	Route        string
 	Preflight    string
+	Executive    string
 	Aggregator   string
 	Holmes       string
 	Microplanner string
@@ -52,6 +53,7 @@ var sectionOrder = []string{
 	"SOUL",
 	"ROUTE",
 	"PREFLIGHT",
+	"EXECUTIVE",
 	"AGGREGATOR",
 	"HOLMES",
 	"MICROPLANNER",
@@ -70,6 +72,7 @@ var targets = map[string]*string{
 	"SOUL":         &Soul,
 	"ROUTE":        &Route,
 	"PREFLIGHT":    &Preflight,
+	"EXECUTIVE":    &Executive,
 	"AGGREGATOR":   &Aggregator,
 	"HOLMES":       &Holmes,
 	"MICROPLANNER": &Microplanner,

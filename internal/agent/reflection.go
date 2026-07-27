@@ -139,14 +139,45 @@ func assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, trigger Tri
 	sb.WriteString(formatTrigger(trigger))
 	sb.WriteString("\n\n")
 
-	// Budget-in-English — tells the reflector how many replan/investigate
-	// rounds it has spent and how much wall clock is gone, so it stops
-	// expanding when rounds stop paying off (a soft brake ahead of the hard
-	// caps in the scheduler).
-	if budgetLine != "" {
-		sb.WriteString("## Budget\n\n")
-		sb.WriteString(budgetLine)
-		sb.WriteString("\n\n")
+	// ## History — the running record of this investigation: the round counter +
+	// wall clock (the soft brake), then one compact line per prior replan and per
+	// prior debug fix, so the reflector can SEE what earlier rounds already tried
+	// and not loop on a move that already returned nothing. Merges what used to be
+	// separate "Budget" and "Previous Debug Attempts" sections.
+	{
+		var replans, debugAttempts []string
+		if graph != nil {
+			replans = graph.ReplanRecords()
+			for _, gn := range graph.ResolvedByType(NodeMicroPlanner) {
+				var mp struct {
+					Summary string `json:"summary"`
+				}
+				if TryParseLLMJSON(gn.Result, &mp) && mp.Summary != "" {
+					debugAttempts = append(debugAttempts, mp.Summary)
+				}
+			}
+		}
+		if budgetLine != "" || len(replans) > 0 || len(debugAttempts) > 0 {
+			sb.WriteString("## History\n\n")
+			if budgetLine != "" {
+				sb.WriteString(budgetLine)
+				sb.WriteString("\n\n")
+			}
+			if len(replans) > 0 {
+				sb.WriteString("Replans already tried — do NOT repeat a move that returned nothing or was blocked:\n")
+				for _, r := range replans {
+					sb.WriteString("- " + r + "\n")
+				}
+				sb.WriteString("\n")
+			}
+			if len(debugAttempts) > 0 {
+				sb.WriteString("Debug fixes already attempted and DID NOT solve it — name a DIFFERENT root cause:\n")
+				for i, att := range debugAttempts {
+					sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, att))
+				}
+				sb.WriteString("\n")
+			}
+		}
 	}
 
 	// Graph summary — quick counts
@@ -175,27 +206,6 @@ func assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, trigger Tri
 			sb.WriteString("## Execution Timeline\n\n```\n")
 			sb.WriteString(wl)
 			sb.WriteString("\n```\n\n")
-		}
-	}
-
-	// Previous debug attempts — escalation hint
-	if graph != nil {
-		var attempts []string
-		for _, gn := range graph.ResolvedByType(NodeMicroPlanner) {
-			var mp struct {
-				Summary string `json:"summary"`
-			}
-			if TryParseLLMJSON(gn.Result, &mp) && mp.Summary != "" {
-				attempts = append(attempts, mp.Summary)
-			}
-		}
-		if len(attempts) > 0 {
-			sb.WriteString("## Previous Debug Attempts\n\n")
-			sb.WriteString("The following debug fixes were already attempted and DID NOT solve the problem:\n\n")
-			for i, att := range attempts {
-				sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, att))
-			}
-			sb.WriteString("\nYour problem description MUST identify a DIFFERENT root cause.\n\n")
 		}
 	}
 

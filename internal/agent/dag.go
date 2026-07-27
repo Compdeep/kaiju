@@ -251,6 +251,25 @@ type Graph struct {
 	Context     *ContextGate   // per-investigation context API; constructed at investigation start
 	ActiveCards []string       // skill card keys selected by preflight; read by skill_guidance source and DAG-path callers
 	Preflight   *PreflightResult // preflight result (mode/intent/skills/compute-mode); per-investigation, read by the planner
+	replanLog   []string         // one compact line per completed replan round, for the reflector's ## History (mu-protected)
+}
+
+// AddReplanRecord appends a one-line record of a replan round, so a later
+// reflection can see what earlier rounds already tried and not repeat a move
+// that returned nothing / was blocked.
+func (g *Graph) AddReplanRecord(s string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.replanLog = append(g.replanLog, s)
+}
+
+// ReplanRecords returns a copy of the per-round replan history.
+func (g *Graph) ReplanRecords() []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	out := make([]string, len(g.replanLog))
+	copy(out, g.replanLog)
+	return out
 }
 
 /*

@@ -96,16 +96,18 @@ func TestScaleReplanCap(t *testing.T) {
 // TestAssembleReflectorPrompt_Budget verifies the budget-in-English line is
 // injected as a "## Budget" section when present and omitted when empty, so the
 // reflector self-regulates against the replan/investigate caps.
-func TestAssembleReflectorPrompt_Budget(t *testing.T) {
+func TestAssembleReflectorPrompt_History(t *testing.T) {
 	trig := Trigger{Type: "chat_query", Data: []byte(`{"query":"find the CVEs"}`)}
 
+	// Budget line now leads the merged ## History section.
 	withBudget := assembleReflectorPrompt(nil, nil, trig, "replan round 2 of 3, 3m40s elapsed.")
-	if !strings.Contains(withBudget, "## Budget") || !strings.Contains(withBudget, "replan round 2 of 3") {
-		t.Fatalf("budget line not injected:\n%s", withBudget)
+	if !strings.Contains(withBudget, "## History") || !strings.Contains(withBudget, "replan round 2 of 3") {
+		t.Fatalf("budget line not injected into History:\n%s", withBudget)
 	}
 
+	// Empty budget + nil graph ⇒ no replans, no debug fixes ⇒ no History section.
 	noBudget := assembleReflectorPrompt(nil, nil, trig, "")
-	if strings.Contains(noBudget, "## Budget") {
-		t.Fatalf("empty budget line should not emit a Budget section:\n%s", noBudget)
+	if strings.Contains(noBudget, "## History") {
+		t.Fatalf("empty history should not emit a History section:\n%s", noBudget)
 	}
 }

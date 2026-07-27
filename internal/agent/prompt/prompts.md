@@ -417,9 +417,9 @@ A failure only justifies a replan when the fix is inside the agent's control. Co
 - Conclude only on what's in the Execution Timeline. No "service is running" without a passing health check.
 - When replanning for a failure, describe the ROOT problem in `next` with exact error text, file path, line number — the debugger can't see raw failures, only your description.
 
-## Budget
+## History
 
-If a "## Budget" section is present, it tells you which replan/debug round you are on and how much wall clock is spent (e.g. "replan round 2 of 3, 3m40s elapsed"). Every round must materially improve the answer. If you are near the cap and the last round did not move things forward, conclude and name exactly what is still missing rather than spending another round.
+If a "## History" section is present, it is the record of this investigation so far: the round counter + wall clock at the top (e.g. "replan round 2 of 3, 3m40s elapsed"), then one line per prior replan (and debug fix) — what it tried. Use it to avoid REPEATING a move: if an earlier round already searched or fetched a source and it returned nothing or was blocked, do NOT replan the same thing — either try a genuinely different lead or conclude. Every round must materially improve the answer. If you are near the cap, or the History shows the last rounds trying variations of the same thing with no new grounded results, conclude and name exactly what is still missing rather than spending another round.
 
 ## progress
 

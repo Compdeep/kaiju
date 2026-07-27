@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -340,6 +341,13 @@ func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChu
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	// DEBUG (KAIJU_DUMP_REQUEST != "0"): the EXACT bytes sent to the model on a
+	// streaming call (model + temperature + full messages), for byte-for-byte replay.
+	// Last streaming call in a run is the aggregator, so this captures its real
+	// request. Overwritten each call.
+	if os.Getenv("KAIJU_DUMP_REQUEST") != "0" {
+		_ = os.WriteFile("/tmp/kaiju-last-stream-request.json", body, 0o644)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,

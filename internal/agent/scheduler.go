@@ -1104,6 +1104,9 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						replanCount++
 						log.Printf("[dag] reflection: replan #%d/%d — %s", replanCount, maxReplans, Text.TruncateLog(next, 200))
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "REPLAN", fmt.Sprintf("#%d/%d | %s", replanCount, maxReplans, Text.TruncateLog(next, 200)))
+						// Record this round for the reflector's ## History so the NEXT
+						// reflection can see what was already tried and not loop on it.
+						graph.AddReplanRecord(fmt.Sprintf("Round %d — %s (tried next: %s)", replanCount, Text.TruncateLog(ref.Summary, 180), Text.TruncateLog(next, 120)))
 
 						// Anchor the user's goal verbatim (formatTrigger inside the
 						// executive); hand it a generic frame: what's already done

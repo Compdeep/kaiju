@@ -114,7 +114,7 @@ func (f *FileRead) Execute(_ context.Context, params map[string]any) (string, er
 		lines = append(lines, fmt.Sprintf("... (truncated at %d lines)", maxLines))
 	}
 
-	return strings.Join(lines, "\n"), nil
+	return tools.ToolText(strings.Join(lines, "\n")).JSON(), nil
 }
 
 var _ tools.Tool = (*FileRead)(nil)
@@ -228,13 +228,13 @@ func (f *FileWrite) Execute(_ context.Context, params map[string]any) (string, e
 		if _, err := f2.WriteString(content); err != nil {
 			return "", fmt.Errorf("file_write: %w", err)
 		}
-		return fmt.Sprintf("appended %d bytes to %s", len(content), path), nil
+		return tools.ToolText(fmt.Sprintf("appended %d bytes to %s", len(content), path)).JSON(), nil
 	}
 
 	if err := agent.OverwriteFile(path, content); err != nil {
 		return "", fmt.Errorf("file_write: %w", err)
 	}
-	return fmt.Sprintf("wrote %d bytes to %s", len(content), path), nil
+	return tools.ToolText(fmt.Sprintf("wrote %d bytes to %s", len(content), path)).JSON(), nil
 }
 
 /*

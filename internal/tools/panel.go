@@ -99,7 +99,7 @@ func (p *PanelPush) Execute(_ context.Context, params map[string]any) (string, e
 	if plugin == "" || content == "" {
 		return "", fmt.Errorf("panel_push: plugin and content are required")
 	}
-	return fmt.Sprintf("pushed %d bytes to %s panel", len(content), plugin), nil
+	return tools.ToolText(fmt.Sprintf("pushed %d bytes to %s panel", len(content), plugin)).JSON(), nil
 }
 
 /*

@@ -27,7 +27,14 @@ func (b toolMessageBody) Envelope() agenttools.ToolMessage { return b.msg }
 // ${node.X.field} and ${node.X.data.field} resolve.
 func (b toolMessageBody) Field(path string) (any, bool) {
 	p := strings.TrimPrefix(path, "data.")
-	v, err := extractJSONFieldAny(string(b.msg.Data), p)
+	// Prefer the structured payload; fall back to Content for tools that carry
+	// their whole result there (which may itself be JSON — e.g. reading a JSON
+	// file), so field access is preserved exactly as pre-envelope.
+	src := string(b.msg.Data)
+	if src == "" {
+		src = b.msg.Content
+	}
+	v, err := extractJSONFieldAny(src, p)
 	if err != nil {
 		return nil, false
 	}

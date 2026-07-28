@@ -112,9 +112,9 @@ func (e *EnvList) Execute(_ context.Context, params map[string]any) (string, err
 	}
 
 	if len(result) == 0 {
-		return "no matching environment variables", nil
+		return agenttools.ToolEmpty("env", "no matching environment variables").JSON(), nil
 	}
-	return strings.Join(result, "\n"), nil
+	return agenttools.ToolText(strings.Join(result, "\n")).JSON(), nil
 }
 
 /*
@@ -249,7 +249,7 @@ func diskUsageAll(ctx context.Context) (string, error) {
 		}
 	}
 
-	return result.String(), nil
+	return agenttools.ToolText(result.String()).JSON(), nil
 }
 
 /*
@@ -278,7 +278,7 @@ func diskUsagePath(ctx context.Context, path string) (string, error) {
 		if timeoutCtx.Err() == context.DeadlineExceeded {
 			// Return partial output if we got some before timeout
 			if len(out) > 0 {
-				return strings.TrimSpace(string(out)) + "\n(truncated — scan timed out)", nil
+				return agenttools.ToolText(strings.TrimSpace(string(out)) + "\n(truncated — scan timed out)").JSON(), nil
 			}
 			return "", fmt.Errorf("disk_usage: scan timed out after 15s")
 		}
@@ -289,7 +289,7 @@ func diskUsagePath(ctx context.Context, path string) (string, error) {
 	if len(output) > 4096 {
 		output = output[:4096] + "\n... (truncated)"
 	}
-	return output, nil
+	return agenttools.ToolText(output).JSON(), nil
 }
 
 var _ agenttools.Tool = (*DiskUsage)(nil)
@@ -420,7 +420,7 @@ func clipboardRead(ctx context.Context) (string, error) {
 	if len(content) > 8192 {
 		content = content[:8192] + "\n... (truncated)"
 	}
-	return content, nil
+	return agenttools.ToolOK("clipboard", content, nil).JSON(), nil
 }
 
 /*
@@ -458,7 +458,7 @@ func clipboardWrite(ctx context.Context, content string) (string, error) {
 		}
 	}
 
-	return fmt.Sprintf("wrote %d bytes to clipboard", len(content)), nil
+	return agenttools.ToolText(fmt.Sprintf("wrote %d bytes to clipboard", len(content))).JSON(), nil
 }
 
 var _ agenttools.Tool = (*Clipboard)(nil)

@@ -1180,6 +1180,8 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// Tool/compute node resolved successfully
 				if node.Type == NodeCompute {
 					graph.SetBody(comp.NodeID, parseComputeBody(comp.Result))
+				} else if msg, ok := tools.ParseToolMessage(comp.Result); ok {
+					graph.SetBody(comp.NodeID, toolMessageBody{msg: msg})
 				} else {
 					graph.SetResult(comp.NodeID, comp.Result)
 				}

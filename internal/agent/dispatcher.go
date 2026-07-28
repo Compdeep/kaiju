@@ -271,23 +271,25 @@ func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error)
 	if field == "" {
 		return dep.Result, nil
 	}
-	// Tolerant of upstream tool serialization bugs: if the Result is
-	// non-JSON, fall back to returning the raw string so a working
-	// pipeline doesn't break on a malformed envelope (the brace_json
-	// dispatcher silent-fallback fix path). Probe up front so we can
-	// distinguish "envelope is malformed" from "JSON valid but field
-	// missing" — the former is a tool bug and degrades gracefully, the
-	// latter is a planner bug and fails loud.
+	// Resolve the dot-path through the node's typed body — the single field
+	// access primitive. RawTextBody (the default for tools today) parses its
+	// JSON and walks the path, exactly as before; typed bodies may read their
+	// own fields. A hit returns the typed value.
+	if dep.Body != nil {
+		if v, ok := dep.Body.Field(field); ok {
+			return v, nil
+		}
+	}
+	// Body.Field missed. Distinguish "envelope not JSON" (a tool bug — degrade
+	// gracefully to the raw string so a working pipeline doesn't break) from
+	// "JSON valid but field absent" (a planner bug — fail loud), preserving the
+	// prior behavior.
 	var probe any
 	if json.Unmarshal([]byte(dep.Result), &probe) != nil {
 		log.Printf("[dag] template on %s: dep %s result is not JSON, injecting full result (upstream tool bug, not rejecting)", owner, depID)
 		return dep.Result, nil
 	}
-	val, err := extractJSONFieldAny(dep.Result, field)
-	if err != nil {
-		return nil, fmt.Errorf("template on %s: field %q absent in dep %s (%w)", owner, field, depID, err)
-	}
-	return val, nil
+	return nil, fmt.Errorf("template on %s: field %q absent in dep %s", owner, field, depID)
 }
 
 // nodeTemplateRe matches embedded ${node.<id>(.path)?} placeholders

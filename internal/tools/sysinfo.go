@@ -97,8 +97,7 @@ func (s *Sysinfo) Execute(_ context.Context, _ map[string]any) (string, error) {
 		"time":      time.Now().UTC().Format(time.RFC3339),
 		"cpus":      runtime.NumCPU(),
 	}
-	b, _ := json.Marshal(info)
-	return string(b), nil
+	return tools.ToolOK("sysinfo", "", info).JSON(), nil
 }
 
 // Verify interface compliance at compile time.

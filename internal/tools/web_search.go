@@ -161,13 +161,10 @@ func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string,
 	// Never emit a bare `null` — an empty results field serializes to
 	// "results": null and the model hallucinates URLs to fill it. Always return
 	// an explicit [] plus a note so "no results" reads as "no results".
-	payload := map[string]any{"query": query, "results": results}
 	if len(results) == 0 {
-		payload["results"] = []searchResult{}
-		payload["note"] = "no reachable results for this query — do not invent URLs; try a different query or report that nothing was found"
+		return agenttools.ToolEmpty("search", "no reachable results for this query — try a different query or report that nothing was found").JSON(), nil
 	}
-	b, _ := json.Marshal(payload)
-	return string(b), nil
+	return agenttools.ToolOK("search", "", map[string]any{"query": query, "results": results}).JSON(), nil
 }
 
 func (w *WebSearch) searchStartpage(ctx context.Context, query string, max int) ([]searchResult, error) {

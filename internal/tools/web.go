@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	readability "github.com/go-shiori/go-readability"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
 	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	readability "github.com/go-shiori/go-readability"
 )
 
 /*
@@ -243,11 +243,27 @@ type fetchResult struct {
 }
 
 func marshalFetchResult(r fetchResult) (string, error) {
-	b, err := json.Marshal(r)
+	data, err := json.Marshal(r)
 	if err != nil {
 		return "", err
 	}
-	return string(b), nil
+	// Map the fetch outcome onto the uniform tool envelope: HTTP >= 400 → error;
+	// structurally-fine-but-no-usable-content (Note set, Content empty) → empty;
+	// otherwise ok. The full fetchResult rides in Data so ${node.X.title/.status/
+	// .format} keep resolving; the page text becomes the evidence Content.
+	msg := agenttools.ToolMessage{Kind: "page", Data: data}
+	switch {
+	case strings.HasPrefix(r.Status, "HTTP 4") || strings.HasPrefix(r.Status, "HTTP 5"):
+		msg.Status = agenttools.StatusError
+		msg.Detail = r.Status
+	case r.Content == "" && r.Note != "":
+		msg.Status = agenttools.StatusEmpty
+		msg.Detail = r.Note
+	default:
+		msg.Status = agenttools.StatusOK
+		msg.Content = r.Content
+	}
+	return msg.JSON(), nil
 }
 
 /*

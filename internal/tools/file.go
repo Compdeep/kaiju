@@ -375,8 +375,7 @@ func (f *FileList) Execute(_ context.Context, params map[string]any) (string, er
 		result = append(result, entry{Name: e.Name(), Type: typ, Size: size})
 	}
 
-	b, _ := json.Marshal(map[string]any{"entries": result})
-	return string(b), nil
+	return tools.ToolOK("listing", "", map[string]any{"entries": result}).JSON(), nil
 }
 
 var _ tools.Tool = (*FileList)(nil)

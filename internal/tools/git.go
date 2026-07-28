@@ -202,7 +202,7 @@ func (g *Git) Execute(ctx context.Context, params map[string]any) (string, error
 	if err != nil {
 		return fmt.Sprintf("%s\n[exit: %v]", output, err), nil
 	}
-	return output, nil
+	return agenttools.ToolText(output).JSON(), nil
 }
 
 var _ agenttools.Tool = (*Git)(nil)

@@ -151,7 +151,7 @@ func archiveList(path, format string) (string, error) {
 		for _, f := range r.File {
 			lines = append(lines, fmt.Sprintf("%10d  %s  %s", f.UncompressedSize64, f.Modified.Format("2006-01-02 15:04"), f.Name))
 		}
-		return fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n")), nil
+		return agenttools.ToolText(fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n"))).JSON(), nil
 
 	case "tar.gz":
 		f, err := os.Open(path)
@@ -176,7 +176,7 @@ func archiveList(path, format string) (string, error) {
 			}
 			lines = append(lines, fmt.Sprintf("%10d  %s  %s", hdr.Size, hdr.ModTime.Format("2006-01-02 15:04"), hdr.Name))
 		}
-		return fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n")), nil
+		return agenttools.ToolText(fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n"))).JSON(), nil
 
 	default:
 		return "", fmt.Errorf("archive: unsupported format %q", format)
@@ -229,7 +229,7 @@ func archiveExtract(archivePath, dest, format string) (string, error) {
 			rc.Close()
 			count++
 		}
-		return fmt.Sprintf("extracted %d files to %s", count, dest), nil
+		return agenttools.ToolText(fmt.Sprintf("extracted %d files to %s", count, dest)).JSON(), nil
 
 	case "tar.gz":
 		f, err := os.Open(archivePath)
@@ -270,7 +270,7 @@ func archiveExtract(archivePath, dest, format string) (string, error) {
 				count++
 			}
 		}
-		return fmt.Sprintf("extracted %d files to %s", count, dest), nil
+		return agenttools.ToolText(fmt.Sprintf("extracted %d files to %s", count, dest)).JSON(), nil
 
 	default:
 		return "", fmt.Errorf("archive: unsupported format %q", format)
@@ -318,7 +318,7 @@ func archiveCreate(archivePath string, files []string, format string) (string, e
 				return "", fmt.Errorf("archive: %w", err)
 			}
 		}
-		return fmt.Sprintf("created %s with %d files", archivePath, count), nil
+		return agenttools.ToolText(fmt.Sprintf("created %s with %d files", archivePath, count)).JSON(), nil
 
 	case "tar.gz":
 		out, err := os.Create(archivePath)
@@ -357,7 +357,7 @@ func archiveCreate(archivePath string, files []string, format string) (string, e
 				return "", fmt.Errorf("archive: %w", err)
 			}
 		}
-		return fmt.Sprintf("created %s with %d files", archivePath, count), nil
+		return agenttools.ToolText(fmt.Sprintf("created %s with %d files", archivePath, count)).JSON(), nil
 
 	default:
 		return "", fmt.Errorf("archive: unsupported format %q", format)

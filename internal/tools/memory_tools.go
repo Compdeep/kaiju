@@ -109,7 +109,7 @@ func (m *MemoryStore) Execute(_ context.Context, params map[string]any) (string,
 	}
 
 	m.mem.Set(key, value, ttl, tags)
-	return fmt.Sprintf("stored key=%q (%d bytes)", key, len(value)), nil
+	return tools.ToolText(fmt.Sprintf("stored key=%q (%d bytes)", key, len(value))).JSON(), nil
 }
 
 var _ tools.Tool = (*MemoryStore)(nil)
@@ -195,9 +195,9 @@ func (m *MemoryRecall) Execute(_ context.Context, params map[string]any) (string
 	}
 	val, ok := m.mem.Get(key)
 	if !ok {
-		return fmt.Sprintf("key=%q not found", key), nil
+		return tools.ToolEmpty("kv", fmt.Sprintf("key=%q not found", key)).JSON(), nil
 	}
-	return val, nil
+	return tools.ToolOK("kv", val, nil).JSON(), nil
 }
 
 var _ tools.Tool = (*MemoryRecall)(nil)

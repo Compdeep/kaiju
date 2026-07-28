@@ -125,7 +125,7 @@ func (p *ProcessList) Execute(ctx context.Context, params map[string]any) (strin
 		}
 	}
 
-	return strings.Join(result, "\n"), nil
+	return agenttools.ToolText(strings.Join(result, "\n")).JSON(), nil
 }
 
 var _ agenttools.Tool = (*ProcessList)(nil)
@@ -231,9 +231,9 @@ func (p *ProcessKill) Execute(ctx context.Context, params map[string]any) (strin
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Sprintf("failed: %v\n%s", err, string(out)), nil
+		return agenttools.ToolFail("command", fmt.Sprintf("kill failed: %v — %s", err, strings.TrimSpace(string(out))), nil).JSON(), nil
 	}
-	return fmt.Sprintf("killed pid %d (force=%v)\n%s", pid, force, strings.TrimSpace(string(out))), nil
+	return agenttools.ToolText(fmt.Sprintf("killed pid %d (force=%v)\n%s", pid, force, strings.TrimSpace(string(out)))).JSON(), nil
 }
 
 var _ agenttools.Tool = (*ProcessKill)(nil)

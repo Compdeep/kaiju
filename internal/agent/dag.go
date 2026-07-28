@@ -49,7 +49,7 @@ const (
 	NodeReflection                   // inter-wave reflection checkpoint
 	NodeObserver                     // per-node completion observer (observer mode)
 	NodeInterjection                 // human-triggered reflection (operator message)
-	NodeHolmes                     // ReAct investigator iteration (root-cause analysis)
+	NodeHolmes                       // ReAct investigator iteration (root-cause analysis)
 )
 
 /*
@@ -133,6 +133,7 @@ type Node struct {
 	Params    map[string]any // may embed ${node.<id>(.path)?} templates resolved by the dispatcher before execution
 	DependsOn []string       // node IDs that must resolve before this fires
 	Result    string
+	Body      NodeBody // typed output; Result is a cached render of this during the migration
 	Error     error
 	Children  []string     // node IDs spawned by this node
 	SpawnedBy string       // parent node ID (empty for executive-created nodes)
@@ -174,11 +175,11 @@ func (n *Node) IsTerminal() bool {
 type DAGEvent struct {
 	Type      string      `json:"type"` // "start", "node", "add", "done", "verdict"
 	NodeID    string      `json:"id,omitempty"`
-	Node      *NodeInfo   `json:"node,omitempty"`  // for "node" and "add"
-	Nodes     []*NodeInfo `json:"nodes,omitempty"` // for "start"/"done" (full snapshot)
-	AlertID   string      `json:"alert,omitempty"` // for "start"
+	Node      *NodeInfo   `json:"node,omitempty"`       // for "node" and "add"
+	Nodes     []*NodeInfo `json:"nodes,omitempty"`      // for "start"/"done" (full snapshot)
+	AlertID   string      `json:"alert,omitempty"`      // for "start"
 	SessionID string      `json:"session_id,omitempty"` // session this event belongs to (for frontend routing)
-	Text      string      `json:"text,omitempty"`  // for "verdict" (streaming token chunk)
+	Text      string      `json:"text,omitempty"`       // for "verdict" (streaming token chunk)
 }
 
 /*
@@ -244,12 +245,12 @@ type Graph struct {
 	nodes       map[string]*Node
 	counter     int
 	observer    chan<- DAGEvent
-	Gaps        []string       // capability gaps declared by the executive (not mutex-protected — set once after planning)
-	SessionID   string         // conversation session for per-session state (blueprints + interfaces.json)
-	ProjectRoot string         // project root path set by the architect (e.g. "project/kaiju_webapp"); empty means legacy "project/"
-	Validators  []ValidatorDef // architect-declared validation checks, stored for replay after replans
-	Context     *ContextGate   // per-investigation context API; constructed at investigation start
-	ActiveCards []string       // skill card keys selected by preflight; read by skill_guidance source and DAG-path callers
+	Gaps        []string         // capability gaps declared by the executive (not mutex-protected — set once after planning)
+	SessionID   string           // conversation session for per-session state (blueprints + interfaces.json)
+	ProjectRoot string           // project root path set by the architect (e.g. "project/kaiju_webapp"); empty means legacy "project/"
+	Validators  []ValidatorDef   // architect-declared validation checks, stored for replay after replans
+	Context     *ContextGate     // per-investigation context API; constructed at investigation start
+	ActiveCards []string         // skill card keys selected by preflight; read by skill_guidance source and DAG-path callers
 	Preflight   *PreflightResult // preflight result (mode/intent/skills/compute-mode); per-investigation, read by the planner
 	replanLog   []string         // one compact line per completed replan round, for the reflector's ## History (mu-protected)
 }
@@ -770,6 +771,28 @@ func (g *Graph) SetResult(nodeID, result string) {
 	defer g.mu.Unlock()
 	if n, ok := g.nodes[nodeID]; ok {
 		n.Result = result
+		n.Body = RawText(result)
+		n.State = StateResolved
+		n.EndedAt = time.Now()
+		g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+	}
+}
+
+/*
+ * SetBody sets a node's typed body and marks it resolved.
+ * desc: Records the typed NodeBody, keeps Result as a cached render (Evidence)
+ *       of it for the frontend/persistence contract during the typed-body
+ *       migration, transitions state to StateResolved, stamps EndedAt, and
+ *       emits a "node" event.
+ * param: nodeID - the ID of the node to update.
+ * param: body - the typed output produced by the node.
+ */
+func (g *Graph) SetBody(nodeID string, body NodeBody) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if n, ok := g.nodes[nodeID]; ok {
+		n.Body = body
+		n.Result = body.Evidence()
 		n.State = StateResolved
 		n.EndedAt = time.Now()
 		g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})

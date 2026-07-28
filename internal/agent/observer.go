@@ -168,7 +168,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	WriteLLMTrace(traceObs)
 
 	log.Printf("[dag] observer for %s: %s", completedNode.Tag, Text.TruncateLog(raw, 150))
-	graph.SetResult(obsID, raw)
+	graph.SetBody(obsID, parseObserverBody(raw))
 
 	ch <- nodeCompletion{NodeID: obsID, Result: raw}
 }

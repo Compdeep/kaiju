@@ -740,7 +740,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				//   2. actions present → graft all as parallel tool nodes + queue
 				//                        the next Holmes iteration depending on all
 				//   3. iter cap hit    → force conclude with low confidence
-				graph.SetResult(comp.NodeID, comp.Result)
+				graph.SetBody(comp.NodeID, parseHolmesBody(comp.Result))
 				out, perr := parseHolmesOutput(comp.Result)
 				prevState, _ := loadHolmesState(node)
 				if perr != nil || prevState == nil {
@@ -909,7 +909,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 			} else if node.Type == NodeMicroPlanner {
 				// Clean-room debugger completed — parse plan and graft steps
-				graph.SetResult(comp.NodeID, comp.Result)
+				graph.SetBody(comp.NodeID, parseMicroPlannerBody(comp.Result))
 
 				var mpOutput microPlannerOutput
 				if err := ParseLLMJSON(comp.Result, &mpOutput); err != nil {
@@ -1039,7 +1039,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 					switch ref.Decision {
 					case "continue":
-						graph.SetResult(comp.NodeID, comp.Result)
+						graph.SetBody(comp.NodeID, ReflectionBody{Out: *ref, Raw: comp.Result})
 						budget.ResetWaveCounters()
 						investigationCount = 0 // reset — if previous investigation worked, next reflection starts fresh
 						log.Printf("[dag] reflection: continue (%s), wave counters reset", ref.Reason)
@@ -1060,7 +1060,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// This is the growth path that mirrors investigate's REPAIR path —
 						// but with a diagnosis of SUCCESS ("here's what to do next") rather
 						// than failure. The failure pipeline is untouched.
-						graph.SetResult(comp.NodeID, comp.Result)
+						graph.SetBody(comp.NodeID, ReflectionBody{Out: *ref, Raw: comp.Result})
 						budget.ResetWaveCounters()
 
 						next := ref.Next
@@ -1155,7 +1155,10 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						launchReady()
 
 					case "conclude":
-						graph.SetResult(comp.NodeID, ref.Verdict)
+						// Store the whole reflection (not just the verdict) so
+						// Decision/Next/Summary/Aggregate survive on the node. The
+						// verdict still surfaces via reflectionVerdict below.
+						graph.SetBody(comp.NodeID, ReflectionBody{Out: *ref, Raw: comp.Result})
 						graph.SkipAllPending()
 						reflectionConcluded = true
 						reflectionVerdict = ref.Verdict
@@ -1175,7 +1178,11 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 			} else {
 				// Tool/compute node resolved successfully
-				graph.SetResult(comp.NodeID, comp.Result)
+				if node.Type == NodeCompute {
+					graph.SetBody(comp.NodeID, parseComputeBody(comp.Result))
+				} else {
+					graph.SetResult(comp.NodeID, comp.Result)
+				}
 
 				// ── Detect bash errors (non-zero exit returned as result, not error) ──
 				if bashErr, isBash := isBashError(comp.Result); isBash && node.Type == NodeTool && node.ToolName == "bash" {
@@ -1245,6 +1252,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							merged, err := mergeJSONField(parent.Result, "output", stdout)
 							if err == nil {
 								parent.Result = merged
+								parent.Body = parseComputeBody(merged) // keep typed body in sync with the spliced Result
 								log.Printf("[dag] exposed %d bytes of exec stdout on compute parent %s as .output", len(stdout), parent.ID)
 							}
 						}
@@ -1374,7 +1382,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						Setup       []string        `json:"setup,omitempty"`
 						FollowUp    json.RawMessage `json:"follow_up,omitempty"`
 						Execute     string          `json:"execute,omitempty"`
-						Services []struct {
+						Services    []struct {
 							Name    string `json:"name"`
 							Command string `json:"command"`
 							Workdir string `json:"workdir,omitempty"`
@@ -2143,7 +2151,7 @@ func classifyRetryTier(errMsg string) string {
 	// Tier 2: blind — transient errors, just rerun
 	blindPatterns := []string{
 		"connection refused", "econnrefused", "econnreset",
-		"etimedout", // network timeout (not command timeout)
+		"etimedout",     // network timeout (not command timeout)
 		"exit status 7", // curl: couldn't connect
 		"npm err! network", "fetch failed",
 		"rate limit", "http 429", "http 503",

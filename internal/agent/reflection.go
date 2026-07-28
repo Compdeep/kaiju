@@ -32,6 +32,46 @@ type reflectionOutput struct {
 }
 
 /*
+ * ReflectionBody is the typed output of a reflection (or interjection) node.
+ * desc: Carries the full parsed decision so no field is lost at storage. This
+ *       is the fix for the old conclude path, which stored only the verdict
+ *       string and dropped Decision/Next/Summary/Aggregate from the node. Raw
+ *       holds the reflector's original tool-call JSON for faithful rendering
+ *       (Evidence) and template access (Field), matching pre-refactor behavior.
+ */
+type ReflectionBody struct {
+	Out reflectionOutput
+	Raw string
+}
+
+// Field resolves ${node.<id>.<path>} against the reflector's raw JSON, matching
+// the legacy RawText behavior.
+func (b ReflectionBody) Field(path string) (any, bool) { return RawText(b.Raw).Field(path) }
+
+// Evidence returns the reflector's raw JSON — the same text the pre-refactor
+// continue/replan paths stored, now also carried on conclude so decision, next,
+// summary and aggregate survive rather than collapsing to the verdict alone.
+func (b ReflectionBody) Evidence() string {
+	if b.Raw != "" {
+		return b.Raw
+	}
+	return b.Out.Summary
+}
+
+// Summary renders a short "decision: reason" line for the frontend trace.
+func (b ReflectionBody) Summary() string {
+	reason := b.Out.Reason
+	if reason == "" {
+		reason = b.Out.Summary
+	}
+	reason = Text.TruncateLog(reason, 160)
+	if b.Out.Decision == "" {
+		return reason
+	}
+	return b.Out.Decision + ": " + reason
+}
+
+/*
  * fireReflection runs a reflection checkpoint LLM call.
  * desc: Reviews node returns, worklog, and previous debug attempts to decide
  *       continue / conclude / investigate. Context is built by the caller via

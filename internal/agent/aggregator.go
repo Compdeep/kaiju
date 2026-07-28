@@ -57,6 +57,15 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	}
 	rolePrompt := fmt.Sprintf(prompt.Aggregator, aggGuidance, a.FormatRule(), intentStr)
 
+	// Coverage edge (graph → aggregator): when gathering left gaps — tool steps
+	// that came back empty or failed — frame them so absence is explicit and the
+	// aggregator doesn't fabricate to fill the shape of the request. Gated: no
+	// gaps → no edge, no cost.
+	if cov := a.coverageEdge(ctx, graph, userPrompt); cov != "" {
+		userPrompt = cov + "\n\n" + userPrompt
+		rolePrompt = rolePrompt + coverageHook
+	}
+
 	messages := BuildMessagesWithHistory(
 		ComposeSystemPrompt(a.soulPrompt, rolePrompt),
 		userPrompt,

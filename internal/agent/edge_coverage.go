@@ -62,34 +62,7 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 	return gaps
 }
 
-// gapBlock renders the content-agnostic structural gap list — the gathering
-// steps that came back empty or failed — or "" when gathering was clean. This
-// is code-only (no LLM), so it is cheap enough to attach to every reflection.
-func (a *Agent) gapBlock(graph *Graph) string {
-	gaps := a.collectGaps(graph)
-	if len(gaps) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("## Gaps — gathering steps that returned nothing usable\n")
-	b.WriteString("Treat what these were meant to retrieve as unavailable; report it as not found, never fabricate to fill it:\n")
-	for _, g := range gaps {
-		label := g.Tag
-		if label == "" {
-			label = g.Kind
-		}
-		b.WriteString(fmt.Sprintf("- %s (%s): %s\n", label, g.Kind, strings.TrimSpace(g.Detail)))
-	}
-	return b.String()
-}
-
-// reflectorGapHook reminds the reflector that a conclude verdict must honour the
-// gaps — the reflector often writes the final answer directly, bypassing the
-// aggregator (and its coverage edge). This is the reflector-conclude counterpart
-// to the aggregator's coverageHook.
-const reflectorGapHook = "\n\nSome gathering steps returned nothing usable (see \"## Gaps\"). If you conclude, your verdict must report those as not found or not retrieved — never invent a link, figure, quote, or date to fill a gap. A gap honestly reported is a complete, correct answer, not a failure."
-
-// coverageEdge frames the graph→aggregator hand-off. When gathering left gaps
+// coverageEdge frames the hand-off into whichever node writes the answer. When gathering left gaps
 // (tool steps that came back empty or failed), it produces a "## Coverage"
 // checklist so absence is explicit to the aggregator and it does not fabricate
 // to fill the shape of the request. Returns "" when gathering was clean — the

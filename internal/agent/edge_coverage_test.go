@@ -2,30 +2,10 @@ package agent
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 )
-
-// gapBlock is the reflector-conclude framing: a code-only list of empty/failed
-// gathering steps, or "" when gathering was clean.
-func TestGapBlock(t *testing.T) {
-	g := NewGraph()
-	id := g.AddNode(&Node{Type: NodeTool, Tag: "search_x", ToolName: "web_search"})
-	g.SetBody(id, toolMessageBody{msg: agenttools.ToolEmpty("search", "no reachable results")})
-	blk := (&Agent{}).gapBlock(g)
-	if !strings.Contains(blk, "## Gaps") || !strings.Contains(blk, "search_x") || !strings.Contains(blk, "no reachable results") {
-		t.Fatalf("gapBlock should name the empty step: %q", blk)
-	}
-
-	clean := NewGraph()
-	okID := clean.AddNode(&Node{Type: NodeTool, Tag: "ok", ToolName: "web_fetch"})
-	clean.SetBody(okID, toolMessageBody{msg: agenttools.ToolOK("page", "content", nil)})
-	if blk := (&Agent{}).gapBlock(clean); blk != "" {
-		t.Fatalf("clean gathering → gapBlock should be empty, got %q", blk)
-	}
-}
 
 // collectGaps is the content-agnostic code half of the coverage edge: it must
 // flag empty/error tool bodies and failed nodes, and leave successful ones alone.

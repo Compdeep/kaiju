@@ -32,9 +32,9 @@ var writePattern = regexp.MustCompile(`(?i)(>\s*\S|>>|tee\s|cp\s|mv\s|mkdir|touc
  * desc: Tool that runs arbitrary shell commands via sh, powershell, or cmd with configurable timeout.
  */
 type Bash struct {
-	shell     string
-	timeout   time.Duration
-	workDir   string
+	shell   string
+	timeout time.Duration
+	workDir string
 }
 
 /*
@@ -180,7 +180,7 @@ func (b *Bash) isWorkspaceOnly(cmd string) bool {
  * param: params - must contain "command" (or "cmd" alias); optionally "timeout_sec"
  * return: combined stdout/stderr output (truncated to 8KB), or error on timeout/failure
  */
-func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, error) {
+func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (tools.ToolMessage, error) {
 	command, _ := params["command"].(string)
 	// Accept common aliases — LLMs frequently hallucinate param names
 	if command == "" {
@@ -190,7 +190,7 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 		command, _ = params["script"].(string)
 	}
 	if command == "" {
-		return "", fmt.Errorf("bash: command is required")
+		return tools.ToolMessage{}, fmt.Errorf("bash: command is required")
 	}
 
 	timeout := b.timeout
@@ -270,7 +270,7 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return output, fmt.Errorf("bash: command timed out after %s", timeout)
+			return tools.ToolMessage{}, fmt.Errorf("bash: command timed out after %s", timeout)
 		}
 		// Return structured error as result (nil error so node resolves).
 		// The scheduler detects execute node failures from the result content.
@@ -286,19 +286,40 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 		// start, so we keep both ends.
 		stdoutStr := headTailTruncate(stdout.String(), 200, 600)
 		stderrStr := headTailTruncate(stderr.String(), 200, 600)
-		errInfo := map[string]any{
-			"bash_error": true,
-			"exit_code":  exitCode,
-			"stdout":     stdoutStr,
-			"stderr":     stderrStr,
-			"error":      err.Error(),
-			"command":    command,
-		}
-		errJSON, _ := json.Marshal(errInfo)
-		return string(errJSON), nil
+		return tools.ToolFail("command", fmt.Sprintf("exit %d: %s", exitCode, err.Error()), bashData{
+			ExitCode: exitCode,
+			Stdout:   stdoutStr,
+			Stderr:   stderrStr,
+			Command:  command,
+		}), nil
 	}
 
-	return output, nil
+	return tools.ToolOK("command", output, bashData{
+		ExitCode: 0,
+		Stdout:   headTailTruncate(stdout.String(), 4000, 4000),
+		Stderr:   headTailTruncate(stderr.String(), 4000, 4000),
+		Command:  command,
+	}), nil
+}
+
+// Execute satisfies the Tool interface for non-DAG callers; the dispatcher
+// prefers ExecuteTyped (no round-trip) and reads the typed body directly.
+func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, error) {
+	msg, err := b.ExecuteTyped(ctx, params)
+	if err != nil {
+		return "", err
+	}
+	return msg.JSON(), nil
+}
+
+// bashData is the structured payload of a command node: exit status and the
+// captured streams, so consumers read them as typed fields instead of grepping
+// the raw string.
+type bashData struct {
+	ExitCode int    `json:"exit_code"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	Command  string `json:"command"`
 }
 
 var _ tools.Tool = (*Bash)(nil)

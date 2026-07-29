@@ -916,7 +916,32 @@ func containsAnyCI(s string, needles ...string) bool {
 // instead of showing the raw JSON wrapper. Used by nodeReturnsSource and
 // the aggregator's failure summary.
 func extractFailureDetail(n *Node) string {
-	// Try to extract from the result (bash errors are returned as result, not Error)
+	// Typed bash: read exit status and streams off the command body directly.
+	if tb, ok := n.Body.(toolMessageBody); ok {
+		if env := tb.Envelope(); env.Kind == "command" {
+			var d struct {
+				ExitCode int    `json:"exit_code"`
+				Stdout   string `json:"stdout"`
+				Stderr   string `json:"stderr"`
+				Command  string `json:"command"`
+			}
+			if json.Unmarshal(env.Data, &d) == nil {
+				var parts []string
+				if d.Stderr != "" {
+					parts = append(parts, "stderr: "+d.Stderr)
+				}
+				if d.Stdout != "" {
+					parts = append(parts, "stdout: "+d.Stdout)
+				}
+				if len(parts) > 0 {
+					return fmt.Sprintf("exit %d | %s", d.ExitCode, strings.Join(parts, " | "))
+				}
+				return fmt.Sprintf("exit %d (command: %s)", d.ExitCode, d.Command)
+			}
+		}
+	}
+
+	// Try to extract from the result (legacy bash errors are returned as result, not Error)
 	raw := n.Result
 	if raw == "" && n.Error != nil {
 		raw = n.Error.Error()

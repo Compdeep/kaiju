@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -196,8 +198,16 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 	}
 	defer resp.Body.Close()
 
-	// Read up to 256KB for extraction (readability needs the full page)
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	// Read cap: HTML extraction needs ~256KB, but a binary we can decode (a PDF,
+	// via a plugin-registered decoder) needs the whole file — a search hit is
+	// often a multi-MB report and the HTML cap would corrupt it. Both signals
+	// (Content-Type header, URL) are known before the body is read.
+	ctype := resp.Header.Get("Content-Type")
+	readCap := int64(256 * 1024)
+	if agenttools.HasBinaryDecoder(ctype) || looksLikePDFURL(rawURL) {
+		readCap = 16 * 1024 * 1024
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, readCap))
 	if err != nil {
 		return "", fmt.Errorf("web_fetch: read body: %w", err)
 	}
@@ -211,6 +221,22 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 			body = body[:2048] + "..."
 		}
 		return marshalFetchResult(fetchResult{Status: status, Content: body, Format: format})
+	}
+
+	// Binary bodies (PDF, …) can't be read by readability. If a plugin registered
+	// a decoder for this response, use it — this is how web_fetch reads a PDF a
+	// search turned up (gov/academic primary sources). No decoder → normal path.
+	if text, found, derr := decodePageBinary(ctype, rawURL, bodyBytes); found {
+		switch {
+		case derr != nil:
+			return marshalFetchResult(fetchResult{Status: status, Format: format, Note: "downloaded but could not decode: " + derr.Error()})
+		case strings.TrimSpace(text) == "":
+			return marshalFetchResult(fetchResult{Status: status, Format: format, Note: "downloaded a document with no extractable text (likely scanned or image-only)"})
+		}
+		if len(text) > 16000 {
+			text = text[:16000] + "\n… (truncated)"
+		}
+		return marshalFetchResult(fetchResult{Status: status, Content: text, Format: format})
 	}
 
 	// Route to format handler
@@ -378,13 +404,24 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 	// access to this tool…" which downstream callers happily treated as
 	// the page's actual content. Refuse to fabricate.
 	if len(strings.TrimSpace(content)) < 200 {
-		return marshalFetchResult(fetchResult{
-			Status:  status,
-			Title:   title,
-			Content: "",
-			Format:  "summary",
-			Note:    "no extractable content (likely JS-rendered, login-walled, or an interactive widget). Try a different URL — an API endpoint or a static documentation page.",
-		})
+		// Before giving up: (1) page metadata (OpenGraph / meta description /
+		// title) — the crawler-facing summary a JS-rendered or lightly-walled
+		// page still embeds even when its body isn't in the initial HTML; (2) a
+		// plugin reader fallback (render + extract) if one is registered. Either
+		// beats a bare "no content" for the planner. Only then declare it empty.
+		if meta := extractMeta(string(body)); len(strings.TrimSpace(meta)) >= 120 {
+			content = meta
+		} else if rendered, ok, _ := agenttools.ReaderFallback(ctx, rawURL); ok && len(strings.TrimSpace(rendered)) >= 120 {
+			content = rendered
+		} else {
+			return marshalFetchResult(fetchResult{
+				Status:  status,
+				Title:   title,
+				Content: "",
+				Format:  "summary",
+				Note:    "no extractable content (likely JS-rendered, login-walled, or an interactive widget). Try a different URL — an API endpoint or a static documentation page.",
+			})
+		}
 	}
 
 	// Truncate for LLM context (don't send 256KB to the summarizer)
@@ -455,6 +492,72 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 	}
 
 	return marshalFetchResult(fetchResult{Status: status, Title: title, Content: summary, Format: "summary"})
+}
+
+// looksLikePDFURL reports whether the URL path ends in .pdf — a fallback for
+// servers that send a PDF without a proper application/pdf Content-Type.
+func looksLikePDFURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(u.Path), ".pdf")
+}
+
+// decodePageBinary tries a plugin-registered decoder for the response — first by
+// Content-Type, then (when the type is missing/generic) by a .pdf URL. found is
+// false when no decoder applies and web_fetch continues with HTML extraction.
+func decodePageBinary(contentType, rawURL string, body []byte) (text string, found bool, err error) {
+	if t, ok, e := agenttools.DecodeBinary(contentType, body); ok {
+		return t, true, e
+	}
+	if looksLikePDFURL(rawURL) {
+		return agenttools.DecodeBinary("application/pdf", body)
+	}
+	return "", false, nil
+}
+
+var (
+	metaTagRe = regexp.MustCompile(`(?is)<meta\b[^>]*>`)
+	attrRe    = regexp.MustCompile(`(?is)([a-z:_-]+)\s*=\s*"([^"]*)"`)
+	titleRe   = regexp.MustCompile(`(?is)<title\b[^>]*>(.*?)</title>`)
+)
+
+// extractMeta pulls a page's crawler-facing summary — OpenGraph / standard meta
+// description and the title — for when the main extraction came up empty. Many
+// JS-rendered or lightly-walled pages still expose this for SEO, so it yields a
+// real abstract (and source attribution) instead of "no content". Best-effort,
+// dependency-free.
+func extractMeta(htmlBody string) string {
+	var parts []string
+	if t := metaContent(htmlBody, "property", "og:title"); t != "" {
+		parts = append(parts, "Title: "+t)
+	} else if m := titleRe.FindStringSubmatch(htmlBody); m != nil {
+		if t := strings.TrimSpace(html.UnescapeString(m[1])); t != "" {
+			parts = append(parts, "Title: "+t)
+		}
+	}
+	if d := metaContent(htmlBody, "property", "og:description"); d != "" {
+		parts = append(parts, d)
+	} else if d := metaContent(htmlBody, "name", "description"); d != "" {
+		parts = append(parts, d)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+// metaContent finds the first <meta> tag whose attr equals val (e.g.
+// property="og:description") and returns its unescaped content attribute.
+func metaContent(htmlBody, attr, val string) string {
+	for _, tag := range metaTagRe.FindAllString(htmlBody, -1) {
+		attrs := map[string]string{}
+		for _, m := range attrRe.FindAllStringSubmatch(tag, -1) {
+			attrs[strings.ToLower(m[1])] = m[2]
+		}
+		if strings.EqualFold(attrs[attr], val) {
+			return strings.TrimSpace(html.UnescapeString(attrs["content"]))
+		}
+	}
+	return ""
 }
 
 // looksLikeSummarizerRefusal flags LLM responses that are obviously

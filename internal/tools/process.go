@@ -57,7 +57,7 @@ func (p *ProcessList) Impact(map[string]any) int { return agenttools.ImpactObser
  * return: JSON schema as raw bytes
  */
 func (p *ProcessList) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"output":{"type":"string","description":"process list table"}}}`)
+	return agenttools.EnvelopeSchema("")
 }
 
 /*
@@ -175,7 +175,7 @@ func (p *ProcessKill) Impact(map[string]any) int { return agenttools.ImpactContr
  * return: JSON schema as raw bytes
  */
 func (p *ProcessKill) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"result":{"type":"string","description":"kill result"}}}`)
+	return agenttools.EnvelopeSchema("")
 }
 
 /*

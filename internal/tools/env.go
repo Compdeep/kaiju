@@ -59,7 +59,7 @@ func (e *EnvList) Impact(map[string]any) int { return agenttools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (e *EnvList) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"output":{"type":"string","description":"environment variables, one per line"}}}`)
+	return agenttools.EnvelopeSchema("")
 }
 
 /*
@@ -181,7 +181,7 @@ func (d *DiskUsage) Impact(map[string]any) int { return agenttools.ImpactObserve
  * return: JSON schema as raw bytes
  */
 func (d *DiskUsage) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"output":{"type":"string","description":"disk usage report"}}}`)
+	return agenttools.EnvelopeSchema("")
 }
 
 /*
@@ -329,7 +329,7 @@ func (c *Clipboard) Description() string { return "Read from or write to the sys
  * return: JSON schema as raw bytes
  */
 func (c *Clipboard) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"content":{"type":"string","description":"clipboard content or confirmation"}}}`)
+	return agenttools.EnvelopeSchema("")
 }
 
 /*

@@ -78,7 +78,7 @@ func (w *WebFetch) Impact(map[string]any) int { return agenttools.ImpactObserve 
  * return: JSON schema as raw bytes
  */
 func (w *WebFetch) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"}}}`)
+	return agenttools.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"}}}`)
 }
 
 /*

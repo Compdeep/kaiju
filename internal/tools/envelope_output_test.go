@@ -10,16 +10,35 @@ import (
 	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
-// The migrated tools whose schema was actively wrong/missing now declare the
-// unified envelope schema (derived from EnvelopeSchema) — proof of soundness.
-func TestSchemaUnified_NetInfoService(t *testing.T) {
-	for name, schema := range map[string]json.RawMessage{
-		"net_info": NewNetInfo().OutputSchema(),
-		"service":  (&Service{}).OutputSchema(),
-	} {
-		if !strings.Contains(string(schema), `"enum":["ok","empty","error"]`) {
-			t.Errorf("%s OutputSchema is not the unified envelope schema: %s", name, schema)
+// Every migrated tool now declares the unified envelope schema (derived from
+// EnvelopeSchema) — the declared contract matches the actual output shape.
+func TestSchemaUnified(t *testing.T) {
+	schemas := map[string]json.RawMessage{
+		"sysinfo":    NewSysinfo().OutputSchema(),
+		"file_read":  NewFileRead("").OutputSchema(),
+		"file_write": NewFileWrite("").OutputSchema(),
+		"file_list":  NewFileList("").OutputSchema(),
+		"web_search": NewWebSearch().OutputSchema(),
+		"web_fetch":  NewWebFetch().OutputSchema(),
+		"env_list":   NewEnvList().OutputSchema(),
+		"net_info":   NewNetInfo().OutputSchema(),
+		"service":    (&Service{}).OutputSchema(),
+	}
+	for name, schema := range schemas {
+		if !json.Valid(schema) {
+			t.Errorf("%s OutputSchema is not valid JSON: %s", name, schema)
 		}
+		if !strings.Contains(string(schema), `"enum":["ok","empty","error"]`) {
+			t.Errorf("%s OutputSchema not unified to the envelope: %s", name, schema)
+		}
+	}
+	// structured tools keep their payload schema nested under data
+	if !strings.Contains(string(NewWebFetch().OutputSchema()), `"data":`) {
+		t.Errorf("web_fetch should carry its payload schema under data")
+	}
+	// text tools have no data — content-only
+	if strings.Contains(string(NewFileRead("").OutputSchema()), `"data":`) {
+		t.Errorf("file_read is text-only and should have no data schema")
 	}
 }
 

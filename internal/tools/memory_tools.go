@@ -58,7 +58,7 @@ func (m *MemoryStore) Impact(map[string]any) int { return tools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (m *MemoryStore) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"result":{"type":"string"}}}`)
+	return tools.EnvelopeSchema("")
 }
 
 /*
@@ -162,7 +162,7 @@ func (m *MemoryRecall) Impact(map[string]any) int { return tools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (m *MemoryRecall) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"value":{"type":"string","description":"recalled memory value"}}}`)
+	return tools.EnvelopeSchema("")
 }
 
 /*

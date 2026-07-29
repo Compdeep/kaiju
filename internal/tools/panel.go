@@ -83,7 +83,7 @@ func (p *PanelPush) Parameters() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (p *PanelPush) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"result":{"type":"string"}}}`)
+	return tools.EnvelopeSchema("")
 }
 
 /*

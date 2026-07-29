@@ -50,7 +50,7 @@ func (a *Archive) Description() string {
  * return: JSON schema as raw bytes
  */
 func (a *Archive) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"result":{"type":"string","description":"archive operation result"}}}`)
+	return agenttools.EnvelopeSchema("")
 }
 
 /*

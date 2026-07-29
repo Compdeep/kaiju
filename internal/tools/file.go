@@ -60,7 +60,7 @@ func (f *FileRead) Impact(map[string]any) int { return tools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (f *FileRead) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"content":{"type":"string","description":"file contents"}}}`)
+	return tools.EnvelopeSchema("")
 }
 
 /*
@@ -166,7 +166,7 @@ func (f *FileWrite) Impact(map[string]any) int { return tools.ImpactAffect }
  * return: JSON schema as raw bytes
  */
 func (f *FileWrite) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"result":{"type":"string","description":"confirmation message with bytes written"}}}`)
+	return tools.EnvelopeSchema("")
 }
 
 /*
@@ -328,7 +328,7 @@ func (f *FileList) Parameters() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (f *FileList) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"entries":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"type":{"type":"string"},"size":{"type":"integer"}}}}}}`)
+	return tools.EnvelopeSchema(`{"type":"object","properties":{"entries":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"type":{"type":"string"},"size":{"type":"integer"}}}}}}`)
 }
 
 /*

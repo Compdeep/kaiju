@@ -30,7 +30,7 @@ func NewGit() *Git { return &Git{} }
  * return: JSON schema as raw bytes
  */
 func (g *Git) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"output":{"type":"string","description":"git command output"}}}`)
+	return agenttools.EnvelopeSchema("")
 }
 
 /*

@@ -13,19 +13,46 @@ import (
 	"github.com/Compdeep/kaiju/internal/plugins"
 )
 
-// TestPluginRegistersTool confirms the plugin exposes exactly the pdf_extract
-// tool and that it satisfies the tool interface (observe impact, has a schema).
-func TestPluginRegistersTool(t *testing.T) {
-	ts := plugin{}.Tools(plugins.Deps{})
-	if len(ts) != 1 || ts[0].Name() != "pdf_extract" {
-		t.Fatalf("Tools() = %v, want one pdf_extract", ts)
+// captureHost is a test double for plugins.Host that records everything a plugin
+// contributes through Register — both its tools and its seams.
+type captureHost struct {
+	ws       string
+	tools    []agenttools.Tool
+	decoders map[string]func([]byte) (string, error)
+}
+
+var _ plugins.Host = (*captureHost)(nil)
+
+func (h *captureHost) Workspace() string         { return h.ws }
+func (h *captureHost) AddTool(t agenttools.Tool) { h.tools = append(h.tools, t) }
+func (h *captureHost) RegisterBinaryDecoder(mime string, fn func([]byte) (string, error)) {
+	if h.decoders == nil {
+		h.decoders = map[string]func([]byte) (string, error){}
 	}
-	tool := ts[0]
+	h.decoders[mime] = fn
+}
+func (h *captureHost) RegisterReaderFallback(func(context.Context, string) (string, error)) {}
+
+// TestPluginRegistersToolAndSeam confirms Register contributes BOTH the
+// pdf_extract tool (planner-callable, observe impact, has a schema) AND the
+// application/pdf decoder seam (called by core web_fetch, not the planner).
+func TestPluginRegistersToolAndSeam(t *testing.T) {
+	h := &captureHost{ws: t.TempDir()}
+	plugin{}.Register(h)
+
+	if len(h.tools) != 1 || h.tools[0].Name() != "pdf_extract" {
+		t.Fatalf("Register added tools %v, want one pdf_extract", h.tools)
+	}
+	tool := h.tools[0]
 	if tool.Impact(nil) != agenttools.ImpactObserve {
 		t.Errorf("Impact = %d, want observe (%d)", tool.Impact(nil), agenttools.ImpactObserve)
 	}
 	if len(tool.Parameters()) == 0 || !strings.Contains(string(tool.Parameters()), "path") {
 		t.Errorf("Parameters missing 'path': %s", tool.Parameters())
+	}
+
+	if _, ok := h.decoders["application/pdf"]; !ok {
+		t.Fatalf("Register did not register an application/pdf decoder: %v", h.decoders)
 	}
 }
 

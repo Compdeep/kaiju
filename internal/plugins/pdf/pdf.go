@@ -12,6 +12,7 @@
 package pdf
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,14 +25,21 @@ import (
 	pdflib "github.com/ledongthuc/pdf"
 )
 
-func init() { plugins.Register(plugin{}) }
+func init() { plugins.Add(plugin{}) }
 
 type plugin struct{}
 
 func (plugin) Name() string { return "pdf" }
 
-func (plugin) Tools(d plugins.Deps) []agenttools.Tool {
-	return []agenttools.Tool{&extractTool{workspace: d.Workspace}}
+// Register contributes the plugin's two capabilities through the Host — both
+// explicit at this one call site:
+//   - the pdf_extract TOOL the planner can call on a file; and
+//   - an "application/pdf" SEAM so core web_fetch can read a PDF a search turned
+//     up (many government / academic primary sources are PDFs). The decoder lives
+//     here in the optional plugin; core only holds the seam.
+func (plugin) Register(h plugins.Host) {
+	h.AddTool(&extractTool{workspace: h.Workspace()})
+	h.RegisterBinaryDecoder("application/pdf", decodeBytes)
 }
 
 // defaultMaxChars caps the returned text so a huge PDF can't blow up the context
@@ -81,8 +89,22 @@ func (t *extractTool) Execute(_ context.Context, params map[string]any) (string,
 	}
 	defer f.Close()
 
+	out, pages := extractText(r, maxChars)
+	if out == "" {
+		return fmt.Sprintf("(pdf_extract read %d page(s) from %s but found no extractable text — it is likely a scanned or image-only PDF, which needs OCR or a vision model.)", pages, filepath.Base(path)), nil
+	}
+	if len(out) > maxChars {
+		out = out[:maxChars] + "\n…[truncated]"
+	}
+	return fmt.Sprintf("PDF: %s (%d page(s))\n\n%s", filepath.Base(path), pages, out), nil
+}
+
+// extractText walks every page of a PDF reader into spaced plain text, capped at
+// maxChars. Shared by the pdf_extract tool (a file path) and decodeBytes (bytes
+// web_fetch downloaded), so both read PDFs identically.
+func extractText(r *pdflib.Reader, maxChars int) (text string, pages int) {
 	var b strings.Builder
-	pages := r.NumPage()
+	pages = r.NumPage()
 	for i := 1; i <= pages; i++ {
 		p := r.Page(i)
 		if p.V.IsNull() {
@@ -94,15 +116,23 @@ func (t *extractTool) Execute(_ context.Context, params map[string]any) (string,
 			break
 		}
 	}
+	return strings.TrimSpace(b.String()), pages
+}
 
-	out := strings.TrimSpace(b.String())
+// decodeBytes extracts text from raw PDF bytes — the path web_fetch takes when a
+// search result is a PDF. Registered as the "application/pdf" binary decoder. An
+// empty return means no text layer (scanned/image-only); web_fetch surfaces that
+// as a clear "no extractable text" note rather than fabricating.
+func decodeBytes(data []byte) (string, error) {
+	r, err := pdflib.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return "", fmt.Errorf("pdf decode: %w", err)
+	}
+	out, pages := extractText(r, defaultMaxChars)
 	if out == "" {
-		return fmt.Sprintf("(pdf_extract read %d page(s) from %s but found no extractable text — it is likely a scanned or image-only PDF, which needs OCR or a vision model.)", pages, filepath.Base(path)), nil
+		return "", nil
 	}
-	if len(out) > maxChars {
-		out = out[:maxChars] + "\n…[truncated]"
-	}
-	return fmt.Sprintf("PDF: %s (%d page(s))\n\n%s", filepath.Base(path), pages, out), nil
+	return fmt.Sprintf("PDF (%d page(s))\n\n%s", pages, out), nil
 }
 
 // pageText extracts a page's text with word spacing recovered from the glyph

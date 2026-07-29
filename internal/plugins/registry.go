@@ -1,37 +1,62 @@
 // Package plugins is an optional, build-tag-gated extension point for kaiju.
 //
-// A plugin bundles one or more tools that are compiled into the binary ONLY when
-// its build tag is set (e.g. `go build -tags plugin_pdf`) and switched on at
-// runtime only when named in config `plugins` or the `--plugins` flag. This keeps
-// heavy or niche dependencies (PDF parsing, etc.) out of the default binary while
+// A plugin bundles capabilities that are compiled into the binary ONLY when its
+// build tag is set (e.g. `go build -tags plugin_pdf`) and switched on at runtime
+// only when named in config `plugins` or the `--plugins` flag. This keeps heavy
+// or niche dependencies (PDF parsing, etc.) out of the default binary while
 // letting an operator opt in without forking the codebase.
 //
-// A plugin registers itself from an init() in a build-tagged file, so the default
-// build links in neither the plugin nor its dependencies — Compiled() comes back
-// empty and the wiring in main.go is a no-op.
+// A plugin adds itself from an init() in a build-tagged file (plugins.Add), so
+// the default build links in neither the plugin nor its dependencies. At startup
+// Activate calls each active plugin's Register(Host), through which it explicitly
+// contributes its capabilities.
 package plugins
 
 import (
+	"context"
 	"sort"
 	"sync"
 
 	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
-// Deps are the shared services a plugin's tools may need at construction time.
-// Extend this as new plugins need more (executor client, memory, …); a plugin
-// simply ignores the fields it doesn't use.
+// Deps are the shared services a Host is built from. Extend this as plugins need
+// more (executor client, memory, …); a plugin reads only what it needs, through
+// the Host.
 type Deps struct {
 	Workspace string // sandbox root; file-touching tools resolve paths under it
 }
 
-// Plugin contributes a named bundle of tools to the agent's tool registry.
+// Host is the surface a plugin registers its capabilities into, at activation. A
+// plugin touches ONLY the Host — never global state — so what it contributes is
+// explicit at the call site and capturable in a test. Two kinds of capability:
+//
+//   - a TOOL the agent's planner can call by name (AddTool);
+//   - a SEAM that enriches an existing core tool and is called by that tool, not
+//     the planner (RegisterBinaryDecoder, RegisterReaderFallback).
+//
+// Grow this interface as new seams appear (a skill registrar, a renderer, …); a
+// plugin uses only the methods it needs.
+type Host interface {
+	// Workspace is the sandbox root file-touching tools resolve paths under.
+	Workspace() string
+	// AddTool contributes a tool the agent's planner can call by name.
+	AddTool(agenttools.Tool)
+	// RegisterBinaryDecoder teaches core web_fetch to turn a typed body (e.g.
+	// "application/pdf") into text — invoked by the tool, not the planner.
+	RegisterBinaryDecoder(mime string, fn func([]byte) (string, error))
+	// RegisterReaderFallback teaches core web_fetch a heavier re-read path for a
+	// URL with no extractable content (render + extract).
+	RegisterReaderFallback(fn func(ctx context.Context, rawURL string) (string, error))
+}
+
+// Plugin contributes tools and/or seams to the agent. Register is called once at
+// startup, and only when the plugin is both compiled in and activated.
 type Plugin interface {
 	// Name is the activation key used in config `plugins` / the `--plugins` flag.
 	Name() string
-	// Tools builds this plugin's tools. Called once at startup, and only when the
-	// plugin is both compiled in and activated.
-	Tools(Deps) []agenttools.Tool
+	// Register contributes the plugin's capabilities through the Host.
+	Register(Host)
 }
 
 var (
@@ -39,9 +64,9 @@ var (
 	registered = map[string]Plugin{}
 )
 
-// Register records a compiled-in plugin. Call it from an init() in the plugin's
+// Add records a compiled-in plugin. Call it from an init() in the plugin's
 // build-tagged file so the default build never links the plugin in.
-func Register(p Plugin) {
+func Add(p Plugin) {
 	mu.Lock()
 	defer mu.Unlock()
 	registered[p.Name()] = p
@@ -59,10 +84,11 @@ func Compiled() []string {
 	return names
 }
 
-// Activate builds the tools of every plugin named in `want` that is compiled in.
-// It returns the tools to register, the plugin names actually switched on, and
-// any requested-but-not-compiled-in names so the caller can warn the operator
-// (they asked for a plugin this binary wasn't built with).
+// Activate registers the capabilities of every plugin named in `want` that is
+// compiled in. It returns the tools to add to the agent registry, the plugin
+// names actually switched on, and any requested-but-not-compiled-in names so the
+// caller can warn the operator (they asked for a plugin this binary wasn't built
+// with). Seams register as a side effect through each plugin's Host.
 func Activate(want []string, d Deps) (active []agenttools.Tool, on, missing []string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -77,8 +103,28 @@ func Activate(want []string, d Deps) (active []agenttools.Tool, on, missing []st
 			missing = append(missing, name)
 			continue
 		}
-		active = append(active, p.Tools(d)...)
+		h := &activation{deps: d}
+		p.Register(h)
+		active = append(active, h.tools...)
 		on = append(on, name)
 	}
 	return active, on, missing
+}
+
+// activation is the concrete Host used during Activate: it accumulates the tools
+// a plugin adds and delegates seam registration to the core agent/tools package.
+type activation struct {
+	deps  Deps
+	tools []agenttools.Tool
+}
+
+func (a *activation) Workspace() string         { return a.deps.Workspace }
+func (a *activation) AddTool(t agenttools.Tool) { a.tools = append(a.tools, t) }
+
+func (a *activation) RegisterBinaryDecoder(mime string, fn func([]byte) (string, error)) {
+	agenttools.RegisterBinaryDecoder(mime, fn)
+}
+
+func (a *activation) RegisterReaderFallback(fn func(ctx context.Context, rawURL string) (string, error)) {
+	agenttools.RegisterReaderFallback(fn)
 }

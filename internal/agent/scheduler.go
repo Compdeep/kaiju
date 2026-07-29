@@ -1271,7 +1271,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						PID    int    `json:"pid"`
 						Port   int    `json:"port"`
 					}
-					if json.Unmarshal([]byte(comp.Result), &svcResult) == nil && svcResult.Status == "started" {
+					// service now emits a ToolMessage envelope; the action payload
+					// (status/name/pid/port) is in Data.
+					svcSrc := comp.Result
+					if msg, ok := tools.ParseToolMessage(comp.Result); ok {
+						svcSrc = string(msg.Data)
+					}
+					if json.Unmarshal([]byte(svcSrc), &svcResult) == nil && svcResult.Status == "started" {
 						// Determine port: prefer explicit port from service result,
 						// then try to extract from the original service command,
 						// then fall back to name-based heuristic.

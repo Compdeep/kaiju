@@ -148,8 +148,7 @@ func netInterfaces() (string, error) {
 		})
 	}
 
-	b, _ := json.Marshal(map[string]any{"action": "interfaces", "interfaces": result})
-	return string(b), nil
+	return agenttools.ToolOK("net", "", map[string]any{"action": "interfaces", "interfaces": result}).JSON(), nil
 }
 
 /*
@@ -171,12 +170,10 @@ func netConnectivity(ctx context.Context, host string, port int) (string, error)
 	elapsed := time.Since(start)
 
 	if err != nil {
-		return fmt.Sprintf(`{"action":"connectivity","host":%q,"port":%d,"reachable":false,"error":%q,"latency_ms":%d}`,
-			host, port, err.Error(), elapsed.Milliseconds()), nil
+		return agenttools.ToolOK("net", "", map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": false, "error": err.Error(), "latency_ms": elapsed.Milliseconds()}).JSON(), nil
 	}
 	conn.Close()
-	return fmt.Sprintf(`{"action":"connectivity","host":%q,"port":%d,"reachable":true,"latency_ms":%d}`,
-		host, port, elapsed.Milliseconds()), nil
+	return agenttools.ToolOK("net", "", map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": true, "latency_ms": elapsed.Milliseconds()}).JSON(), nil
 }
 
 /*
@@ -194,11 +191,10 @@ func netDNS(ctx context.Context, host string) (string, error) {
 	resolver := &net.Resolver{}
 	addrs, err := resolver.LookupHost(ctx, host)
 	if err != nil {
-		return fmt.Sprintf(`{"action":"dns","host":%q,"error":%q}`, host, err.Error()), nil
+		return agenttools.ToolOK("net", "", map[string]any{"action": "dns", "host": host, "error": err.Error()}).JSON(), nil
 	}
 
-	b, _ := json.Marshal(map[string]any{"action": "dns", "host": host, "addresses": addrs})
-	return string(b), nil
+	return agenttools.ToolOK("net", "", map[string]any{"action": "dns", "host": host, "addresses": addrs}).JSON(), nil
 }
 
 /*
@@ -237,7 +233,7 @@ func netListeningPorts(ctx context.Context) (string, error) {
 	if len(output) > 4096 {
 		output = output[:4096] + "\n... (truncated)"
 	}
-	return output, nil
+	return agenttools.ToolOK("net", output, nil).JSON(), nil
 }
 
 var _ agenttools.Tool = (*NetInfo)(nil)

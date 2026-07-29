@@ -99,6 +99,15 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	budgetLine, _ := rNode.Params["budget"].(string)
 	userPrompt := assembleReflectorPrompt(graph, gateCtx, trigger, budgetLine)
 
+	// Coverage framing for the conclude path: the reflector often writes the
+	// final answer directly, bypassing the aggregator (and its coverage edge).
+	// When gathering left gaps, make them explicit so a conclude verdict reports
+	// them honestly instead of fabricating. Code-only — no extra LLM call.
+	if gaps := a.gapBlock(graph); gaps != "" {
+		userPrompt = gaps + "\n\n" + userPrompt
+		sysPrompt += reflectorGapHook
+	}
+
 	messages := []llm.Message{
 		{Role: "system", Content: sysPrompt},
 		{Role: "user", Content: userPrompt},

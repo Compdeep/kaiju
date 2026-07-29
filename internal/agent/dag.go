@@ -363,8 +363,15 @@ func (g *Graph) nodeInfo(n *Node) *NodeInfo {
 		} else {
 			info.Result = n.Result[:512] + "…"
 		}
-		// Generate a short summary line for the trace header
+		// Generate a short summary line for the trace header. Prefer the typed
+		// body's summary (reflection decision, compute files, tool kind/status);
+		// RawTextBody (opaque/legacy) keeps the richer nodeSummary heuristics.
 		info.Summary = nodeSummary(n)
+		if n.Body != nil {
+			if _, raw := n.Body.(RawTextBody); !raw {
+				info.Summary = n.Body.Summary()
+			}
+		}
 	}
 	if n.Params != nil {
 		info.Params = compactParams(n.Params)

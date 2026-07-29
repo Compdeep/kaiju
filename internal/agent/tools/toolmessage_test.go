@@ -88,3 +88,29 @@ func TestParseToolMessage_CoupledToolsStayRaw(t *testing.T) {
 		}
 	}
 }
+
+// service is a coupled migration: its lifecycle status moved into Data, and the
+// scheduler's health-check graft must read it from there. This asserts that
+// exact path: envelope status is "ok", and status/name/port are recoverable
+// from Data — if it breaks, the post-start health check silently stops grafting.
+func TestServiceEnvelope_GraftReadsStatusFromData(t *testing.T) {
+	out := ToolOK("service", "", map[string]any{"status": "started", "name": "api", "pid": 42, "port": 4000}).JSON()
+	msg, ok := ParseToolMessage(out)
+	if !ok {
+		t.Fatalf("service output should be a valid envelope: %s", out)
+	}
+	if msg.Status != StatusOK {
+		t.Fatalf("envelope status = %q, want ok (lifecycle status lives in Data)", msg.Status)
+	}
+	var svc struct {
+		Status string `json:"status"`
+		Name   string `json:"name"`
+		Port   int    `json:"port"`
+	}
+	if err := json.Unmarshal(msg.Data, &svc); err != nil {
+		t.Fatalf("health-check graft can't read service Data: %v", err)
+	}
+	if svc.Status != "started" || svc.Name != "api" || svc.Port != 4000 {
+		t.Fatalf("graft read wrong service data: %+v", svc)
+	}
+}

@@ -620,6 +620,9 @@ func tailFile(path string, n int) string {
 }
 
 func toJSON(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
+	// Every service action returns through here — wrap the payload in the uniform
+	// tool envelope. The action-specific fields (status, name, pid, services, …)
+	// ride in Data, so field access and the scheduler's health-check graft read
+	// them from there.
+	return agenttools.ToolOK("service", "", v).JSON()
 }

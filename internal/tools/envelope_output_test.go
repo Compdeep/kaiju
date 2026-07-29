@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,6 +55,20 @@ func TestFileList_EmitsListingEnvelope(t *testing.T) {
 	}
 	if len(m.Data) == 0 {
 		t.Fatalf("file_list should carry entries in data")
+	}
+}
+
+func TestNetInfo_InterfacesEnvelope(t *testing.T) {
+	out, err := NewNetInfo().Execute(nil, map[string]any{"action": "interfaces"})
+	m := mustEnvelope(t, out, err)
+	if m.Kind != "net" || m.Status != agenttools.StatusOK {
+		t.Fatalf("net_info envelope = kind %q status %q", m.Kind, m.Status)
+	}
+	var d struct {
+		Action string `json:"action"`
+	}
+	if json.Unmarshal(m.Data, &d) != nil || d.Action != "interfaces" {
+		t.Fatalf("net_info data.action = %q want interfaces (%s)", d.Action, m.Data)
 	}
 }
 

@@ -63,7 +63,7 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	// gaps → no edge, no cost.
 	if cov := a.coverageEdge(ctx, graph, userPrompt); cov != "" {
 		userPrompt = cov + "\n\n" + userPrompt
-		rolePrompt = rolePrompt + coverageHook
+		rolePrompt = rolePrompt + "\n\n" + prompt.CoverageHook
 	}
 
 	messages := BuildMessagesWithHistory(

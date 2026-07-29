@@ -106,7 +106,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// Gated on gaps — clean gathering pays nothing.
 	if cov := a.coverageEdge(ctx, graph, userPrompt); cov != "" {
 		userPrompt = cov + "\n\n" + userPrompt
-		sysPrompt += coverageHook
+		sysPrompt += "\n\n" + prompt.CoverageHook
 	}
 
 	messages := []llm.Message{

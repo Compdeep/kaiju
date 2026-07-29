@@ -1178,7 +1178,9 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 			} else {
 				// Tool/compute node resolved successfully
-				if node.Type == NodeCompute {
+				if comp.Body != nil {
+					graph.SetBody(comp.NodeID, comp.Body)
+				} else if node.Type == NodeCompute {
 					graph.SetBody(comp.NodeID, parseComputeBody(comp.Result))
 				} else if msg, ok := tools.ParseToolMessage(comp.Result); ok {
 					graph.SetBody(comp.NodeID, toolMessageBody{msg: msg})
@@ -1825,7 +1827,7 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 		if dagCtx.Err() != nil {
 			break
 		}
-		result, execErr := a.executeToolNode(dagCtx, nil, nil, nil, action.Tool, action.Params, trigger.AlertID, resolvedIntent, trigger.Scope)
+		result, _, execErr := a.executeToolNode(dagCtx, nil, nil, nil, action.Tool, action.Params, trigger.AlertID, resolvedIntent, trigger.Scope)
 		if execErr != nil {
 			log.Printf("[dag] actuator %s failed: %v", action.Tool, execErr)
 		} else {

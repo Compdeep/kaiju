@@ -160,7 +160,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		log.Printf("[dag] exec %s (%s) params=%s", n.ID, n.ToolName, Text.TruncateLog(string(paramJSON), 200))
 	}
 
-	result, err := a.executeToolNode(ctx, n, graph, budget, n.ToolName, n.Params, alertID, intent, scope)
+	result, body, err := a.executeToolNode(ctx, n, graph, budget, n.ToolName, n.Params, alertID, intent, scope)
 
 	// Attach tool actions to the node before completion so they're
 	// included in the node event when SetResult emits it.
@@ -183,6 +183,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	ch <- nodeCompletion{
 		NodeID: n.ID,
 		Result: result,
+		Body:   body,
 		Err:    err,
 	}
 }
@@ -369,17 +370,17 @@ func dotPrefix(s string) string {
  * return: result string and error.
  */
 func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budget *Budget,
-	toolName string, params map[string]any, alertID string, intent gates.Intent, scope *ResolvedScope) (string, error) {
+	toolName string, params map[string]any, alertID string, intent gates.Intent, scope *ResolvedScope) (string, NodeBody, error) {
 
 	// Scope check: reject tools not in the user's scope (defense-in-depth)
 	// Wildcard "*" in AllowedTools means all tools allowed.
 	if scope != nil && !scope.AllowedTools["*"] && !scope.AllowedTools[toolName] {
-		return "", fmt.Errorf("gate: %s not in user scope", toolName)
+		return "", nil, fmt.Errorf("gate: %s not in user scope", toolName)
 	}
 
 	skill, ok := a.registry.Get(toolName)
 	if !ok {
-		return "", fmt.Errorf("unknown tool: %s", toolName)
+		return "", nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
 
 	// Resolve the tool's effective impact via the intent registry (DB
@@ -393,7 +394,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 				AlertID: alertID,
 				Error:   err.Error(),
 			})
-			return "", err
+			return "", nil, err
 		}
 	}
 
@@ -417,7 +418,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			Intent:  int(intent),
 			Impact:  impact,
 		})
-		return "", err
+		return "", nil, err
 	}
 
 	// Clearance: check external authorization endpoint (if configured)
@@ -434,7 +435,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 				Intent:  int(intent),
 				Impact:  impact,
 			})
-			return "", err
+			return "", nil, err
 		}
 	}
 
@@ -443,9 +444,18 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// Contextual results are structured pipeline data (e.g. compute plans
 	// with follow_up graft instructions) and must not be truncated.
 	var result string
+	var body NodeBody
 	var err error
 	isContextual := false
-	if cx, ok := skill.(ContextualExecutor); ok && n != nil {
+	if tx, ok := skill.(tools.TypedExecutor); ok {
+		// Typed path: the tool returns a ToolMessage directly — no JSON round-trip.
+		var msg tools.ToolMessage
+		if msg, err = tx.ExecuteTyped(ctx, params); err == nil {
+			body = toolMessageBody{msg: msg}
+			result = msg.JSON()
+			isContextual = true // structured envelope — exempt from truncation
+		}
+	} else if cx, ok := skill.(ContextualExecutor); ok && n != nil {
 		isContextual = true
 		// Resolve classifier-active skills into per-role guidance sections.
 		// Compute uses this; other contextual tools may ignore it.
@@ -512,7 +522,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	}
 
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Truncate large results for normal tools. Contextual tools (compute)
@@ -530,5 +540,5 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		result = truncateToolResult(result, maxToolResultLen, Text.HeadTail)
 	}
 
-	return result, nil
+	return result, body, nil
 }

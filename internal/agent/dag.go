@@ -1492,6 +1492,7 @@ type ActuatorAction struct {
 type nodeCompletion struct {
 	NodeID    string
 	Result    string
+	Body      NodeBody // typed output when the tool used ExecuteTyped; nil for legacy string tools
 	Err       error
 	TokensIn  int
 	TokensOut int

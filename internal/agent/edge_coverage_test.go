@@ -1,9 +1,16 @@
 package agent
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/Compdeep/kaiju/internal/agent/llm"
 	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
@@ -44,5 +51,69 @@ func TestCoverageEdge_CleanRunSkips(t *testing.T) {
 
 	if cov := (&Agent{}).coverageEdge(nil, g, "some evidence"); cov != "" {
 		t.Fatalf("clean run should skip the edge (return \"\"), got %q", cov)
+	}
+}
+
+// The one safety property of the whole edge: when gathering left gaps but the
+// light LLM lane is unavailable (executor nil on a zero Agent), the edge must
+// STILL hand the answer-writer an explicit "## Coverage" absence block — never
+// return "". A regression to "" here lets the aggregator fabricate the missing
+// data, the exact failure the edge exists to prevent.
+func TestCoverageEdge_FailOpenToStructural(t *testing.T) {
+	g := NewGraph()
+	emID := g.AddNode(&Node{Type: NodeTool, Tag: "search_x", ToolName: "web_search"})
+	g.SetBody(emID, toolMessageBody{msg: agenttools.ToolEmpty("search", "no reachable results")})
+	erID := g.AddNode(&Node{Type: NodeTool, Tag: "fetch_bad", ToolName: "web_fetch"})
+	g.SetBody(erID, toolMessageBody{msg: agenttools.ToolFail("page", "HTTP 404", nil)})
+
+	cov := (&Agent{}).coverageEdge(context.Background(), g, "REQUEST + EVIDENCE")
+	if cov == "" {
+		t.Fatal("gaps present but edge returned \"\" — the aggregator gets no absence signal and may fabricate")
+	}
+	if !strings.HasPrefix(cov, "## Coverage") {
+		t.Fatalf("fail-open output must be the structural ## Coverage block, got: %q", cov)
+	}
+	for _, want := range []string{"search_x", "fetch_bad"} {
+		if !strings.Contains(cov, want) {
+			t.Fatalf("structural block missing gap %q:\n%s", want, cov)
+		}
+	}
+}
+
+// The generative half: with a light lane available, the edge runs the generator
+// (prompt.CoverageGen) and prepends its checklist under the ## Coverage header.
+func TestCoverageEdge_GeneratesFromLLM(t *testing.T) {
+	const checklist = "BACKED: none\nNOT BACKED: the annual revenue figure"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":`+strconv.Quote(checklist)+`}}],"usage":{"total_tokens":1}}`)
+	}))
+	defer srv.Close()
+
+	a := &Agent{executor: llm.NewClient(srv.URL, "k", "test-light")}
+	g := NewGraph()
+	id := g.AddNode(&Node{Type: NodeTool, Tag: "search_x", ToolName: "web_search"})
+	g.SetBody(id, toolMessageBody{msg: agenttools.ToolEmpty("search", "no results")})
+
+	cov := a.coverageEdge(context.Background(), g, "REQUEST: revenue?\nEVIDENCE: none")
+	if !strings.HasPrefix(cov, "## Coverage") {
+		t.Fatalf("generated output must carry the ## Coverage header, got: %q", cov)
+	}
+	if !strings.Contains(cov, "NOT BACKED: the annual revenue figure") {
+		t.Fatalf("generated checklist not prepended:\n%s", cov)
+	}
+}
+
+// collectGaps stays content-agnostic: a nil graph is a no-op, and a tool node
+// not yet on the envelope protocol (a RawTextBody) carries no structural status,
+// so it must be skipped — not panicked on — as new body types flow through.
+func TestCollectGaps_SkipsNonEnvelopeAndNilGraph(t *testing.T) {
+	if gaps := (&Agent{}).collectGaps(nil); gaps != nil {
+		t.Fatalf("nil graph should yield no gaps, got %+v", gaps)
+	}
+	g := NewGraph()
+	id := g.AddNode(&Node{Type: NodeTool, Tag: "legacy", ToolName: "web_fetch"})
+	g.SetBody(id, RawTextBody{Text: "some opaque result"})
+	if gaps := (&Agent{}).collectGaps(g); len(gaps) != 0 {
+		t.Fatalf("a non-envelope tool body must be skipped, got %+v", gaps)
 	}
 }

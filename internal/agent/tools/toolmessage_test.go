@@ -2,8 +2,26 @@ package tools
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
+
+func TestEnvelopeSchema(t *testing.T) {
+	bare := EnvelopeSchema("")
+	if !json.Valid(bare) {
+		t.Fatalf("EnvelopeSchema(\"\") is not valid JSON: %s", bare)
+	}
+	if !strings.Contains(string(bare), `"enum":["ok","empty","error"]`) {
+		t.Fatalf("envelope schema must carry the status enum: %s", bare)
+	}
+	if strings.Contains(string(bare), `"data"`) {
+		t.Fatalf("EnvelopeSchema(\"\") should omit data")
+	}
+	withData := EnvelopeSchema(`{"type":"array"}`)
+	if !json.Valid(withData) || !strings.Contains(string(withData), `"data":{"type":"array"}`) {
+		t.Fatalf("EnvelopeSchema(data) should slot the data schema in: %s", withData)
+	}
+}
 
 func TestToolMessage_Constructors(t *testing.T) {
 	ok := ToolOK("page", "hello", map[string]any{"x": 1})

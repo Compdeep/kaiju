@@ -619,6 +619,12 @@ func tailFile(path string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
+// OutputSchema declares the uniform tool envelope; the service payload is
+// action-specific and carried in data.
+func (s *Service) OutputSchema() json.RawMessage {
+	return agenttools.EnvelopeSchema("")
+}
+
 func toJSON(v any) string {
 	// Every service action returns through here — wrap the payload in the uniform
 	// tool envelope. The action-specific fields (status, name, pid, services, …)

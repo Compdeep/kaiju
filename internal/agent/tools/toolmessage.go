@@ -67,6 +67,19 @@ func (m ToolMessage) JSON() string {
 	return string(b)
 }
 
+// EnvelopeSchema returns the JSON Schema for a tool that emits a ToolMessage —
+// the single source of truth for the uniform envelope, so a declared output
+// schema can't drift from the actual output. dataSchema is the JSON Schema for
+// the tool-specific `data` payload (pass "" when the tool carries only text in
+// `content`).
+func EnvelopeSchema(dataSchema string) json.RawMessage {
+	data := ""
+	if dataSchema != "" {
+		data = `,"data":` + dataSchema
+	}
+	return json.RawMessage(`{"type":"object","description":"Uniform tool envelope. status is ok|empty|error; the tool-specific payload is in data; content is the rendered text.","properties":{"kind":{"type":"string"},"status":{"type":"string","enum":["ok","empty","error"]},"content":{"type":"string"},"detail":{"type":"string"}` + data + `}}`)
+}
+
 // ParseToolMessage reconstructs an envelope from a tool-result string. ok is
 // true only when the string is a well-formed envelope (has a kind AND a valid
 // status), so legacy/raw tool output is never mistaken for one.

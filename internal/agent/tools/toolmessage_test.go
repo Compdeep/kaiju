@@ -69,3 +69,22 @@ func TestParseToolMessage_RejectsNonEnvelopes(t *testing.T) {
 		}
 	}
 }
+
+// The coupled tools (bash, debug) are deliberately NOT migrated — their current
+// output is read by name by consumers (isBashError's "bash_error":true match,
+// the debug graft's type=="debug"). This asserts their real output shapes are
+// NOT mistaken for an envelope, so they stay RawTextBody and those consumers
+// keep working. If this ever fails, migrating bash/debug silently broke the
+// failure→Holmes loop.
+func TestParseToolMessage_CoupledToolsStayRaw(t *testing.T) {
+	coupled := map[string]string{
+		"bash success (raw text)": "total 8\ndrwxr-xr-x  2 u u 4096 .\n",
+		"bash error JSON":         `{"bash_error":true,"exit_code":1,"stdout":"","stderr":"boom","error":"exit status 1","command":"false"}`,
+		"debug envelope":          `{"type":"debug","problem":"nil deref at x.go:3"}`,
+	}
+	for name, s := range coupled {
+		if _, ok := ParseToolMessage(s); ok {
+			t.Errorf("%s: must NOT be wrapped as an envelope (it is read raw by a consumer): %q", name, s)
+		}
+	}
+}

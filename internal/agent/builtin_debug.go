@@ -102,12 +102,12 @@ func (d *DebugTool) Execute(_ context.Context, _ map[string]any) (string, error)
  * param: params - resolved tool params; `problem` is the investigation brief.
  * return: the debug envelope JSON.
  */
-func (d *DebugTool) ExecuteWithContext(_ *ExecuteContext, params map[string]any) (string, error) {
+func (d *DebugTool) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
 	problem, _ := params["problem"].(string)
-	env := map[string]string{"type": "debug", "problem": problem}
-	b, err := json.Marshal(env)
-	if err != nil {
-		return "", fmt.Errorf("debug: marshal envelope: %w", err)
-	}
-	return string(b), nil
+	return tools.ToolOK("debug", "", map[string]string{"problem": problem}), nil
+}
+
+func (d *DebugTool) ExecuteWithContext(_ *ExecuteContext, params map[string]any) (string, error) {
+	msg, _ := d.ExecuteTyped(context.Background(), params)
+	return msg.JSON(), nil
 }

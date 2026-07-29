@@ -1337,12 +1337,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// NOT SkipAllPending — debug is a planned leaf, and independent
 				// sibling work should keep running.
 				if node.Type == NodeTool && node.ToolName == debugToolName {
-					var dbg struct {
-						Type    string `json:"type"`
-						Problem string `json:"problem"`
-					}
-					if json.Unmarshal([]byte(comp.Result), &dbg) == nil && dbg.Type == "debug" {
-						problem := dbg.Problem
+					if problem, isDebug := debugProblem(comp); isDebug {
 						if problem == "" {
 							// Synthesize a brief from the current failures.
 							var fails []string
@@ -2091,6 +2086,31 @@ func bashError(comp nodeCompletion) (error, bool) {
 		return nil, false
 	}
 	return isBashError(comp.Result)
+}
+
+// debugProblem reports whether a node completed as a debug envelope and returns
+// its problem brief — from the typed body (Kind=="debug") when the tool used
+// ExecuteTyped, else the legacy {type:"debug"} string. Triggers the Holmes graft.
+func debugProblem(comp nodeCompletion) (string, bool) {
+	if tb, ok := comp.Body.(toolMessageBody); ok {
+		env := tb.Envelope()
+		if env.Kind != "debug" {
+			return "", false
+		}
+		var d struct {
+			Problem string `json:"problem"`
+		}
+		_ = json.Unmarshal(env.Data, &d)
+		return d.Problem, true
+	}
+	var dbg struct {
+		Type    string `json:"type"`
+		Problem string `json:"problem"`
+	}
+	if json.Unmarshal([]byte(comp.Result), &dbg) == nil && dbg.Type == "debug" {
+		return dbg.Problem, true
+	}
+	return "", false
 }
 
 func isBashError(result string) (error, bool) {

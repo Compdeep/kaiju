@@ -88,6 +88,15 @@ type Outputter interface {
 	OutputSchema() json.RawMessage
 }
 
+// TypedExecutor is the typed output path: a tool returns a ToolMessage envelope
+// directly instead of a marshalled string, so the dispatcher stores the typed
+// body with no JSON round-trip and consumers read Status/Data off it rather than
+// grepping the raw string. Tools we control implement this; opaque tools
+// (plugins, skill-md wrappers) stay on plain Execute and are wrapped as text.
+type TypedExecutor interface {
+	ExecuteTyped(ctx context.Context, params map[string]any) (ToolMessage, error)
+}
+
 /*
  * GetOutputSchema returns the tool's declared output schema, or nil
  * if the tool does not implement the Outputter interface.

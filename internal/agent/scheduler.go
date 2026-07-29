@@ -1189,7 +1189,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				}
 
 				// ── Detect bash errors (non-zero exit returned as result, not error) ──
-				if bashErr, isBash := isBashError(comp.Result); isBash && node.Type == NodeTool && node.ToolName == "bash" {
+				if bashErr, isBash := bashError(comp); isBash && node.Type == NodeTool && node.ToolName == "bash" {
 					log.Printf("[dag] node %s (bash) completed with error: %s", comp.NodeID, Text.TruncateLog(comp.Result, 500))
 					graph.SetError(comp.NodeID, bashErr)
 					node.Error = bashErr
@@ -2079,6 +2079,20 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
  * isBashError checks if a resolved bash result contains a structured error.
  * desc: Returns the error and true if the result has bash_error:true.
  */
+// bashError reports whether a bash node completed with a failure — from the
+// typed command body (Status==error) when the tool used ExecuteTyped, else the
+// legacy "bash_error":true string. The error carries a short detail for logging.
+func bashError(comp nodeCompletion) (error, bool) {
+	if tb, ok := comp.Body.(toolMessageBody); ok {
+		env := tb.Envelope()
+		if env.Kind == "command" && env.Status == tools.StatusError {
+			return fmt.Errorf("bash failed: %s", Text.TruncateLog(env.Detail, 300)), true
+		}
+		return nil, false
+	}
+	return isBashError(comp.Result)
+}
+
 func isBashError(result string) (error, bool) {
 	if !strings.Contains(result, `"bash_error":true`) {
 		return nil, false
@@ -2096,6 +2110,22 @@ func extractBashStdout(result string) string {
 	trimmed := strings.TrimSpace(result)
 	if trimmed == "" {
 		return ""
+	}
+	// Typed bash: envelope carrying stdout/stderr in data.
+	if msg, ok := tools.ParseToolMessage(trimmed); ok {
+		var d struct {
+			Stdout string `json:"stdout"`
+			Stderr string `json:"stderr"`
+		}
+		if json.Unmarshal(msg.Data, &d) == nil {
+			if d.Stdout != "" {
+				return d.Stdout
+			}
+			if d.Stderr != "" {
+				return d.Stderr
+			}
+		}
+		return msg.Content
 	}
 	if strings.HasPrefix(trimmed, "{") && strings.Contains(trimmed, `"bash_error"`) {
 		var bashErr struct {

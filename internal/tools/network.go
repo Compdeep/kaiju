@@ -79,7 +79,7 @@ func (n *NetInfo) Parameters() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (n *NetInfo) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"action":{"type":"string"},"result":{"type":"string"}}}`)
+	return agenttools.EnvelopeSchema("")
 }
 
 /*

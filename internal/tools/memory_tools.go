@@ -250,7 +250,7 @@ func (m *MemorySearch) Impact(map[string]any) int { return tools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (m *MemorySearch) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"array","items":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"}}}}`)
+	return tools.EnvelopeSchema(`{"type":"array","items":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"}}}}`)
 }
 
 /*
@@ -283,7 +283,7 @@ func (m *MemorySearch) Execute(_ context.Context, params map[string]any) (string
 	}
 	results := m.mem.Search([]string{tag})
 	if len(results) == 0 {
-		return fmt.Sprintf("no entries with tag=%q", tag), nil
+		return tools.ToolEmpty("search", fmt.Sprintf("no entries with tag=%q", tag)).JSON(), nil
 	}
 	// Format results as key=value pairs
 	type entry struct {
@@ -294,8 +294,7 @@ func (m *MemorySearch) Execute(_ context.Context, params map[string]any) (string
 	for i, r := range results {
 		out[i] = entry{Key: r.Key, Value: r.Value}
 	}
-	b, _ := json.Marshal(out)
-	return string(b), nil
+	return tools.ToolOK("search", "", out).JSON(), nil
 }
 
 var _ tools.Tool = (*MemorySearch)(nil)

@@ -4,10 +4,24 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 )
+
+// The migrated tools whose schema was actively wrong/missing now declare the
+// unified envelope schema (derived from EnvelopeSchema) — proof of soundness.
+func TestSchemaUnified_NetInfoService(t *testing.T) {
+	for name, schema := range map[string]json.RawMessage{
+		"net_info": NewNetInfo().OutputSchema(),
+		"service":  (&Service{}).OutputSchema(),
+	} {
+		if !strings.Contains(string(schema), `"enum":["ok","empty","error"]`) {
+			t.Errorf("%s OutputSchema is not the unified envelope schema: %s", name, schema)
+		}
+	}
+}
 
 // mustEnvelope asserts a tool's Execute output is a well-formed ToolMessage.
 func mustEnvelope(t *testing.T, out string, err error) agenttools.ToolMessage {

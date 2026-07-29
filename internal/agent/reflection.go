@@ -99,13 +99,14 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	budgetLine, _ := rNode.Params["budget"].(string)
 	userPrompt := assembleReflectorPrompt(graph, gateCtx, trigger, budgetLine)
 
-	// Coverage framing for the conclude path: the reflector often writes the
-	// final answer directly, bypassing the aggregator (and its coverage edge).
-	// When gathering left gaps, make them explicit so a conclude verdict reports
-	// them honestly instead of fabricating. Code-only — no extra LLM call.
-	if gaps := a.gapBlock(graph); gaps != "" {
-		userPrompt = gaps + "\n\n" + userPrompt
-		sysPrompt += reflectorGapHook
+	// Coverage edge on the conclude path: the reflector often writes the final
+	// answer directly, bypassing the aggregator. Give it the SAME content-specific
+	// LLM reframe (asked-vs-backed against the evidence + the gaps) the aggregator
+	// gets, so a conclude verdict reports gaps honestly instead of fabricating.
+	// Gated on gaps — clean gathering pays nothing.
+	if cov := a.coverageEdge(ctx, graph, userPrompt); cov != "" {
+		userPrompt = cov + "\n\n" + userPrompt
+		sysPrompt += coverageHook
 	}
 
 	messages := []llm.Message{

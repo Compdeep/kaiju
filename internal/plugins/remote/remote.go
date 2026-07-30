@@ -63,6 +63,11 @@ type manifestTool struct {
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
 	Impact      string          `json:"impact"`
+	// Reader marks a tool that renders+extracts a URL. When set, the bridge ALSO
+	// registers it as web_fetch's ReaderFallback, so once the plugin is enabled the
+	// fetch tool reads every page through it automatically (JS/SPA pages included) —
+	// not only as a callable tool the planner has to pick.
+	Reader bool `json:"reader"`
 }
 
 // Register fetches the host manifest and adds one kaiju tool per advertised tool.
@@ -77,11 +82,19 @@ func (bridge) Register(h plugins.Host) {
 		return
 	}
 	token := os.Getenv("KAIJU_PLUGIN_TOKEN")
-	tools := 0
+	tools, readers := 0, 0
 	for _, p := range man.Plugins {
 		for _, t := range p.Tools {
-			h.AddTool(&remoteTool{base: base, token: token, spec: t})
+			rt := &remoteTool{base: base, token: token, spec: t}
+			h.AddTool(rt)
 			tools++
+			// A reader tool ALSO becomes web_fetch's ReaderFallback, so an enabled
+			// reader plugin reads every page automatically (see primaryContent in
+			// web_fetch), not just when the planner calls the tool by name.
+			if t.Reader {
+				h.RegisterReaderFallback(readerFrom(rt))
+				readers++
+			}
 		}
 		if p.Skill != "" {
 			// The skill travels with the plugin in the manifest. Injecting it into
@@ -90,7 +103,26 @@ func (bridge) Register(h plugins.Host) {
 			log.Printf("[plugin/remote] plugin %q ships a skill (%d bytes) — carried, not yet injected", p.Name, len(p.Skill))
 		}
 	}
-	log.Printf("[plugin/remote] host %s: %d tool(s) from %d plugin(s)", base, tools, len(man.Plugins))
+	log.Printf("[plugin/remote] host %s: %d tool(s) (%d reader) from %d plugin(s)", base, tools, readers, len(man.Plugins))
+}
+
+// readerFrom adapts a remote reader tool into web_fetch's ReaderFallback: it
+// invokes the tool with {"url": rawURL} and returns the extracted text (empty when
+// the tool reported empty/error, so web_fetch falls back to built-in extraction).
+func readerFrom(rt *remoteTool) func(ctx context.Context, rawURL string) (string, error) {
+	return func(ctx context.Context, rawURL string) (string, error) {
+		out, err := rt.Execute(ctx, map[string]any{"url": rawURL})
+		if err != nil {
+			return "", err
+		}
+		if msg, ok := agenttools.ParseToolMessage(out); ok {
+			if msg.Status == agenttools.StatusOK {
+				return msg.Content, nil
+			}
+			return "", nil
+		}
+		return out, nil
+	}
 }
 
 func fetchManifest(base string) (*manifest, error) {

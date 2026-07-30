@@ -45,6 +45,11 @@ type Config struct {
 	// plugin on at runtime (and persist it here). Off by default — the embedding
 	// host opts in. When off, plugin_enable is not registered at all.
 	AllowRuntimePluginActivation bool `json:"allow_runtime_plugin_activation,omitempty"`
+	// RemotePluginHost is the base URL of the out-of-process plugin host the
+	// `remote` bridge connects to (e.g. http://127.0.0.1:8091). Set via the
+	// plugin_option tool; exported to KAIJU_PLUGIN_HOST for the bridge at startup
+	// and on enable, so a user can point kaiju at the host from chat.
+	RemotePluginHost string `json:"remote_plugin_host,omitempty"`
 
 	path string // source file path (set by Load); used to persist runtime changes
 }
@@ -345,6 +350,31 @@ func (c *Config) SetPluginsPersisted(names []string) error {
 	}
 	nb, _ := json.Marshal(names)
 	m["plugins"] = nb
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(c.path, out, 0o644)
+}
+
+// SetRemotePluginHostPersisted updates the remote plugin host URL in memory and
+// writes it back to the source config, touching ONLY `remote_plugin_host`. Mirrors
+// SetPluginsPersisted so plugin_option can persist the host from chat.
+func (c *Config) SetRemotePluginHostPersisted(url string) error {
+	c.RemotePluginHost = url
+	if c.path == "" {
+		return fmt.Errorf("config: no source file to persist to")
+	}
+	raw, err := os.ReadFile(c.path)
+	if err != nil {
+		return fmt.Errorf("config: read %s: %w", c.path, err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("config: parse %s: %w", c.path, err)
+	}
+	vb, _ := json.Marshal(url)
+	m["remote_plugin_host"] = vb
 	out, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

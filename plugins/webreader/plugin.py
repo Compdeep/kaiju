@@ -48,6 +48,10 @@ MANIFEST = {
                 "additionalProperties": False,
             },
             "impact": "observe",
+            # reader: kaiju wires this as web_fetch's ReaderFallback, so once the
+            # plugin is enabled every fetch reads through webreader automatically
+            # (rendering JS pages), not only when the planner calls web_read.
+            "reader": True,
         }
     ],
 }

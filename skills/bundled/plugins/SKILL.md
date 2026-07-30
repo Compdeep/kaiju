@@ -17,6 +17,11 @@ each optional plugin as:
 
 ## Planning Guidance
 
+- **This is about PLUGINS, not system services.** A request to "enable web
+  reading / read these JS pages / turn on the crawler / enable the reader / enable
+  this capability" is a plugin question — use `plugin_list` / `plugin_enable` /
+  `plugin_option`. Do NOT reach for the `service` tool (that manages OS daemons
+  like nginx/redis) and do NOT ask "which service" — the user means a plugin.
 - On "what can you do / are there plugins / can you do X?" → call `plugin_list`
   and answer from it. Name what's active, and mention anything **available** you
   could switch on.
@@ -26,10 +31,16 @@ each optional plugin as:
   asked to enable it outright.
 - To enable, call `plugin_enable` with the `name` from `plugin_list`. Its tools
   become available immediately — use them on the next step.
+- **Remote plugins need a host URL.** Webreader runs in an out-of-process host
+  reached by the `remote` bridge. If `plugin_enable name="remote"` reports the
+  host is unreachable / added no tools, set the URL first with
+  `plugin_option {name:"remote", key:"host", value:"http://127.0.0.1:8091"}`
+  (ask the user for the URL if you don't know it), then enable.
+- **A reader plugin wires itself into `web_fetch`.** Once `webreader` is enabled,
+  you do NOT call a separate tool to use it — `web_fetch` reads every page through
+  it automatically (JS/SPA pages included). Just fetch as usual.
 - If `plugin_enable` reports the plugin isn't built into this binary, tell the
   user it needs an operator to rebuild with that plugin — you can't add it.
-- If enabling a remote plugin adds no tools, its host is probably not running —
-  say that rather than claiming the capability.
 
 ## RULES
 

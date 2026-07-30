@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
@@ -125,6 +126,12 @@ func (p *PluginEnable) Execute(_ context.Context, params map[string]any) (string
 		return agenttools.ToolFail("plugin", fmt.Sprintf("plugin %q is not built into this binary — it needs a rebuild with -tags plugin_%s", name, name), nil).JSON(), nil
 	}
 
+	// A remote plugin's bridge reads KAIJU_PLUGIN_HOST; export the configured host
+	// (set via plugin_option) so enabling "remote" connects to the right place.
+	if p.cfg.RemotePluginHost != "" {
+		os.Setenv("KAIJU_PLUGIN_HOST", p.cfg.RemotePluginHost)
+	}
+
 	host := &liveHost{reg: p.reg, workspace: p.workspace}
 	pl.Register(host)
 	plugins.MarkActive(name)
@@ -141,6 +148,49 @@ func (p *PluginEnable) Execute(_ context.Context, params map[string]any) (string
 	msg := fmt.Sprintf("Enabled %q. Added tool(s): %s.%s", name, strings.Join(host.added, ", "), note)
 	return agenttools.ToolOK("plugin", msg, map[string]any{"enabled": name, "tools": host.added, "persisted": note == ""}).JSON(), nil
 }
+
+// PluginOption sets and persists a plugin configuration option. Today the
+// meaningful one is the remote plugin host URL (key "host"/"url"), which the
+// `remote` bridge connects to — so a user can point kaiju at their plugin host
+// from chat, then enable it. Registered behind the same runtime-activation flag.
+type PluginOption struct{ cfg *config.Config }
+
+// NewPluginOption returns the plugin_option tool.
+func NewPluginOption(cfg *config.Config) *PluginOption { return &PluginOption{cfg: cfg} }
+
+func (p *PluginOption) Name() string { return "plugin_option" }
+
+func (p *PluginOption) Description() string {
+	return `Set and persist a plugin configuration option. Currently supported: the remote plugin host URL — call with {"name":"remote","key":"host","value":"http://127.0.0.1:8091"}, then plugin_enable {"name":"remote"}. Use only when the user asks to configure or point kaiju at a plugin host.`
+}
+
+func (p *PluginOption) Impact(map[string]any) int { return agenttools.ImpactAffect }
+
+func (p *PluginOption) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Plugin name (e.g. \"remote\")."},"key":{"type":"string","description":"Option key (e.g. \"host\")."},"value":{"type":"string","description":"Option value (e.g. the host URL)."}},"required":["name","key","value"],"additionalProperties":false}`)
+}
+
+func (p *PluginOption) Execute(_ context.Context, params map[string]any) (string, error) {
+	key, _ := params["key"].(string)
+	value, _ := params["value"].(string)
+	key = strings.ToLower(strings.TrimSpace(key))
+	value = strings.TrimSpace(value)
+	if key == "" || value == "" {
+		return agenttools.ToolFail("plugin", "'key' and 'value' are required", nil).JSON(), nil
+	}
+	switch key {
+	case "host", "url", "remote_plugin_host":
+		if err := p.cfg.SetRemotePluginHostPersisted(value); err != nil {
+			return agenttools.ToolFail("plugin", "couldn't persist host: "+err.Error(), nil).JSON(), nil
+		}
+		os.Setenv("KAIJU_PLUGIN_HOST", value)
+		return agenttools.ToolOK("plugin", fmt.Sprintf("Set the remote plugin host to %s. Enable it with plugin_enable name=\"remote\".", value), map[string]any{"remote_plugin_host": value}).JSON(), nil
+	default:
+		return agenttools.ToolFail("plugin", fmt.Sprintf("unknown option %q — supported: host (the remote plugin host URL)", key), nil).JSON(), nil
+	}
+}
+
+var _ agenttools.Tool = (*PluginOption)(nil)
 
 // appendUnique returns list with v appended if absent (a fresh slice, no aliasing).
 func appendUnique(list []string, v string) []string {

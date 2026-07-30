@@ -416,10 +416,16 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	}
 	if cfg.Tools.Web.Enabled {
 		reg.Replace(kaijutools.NewWebFetchWithLLM(ag.ExecutorClient()), "builtin")
-		reg.Replace(kaijutools.NewWebSearchWithConfig(kaijutools.SearchConfig{
+		searchCfg := kaijutools.SearchConfig{
 			Provider: cfg.Tools.Web.SearchProvider,
 			DelaySec: cfg.Tools.Web.SearchDelaySec,
-		}), "builtin")
+		}
+		reg.Replace(kaijutools.NewWebSearchWithConfig(searchCfg), "builtin")
+		// web_research = search + auto-fetch the top results in one step, so the
+		// planner never picks a URL to fetch (can't invent) or decides to fetch
+		// (can't skip). The preferred research path; web_search/web_fetch stay for
+		// the cases that genuinely need just URLs or a specific known page.
+		reg.Replace(kaijutools.NewWebResearch(searchCfg, ag.ExecutorClient()), "builtin")
 	}
 
 	// Vision tool: lets the planner read an image mid-plan (a fetched screenshot,

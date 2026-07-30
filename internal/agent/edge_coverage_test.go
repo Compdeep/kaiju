@@ -103,6 +103,59 @@ func TestCoverageEdge_GeneratesFromLLM(t *testing.T) {
 	}
 }
 
+// fetchedNode records a web_fetch that actually retrieved a URL — the URL is
+// stamped into the page envelope's Data, which collectFetched reads.
+func fetchedNode(g *Graph, tag, url string) {
+	id := g.AddNode(&Node{Type: NodeTool, Tag: tag, ToolName: "web_fetch"})
+	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("page", "content", map[string]any{"url": url})})
+}
+
+// Part 2 of the coverage edge: even with NO gaps (every search returned ok), if a
+// search surfaced URLs that no fetch ever read, the aggregator must be told they
+// were referenced-but-not-retrieved — so it can't present them as read/verified.
+// This is the exact failure that produced a "verified and live" URL list.
+func TestCoverageEdge_ReferencedButNotRetrieved(t *testing.T) {
+	g := NewGraph()
+	searchNode(g, "s1", "https://ref.example/a", "https://ref.example/b") // ok search, no gap
+	cov := (&Agent{}).coverageEdge(context.Background(), g, "get me 10 real sources")
+	if cov == "" {
+		t.Fatal("unretrieved references present but edge returned \"\" — aggregator gets no signal and may claim them verified")
+	}
+	if !strings.Contains(cov, "Referenced but not retrieved") {
+		t.Fatalf("expected the referenced-but-not-retrieved block, got:\n%s", cov)
+	}
+	for _, u := range []string{"https://ref.example/a", "https://ref.example/b"} {
+		if !strings.Contains(cov, u) {
+			t.Fatalf("block must list the unretrieved reference %q:\n%s", u, cov)
+		}
+	}
+}
+
+// A URL that WAS retrieved must not be flagged — and if nothing else is amiss the
+// edge stays silent (no false "unverified" label on a source we actually read).
+func TestCoverageEdge_RetrievedUrlNotFlagged(t *testing.T) {
+	g := NewGraph()
+	searchNode(g, "s1", "https://read.example/a")
+	fetchedNode(g, "f1", "https://read.example/a") // same URL, actually read
+	if cov := (&Agent{}).coverageEdge(context.Background(), g, "req"); cov != "" {
+		t.Fatalf("a retrieved URL (no gaps) should leave the edge silent, got:\n%s", cov)
+	}
+}
+
+// Mixed: one reference read, one not — only the unread one is flagged.
+func TestCoverageEdge_FlagsOnlyUnretrieved(t *testing.T) {
+	g := NewGraph()
+	searchNode(g, "s1", "https://x.example/read", "https://x.example/unread")
+	fetchedNode(g, "f1", "https://x.example/read")
+	cov := (&Agent{}).coverageEdge(context.Background(), g, "req")
+	if !strings.Contains(cov, "https://x.example/unread") {
+		t.Fatalf("the unread reference must be flagged:\n%s", cov)
+	}
+	if strings.Contains(cov, "https://x.example/read") {
+		t.Fatalf("the reference that was actually read must NOT be flagged:\n%s", cov)
+	}
+}
+
 // collectGaps stays content-agnostic: a nil graph is a no-op, and a tool node
 // not yet on the envelope protocol (a RawTextBody) carries no structural status,
 // so it must be skipped — not panicked on — as new body types flow through.

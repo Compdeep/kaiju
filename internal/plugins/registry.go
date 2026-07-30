@@ -140,6 +140,7 @@ type RemoteInfo struct {
 	Name        string
 	Description string
 	DefaultURL  string // where its host runs unless overridden by config remote_plugin_host
+	StartCmd    string // shell command to LAUNCH the host when it isn't running ({port} is substituted); overridable by config remote_plugin_start. Empty ⇒ can't auto-start, only connect.
 }
 
 // RemoteCatalog is the curated set of known remote plugins. The bridge itself
@@ -148,7 +149,8 @@ var RemoteCatalog = []RemoteInfo{
 	{
 		Name:        "webreader",
 		Description: "Read web pages as clean text, rendering JavaScript-heavy pages (SPAs, dashboards) when a plain fetch comes back thin. Once on, web_fetch reads every page through it.",
-		DefaultURL:  "http://127.0.0.1:8091",
+		DefaultURL:  "http://127.0.0.1:8092", // 8091 is the MCS worker; keep off it
+		StartCmd:    "/home/sites/kaiju/kaiju/plugins/start.sh {port}",
 	},
 }
 

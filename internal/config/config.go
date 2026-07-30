@@ -50,6 +50,11 @@ type Config struct {
 	// plugin_option tool; exported to KAIJU_PLUGIN_HOST for the bridge at startup
 	// and on enable, so a user can point kaiju at the host from chat.
 	RemotePluginHost string `json:"remote_plugin_host,omitempty"`
+	// RemotePluginStart overrides the shell command used to LAUNCH the remote plugin
+	// host when it isn't already running ({port} is substituted). Empty ⇒ use the
+	// catalog default. Enabling a capability runs this so it "just works" without a
+	// separate manual start.
+	RemotePluginStart string `json:"remote_plugin_start,omitempty"`
 
 	path string // source file path (set by Load); used to persist runtime changes
 }

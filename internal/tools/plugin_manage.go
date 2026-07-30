@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"strings"
+	"syscall"
+	"time"
 
 	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
 	"github.com/Compdeep/kaiju/internal/config"
@@ -196,8 +202,21 @@ func (p *PluginEnable) enableRemote(r plugins.RemoteInfo) (string, error) {
 
 	host := &liveHost{reg: p.reg, workspace: p.workspace}
 	bridge.Register(host)
+
+	// If the host isn't up, START it ourselves and retry — enabling a capability
+	// brings up its service, so the user never has to start anything by hand.
 	if len(host.added) == 0 {
-		return agenttools.ToolOK("plugin", fmt.Sprintf("Couldn't reach %q's host at %s — start the host there, or point at a different URL with plugin_option {name:%q, key:\"host\", value:\"<url>\"}, then enable again.", r.Name, url, r.Name), map[string]any{"enabled": "", "host": url}).JSON(), nil
+		startCmd := p.cfg.RemotePluginStart
+		if startCmd == "" {
+			startCmd = r.StartCmd
+		}
+		if startCmd != "" && startHostAndWait(url, startCmd) {
+			host = &liveHost{reg: p.reg, workspace: p.workspace}
+			bridge.Register(host)
+		}
+	}
+	if len(host.added) == 0 {
+		return agenttools.ToolFail("plugin", fmt.Sprintf("Couldn't bring up %q's host at %s. Its service failed to start or answer — check that the host command works, or set a different URL with plugin_option {name:%q, key:\"host\", value:\"<url>\"}.", r.Name, url, r.Name), nil).JSON(), nil
 	}
 	plugins.MarkActive("remote")
 	plugins.MarkActive(r.Name)
@@ -210,6 +229,49 @@ func (p *PluginEnable) enableRemote(r plugins.RemoteInfo) (string, error) {
 		_ = p.cfg.SetRemotePluginHostPersisted(url)
 	}
 	return agenttools.ToolOK("plugin", fmt.Sprintf("Enabled %q — web_fetch now reads pages through it automatically.%s", r.Name, note), map[string]any{"enabled": r.Name, "tools": host.added, "host": url}).JSON(), nil
+}
+
+// startHostAndWait launches a plugin host (StartCmd with {port} substituted from
+// the URL, detached via setsid so it outlives this call and a kaiju restart) and
+// polls until it answers, returning true once it's up. This is what makes "enable
+// webreader" bring the service up on its own.
+func startHostAndWait(rawURL, startCmd string) bool {
+	port := "8092"
+	if u, err := url.Parse(rawURL); err == nil && u.Port() != "" {
+		port = u.Port()
+	}
+	cmd := exec.Command("bash", "-c", strings.ReplaceAll(startCmd, "{port}", port))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		log.Printf("[plugin] failed to start host: %v", err)
+		return false
+	}
+	log.Printf("[plugin] started host: %s (waiting for %s)", cmd.String(), rawURL)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(1500 * time.Millisecond)
+		if hostUp(rawURL) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostUp reports whether the plugin host answers GET /plugins with 200.
+func hostUp(rawURL string) bool {
+	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(rawURL, "/")+"/plugins", nil)
+	if err != nil {
+		return false
+	}
+	if tok := os.Getenv("KAIJU_PLUGIN_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // PluginOption sets and persists a plugin configuration option. Today the

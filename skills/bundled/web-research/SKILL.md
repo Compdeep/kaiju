@@ -9,8 +9,10 @@ When the request requires web research, plan in two phases:
 
 ### Phase 1: Parallel Searches
 Plan multiple `web_search` calls in parallel — one per research angle.
-- Use specific, targeted queries. Not "subscription boxes" but "top subscription box competitors pricing comparison 2026"
-- Plan 2-5 parallel searches covering different aspects of the question
+- Use specific, targeted queries — but as plain KEYWORDS, not search operators. "top subscription box competitors pricing comparison 2026", not "subscription boxes".
+- Do NOT stack search operators. Piling `site:… OR site:… OR …` together with `filetype:pdf` and niche terms almost always returns nothing — the engine already ranks good sources without them. If a plain query is too noisy, narrow it by adding one more keyword, not an operator. An over-filtered search that returns nothing is what pushes a planner to invent URLs.
+- Plan 2-5 parallel searches covering different aspects of the question.
+- `web_search` takes an optional `recency_days` — set it for time-sensitive figures (market size, recent news); leave it off otherwise.
 
 ### Phase 2: Targeted Fetches
 Fetching a URL is how you actually **read a source** — a news article, an analyst report, a government or standards page, a paper. A search only gives you titles and short snippets; the real content, figures, and quotes come from the fetch. So for research you MUST fetch the sources you found — never answer from search snippets alone, and never present a URL you did not fetch as a source.

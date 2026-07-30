@@ -114,6 +114,14 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
  * param: budget - the execution budget.
  * return: resolved IGX intent and error.
  */
+// replanFrameTemplate is the frame handed to the executive on a replan (%s = the
+// reflector's `next`). It MUST keep teaching step wiring — leading with a
+// web_search→web_fetch chain (`${step.0.results.0.url}`, `depends_on:[0]`) — and
+// MUST NOT tell the planner to avoid `${step}`/`depends_on` for its new steps.
+// A prompt that bans wiring here is exactly what collapsed replans to flat plans
+// with literal URLs invented from memory (guarded by TestReplanFrame_TeachesWiring).
+const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n\nPlan the next steps needed to close this gap and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. step 0 `web_search`, step 1 `web_fetch` whose url param is `${step.0.results.0.url}` with `depends_on:[0]`. `${step.N}` addresses the NEW steps in THIS plan (0-indexed from your first new step). Only for a value from a PRIOR, already-finished step (shown above as DATA) do you paste it in literally with `depends_on:[]` — a prior-frame index can't reach it. Never paste a URL you don't actually have in front of you: a URL to fetch comes from a search step, not memory.\n\nIf the next move is to FIX a FAILURE, plan a single `debug` step (a leaf, no dependents) with the failure — exact error text, file paths, module names — in its `problem` param; the debugger diagnoses the root cause and applies the fix, and the following re-plan handles any follow-on work. If the request is already fully answered by the worklog, return an empty plan."
+
 // scheduleOutcome holds the outcome of plan+schedule, including an optional verdict
 // from reflection that can skip the aggregator.
 type scheduleOutcome struct {
@@ -1140,9 +1148,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// Anchor the user's goal verbatim (formatTrigger inside the
 						// executive); hand it a generic frame: what's already done
 						// (worklog) + the reflector's `next`. The executive decides HOW.
-						frame := fmt.Sprintf(
-							"\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n\nPlan the next steps needed to close this gap and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. step 0 `web_search`, step 1 `web_fetch` whose url param is `${step.0.results.0.url}` with `depends_on:[0]`. `${step.N}` addresses the NEW steps in THIS plan (0-indexed from your first new step). Only for a value from a PRIOR, already-finished step (shown above as DATA) do you paste it in literally with `depends_on:[]` — a prior-frame index can't reach it. Never paste a URL you don't actually have in front of you: a URL to fetch comes from a search step, not memory.\n\nIf the next move is to FIX a FAILURE, plan a single `debug` step (a leaf, no dependents) with the failure — exact error text, file paths, module names — in its `problem` param; the debugger diagnoses the root cause and applies the fix, and the following re-plan handles any follow-on work. If the request is already fully answered by the worklog, return an empty plan.",
-							next)
+						frame := fmt.Sprintf(replanFrameTemplate, next)
 
 						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "running", Tag: "replan"}})
 						replanResult, rerr := a.runExecutive(ctx, trigger, graph, frame)

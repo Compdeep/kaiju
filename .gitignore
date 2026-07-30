@@ -1,5 +1,7 @@
-# Binary
-kaiju
+# Binary (repo-root build output only — anchored so it doesn't match the
+# cmd/kaiju/ source directory and silently ignore new files there).
+/kaiju
+/cmd/kaiju/kaiju
 .kaiju
 .kaiju-state
 *.exe

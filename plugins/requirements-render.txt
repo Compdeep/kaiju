@@ -1,0 +1,13 @@
+# OPTIONAL render tier for webreader — only if you need JavaScript-rendered
+# pages (SPAs, some analyst/report sites). It pulls a headless browser, which
+# is HEAVY:
+#
+#   pip install -r requirements-render.txt
+#   playwright install chromium      # ~150MB download, a few hundred MB on disk
+#
+# Without this, webreader runs tier 1 (static extraction) only and skips
+# rendering gracefully — no browser, no Chromium, no code change.
+#
+# On a small box, prefer running the host (with this tier) on a separate,
+# beefier machine and point KAIJU_PLUGIN_HOST at it; kaiju stays untouched.
+playwright>=1.44

@@ -214,43 +214,85 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 
 	status := fmt.Sprintf("HTTP %d %s", resp.StatusCode, resp.Status)
 
-	if resp.StatusCode >= 400 {
-		// Error responses: return raw truncated
+	// Build the result, then stamp the fetched URL onto it (withURL) at a single
+	// exit — so every outcome, especially a 404 or an empty page, records WHICH url
+	// produced it. A bare "HTTP 404" with no url is un-debuggable in the trace.
+	var out string
+
+	// Binary decode (PDF etc.) — only for non-error responses; computed once.
+	var decoded string
+	var decFound bool
+	var decErr error
+	if resp.StatusCode < 400 {
+		decoded, decFound, decErr = decodePageBinary(ctype, rawURL, bodyBytes)
+	}
+
+	switch {
+	case resp.StatusCode >= 400:
+		// Error responses: return raw truncated.
 		body := string(bodyBytes)
 		if len(body) > 2048 {
 			body = body[:2048] + "..."
 		}
-		return marshalFetchResult(fetchResult{Status: status, Content: body, Format: format})
-	}
+		out, err = marshalFetchResult(fetchResult{Status: status, Content: body, Format: format})
 
-	// Binary bodies (PDF, …) can't be read by readability. If a plugin registered
-	// a decoder for this response, use it — this is how web_fetch reads a PDF a
-	// search turned up (gov/academic primary sources). No decoder → normal path.
-	if text, found, derr := decodePageBinary(ctype, rawURL, bodyBytes); found {
+	case decFound:
+		// A plugin decoded a binary body (e.g. a PDF a search turned up).
 		switch {
-		case derr != nil:
-			return marshalFetchResult(fetchResult{Status: status, Format: format, Note: "downloaded but could not decode: " + derr.Error()})
-		case strings.TrimSpace(text) == "":
-			return marshalFetchResult(fetchResult{Status: status, Format: format, Note: "downloaded a document with no extractable text (likely scanned or image-only)"})
+		case decErr != nil:
+			out, err = marshalFetchResult(fetchResult{Status: status, Format: format, Note: "downloaded but could not decode: " + decErr.Error()})
+		case strings.TrimSpace(decoded) == "":
+			out, err = marshalFetchResult(fetchResult{Status: status, Format: format, Note: "downloaded a document with no extractable text (likely scanned or image-only)"})
+		default:
+			if len(decoded) > 16000 {
+				decoded = decoded[:16000] + "\n… (truncated)"
+			}
+			out, err = marshalFetchResult(fetchResult{Status: status, Content: decoded, Format: format})
 		}
-		if len(text) > 16000 {
-			text = text[:16000] + "\n… (truncated)"
-		}
-		return marshalFetchResult(fetchResult{Status: status, Content: text, Format: format})
-	}
 
-	// Route to format handler
-	switch format {
-	case "raw":
-		return w.formatRaw(status, bodyBytes)
-	case "text":
-		return w.formatText(ctx, status, rawURL, bodyBytes)
-	case "summary":
-		focus, _ := params["focus"].(string)
-		return w.formatSummary(ctx, status, rawURL, bodyBytes, focus)
-	default: // markdown
-		return w.formatMarkdown(ctx, status, rawURL, bodyBytes)
+	default:
+		switch format {
+		case "raw":
+			out, err = w.formatRaw(status, bodyBytes)
+		case "text":
+			out, err = w.formatText(ctx, status, rawURL, bodyBytes)
+		case "summary":
+			focus, _ := params["focus"].(string)
+			out, err = w.formatSummary(ctx, status, rawURL, bodyBytes, focus)
+		default: // markdown
+			out, err = w.formatMarkdown(ctx, status, rawURL, bodyBytes)
+		}
 	}
+	return withURL(rawURL, out, err)
+}
+
+// withURL stamps the fetched URL onto a fetch-result envelope: into Data always,
+// and into Detail on any non-ok outcome — so the trace shows exactly WHICH url
+// produced a 404 or an empty page instead of an anonymous error.
+func withURL(rawURL, out string, err error) (string, error) {
+	if err != nil || rawURL == "" {
+		return out, err
+	}
+	m, ok := agenttools.ParseToolMessage(out)
+	if !ok {
+		return out, err
+	}
+	obj := map[string]any{}
+	if len(m.Data) > 0 {
+		_ = json.Unmarshal(m.Data, &obj)
+	}
+	obj["url"] = rawURL
+	if b, e := json.Marshal(obj); e == nil {
+		m.Data = b
+	}
+	if m.Status != agenttools.StatusOK && !strings.Contains(m.Detail, rawURL) {
+		if m.Detail == "" {
+			m.Detail = rawURL
+		} else {
+			m.Detail = m.Detail + " — " + rawURL
+		}
+	}
+	return m.JSON(), nil
 }
 
 // fetchResult is the structured JSON return shape of web_fetch. Declared here

@@ -485,6 +485,18 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Persist the DAG trace against that assistant message ourselves, server-side.
+	// The browser also POSTs it back (/sessions/{id}/trace), but that path is
+	// fragile — a replan's start-event clears the live node buffer and an
+	// SSE/return race can leave it empty at save time, so the trace silently
+	// vanished on reload. Saving the run's own final snapshot here makes the
+	// trace reliably survive regardless of client state.
+	if a.db != nil && req.SessionID != "" && len(result.Trace) > 0 {
+		if err := a.db.SetDAGTrace(req.SessionID, string(result.Trace)); err != nil {
+			log.Printf("[api] failed to persist DAG trace (%s): %v", trigger.AlertID, err)
+		}
+	}
+
 	// Convert actions to API type
 	var apiActions []ActionInfo
 	for _, a := range result.Actions {

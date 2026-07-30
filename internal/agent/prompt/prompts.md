@@ -99,7 +99,8 @@ A long context paragraph is fine. A lossy short one is a bug.
   "intent": %s,
   "required_categories": ["network", "filesystem", "compute", "process", "info"],
   "context": "paragraph covering intent + every concrete identifier (URLs, paths, selectors, constants) verbatim",
-  "compute_mode": "" | "shallow" | "deep"
+  "compute_mode": "" | "shallow" | "deep",
+  "needs_synthesis": true | false
 }
 
 ## Field meanings
@@ -158,6 +159,8 @@ Set "" for everything else, including:
 When unsure between "" and "shallow", prefer "shallow" for anything astronomical, orbital, financial, or statistical — the cost of a wasted coder call is much less than the cost of returning "use an external app" to the user, which is forbidden.
 
 The presence of an existing project in the workspace is NOT a signal. Only the user's current query + prior context drive this choice. A user asking "what's the weather" after previously building a webapp still gets compute_mode="".
+
+**needs_synthesis** — Whether the final answer needs a written-up synthesis over everything gathered, rather than a one-line conclusion. Set `true` when the query asks for **deep or multi-source research, a report/analysis/comparison, or to build/flesh out/draft a section or document** — anything where the value is in the composed write-up. Set `false` for a **single fact lookup, a yes/no, a status check, or a quick calculation** where one sentence is the answer. When true, the run always finishes with the aggregator (a full synthesis with the honesty framing), instead of letting the reflector conclude with a short summary. When unsure on a real research task, prefer `true`.
 
 Return ONLY the raw JSON object.
 

@@ -122,6 +122,38 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
 // with literal URLs invented from memory (guarded by TestReplanFrame_TeachesWiring).
 const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n\nPlan the next steps needed to close this gap and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. step 0 `web_search`, step 1 `web_fetch` whose url param is `${step.0.results.0.url}` with `depends_on:[0]`. `${step.N}` addresses the NEW steps in THIS plan (0-indexed from your first new step). Only for a value from a PRIOR, already-finished step (shown above as DATA) do you paste it in literally with `depends_on:[]` — a prior-frame index can't reach it. Never paste a URL you don't actually have in front of you: a URL to fetch comes from a search step, not memory.\n\nIf the next move is to FIX a FAILURE, plan a single `debug` step (a leaf, no dependents) with the failure — exact error text, file paths, module names — in its `problem` param; the debugger diagnoses the root cause and applies the fix, and the following re-plan handles any follow-on work. If the request is already fully answered by the worklog, return an empty plan."
 
+// complexFanoutFloor is the number of resolved tool steps at or above which a run
+// counts as "complex" regardless of what preflight guessed — a structural backstop
+// so a query that actually fanned out to many gather steps still earns a full
+// synthesis. A simple lookup resolves 1-3 tool nodes; a real research run resolves
+// many more.
+const complexFanoutFloor = 6
+
+// decideAutoAggMode picks the aggregator lane in auto mode (agg_mode -1): 0=skip
+// (use the reflector's verdict), 1=executor model, 2=reasoning model. Pure over the
+// structural signals so it is unit-tested directly (TestDecideAutoAggMode).
+//
+//   - compute present            → 1 (a compute run always needs a formatted answer)
+//   - complex + usable evidence   → 2 (a real synthesis, with the honesty framing)
+//   - complex + NO usable evidence→ 0 (nothing to synthesize; the reflector's honest
+//     "couldn't get the data" verdict stands — this is the reflector's override)
+//   - simple + reflector wants it → 2
+//   - simple, reflector done      → 0
+func decideAutoAggMode(hasCompute, complex, hasEvidence bool, reflectorWants *bool) (int, string) {
+	switch {
+	case hasCompute:
+		return 1, "compute nodes present, forcing aggregator"
+	case complex && hasEvidence:
+		return 2, "complex query → aggregating"
+	case complex:
+		return 0, "complex query but no usable evidence — using reflector's verdict"
+	case reflectorWants != nil && *reflectorWants:
+		return 2, "reflector requested aggregation (reasoning model)"
+	default:
+		return 0, "reflector verdict is complete, skipping aggregator"
+	}
+}
+
 // scheduleOutcome holds the outcome of plan+schedule, including an optional verdict
 // from reflection that can skip the aggregator.
 type scheduleOutcome struct {
@@ -2011,19 +2043,20 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	var verdict string
 	var actions []ActuatorAction
 
-	// Auto mode: let the reflector decide — but always aggregate when compute nodes are involved
+	// Auto mode: decide who writes the final answer. A sizable/complex query
+	// (preflight said so, or the run structurally fanned out) MUST end with the
+	// aggregator — a full synthesis with the honesty framing and 2x token budget —
+	// rather than a short reflector summary. The reflector only wins here when it
+	// couldn't gather usable evidence: then its honest "couldn't get the data"
+	// verdict is the right answer and an aggregator pass over emptiness is skipped.
 	hasCompute := graph.HasNodeOfType(NodeCompute)
+	needsSynthesis := graph.Preflight != nil && graph.Preflight.NeedsSynthesis
+	fanout := a.runFanout(graph)
+	complex := needsSynthesis || fanout >= complexFanoutFloor // a real gather, not a lookup
 	if aggMode == -1 && pr.ReflectionVerdict != "" {
-		if hasCompute {
-			aggMode = 1 // compute runs always need the aggregator for a proper formatted response
-			log.Printf("[dag] auto agg: compute nodes present, forcing aggregator")
-		} else if pr.ReflectionAggregate != nil && *pr.ReflectionAggregate {
-			aggMode = 2 // reflector says aggregate needed — use reasoning model
-			log.Printf("[dag] auto agg: reflector requested aggregation (reasoning model)")
-		} else {
-			aggMode = 0 // reflector says verdict is complete — skip
-			log.Printf("[dag] auto agg: reflector verdict is complete, skipping aggregator")
-		}
+		var reason string
+		aggMode, reason = decideAutoAggMode(hasCompute, complex, a.hasUsableEvidence(graph), pr.ReflectionAggregate)
+		log.Printf("[dag] auto agg: %s (needs_synthesis=%v, fanout=%d)", reason, needsSynthesis, fanout)
 	}
 
 	// If reflection concluded AND aggregator is disabled, use reflection verdict directly

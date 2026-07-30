@@ -281,6 +281,10 @@ func preflightToolDef() llm.ToolDef {
 						"type": "string",
 						"enum": ["", "shallow", "deep"],
 						"description": "Authoritative compute-node depth. 'deep' = build a new codebase. 'shallow' = one-off script / calculation / ranking (even over many inputs). '' = no compute needed. Presence of existing workspace files is NOT a signal."
+					},
+					"needs_synthesis": {
+						"type": "boolean",
+						"description": "True when the answer needs a written-up synthesis over gathered evidence: deep/multi-source research, a report or analysis, or 'build/flesh out/draft a section/document'. False for a single fact lookup, a yes/no, or a quick status check. When true, the run always ends with the aggregator (full synthesis) rather than a short reflector summary."
 					}
 				},
 				"required": ["mode", "intent", "context", "compute_mode"]

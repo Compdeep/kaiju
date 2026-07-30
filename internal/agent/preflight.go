@@ -26,6 +26,7 @@ type PreflightResult struct {
 	RequiredCategories []string     // tool categories the plan must include (network/filesystem/compute/process/info)
 	Context            string       // one-line framing of the user's intent based on conversation history
 	ComputeMode        string       // "" (no compute / no opinion) | "shallow" | "deep" — authoritative for the planner
+	NeedsSynthesis     bool         // true ⇒ the run must end with the aggregator (a written synthesis), not a short reflector summary — set for deep/multi-source research and "build a section/report" tasks
 }
 
 // preflightCategories is the fixed set of tool categories the preflight
@@ -56,6 +57,7 @@ type preflightRaw struct {
 	RequiredCategories []string `json:"required_categories"`
 	Context            string   `json:"context"`
 	ComputeMode        string   `json:"compute_mode"`
+	NeedsSynthesis     bool     `json:"needs_synthesis"`
 }
 
 /*
@@ -341,6 +343,10 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 	default:
 		log.Printf("[dag] preflight: unknown compute_mode %q, defaulting to none", raw.ComputeMode)
 	}
+
+	// NeedsSynthesis — pass through; the aggregate decision reads it (with a
+	// structural fan-out floor as backstop).
+	out.NeedsSynthesis = raw.NeedsSynthesis
 
 	return out
 }

@@ -37,19 +37,41 @@ func (p *PluginList) OutputSchema() json.RawMessage {
 }
 
 func (p *PluginList) Execute(_ context.Context, _ map[string]any) (string, error) {
-	cat := plugins.Catalog()
-	if len(cat) == 0 {
-		return agenttools.ToolEmpty("plugins", "no optional plugins are compiled into this build").JSON(), nil
+	type row struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Active      bool   `json:"active"`
+	}
+	var rows []row
+	// Compiled-in plugins — but HIDE the "remote" bridge: it's plumbing, surfaced to
+	// the user as the individual capabilities below (webreader, …), never by name.
+	for _, info := range plugins.Catalog() {
+		if info.Name == "remote" {
+			continue
+		}
+		rows = append(rows, row{info.Name, info.Description, info.Active})
+	}
+	// Remote capabilities shown by name even with their host off. Only when the
+	// bridge is compiled in (else they can't be brought up). "Active" tracks the
+	// bridge — enabling any of them brings it up, and they come up together.
+	if _, ok := plugins.Get("remote"); ok {
+		bridgeUp := plugins.IsActive("remote")
+		for _, r := range plugins.RemoteCatalog {
+			rows = append(rows, row{r.Name, r.Description, bridgeUp})
+		}
+	}
+	if len(rows) == 0 {
+		return agenttools.ToolEmpty("plugins", "no optional plugins are available in this build").JSON(), nil
 	}
 	var b strings.Builder
-	for _, info := range cat {
+	for _, r := range rows {
 		state := "available (off)"
-		if info.Active {
+		if r.Active {
 			state = "active"
 		}
-		b.WriteString(fmt.Sprintf("- %s [%s]: %s\n", info.Name, state, info.Description))
+		b.WriteString(fmt.Sprintf("- %s [%s]: %s\n", r.Name, state, r.Description))
 	}
-	return agenttools.ToolOK("plugins", strings.TrimRight(b.String(), "\n"), cat).JSON(), nil
+	return agenttools.ToolOK("plugins", strings.TrimRight(b.String(), "\n"), rows).JSON(), nil
 }
 
 var (
@@ -118,6 +140,12 @@ func (p *PluginEnable) Execute(_ context.Context, params map[string]any) (string
 	if name == "" {
 		return agenttools.ToolFail("plugin", "'name' is required — see plugin_list", nil).JSON(), nil
 	}
+	// A remote CAPABILITY (webreader, …): bring up the bridge pointed at its host
+	// transparently — the user enables the capability, never the "remote" bridge.
+	if r, ok := plugins.RemoteByName(name); ok {
+		return p.enableRemote(r)
+	}
+
 	if plugins.IsActive(name) {
 		return agenttools.ToolOK("plugin", fmt.Sprintf("plugin %q is already active", name), nil).JSON(), nil
 	}
@@ -147,6 +175,41 @@ func (p *PluginEnable) Execute(_ context.Context, params map[string]any) (string
 	}
 	msg := fmt.Sprintf("Enabled %q. Added tool(s): %s.%s", name, strings.Join(host.added, ", "), note)
 	return agenttools.ToolOK("plugin", msg, map[string]any{"enabled": name, "tools": host.added, "persisted": note == ""}).JSON(), nil
+}
+
+// enableRemote brings up the remote bridge pointed at the capability's host and
+// wires its tools (including web_fetch's reader), then persists it. The bridge
+// stays invisible — the user enabled "webreader", never "remote".
+func (p *PluginEnable) enableRemote(r plugins.RemoteInfo) (string, error) {
+	if plugins.IsActive("remote") {
+		return agenttools.ToolOK("plugin", fmt.Sprintf("%q is already active — web_fetch reads pages through it.", r.Name), map[string]any{"enabled": r.Name}).JSON(), nil
+	}
+	bridge, ok := plugins.Get("remote")
+	if !ok {
+		return agenttools.ToolFail("plugin", fmt.Sprintf("%q needs the remote bridge, which isn't built into this binary (rebuild with -tags plugin_remote).", r.Name), nil).JSON(), nil
+	}
+	url := strings.TrimRight(p.cfg.RemotePluginHost, "/")
+	if url == "" {
+		url = r.DefaultURL
+	}
+	os.Setenv("KAIJU_PLUGIN_HOST", url)
+
+	host := &liveHost{reg: p.reg, workspace: p.workspace}
+	bridge.Register(host)
+	if len(host.added) == 0 {
+		return agenttools.ToolOK("plugin", fmt.Sprintf("Couldn't reach %q's host at %s — start the host there, or point at a different URL with plugin_option {name:%q, key:\"host\", value:\"<url>\"}, then enable again.", r.Name, url, r.Name), map[string]any{"enabled": "", "host": url}).JSON(), nil
+	}
+	plugins.MarkActive("remote")
+	plugins.MarkActive(r.Name)
+
+	// Persist so it survives a restart: the bridge in `plugins`, and the host URL.
+	note := ""
+	if err := p.cfg.SetPluginsPersisted(appendUnique(p.cfg.Plugins, "remote")); err != nil {
+		note = fmt.Sprintf(" (active now, not persisted: %v)", err)
+	} else if p.cfg.RemotePluginHost == "" {
+		_ = p.cfg.SetRemotePluginHostPersisted(url)
+	}
+	return agenttools.ToolOK("plugin", fmt.Sprintf("Enabled %q — web_fetch now reads pages through it automatically.%s", r.Name, note), map[string]any{"enabled": r.Name, "tools": host.added, "host": url}).JSON(), nil
 }
 
 // PluginOption sets and persists a plugin configuration option. Today the

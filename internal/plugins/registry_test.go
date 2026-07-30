@@ -80,3 +80,19 @@ func TestRegistryLifecycle(t *testing.T) {
 		t.Fatal("MarkActive did not take")
 	}
 }
+
+// The user sees CAPABILITIES (webreader), never the "remote" bridge. The catalog
+// surfaces webreader by name and must not expose the plumbing.
+func TestRemoteCatalog(t *testing.T) {
+	if _, ok := RemoteByName("webreader"); !ok {
+		t.Fatal("webreader should be surfaced in the remote catalog")
+	}
+	if _, ok := RemoteByName("remote"); ok {
+		t.Fatal("the bridge 'remote' must NOT be a user-facing capability")
+	}
+	for _, r := range RemoteCatalog {
+		if r.Name == "" || r.Description == "" || r.DefaultURL == "" {
+			t.Fatalf("catalog entry incomplete (name/description/url all required): %+v", r)
+		}
+	}
+}

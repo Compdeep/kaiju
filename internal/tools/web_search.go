@@ -82,7 +82,8 @@ func (w *WebSearch) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"query": {"type": "string", "description": "Search query"},
-			"max_results": {"type": "integer", "description": "Maximum results to return (default: 5, max: 10)"}
+			"max_results": {"type": "integer", "description": "Maximum results to return (default: 5, max: 10)"},
+			"recency_days": {"type": "integer", "description": "Optional: bias results to roughly the last N days (a recency filter — useful for time-sensitive research). Omit for no time limit."}
 		},
 		"required": ["query"],
 		"additionalProperties": false
@@ -114,6 +115,13 @@ func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string,
 		}
 	}
 
+	// recency_days: an optional "recent results only" filter the planner can set
+	// for time-sensitive research. Mapped to each provider's coarse date bucket.
+	dateFilter := ""
+	if rd, ok := params["recency_days"].(float64); ok {
+		dateFilter = daysToBucket(int(rd))
+	}
+
 	// Rate limit: enforce minimum delay between search requests
 	w.mu.Lock()
 	if wait := time.Until(w.lastAt.Add(w.delay)); wait > 0 {
@@ -133,13 +141,13 @@ func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string,
 
 	switch w.provider {
 	case "startpage":
-		results, err = w.searchStartpage(ctx, query, maxResults)
+		results, err = w.searchStartpage(ctx, query, maxResults, dateFilter)
 	case "ddg":
-		results, err = w.searchDDG(ctx, query, maxResults)
+		results, err = w.searchDDG(ctx, query, maxResults, dateFilter)
 	default: // "startpage+ddg"
-		results, err = w.searchStartpage(ctx, query, maxResults)
+		results, err = w.searchStartpage(ctx, query, maxResults, dateFilter)
 		if err != nil || len(results) == 0 {
-			results, err = w.searchDDG(ctx, query, maxResults)
+			results, err = w.searchDDG(ctx, query, maxResults, dateFilter)
 		}
 	}
 
@@ -167,8 +175,31 @@ func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string,
 	return agenttools.ToolOK("search", "", map[string]any{"query": query, "results": results}).JSON(), nil
 }
 
-func (w *WebSearch) searchStartpage(ctx context.Context, query string, max int) ([]searchResult, error) {
+// daysToBucket maps a recency_days count to the coarse date bucket the search
+// providers understand (DuckDuckGo df / Startpage qadf): d, w, m, y. Returns ""
+// (no filter) for <=0 or beyond a year — older than that isn't "recency".
+func daysToBucket(days int) string {
+	switch {
+	case days <= 0:
+		return ""
+	case days <= 1:
+		return "d"
+	case days <= 7:
+		return "w"
+	case days <= 31:
+		return "m"
+	case days <= 366:
+		return "y"
+	default:
+		return ""
+	}
+}
+
+func (w *WebSearch) searchStartpage(ctx context.Context, query string, max int, dateFilter string) ([]searchResult, error) {
 	form := url.Values{"query": {query}, "cat": {"web"}}
+	if dateFilter != "" {
+		form.Set("qadf", dateFilter) // Startpage query-add-date-filter (best-effort)
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://www.startpage.com/sp/search", strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
@@ -312,8 +343,11 @@ func indexOfClass(html, className string) int {
 	}
 }
 
-func (w *WebSearch) searchDDG(ctx context.Context, query string, max int) ([]searchResult, error) {
+func (w *WebSearch) searchDDG(ctx context.Context, query string, max int, dateFilter string) ([]searchResult, error) {
 	form := url.Values{"q": {query}, "b": {""}}
+	if dateFilter != "" {
+		form.Set("df", dateFilter) // DuckDuckGo date filter: d/w/m/y
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://html.duckduckgo.com/html/", strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err

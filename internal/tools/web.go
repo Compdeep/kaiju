@@ -349,6 +349,22 @@ func (w *WebFetch) formatRaw(status string, body []byte) (string, error) {
 	return marshalFetchResult(fetchResult{Status: status, Content: s, Format: "raw"})
 }
 
+// primaryContent returns a reader PLUGIN's extraction of the URL when one is
+// enabled. An enabled reader plugin is the PRIMARY reader for web_fetch — it can
+// render JS and extract cleanly, so it's used for EVERY page, not just as a last
+// resort. (A JS/SPA page usually returns >200 chars of static nav/boilerplate, so
+// the old "readability came back thin" trigger never fired on exactly the pages the
+// plugin exists for.) ok=false when no plugin is registered or it returned nothing,
+// so the caller falls back to built-in readability.
+func primaryContent(ctx context.Context, rawURL string) (string, bool) {
+	if txt, ok, _ := agenttools.ReaderFallback(ctx, rawURL); ok {
+		if t := strings.TrimSpace(txt); len(t) >= 200 {
+			return t, true
+		}
+	}
+	return "", false
+}
+
 /*
  * formatMarkdown uses readability to extract the main content as clean text.
  * desc: Parses the page with go-readability and returns the article text, falling back to plain text on failure.
@@ -359,6 +375,14 @@ func (w *WebFetch) formatRaw(status string, body []byte) (string, error) {
  * return: status line with title/author and extracted article text (truncated to 12KB)
  */
 func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, body []byte) (string, error) {
+	// An enabled reader plugin is the primary reader.
+	if txt, ok := primaryContent(ctx, rawURL); ok {
+		if len(txt) > 12000 {
+			txt = txt[:12000] + "\n... (truncated)"
+		}
+		return marshalFetchResult(fetchResult{Status: status, Content: txt, Format: "markdown"})
+	}
+
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		parsed = &url.URL{}
@@ -422,39 +446,36 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 		return w.formatMarkdown(ctx, status, rawURL, body)
 	}
 
-	// First extract with readability
-	parsed, _ := url.Parse(rawURL)
-	if parsed == nil {
-		parsed = &url.URL{}
-	}
-
-	article, _ := readability.FromReader(strings.NewReader(string(body)), parsed)
-
+	// An enabled reader plugin is the PRIMARY reader; built-in readability is the
+	// fallback used only when no plugin is registered.
 	content := ""
 	title := ""
-	if article.TextContent != "" {
-		content = article.TextContent
-		title = article.Title
+	if txt, ok := primaryContent(ctx, rawURL); ok {
+		content = txt
 	} else {
-		content = stripHTML(string(body))
+		parsed, _ := url.Parse(rawURL)
+		if parsed == nil {
+			parsed = &url.URL{}
+		}
+		article, _ := readability.FromReader(strings.NewReader(string(body)), parsed)
+		if article.TextContent != "" {
+			content = article.TextContent
+			title = article.Title
+		} else {
+			content = stripHTML(string(body))
+		}
 	}
 
-	// If the page yielded essentially nothing extractable (interactive
-	// query widgets, JS-rendered SPAs, login walls, paywalls), bail
-	// early with a clear "no content" signal. Sending such pages to the
-	// summarizer used to yield LLM apologies like "I don't have direct
-	// access to this tool…" which downstream callers happily treated as
-	// the page's actual content. Refuse to fabricate.
+	// If nothing extractable came back (interactive widget, JS-rendered SPA with no
+	// reader plugin, login wall, paywall), bail with a clear "no content" signal
+	// rather than feeding the summarizer an empty page (which used to yield an LLM
+	// apology that callers treated as the page's content). Refuse to fabricate.
 	if len(strings.TrimSpace(content)) < 200 {
-		// Before giving up: (1) page metadata (OpenGraph / meta description /
-		// title) — the crawler-facing summary a JS-rendered or lightly-walled
-		// page still embeds even when its body isn't in the initial HTML; (2) a
-		// plugin reader fallback (render + extract) if one is registered. Either
-		// beats a bare "no content" for the planner. Only then declare it empty.
+		// Last resort: page metadata (OpenGraph / meta description) — the
+		// crawler-facing summary a JS/walled page still embeds. The reader plugin,
+		// if any, already ran above as the primary reader.
 		if meta := extractMeta(string(body)); len(strings.TrimSpace(meta)) >= 120 {
 			content = meta
-		} else if rendered, ok, _ := agenttools.ReaderFallback(ctx, rawURL); ok && len(strings.TrimSpace(rendered)) >= 120 {
-			content = rendered
 		} else {
 			return marshalFetchResult(fetchResult{
 				Status:  status,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -46,7 +47,8 @@ func (w *WebResearch) Parameters() json.RawMessage {
 			"query": {"type": "string", "description": "Search query — plain keywords, not stacked search operators."},
 			"max_sources": {"type": "integer", "description": "How many of the top results to fetch and read (default 4, max 6)."},
 			"recency_days": {"type": "integer", "description": "Optional: bias to results from roughly the last N days."},
-			"focus": {"type": "string", "description": "Optional: the specific facts/figures to extract from each page."}
+			"focus": {"type": "string", "description": "Optional: the specific facts/figures to extract from each page."},
+			"exclude_domains": {"type": "array", "items": {"type": "string"}, "description": "Optional: domains to drop from the results (e.g. aggregators like statista.com, fortunebusinessinsights.com)."}
 		},
 		"required": ["query"],
 		"additionalProperties": false
@@ -98,6 +100,21 @@ func (w *WebResearch) Execute(ctx context.Context, params map[string]any) (strin
 	}
 	if json.Unmarshal(sMsg.Data, &sd) != nil || len(sd.Results) == 0 {
 		return agenttools.ToolEmpty("research", "the search returned no results — try a different query").JSON(), nil
+	}
+
+	// Drop excluded domains (e.g. aggregators the caller doesn't want) before we
+	// pick which results to read.
+	if ex := toStringSlice(params["exclude_domains"]); len(ex) > 0 {
+		kept := sd.Results[:0]
+		for _, r := range sd.Results {
+			if !hostExcluded(r.URL, ex) {
+				kept = append(kept, r)
+			}
+		}
+		sd.Results = kept
+		if len(sd.Results) == 0 {
+			return agenttools.ToolEmpty("research", "every result was an excluded domain — broaden the query or relax exclude_domains").JSON(), nil
+		}
 	}
 
 	// 2) Fetch the top results in parallel — different hosts, so the search rate
@@ -186,6 +203,39 @@ func (w *WebResearch) Execute(ctx context.Context, params map[string]any) (strin
 		Content: strings.TrimRight(b.String(), "\n"),
 		Data:    dataBytes,
 	}.JSON(), nil
+}
+
+// toStringSlice coerces a JSON array param (decoded as []any) into a lowercased,
+// trimmed []string, dropping non-strings and blanks.
+func toStringSlice(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, e := range arr {
+		if s, ok := e.(string); ok {
+			if s = strings.ToLower(strings.TrimSpace(s)); s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+// hostExcluded reports whether rawURL's host contains any of the excluded domains.
+func hostExcluded(rawURL string, excluded []string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Host)
+	for _, d := range excluded {
+		if strings.Contains(host, d) {
+			return true
+		}
+	}
+	return false
 }
 
 var (

@@ -1,0 +1,9 @@
+# kaiju plugin host — BASE install (tier 1). Lightweight, NO browser.
+# Static fetch + extraction handles static and server-rendered pages, and is
+# already a big improvement over a plain HTTP fetch.
+#
+# JavaScript rendering is a separate opt-in — see requirements-render.txt — so
+# this base install pulls neither Playwright nor Chromium.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+trafilatura>=1.8

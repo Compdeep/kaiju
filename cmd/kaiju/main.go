@@ -449,6 +449,17 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		reg.Replace(kaijutools.NewMemorySearch(mem), "builtin")
 	}
 
+	// plugin_list lets the agent report which optional plugins are built in and
+	// which are active (read-only) — only worth registering when at least one
+	// plugin is compiled in. plugin_enable (runtime activation) is offered ONLY
+	// when the host opts in via AllowRuntimePluginActivation.
+	if len(plugins.Compiled()) > 0 {
+		reg.Replace(kaijutools.NewPluginList(), "builtin")
+		if cfg.AllowRuntimePluginActivation {
+			reg.Replace(kaijutools.NewPluginEnable(reg, cfg), "builtin")
+		}
+	}
+
 	// Optional plugin tools (compiled in behind build tags, switched on by config
 	// `plugins` or the `--plugins` flag). On a default build nothing is compiled
 	// in, so Activate returns nothing and this is a no-op.

@@ -41,6 +41,12 @@ type Config struct {
 	// with that plugin's tag (`-tags plugin_pdf`); otherwise it's reported as
 	// missing and ignored. See internal/plugins.
 	Plugins []string `json:"plugins,omitempty"`
+	// AllowRuntimePluginActivation lets the plugin_enable tool switch a compiled-in
+	// plugin on at runtime (and persist it here). Off by default — the embedding
+	// host opts in. When off, plugin_enable is not registered at all.
+	AllowRuntimePluginActivation bool `json:"allow_runtime_plugin_activation,omitempty"`
+
+	path string // source file path (set by Load); used to persist runtime changes
 }
 
 /*
@@ -109,43 +115,43 @@ type ChatConfig struct {
  * desc: Controls DAG mode, node/call limits, rate limiting, safety level, data directory, and workspace path.
  */
 type AgentConfig struct {
-	DAGEnabled        bool        `json:"dag_enabled"`
-	DAGMode           string      `json:"dag_mode"`
-	MaxNodes          int         `json:"max_nodes"`
-	MaxPerSkill       int         `json:"max_per_skill"`
-	MaxLLMCalls       int         `json:"max_llm_calls"`
-	MaxObserverCalls  int         `json:"max_observer_calls"`
-	BatchSize         int         `json:"batch_size"`
-	MaxInvestigations int         `json:"max_investigations"`
-	MaxReplans        int         `json:"max_replans"`
-	MaxConcurrent     int         `json:"max_concurrent"` // scheduler worker-pool size (concurrent investigations); 0 => default (3)
-	DisableCoding     bool        `json:"disable_coding"` // true = refuse deep compute (codebase building); enterprise deployments set this
-	ExecutionMode     string      `json:"execution_mode"` // "interactive" (default) or "autonomous"
+	DAGEnabled        bool   `json:"dag_enabled"`
+	DAGMode           string `json:"dag_mode"`
+	MaxNodes          int    `json:"max_nodes"`
+	MaxPerSkill       int    `json:"max_per_skill"`
+	MaxLLMCalls       int    `json:"max_llm_calls"`
+	MaxObserverCalls  int    `json:"max_observer_calls"`
+	BatchSize         int    `json:"batch_size"`
+	MaxInvestigations int    `json:"max_investigations"`
+	MaxReplans        int    `json:"max_replans"`
+	MaxConcurrent     int    `json:"max_concurrent"` // scheduler worker-pool size (concurrent investigations); 0 => default (3)
+	DisableCoding     bool   `json:"disable_coding"` // true = refuse deep compute (codebase building); enterprise deployments set this
+	ExecutionMode     string `json:"execution_mode"` // "interactive" (default) or "autonomous"
 	// RouteProvider/RouteModel pin the model for the cheap chat-vs-investigate
 	// routing decision (preflight). Empty ⇒ the executor lane. A small capable
 	// model here makes the run-the-agent decision reliable without making every
 	// background call pricier. Overridable via config, the config API, or the CLI.
-	RouteProvider     string      `json:"route_provider,omitempty"`
-	RouteModel        string      `json:"route_model,omitempty"`
+	RouteProvider string `json:"route_provider,omitempty"`
+	RouteModel    string `json:"route_model,omitempty"`
 	// AnswerProvider/AnswerModel pin the model that writes the final answer — the
 	// aggregator + chat lane, i.e. "the AI" the user hears. Empty ⇒ the reasoning
 	// lane. It does open-ended generation (no tool calls), so a thinking model is
 	// fine here, unlike the planner/executor/router lanes.
-	AnswerProvider    string      `json:"answer_provider,omitempty"`
-	AnswerModel       string      `json:"answer_model,omitempty"`
-	WallClockSec      int         `json:"wall_clock_sec"`
-	MaxTurns          int         `json:"max_turns"`
-	RateLimit         int         `json:"rate_limit"`
-	SafetyLevel       int         `json:"safety_level"`
-	DataDir           string      `json:"data_dir"`
-	Workspace         string      `json:"workspace"`
-	MetadataDir       string      `json:"-"` // set at runtime — .kaiju/ in CLI, same as workspace in web
-	CLIMode           bool        `json:"-"` // set at runtime, not from config file
+	AnswerProvider string `json:"answer_provider,omitempty"`
+	AnswerModel    string `json:"answer_model,omitempty"`
+	WallClockSec   int    `json:"wall_clock_sec"`
+	MaxTurns       int    `json:"max_turns"`
+	RateLimit      int    `json:"rate_limit"`
+	SafetyLevel    int    `json:"safety_level"`
+	DataDir        string `json:"data_dir"`
+	Workspace      string `json:"workspace"`
+	MetadataDir    string `json:"-"` // set at runtime — .kaiju/ in CLI, same as workspace in web
+	CLIMode        bool   `json:"-"` // set at runtime, not from config file
 	// ClassifierEnabled controls the pre-plan preflight LLM call that selects
 	// skill guidance, infers intent, routes chat/meta queries, and hints
 	// required tool categories. Default true — disabling degrades behavior
 	// (no skill guidance, no chat short-circuit) and is only useful for tests.
-	ClassifierEnabled *bool         `json:"classifier_enabled,omitempty"`
+	ClassifierEnabled *bool `json:"classifier_enabled,omitempty"`
 	// Intents optionally seeds the intent registry on first run. After the
 	// DB has any intents rows, this is ignored — the DB is authoritative.
 	// Admins can edit via the UI after first startup.
@@ -235,8 +241,8 @@ type DiscordChannelConfig struct {
 type APIConfig struct {
 	Enabled   bool   `json:"enabled"`
 	Port      int    `json:"port"`
-	AuthToken string `json:"auth_token"`  // legacy bearer token (backward compat)
-	JWTSecret string `json:"jwt_secret"`  // auto-generated if empty
+	AuthToken string `json:"auth_token"` // legacy bearer token (backward compat)
+	JWTSecret string `json:"jwt_secret"` // auto-generated if empty
 }
 
 /*
@@ -247,7 +253,7 @@ type ToolsConfig struct {
 	Bash    BashToolConfig    `json:"bash"`
 	File    FileToolConfig    `json:"file"`
 	Web     WebToolConfig     `json:"web"`
-	Sysinfo SysinfoConfig    `json:"sysinfo"`
+	Sysinfo SysinfoConfig     `json:"sysinfo"`
 	Compute ComputeToolConfig `json:"compute"`
 }
 
@@ -284,7 +290,7 @@ type FileToolConfig struct {
  */
 type WebToolConfig struct {
 	Enabled        bool    `json:"enabled"`
-	SearchProvider string  `json:"search_provider"` // "startpage" (default), "ddg", "startpage+ddg"
+	SearchProvider string  `json:"search_provider"`  // "startpage" (default), "ddg", "startpage+ddg"
 	SearchDelaySec float64 `json:"search_delay_sec"` // min seconds between search requests (default 1.5)
 }
 
@@ -313,7 +319,37 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 	cfg.resolve()
+	cfg.path = path
 	return cfg, nil
+}
+
+// Path returns the file this config was loaded from ("" if built in-memory).
+func (c *Config) Path() string { return c.path }
+
+// SetPluginsPersisted updates the active plugin list in memory and writes it back
+// to the source config file, touching ONLY the `plugins` key so every other
+// setting is preserved verbatim. Errors if there is no source path or the write
+// fails; the caller can still treat the in-memory activation as done.
+func (c *Config) SetPluginsPersisted(names []string) error {
+	c.Plugins = names
+	if c.path == "" {
+		return fmt.Errorf("config: no source file to persist to")
+	}
+	raw, err := os.ReadFile(c.path)
+	if err != nil {
+		return fmt.Errorf("config: read %s: %w", c.path, err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("config: parse %s: %w", c.path, err)
+	}
+	nb, _ := json.Marshal(names)
+	m["plugins"] = nb
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(c.path, out, 0o644)
 }
 
 /*

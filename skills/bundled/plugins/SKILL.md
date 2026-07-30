@@ -29,18 +29,17 @@ each optional plugin as:
   OFFER it and ask them to confirm — e.g. "I can do that if I enable the
   `webreader` plugin — want me to?" Enable only after they say yes, or if they
   asked to enable it outright.
-- To enable, call `plugin_enable` with the `name` from `plugin_list`. Its tools
-  become available immediately — use them on the next step.
-- **Remote plugins need a host URL.** Webreader runs in an out-of-process host
-  reached by the `remote` bridge. If `plugin_enable name="remote"` reports the
-  host is unreachable / added no tools, set the URL first with
-  `plugin_option {name:"remote", key:"host", value:"http://127.0.0.1:8091"}`
-  (ask the user for the URL if you don't know it), then enable.
-- **A reader plugin wires itself into `web_fetch`.** Once `webreader` is enabled,
-  you do NOT call a separate tool to use it — `web_fetch` reads every page through
-  it automatically (JS/SPA pages included). Just fetch as usual.
-- If `plugin_enable` reports the plugin isn't built into this binary, tell the
-  user it needs an operator to rebuild with that plugin — you can't add it.
+- To enable, call `plugin_enable` with the capability `name` from `plugin_list`
+  (e.g. `webreader`). Enable the capability by its own name — there is no separate
+  "bridge" or "remote" step to reason about; any plumbing comes up on its own.
+- **A reader capability wires itself into `web_fetch`.** Once `webreader` is
+  enabled, you do NOT call a separate tool to use it — `web_fetch` reads every page
+  through it automatically (JS/SPA pages included). Just fetch as usual.
+- **If enabling reports its host is unreachable**, its background service isn't
+  running at the default address. Say so; if the user gives you a URL, set it with
+  `plugin_option {name:"webreader", key:"host", value:"<url>"}` and enable again.
+- If `plugin_enable` reports the capability isn't built into this binary, tell the
+  user it needs an operator to rebuild — you can't add it.
 
 ## RULES
 

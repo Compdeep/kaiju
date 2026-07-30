@@ -132,6 +132,36 @@ func Catalog() []Info {
 	return out
 }
 
+// RemoteInfo describes a remote (out-of-process) plugin surfaced to the user by
+// NAME — so a user enables "webreader", never the "remote" bridge. These appear in
+// plugin_list even when their host isn't running; enabling one points the bridge at
+// its host and activates it, and the bridge stays invisible.
+type RemoteInfo struct {
+	Name        string
+	Description string
+	DefaultURL  string // where its host runs unless overridden by config remote_plugin_host
+}
+
+// RemoteCatalog is the curated set of known remote plugins. The bridge itself
+// ("remote") is never listed — it's infrastructure, not a capability.
+var RemoteCatalog = []RemoteInfo{
+	{
+		Name:        "webreader",
+		Description: "Read web pages as clean text, rendering JavaScript-heavy pages (SPAs, dashboards) when a plain fetch comes back thin. Once on, web_fetch reads every page through it.",
+		DefaultURL:  "http://127.0.0.1:8091",
+	},
+}
+
+// RemoteByName returns a known remote plugin by name.
+func RemoteByName(name string) (RemoteInfo, bool) {
+	for _, r := range RemoteCatalog {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return RemoteInfo{}, false
+}
+
 // Activate registers the capabilities of every plugin named in `want` that is
 // compiled in. It returns the tools to add to the agent registry, the plugin
 // names actually switched on, and any requested-but-not-compiled-in names so the

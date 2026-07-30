@@ -82,6 +82,49 @@ func TestGroundingEdge_ReSearchWhenNothingGrounded(t *testing.T) {
 	}
 }
 
+// The conclusion floor: a run that found real URLs but read NONE of them must not
+// conclude yet — the floor returns deterministic web_fetch remediation steps for
+// the top unread URLs (capped). This is the search-only "verified and live" case.
+func TestConclusionFloor_GroundingUnread(t *testing.T) {
+	g := NewGraph()
+	searchNode(g, "s1", "https://a.example/1", "https://a.example/2", "https://a.example/3")
+	steps, label := (&Agent{}).conclusionFloor(g, 2) // cap at 2
+	if len(steps) != 2 {
+		t.Fatalf("expected 2 fetch steps (capped from 3), got %d", len(steps))
+	}
+	for _, s := range steps {
+		if s.Tool != "web_fetch" {
+			t.Fatalf("floor remediation must be web_fetch (grounded), got %q", s.Tool)
+		}
+		if u, _ := s.Params["url"].(string); u == "" {
+			t.Fatalf("fetch step missing url param: %+v", s.Params)
+		}
+	}
+	if label == "" {
+		t.Fatal("floor should return a human label for the worklog")
+	}
+}
+
+// Once ANY source was read, the floor is met — trust the reflector, don't force more.
+func TestConclusionFloor_MetWhenSomethingRead(t *testing.T) {
+	g := NewGraph()
+	searchNode(g, "s1", "https://a.example/1", "https://a.example/2")
+	fetchedNode(g, "f1", "https://a.example/1") // read one
+	if steps, _ := (&Agent{}).conclusionFloor(g, 6); steps != nil {
+		t.Fatalf("floor is met once anything is read, got %d steps", len(steps))
+	}
+}
+
+// No search at all → no grounded URLs → floor never fires (self-limiting to web work).
+func TestConclusionFloor_NoSearchNoFloor(t *testing.T) {
+	g := NewGraph()
+	id := g.AddNode(&Node{Type: NodeTool, Tag: "bash", ToolName: "bash"})
+	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("bash", "done", nil)})
+	if steps, _ := (&Agent{}).conclusionFloor(g, 6); steps != nil {
+		t.Fatalf("no search → no floor, got %d steps", len(steps))
+	}
+}
+
 // With a light lane, the edge runs the generator and prepends its reframe.
 func TestGroundingEdge_GeneratesFromLLM(t *testing.T) {
 	const note = "GROUNDED: https://real.example/a\nNOT YET GROUNDED: an OECD report — search for it\nNEXT: broaden the search"

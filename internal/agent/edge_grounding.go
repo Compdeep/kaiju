@@ -104,6 +104,40 @@ func (a *Agent) unretrievedGrounded(graph *Graph) []string {
 	return out
 }
 
+// conclusionFloor is the generic hook the scheduler consults before it lets a
+// reflection CONCLUDE. A "floor" is a hard, structural precondition that — while
+// unmet — blocks conclusion and returns remediation steps to run first. The
+// scheduler stays domain-agnostic: it grafts whatever steps come back and loops
+// once, knowing nothing about what they are. ALL domain knowledge lives here.
+//
+// Today there is one floor — grounding: a run that found real URLs from a search
+// but read NONE of them must read some before concluding, or the answer would rest
+// on snippets or invention. The remediation is deterministic web_fetch steps for
+// the top unread URLs (sourced from the search, never model-invented). Self-
+// limiting — a run with no search has no grounded URLs, so nothing fires outside
+// web work. A future floor adds a branch HERE, never in the scheduler.
+func (a *Agent) conclusionFloor(graph *Graph, maxSteps int) (steps []PlanStep, label string) {
+	// Grounding floor: found URLs, read none.
+	if len(a.collectFetched(graph)) == 0 {
+		urls := a.unretrievedGrounded(graph)
+		found := len(urls)
+		if maxSteps > 0 && len(urls) > maxSteps {
+			urls = urls[:maxSteps]
+		}
+		for i, u := range urls {
+			steps = append(steps, PlanStep{
+				Tool:   "web_fetch",
+				Tag:    fmt.Sprintf("grounding_fetch_%d", i+1),
+				Params: map[string]any{"url": u},
+			})
+		}
+		if len(steps) > 0 {
+			return steps, fmt.Sprintf("grounding: %d source URLs found, none read — reading %d before concluding", found, len(steps))
+		}
+	}
+	return nil, ""
+}
+
 // groundingEdge frames the hand-off from GATHERING into the REFLECTOR / next PLAN
 // — the moment a planner, seeing a thin result, is tempted to fill the gap with
 // URLs from memory. It biases toward READING what's already found: when a search

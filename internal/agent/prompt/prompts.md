@@ -185,10 +185,16 @@ Every input goes in `params`. Each value is one of:
 
 ## Examples
 
-Step 0 is file_read of a CSV, step 1 is compute that processes it →
+Each example below is ONE pattern — read the bold label to see which kind of task it is for, then copy the shape that matches yours.
+
+**Read a source you found (the usual web-research chain).** Step 0 is web_search; step 1 fetches and reads one of its result URLs →
+  `{"tool":"web_fetch","params":{"url":"${step.0.results.0.url}","format":"summary","focus":"the specific facts/figures you need"},"depends_on":[0]}`
+  This is how research reads its sources — a news article, an analyst report, a docs page, a paper. For deep research, plan one fetch per top result (`${step.0.results.0.url}`, `${step.0.results.1.url}`, …): a URL you searched but never fetched is NOT a source you have read.
+
+**Process a file with compute.** Step 0 is file_read of a CSV; step 1 is compute that processes it →
   `{"tool":"compute","params":{"goal":"clean and rank rows","mode":"shallow","context.csv":"${step.0.content}"},"depends_on":[0]}`
 
-Step 0 is web_search, step 1 is bash needing the URL inside a command →
+**Feed a URL into a shell command (niche — e.g. downloading a file).** Step 0 is web_search; step 1 is bash that needs the URL inside a command →
   `{"tool":"bash","params":{"command":"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.0.results.0.url}'"},"depends_on":[0]}`
 
 ## Anti-patterns

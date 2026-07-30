@@ -13,6 +13,8 @@ Plan multiple `web_search` calls in parallel — one per research angle.
 - Plan 2-5 parallel searches covering different aspects of the question
 
 ### Phase 2: Targeted Fetches
+Fetching a URL is how you actually **read a source** — a news article, an analyst report, a government or standards page, a paper. A search only gives you titles and short snippets; the real content, figures, and quotes come from the fetch. So for research you MUST fetch the sources you found — never answer from search snippets alone, and never present a URL you did not fetch as a source.
+
 Plan `web_fetch` calls that depend on the search steps and use the URLs those searches return.
 - Use `format=summary` with a specific `focus` param for each fetch
 - Point each fetch at a URL surfaced by its upstream search (declare that search in `depends_on`)

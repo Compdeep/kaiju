@@ -63,10 +63,22 @@ func TestGroundingEdge_FailOpenToStructural(t *testing.T) {
 		t.Fatalf("expected a ## Grounding block, got: %q", grd)
 	}
 	if !strings.Contains(grd, "https://real.example/a") {
-		t.Fatalf("grounded block must list the real URL:\n%s", grd)
+		t.Fatalf("block must list the unfetched grounded URL:\n%s", grd)
 	}
-	if !strings.Contains(grd, "SEARCH") {
-		t.Fatalf("block must tell the planner to search for more, not invent:\n%s", grd)
+	if !strings.Contains(grd, "FETCH") {
+		t.Fatalf("with an unfetched grounded URL, the block must push to FETCH it (not search more):\n%s", grd)
+	}
+}
+
+// With NO grounded URL (the searches returned nothing), the edge tells the planner
+// to broaden the search — not to fetch or invent.
+func TestGroundingEdge_ReSearchWhenNothingGrounded(t *testing.T) {
+	g := NewGraph()
+	eID := g.AddNode(&Node{Type: NodeTool, Tag: "empty", ToolName: "web_search"})
+	g.SetBody(eID, toolMessageBody{msg: agenttools.ToolEmpty("search", "no results")})
+	grd := (&Agent{}).groundingEdge(context.Background(), g, "find sources")
+	if !strings.HasPrefix(grd, "## Grounding") || !strings.Contains(grd, "broaden the search") {
+		t.Fatalf("empty-grounded should tell the planner to broaden the search, got:\n%s", grd)
 	}
 }
 

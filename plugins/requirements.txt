@@ -7,3 +7,4 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 trafilatura>=1.8
+lxml_html_clean>=0.1  # trafilatura/justext need lxml.html.clean, split out of lxml 5.x

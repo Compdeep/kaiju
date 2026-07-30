@@ -98,15 +98,25 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// self-regulate. Empty for reflection sites that don't set it.
 	budgetLine, _ := rNode.Params["budget"].(string)
 	userPrompt := assembleReflectorPrompt(graph, gateCtx, trigger, budgetLine)
+	edgeInput := userPrompt // the clean request+evidence each edge reframes against
 
 	// Coverage edge on the conclude path: the reflector often writes the final
 	// answer directly, bypassing the aggregator. Give it the SAME content-specific
 	// LLM reframe (asked-vs-backed against the evidence + the gaps) the aggregator
 	// gets, so a conclude verdict reports gaps honestly instead of fabricating.
 	// Gated on gaps — clean gathering pays nothing.
-	if cov := a.coverageEdge(ctx, graph, userPrompt); cov != "" {
+	if cov := a.coverageEdge(ctx, graph, edgeInput); cov != "" {
 		userPrompt = cov + "\n\n" + userPrompt
 		sysPrompt += "\n\n" + prompt.CoverageHook
+	}
+
+	// Grounding edge on the gather→reflect hand-off: when a search came back empty
+	// or a step failed, list the ONLY URLs a real search actually returned, so the
+	// reflector replans a re-search instead of naming sources from memory (which the
+	// executive then materialises as invented, mostly-404 URLs). Gated on gaps.
+	if grd := a.groundingEdge(ctx, graph, edgeInput); grd != "" {
+		userPrompt = grd + "\n\n" + userPrompt
+		sysPrompt += "\n\n" + prompt.GroundingHook
 	}
 
 	messages := []llm.Message{

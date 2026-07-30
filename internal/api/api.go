@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -129,6 +130,24 @@ func execResult(ctx context.Context, alertID, verdict string, nodes, llmCalls in
 		DurationMs: elapsed.Milliseconds(),
 	}
 }
+
+// failureVerdict turns a run error into a user-facing message. Contract: a query
+// that cannot complete ALWAYS reports that it failed — never a silent empty — so
+// the user knows the run ended and that nothing was fabricated.
+func failureVerdict(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "This request could not be completed — it was cut off before an answer was ready (a timeout, or the connection dropped). Nothing was fabricated. Please try again; a narrower request will finish faster."
+	case errors.Is(err, context.DeadlineExceeded):
+		return "This request timed out before it could gather enough to answer. Nothing was fabricated. Try again, or narrow the request so it can finish."
+	default:
+		return "This request could not be completed: " + err.Error() + ". Nothing was fabricated — please try again or rephrase."
+	}
+}
+
+// emptyVerdictNotice is returned when a run finishes with no verdict at all — the
+// run technically completed but produced nothing, which still must be reported.
+const emptyVerdictNotice = "The request finished but produced no answer — nothing usable was gathered. Nothing was fabricated; please try rephrasing or narrowing the request."
 
 /*
  * handleExecute processes a DAG execution request.
@@ -378,8 +397,12 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		})
 		elapsed := time.Since(start)
 		if cerr != nil {
-			log.Printf("[api] chat execute error: %v", cerr)
-			jsonResponse(w, ExecuteResponse{Error: cerr.Error(), DurationMs: elapsed.Milliseconds()}, http.StatusInternalServerError)
+			log.Printf("[api] chat execute error (%s): %v — reporting failure to user", trigger.AlertID, cerr)
+			verdict := failureVerdict(cerr)
+			if memMgr != nil && req.SessionID != "" {
+				memMgr.StoreMessage(req.SessionID, "assistant", verdict)
+			}
+			jsonResponse(w, execResult(ctx, trigger.AlertID, verdict, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 			return
 		}
 		if memMgr != nil && res.Content != "" {
@@ -412,8 +435,12 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			content, toks, verr := a.agent.OneShot(ctx, vp, vm, msgs, 0.3, 1024)
 			elapsed := time.Since(start)
 			if verr != nil {
-				log.Printf("[api] vision execute error: %v", verr)
-				jsonResponse(w, ExecuteResponse{Error: verr.Error(), DurationMs: elapsed.Milliseconds()}, http.StatusInternalServerError)
+				log.Printf("[api] vision execute error (%s): %v — reporting failure to user", trigger.AlertID, verr)
+				verdict := failureVerdict(verr)
+				if memMgr != nil && req.SessionID != "" {
+					memMgr.StoreMessage(req.SessionID, "assistant", verdict)
+				}
+				jsonResponse(w, execResult(ctx, trigger.AlertID, verdict, 0, 1, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 				return
 			}
 			if memMgr != nil && content != "" {
@@ -429,17 +456,30 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	elapsed := time.Since(start)
 
 	if err != nil {
-		log.Printf("[api] execute error: %v", err)
-		jsonResponse(w, ExecuteResponse{
-			Error:      err.Error(),
-			DurationMs: elapsed.Milliseconds(),
-		}, http.StatusInternalServerError)
+		// Contract: a query that can't complete MUST still report that it failed —
+		// never a silent empty. Store a user-facing message as the assistant turn
+		// (so it shows even if the client already disconnected) and return it as
+		// the answer rather than a bare 500.
+		log.Printf("[api] execute error (%s): %v — reporting failure to user", trigger.AlertID, err)
+		verdict := failureVerdict(err)
+		if memMgr != nil && req.SessionID != "" {
+			memMgr.StoreMessage(req.SessionID, "assistant", verdict)
+		}
+		jsonResponse(w, execResult(ctx, trigger.AlertID, verdict, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 		return
 	}
 
+	// A completed run with an empty verdict still must report something — never a
+	// blank answer. Substitute an explicit "produced no answer" notice.
+	verdict := result.Verdict
+	if strings.TrimSpace(verdict) == "" {
+		log.Printf("[api] empty verdict (%s) — substituting failure notice", trigger.AlertID)
+		verdict = emptyVerdictNotice
+	}
+
 	// Store assistant response and auto-compact
-	if memMgr != nil && result.Verdict != "" {
-		memMgr.StoreMessage(req.SessionID, "assistant", result.Verdict)
+	if memMgr != nil {
+		memMgr.StoreMessage(req.SessionID, "assistant", verdict)
 		if shouldCompact, _ := memMgr.ShouldCompact(req.SessionID); shouldCompact {
 			go memMgr.Compact(context.Background(), req.SessionID)
 		}
@@ -451,7 +491,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		apiActions = append(apiActions, ActionInfo{Tool: a.Tool, Params: a.Params})
 	}
 
-	resp := execResult(ctx, trigger.AlertID, result.Verdict, result.Nodes, result.LLMCalls, tokens.RunTotal(ctx), elapsed)
+	resp := execResult(ctx, trigger.AlertID, verdict, result.Nodes, result.LLMCalls, tokens.RunTotal(ctx), elapsed)
 	resp.Actions = apiActions
 	resp.Gaps = result.Gaps
 	jsonResponse(w, resp, http.StatusOK)

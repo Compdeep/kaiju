@@ -64,33 +64,52 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 // gets an explicit absence signal.
 func (a *Agent) coverageEdge(ctx context.Context, graph *Graph, evidence string) string {
 	gaps := a.collectGaps(graph)
-	if len(gaps) == 0 {
+	unretrieved := a.unretrievedGrounded(graph)
+	if len(gaps) == 0 && len(unretrieved) == 0 {
 		return "" // clean gathering — no edge; aggregator runs exactly as before
 	}
 
-	var gb strings.Builder
-	for _, g := range gaps {
-		label := g.Tag
-		if label == "" {
-			label = g.Kind
+	// Part 1 — gaps (steps that came back empty/failed). Same as before: code
+	// supplies the structural gap list, the LLM reframes it against the request.
+	var out string
+	if len(gaps) > 0 {
+		var gb strings.Builder
+		for _, g := range gaps {
+			label := g.Tag
+			if label == "" {
+				label = g.Kind
+			}
+			gb.WriteString(fmt.Sprintf("- %s (%s): %s\n", label, g.Kind, strings.TrimSpace(g.Detail)))
 		}
-		gb.WriteString(fmt.Sprintf("- %s (%s): %s\n", label, g.Kind, strings.TrimSpace(g.Detail)))
-	}
-	structural := "These gathering steps returned nothing usable — treat what they were meant to retrieve as unavailable, and do not fabricate to fill them:\n" + gb.String()
+		structural := "These gathering steps returned nothing usable — treat what they were meant to retrieve as unavailable, and do not fabricate to fill them:\n" + gb.String()
 
-	client, model := a.lightLane(ctx)
-	if client == nil {
-		return "## Coverage — what the evidence can and can't back\n\n" + structural
+		out = "## Coverage — what the evidence can and can't back\n\n" + structural
+		if client, model := a.lightLane(ctx); client != nil {
+			user := fmt.Sprintf("REQUEST + EVIDENCE:\n%s\n\nGATHERING GAPS:\n%s", Text.TruncateEvidence(evidence), gb.String())
+			resp, err := client.Complete(ctx, &llm.ChatRequest{
+				Model:       model,
+				Messages:    []llm.Message{{Role: "system", Content: prompt.CoverageGen}, {Role: "user", Content: user}},
+				Temperature: 0.2,
+				MaxTokens:   700,
+			})
+			if err == nil && resp != nil && len(resp.Choices) > 0 && strings.TrimSpace(resp.Choices[0].Message.Content) != "" {
+				out = "## Coverage — what the evidence can and can't back\n" + strings.TrimSpace(resp.Choices[0].Message.Content)
+			}
+		}
 	}
-	user := fmt.Sprintf("REQUEST + EVIDENCE:\n%s\n\nGATHERING GAPS:\n%s", Text.TruncateEvidence(evidence), gb.String())
-	resp, err := client.Complete(ctx, &llm.ChatRequest{
-		Model:       model,
-		Messages:    []llm.Message{{Role: "system", Content: prompt.CoverageGen}, {Role: "user", Content: user}},
-		Temperature: 0.2,
-		MaxTokens:   700,
-	})
-	if err != nil || resp == nil || len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
-		return "## Coverage — what the evidence can and can't back\n\n" + structural // fail open
+
+	// Part 2 — referenced but not retrieved. The code half of the grounding edge
+	// already knows which URLs a search surfaced that no fetch ever read. Hand that
+	// structural fact to the aggregator so it can't present a merely-referenced
+	// source as one it actually read/verified. Deterministic (not LLM-reframed):
+	// it's a hard honesty constraint, so it must not be softened or dropped.
+	if len(unretrieved) > 0 {
+		note := "## Referenced but not retrieved\n\nThe gathering surfaced these as references but NEVER retrieved them, so their content and availability are unconfirmed. State nothing about what they contain, and do not describe them as verified, confirmed, checked, read, or accessible — list them only as unverified references if the request needs them:\n- " + strings.Join(unretrieved, "\n- ")
+		if out == "" {
+			out = note
+		} else {
+			out = out + "\n\n" + note
+		}
 	}
-	return "## Coverage — what the evidence can and can't back\n" + strings.TrimSpace(resp.Choices[0].Message.Content)
+	return out
 }

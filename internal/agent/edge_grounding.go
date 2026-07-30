@@ -84,6 +84,26 @@ func (a *Agent) collectFetched(graph *Graph) map[string]bool {
 	return out
 }
 
+// unretrievedGrounded returns the URLs a search returned that no fetch has read
+// yet — the references the run knows about but never actually retrieved. It's the
+// structural "found but not verified" set, shared by both edges: the grounding
+// edge pushes the planner to READ them; the coverage edge tells the aggregator not
+// to vouch for them. Pure envelope reading — no interpretation of meaning.
+func (a *Agent) unretrievedGrounded(graph *Graph) []string {
+	grounded := a.collectGrounded(graph)
+	if len(grounded) == 0 {
+		return nil
+	}
+	fetched := a.collectFetched(graph)
+	var out []string
+	for _, u := range grounded {
+		if !fetched[u] {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
 // groundingEdge frames the hand-off from GATHERING into the REFLECTOR / next PLAN
 // — the moment a planner, seeing a thin result, is tempted to fill the gap with
 // URLs from memory. It biases toward READING what's already found: when a search
@@ -100,13 +120,7 @@ func (a *Agent) groundingEdge(ctx context.Context, graph *Graph, request string)
 		return "" // clean gathering — no fabrication pressure, no reframe
 	}
 	grounded := a.collectGrounded(graph)
-	fetched := a.collectFetched(graph)
-	var unfetched []string
-	for _, u := range grounded {
-		if !fetched[u] {
-			unfetched = append(unfetched, u)
-		}
-	}
+	unfetched := a.unretrievedGrounded(graph)
 
 	var structural string
 	switch {

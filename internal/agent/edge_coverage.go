@@ -52,6 +52,33 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 	return gaps
 }
 
+// runFanout counts how many tool nodes actually resolved — a structural proxy for
+// how complex the run turned out to be, independent of the preflight's guess. A
+// query that fanned out to many gather steps earned a real synthesis even if
+// preflight underestimated it.
+func (a *Agent) runFanout(graph *Graph) int {
+	if graph == nil {
+		return 0
+	}
+	return len(graph.ResolvedByType(NodeTool))
+}
+
+// hasUsableEvidence reports whether any resolved tool node returned a successful
+// (ok) result. A run that gathered nothing usable has nothing to synthesize — the
+// reflector's honest "couldn't get the data" verdict is the right answer, not an
+// aggregator pass over emptiness.
+func (a *Agent) hasUsableEvidence(graph *Graph) bool {
+	if graph == nil {
+		return false
+	}
+	for _, n := range graph.ResolvedByType(NodeTool) {
+		if tb, ok := n.Body.(toolMessageBody); ok && tb.Envelope().Status == agenttools.StatusOK {
+			return true
+		}
+	}
+	return false
+}
+
 // coverageEdge frames the hand-off into whichever node writes the answer. When gathering left gaps
 // (tool steps that came back empty or failed), it produces a "## Coverage"
 // checklist so absence is explicit to the aggregator and it does not fabricate

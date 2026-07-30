@@ -1872,6 +1872,12 @@ type SyncResult struct {
 	Gaps     []string         // capability gaps declared by the planner
 	Nodes    int              // total DAG nodes executed
 	LLMCalls int              // total LLM round-trips
+	// Trace is the final DAG node snapshot (the same JSON shape the browser
+	// streams and renders), serialized so the caller can persist it against the
+	// assistant message. Server-authoritative: the trace is saved by the process
+	// that produced it, not round-tripped back from the browser's live buffer
+	// (which a replan's start-event clear or an SSE/return race can empty).
+	Trace json.RawMessage
 }
 
 /*
@@ -2061,12 +2067,17 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		})
 	}
 
+	// Snapshot the final graph so the caller can persist the trace server-side.
+	// This is the same node list the "done" event broadcasts to the browser.
+	traceJSON, _ := json.Marshal(graph.Snapshot())
+
 	return &SyncResult{
 		Verdict:  verdict,
 		Actions:  actions,
 		Gaps:     graph.Gaps,
 		Nodes:    graph.NodeCount(),
 		LLMCalls: int(budget.LLMCount()),
+		Trace:    traceJSON,
 	}, nil
 }
 

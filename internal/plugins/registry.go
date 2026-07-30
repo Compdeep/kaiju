@@ -55,6 +55,9 @@ type Host interface {
 type Plugin interface {
 	// Name is the activation key used in config `plugins` / the `--plugins` flag.
 	Name() string
+	// Description is a one-line summary of what the plugin adds — surfaced by the
+	// plugin_list tool so a user (via the agent) can see what's available.
+	Description() string
 	// Register contributes the plugin's capabilities through the Host.
 	Register(Host)
 }
@@ -62,6 +65,7 @@ type Plugin interface {
 var (
 	mu         sync.Mutex
 	registered = map[string]Plugin{}
+	activeSet  = map[string]bool{} // plugins whose Register has run (boot or runtime)
 )
 
 // Add records a compiled-in plugin. Call it from an init() in the plugin's
@@ -82,6 +86,50 @@ func Compiled() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Get returns a compiled-in plugin by name (for runtime activation).
+func Get(name string) (Plugin, bool) {
+	mu.Lock()
+	defer mu.Unlock()
+	p, ok := registered[name]
+	return p, ok
+}
+
+// IsActive reports whether a plugin's Register has run (at boot or at runtime).
+func IsActive(name string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return activeSet[name]
+}
+
+// MarkActive records a plugin as active. Runtime activation (plugin_enable) calls
+// it after running a plugin's Register with a live host, so IsActive/Catalog
+// reflect plugins switched on after boot.
+func MarkActive(name string) {
+	mu.Lock()
+	defer mu.Unlock()
+	activeSet[name] = true
+}
+
+// Info describes a compiled-in plugin for the plugin_list tool.
+type Info struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Active      bool   `json:"active"`
+}
+
+// Catalog lists every compiled-in plugin with its description and active state,
+// sorted by name — the read model behind plugin_list.
+func Catalog() []Info {
+	mu.Lock()
+	defer mu.Unlock()
+	out := make([]Info, 0, len(registered))
+	for name, p := range registered {
+		out = append(out, Info{Name: name, Description: p.Description(), Active: activeSet[name]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // Activate registers the capabilities of every plugin named in `want` that is
@@ -105,6 +153,7 @@ func Activate(want []string, d Deps) (active []agenttools.Tool, on, missing []st
 		}
 		h := &activation{deps: d}
 		p.Register(h)
+		activeSet[name] = true
 		active = append(active, h.tools...)
 		on = append(on, name)
 	}

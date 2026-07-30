@@ -31,6 +31,10 @@ type plugin struct{}
 
 func (plugin) Name() string { return "pdf" }
 
+func (plugin) Description() string {
+	return "PDF reading: adds the pdf_extract tool and lets web_fetch read PDF URLs a search turns up."
+}
+
 // Register contributes the plugin's two capabilities through the Host — both
 // explicit at this one call site:
 //   - the pdf_extract TOOL the planner can call on a file; and

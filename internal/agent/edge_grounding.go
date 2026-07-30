@@ -56,39 +56,86 @@ func (a *Agent) collectGrounded(graph *Graph) []string {
 	return urls
 }
 
+// collectFetched returns the set of URLs that web_fetch nodes have already read
+// (web_fetch stamps the fetched URL into its envelope Data). Subtracting these
+// from the grounded set gives the URLs found-but-not-yet-read — which the edge
+// pushes the planner to FETCH before it searches again.
+func (a *Agent) collectFetched(graph *Graph) map[string]bool {
+	out := map[string]bool{}
+	if graph == nil {
+		return out
+	}
+	for _, n := range graph.ResolvedByType(NodeTool) {
+		tb, ok := n.Body.(toolMessageBody)
+		if !ok {
+			continue
+		}
+		env := tb.Envelope()
+		if env.Kind != "page" || len(env.Data) == 0 {
+			continue
+		}
+		var d struct {
+			URL string `json:"url"`
+		}
+		if json.Unmarshal(env.Data, &d) == nil && d.URL != "" {
+			out[d.URL] = true
+		}
+	}
+	return out
+}
+
 // groundingEdge frames the hand-off from GATHERING into the REFLECTOR / next PLAN
 // — the moment a planner, seeing a thin result, is tempted to fill the gap with
-// URLs from memory. When a search came back empty or a step failed, it prepends a
-// "## Grounding" note listing the ONLY URLs a real search actually returned, so
-// the next step fetches/cites from those or searches for more, never invents.
+// URLs from memory. It biases toward READING what's already found: when a search
+// returned real URLs that haven't been fetched yet, it says FETCH those before
+// searching again; only when there are no unread leads does it say re-search.
 // Gated on gaps: clean gathering pays nothing.
 //
 // Composition (same shape as the coverage edge): code decides WHETHER a gap exists
-// and supplies the grounded set; the LLM reframes it against the request. On any
-// LLM error it fails open to the structural grounded list alone.
+// and supplies the grounded/unfetched sets; the LLM reframes them against the
+// request. On any LLM error it fails open to the structural note.
 func (a *Agent) groundingEdge(ctx context.Context, graph *Graph, request string) string {
 	gaps := a.collectGaps(graph)
 	if len(gaps) == 0 {
 		return "" // clean gathering — no fabrication pressure, no reframe
 	}
 	grounded := a.collectGrounded(graph)
-
-	var gb strings.Builder
-	if len(grounded) == 0 {
-		gb.WriteString("(none — no URL has come back from a real search yet)\n")
-	} else {
-		for _, u := range grounded {
-			gb.WriteString("- " + u + "\n")
+	fetched := a.collectFetched(graph)
+	var unfetched []string
+	for _, u := range grounded {
+		if !fetched[u] {
+			unfetched = append(unfetched, u)
 		}
 	}
-	structural := "URLs that actually came from a search — the ONLY ones safe to fetch or cite:\n" + gb.String() +
-		"\nDo not fetch or cite any URL not in this list. To add a source, SEARCH for it — never type a URL from memory."
+
+	var structural string
+	switch {
+	case len(unfetched) > 0:
+		var b strings.Builder
+		for _, u := range unfetched {
+			b.WriteString("- " + u + "\n")
+		}
+		structural = "You already have real URLs from a search that you have NOT read yet. FETCH these next — do NOT search again until you have read them:\n" + b.String() +
+			"\nOnly a URL in this list may be fetched or cited. Searching more before reading what you already found wastes the run."
+	case len(grounded) == 0:
+		structural = "No URL has come from a real search yet. The next move is to broaden the search — plainer keywords, no stacked operators. Never fetch or cite a URL you did not get from a search."
+	default:
+		structural = "Every URL a search returned has already been fetched. If that isn't enough, broaden the search for new leads or report plainly what's still missing — never fetch or cite a URL that isn't in the evidence."
+	}
 
 	client, model := a.lightLane(ctx)
 	if client == nil {
-		return "## Grounding — the only real leads so far\n\n" + structural
+		return "## Grounding — read what you already found\n\n" + structural
 	}
 
+	groundedList := "(none)"
+	if len(grounded) > 0 {
+		groundedList = "- " + strings.Join(grounded, "\n- ")
+	}
+	unfetchedList := "(none — all grounded URLs already read)"
+	if len(unfetched) > 0 {
+		unfetchedList = "- " + strings.Join(unfetched, "\n- ")
+	}
 	var gapb strings.Builder
 	for _, g := range gaps {
 		label := g.Tag
@@ -97,8 +144,8 @@ func (a *Agent) groundingEdge(ctx context.Context, graph *Graph, request string)
 		}
 		gapb.WriteString(fmt.Sprintf("- %s (%s): %s\n", label, g.Kind, strings.TrimSpace(g.Detail)))
 	}
-	user := fmt.Sprintf("REQUEST:\n%s\n\nGROUNDED URLS (from real searches):\n%s\nGATHERING GAPS (returned nothing usable):\n%s",
-		Text.TruncateEvidence(request), gb.String(), gapb.String())
+	user := fmt.Sprintf("REQUEST:\n%s\n\nUNFETCHED GROUNDED URLS (found by a search, not yet read):\n%s\n\nALL GROUNDED URLS:\n%s\n\nGATHERING GAPS:\n%s",
+		Text.TruncateEvidence(request), unfetchedList, groundedList, gapb.String())
 	resp, err := client.Complete(ctx, &llm.ChatRequest{
 		Model:       model,
 		Messages:    []llm.Message{{Role: "system", Content: prompt.GroundingGen}, {Role: "user", Content: user}},
@@ -106,7 +153,7 @@ func (a *Agent) groundingEdge(ctx context.Context, graph *Graph, request string)
 		MaxTokens:   600,
 	})
 	if err != nil || resp == nil || len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
-		return "## Grounding — the only real leads so far\n\n" + structural // fail open
+		return "## Grounding — read what you already found\n\n" + structural // fail open
 	}
-	return "## Grounding — the only real leads so far\n" + strings.TrimSpace(resp.Choices[0].Message.Content)
+	return "## Grounding — read what you already found\n" + strings.TrimSpace(resp.Choices[0].Message.Content)
 }

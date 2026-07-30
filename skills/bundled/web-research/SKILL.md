@@ -5,24 +5,12 @@ description: Teaches the planner how to conduct multi-phase web research using s
 
 ## Planning Guidance
 
-When the request requires web research, plan in two phases:
+For web research, use the **`web_research`** tool. It runs a search AND reads the top result pages in ONE step, returning their actual content — so every source is grounded (the URLs come from the search) and already read for you. With `web_research` you never plan a separate `web_search` + `web_fetch`, never pick or invent a URL, and never stop at snippets.
 
-### Phase 1: Parallel Searches
-Plan multiple `web_search` calls in parallel — one per research angle.
-- Use specific, targeted queries — but as plain KEYWORDS, not search operators. "top subscription box competitors pricing comparison 2026", not "subscription boxes".
-- Do NOT stack search operators. Piling `site:… OR site:… OR …` together with `filetype:pdf` and niche terms almost always returns nothing — the engine already ranks good sources without them. If a plain query is too noisy, narrow it by adding one more keyword, not an operator. An over-filtered search that returns nothing is what pushes a planner to invent URLs.
-- Plan 2-5 parallel searches covering different aspects of the question.
-- `web_search` takes an optional `recency_days` — set it for time-sensitive figures (market size, recent news); leave it off otherwise.
-
-### Phase 2: Targeted Fetches
-Fetching a URL is how you actually **read a source** — a news article, an analyst report, a government or standards page, a paper. A search only gives you titles and short snippets; the real content, figures, and quotes come from the fetch. So for research you MUST fetch the sources you found — never answer from search snippets alone, and never present a URL you did not fetch as a source.
-
-Plan `web_fetch` calls that depend on the search steps and use the URLs those searches return.
-- Use `format=summary` with a specific `focus` param for each fetch
-- Point each fetch at a URL surfaced by its upstream search (declare that search in `depends_on`)
-- Plan 3-5 fetches per search, covering the top results
-- Use a BROAD focus that covers all needed information in ONE fetch per URL
-- NEVER fetch the same URL twice with different focus params
+- Plan 2–4 parallel `web_research` calls, one per research angle.
+- Use plain KEYWORD queries, not search operators. "sovereign AI infrastructure market size 2026", NOT `site:… OR site:… filetype:pdf …`. Stacked `site:`/`filetype:` operators over-filter and return nothing — the engine ranks good sources without them.
+- `max_sources` = how many top results to read per angle (default 4). `recency_days` biases to recent results for time-sensitive figures. `focus` names the exact facts/figures to pull from each page.
+- Each source `web_research` returns shows its **return code** and its content. Answer ONLY from sources that actually returned content — if a source shows a 4xx/blocked code with no content, it was NOT read: do not cite it, and never present an unread or invented URL as a source.
 
 ### Focus Parameter Examples
 Good focus values (specific, covers multiple needs):
@@ -33,8 +21,10 @@ Good focus values (specific, covers multiple needs):
 Bad focus values (too narrow, causes duplicate fetches):
 - "pricing" (too narrow — combine with features and customers)
 
+`web_search` (URLs only) and `web_fetch` (one specific known URL) still exist for the rare cases that need them — e.g. fetching a URL the user handed you. For everything else, use `web_research`.
+
 ### What NOT to do
 - Don't use `memory_store` to save intermediate results — evidence is automatic
-- Don't plan a single broad search — break it into parallel specific queries
-- Don't skip the fetch step — search snippets alone are too thin
-- Don't chain web_fetch → web_fetch — fetch consumes URLs, it doesn't produce them
+- Don't over-filter — no stacked `site:`/`filetype:` operators or long `OR` chains; they return nothing
+- Don't answer from snippets, or cite a URL that didn't actually return content (check its return code)
+- Don't type a URL from memory — `web_research` only reads URLs a real search returned

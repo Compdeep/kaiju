@@ -510,6 +510,19 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 
 	// Detect the explicit sentinel.
 	if strings.Contains(summary, noContentSentinel) {
+		// The FOCUSED extraction found no match — but the page may still carry
+		// useful general content that the narrow focus rejected (common on analyst
+		// and report pages: the body is there, it just doesn't phrase the exact
+		// figure asked for). Retry ONCE without the focus before discarding a
+		// content-bearing page, so a real source isn't thrown away over wording.
+		if focus != "" && len(strings.TrimSpace(content)) >= 400 {
+			if g := w.generalSummary(ctx, content, noContentSentinel); g != "" {
+				return marshalFetchResult(fetchResult{
+					Status: status, Title: title, Content: g, Format: "summary",
+					Note: "general summary — the page did not contain the specific focus requested",
+				})
+			}
+		}
 		return marshalFetchResult(fetchResult{
 			Status:  status,
 			Title:   title,
@@ -534,6 +547,29 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 	}
 
 	return marshalFetchResult(fetchResult{Status: status, Title: title, Content: summary, Format: "summary"})
+}
+
+// generalSummary is the focus-free fallback: summarize whatever real content the
+// page yielded so a fetched, content-bearing source isn't discarded just because a
+// narrow focus didn't match. Returns "" if the model still finds nothing usable
+// (the sentinel, a refusal, or empty) — the caller then reports "no content".
+func (w *WebFetch) generalSummary(ctx context.Context, content, sentinel string) string {
+	resp, err := w.executor.Complete(ctx, &llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: "system", Content: "Summarize the key facts, figures, and findings on this web page. Use ONLY what is present in the user message; do not draw on outside knowledge. Reply with " + sentinel + " only if the page has no substantive content at all."},
+			{Role: "user", Content: content},
+		},
+		Temperature: 0.2,
+		MaxTokens:   1024,
+	})
+	if err != nil || len(resp.Choices) == 0 {
+		return ""
+	}
+	g := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if g == "" || strings.Contains(g, sentinel) || looksLikeSummarizerRefusal(g) {
+		return ""
+	}
+	return g
 }
 
 // looksLikePDFURL reports whether the URL path ends in .pdf — a fallback for

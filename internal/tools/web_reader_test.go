@@ -49,6 +49,30 @@ func TestExtractMeta(t *testing.T) {
 	}
 }
 
+// An enabled reader plugin is the PRIMARY reader — web_fetch must use it for the
+// page, not just when built-in readability comes back thin. Here readability WOULD
+// extract the static body, but the registered plugin's content must win.
+func TestFormatMarkdown_PluginIsPrimaryReader(t *testing.T) {
+	agenttools.RegisterReaderFallback(func(context.Context, string) (string, error) {
+		return strings.Repeat("Rendered by the reader plugin. ", 20), nil
+	})
+	defer agenttools.RegisterReaderFallback(nil) // unregister for other tests
+
+	body := []byte("<html><body><article>" +
+		strings.Repeat("Static boilerplate readability would grab. ", 20) +
+		"</article></body></html>")
+	out, err := NewWebFetchWithLLM(nil).formatMarkdown(context.Background(), "HTTP 200 OK", "https://x.example/spa", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Rendered by the reader plugin") {
+		t.Fatalf("enabled reader plugin must be the primary reader, got: %s", out)
+	}
+	if strings.Contains(out, "Static boilerplate") {
+		t.Fatalf("built-in readability leaked despite an enabled plugin: %s", out)
+	}
+}
+
 func TestLooksLikePDFURL(t *testing.T) {
 	cases := map[string]bool{
 		"https://example.gov/reports/ai-2026.pdf": true,

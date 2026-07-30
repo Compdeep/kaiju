@@ -463,7 +463,15 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		reg.Replace(kaijutools.NewPluginList(), "builtin")
 		if cfg.AllowRuntimePluginActivation {
 			reg.Replace(kaijutools.NewPluginEnable(reg, cfg), "builtin")
+			reg.Replace(kaijutools.NewPluginOption(cfg), "builtin")
 		}
+	}
+
+	// Export the persisted remote-plugin host (set via plugin_option) so the
+	// `remote` bridge — activated just below, or later via plugin_enable —
+	// connects to it instead of the default localhost.
+	if cfg.RemotePluginHost != "" {
+		os.Setenv("KAIJU_PLUGIN_HOST", cfg.RemotePluginHost)
 	}
 
 	// Optional plugin tools (compiled in behind build tags, switched on by config

@@ -265,6 +265,10 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 	if err == nil && resp != nil {
 		tokens.AddSplit(ctx, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	}
+	// The same chokepoint, for observation rather than accounting. Fires on
+	// failure too, so an embedding application logging calls sees the ones
+	// that errored — usually the interesting ones.
+	emitCall(ctx, req, resp, err)
 	return resp, err
 }
 
@@ -332,6 +336,17 @@ func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk f
 // shaped exactly like Complete's, so callers can treat streamed and non-streamed
 // turns identically.
 func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (*ChatResponse, error) {
+	resp, err := c.completeStreamResp(ctx, req, onChunk)
+	// One emit covering every return path in the implementation below,
+	// including the early transport and HTTP failures.
+	emitCall(ctx, req, resp, err)
+	return resp, err
+}
+
+// completeStreamResp is the implementation. The exported wrapper above adds
+// the observer notification, so the six return paths in here do not each
+// need one.
+func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (*ChatResponse, error) {
 	if req.Model == "" {
 		req.Model = c.model
 	}

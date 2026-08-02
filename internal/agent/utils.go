@@ -1636,6 +1636,9 @@ func extractJSONFieldAny(jsonStr, fieldPath string) (any, error) {
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 		return nil, fmt.Errorf("result is not JSON: %w", err)
 	}
+	if fieldPath == "" {
+		return data, nil // empty path = the whole document
+	}
 
 	parts := strings.Split(fieldPath, ".")
 	current := data

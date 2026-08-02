@@ -22,6 +22,38 @@ func TestToolMessageBody_FieldFromData(t *testing.T) {
 	}
 }
 
+// A bare "data" reference names the payload wrapper itself — it must resolve to
+// the WHOLE payload, not look for a field literally named "data". This is the
+// exact case that hard-failed a live run:
+//
+//	dependency injection failed: template on n6: field "data" absent in dep n3
+//
+// where n3 was sysinfo (structured payload, no field named "data"). The dotted
+// form ("data.title") was already tolerated; the bare form was the gap.
+// Plan-time validation already accepts ${step.N.data}, so runtime was the outlier.
+func TestToolMessageBody_FieldBareData(t *testing.T) {
+	b := tmBody(agenttools.ToolOK("sysinfo", "", map[string]any{"os": "linux", "cpus": 8}))
+	v, ok := b.Field("data")
+	if !ok {
+		t.Fatalf(`Field("data") should resolve to the whole payload, got ok=false`)
+	}
+	m, isMap := v.(map[string]any)
+	if !isMap || m["cpus"] != float64(8) {
+		t.Fatalf(`Field("data") = %#v want the payload map with cpus=8`, v)
+	}
+	// Dotted and payload-relative forms remain intact.
+	if v, ok := b.Field("data.cpus"); !ok || v != float64(8) {
+		t.Fatalf(`Field("data.cpus") = %v,%v want 8,true`, v, ok)
+	}
+	if v, ok := b.Field("cpus"); !ok || v != float64(8) {
+		t.Fatalf(`Field("cpus") = %v,%v want 8,true`, v, ok)
+	}
+	// We tolerate the wrapper, not everything — a genuinely absent field still misses.
+	if _, ok := b.Field("nonexistent"); ok {
+		t.Fatalf(`Field("nonexistent") should still miss`)
+	}
+}
+
 // A text tool carries its whole result in Content with no Data; field access
 // must still reach into it when it happens to be JSON (a JSON file, a JSON kv).
 func TestToolMessageBody_FieldFallsBackToContent(t *testing.T) {

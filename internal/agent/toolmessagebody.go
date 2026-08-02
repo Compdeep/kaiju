@@ -26,7 +26,15 @@ func (b toolMessageBody) Envelope() agenttools.ToolMessage { return b.msg }
 // pre-envelope behavior. An optional leading "data." is tolerated so both
 // ${node.X.field} and ${node.X.data.field} resolve.
 func (b toolMessageBody) Field(path string) (any, bool) {
+	// Strip the envelope's payload wrapper in either form: "data.field" → "field",
+	// and bare "data" → "" (the whole payload). This body already resolves against
+	// the payload, so a leading "data" is always the wrapper, never a real field —
+	// tolerating only the dotted form left ${node.X.data} failing at runtime even
+	// though plan-time validation accepts it.
 	p := strings.TrimPrefix(path, "data.")
+	if path == "data" {
+		p = ""
+	}
 	// Prefer the structured payload; fall back to Content for tools that carry
 	// their whole result there (which may itself be JSON — e.g. reading a JSON
 	// file), so field access is preserved exactly as pre-envelope.

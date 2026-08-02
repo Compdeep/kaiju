@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
-	"github.com/Compdeep/kaiju/internal/agent/llm"
-	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/llm"
+	"github.com/Compdeep/kaiju/agent/tools"
 	"github.com/Compdeep/kaiju/internal/compat/store"
 )
 

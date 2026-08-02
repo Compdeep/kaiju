@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/llm"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // WebResearch searches the web AND reads the top results in ONE step: it runs a

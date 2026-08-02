@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent/tools" // for Registry type
+	"github.com/Compdeep/kaiju/agent/tools" // for Registry type
 )
 
 var placeholderRe = regexp.MustCompile(`\{\{(\w+)\}\}`)

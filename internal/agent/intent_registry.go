@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 	"github.com/Compdeep/kaiju/internal/db"
 )
 

@@ -15,7 +15,7 @@ import (
 
 	"github.com/Compdeep/kaiju/docs"
 	"github.com/Compdeep/kaiju/internal/agent"
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/uploads"
 	"github.com/Compdeep/kaiju/internal/api"
 	"github.com/Compdeep/kaiju/internal/auth"

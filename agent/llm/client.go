@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/tokens"
+	"github.com/Compdeep/kaiju/tokens"
 )
 
 // Message is a single chat message in the OpenAI format.
@@ -23,10 +23,10 @@ import (
 // (json:"-") and never persisted — the agent's session stores text, and images
 // are re-supplied per request by the host (Makeen), never held in kaiju.
 type Message struct {
-	Role       string        `json:"role"`                   // "system", "user", "assistant", "tool"
+	Role       string        `json:"role"` // "system", "user", "assistant", "tool"
 	Content    string        `json:"content,omitempty"`
-	Reasoning  string        `json:"reasoning,omitempty"`    // hidden reasoning from thinking models (reasoning field + lifted <think>…</think>)
-	Parts      []ContentPart `json:"-"`                      // multimodal parts; overrides Content when set
+	Reasoning  string        `json:"reasoning,omitempty"` // hidden reasoning from thinking models (reasoning field + lifted <think>…</think>)
+	Parts      []ContentPart `json:"-"`                   // multimodal parts; overrides Content when set
 	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"` // set when role == "tool"
 	Name       string        `json:"name,omitempty"`         // function name for tool results

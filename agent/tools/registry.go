@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 /*

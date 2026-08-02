@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/llm"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // collectGaps is the content-agnostic code half of the coverage edge: it must

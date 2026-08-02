@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/llm"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 	readability "github.com/go-shiori/go-readability"
 )
 

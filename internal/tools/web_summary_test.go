@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 // When a focused summary misses (the model returns the no-content sentinel) but

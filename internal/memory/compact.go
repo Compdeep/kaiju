@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 const compactPrompt = `Summarize the following conversation history in 2-3 concise paragraphs.

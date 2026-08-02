@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 type fakeTool struct{ n string }

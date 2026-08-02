@@ -35,6 +35,9 @@ kaiju.json
 __pycache__/
 *.pyc
 
+# Plugin virtualenv — machine-local Python env (matplotlib, etc.), never source.
+plugins/venv/
+
 # IDE
 .vscode/
 .idea/

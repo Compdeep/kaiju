@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kaiju · Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#050506; --bg2:#0a1119; --card:#0e1622; --card2:#12202e; --raise:#0c1420;
+    --line:#1f2a36; --edge:#2b3948;
+    --ink:#eef0f4; --mut:#a8abb6; --faint:#8a8e99;
+    --blue:#38bdf8; --blue-dim:#1a6f97; --blue-bg:#08222e;
+    --orange:#f97316; --orange-dim:#9a4a12; --orange-bg:#2a1608;
+    --violet:#a78bfa; --violet-bg:#171130;
+    --green:#22c55e; --green-dim:#166534; --green-bg:#082818;
+    --amber:#eab308; --amber-dim:#8a6a08; --amber-bg:#221d05;
+    --red:#ef4444; --red-dim:#7f2222; --red-bg:#260d0d;
+    --r:16px; --r2:12px;
+    --sh:0 2px 10px rgba(0,0,0,.5); --sh2:0 14px 44px rgba(0,0,0,.6);
+    --disp:'Exo 2',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:
+      radial-gradient(1200px 620px at 82% -8%, #0a2230 0%, transparent 58%),
+      radial-gradient(900px 520px at -6% 6%, #241206 0%, transparent 55%),
+      var(--bg);
+    color:var(--ink);font:15.5px/1.62 var(--disp);-webkit-font-smoothing:antialiased}
+  /* ── Ambient animated background (sweeping gradient ribbons) ── */
+  /* Fixed vignette — blue center fading to black at the edges (ribbon SVG removed) */
+  .bgwaves{position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(ellipse 125% 100% at 50% 32%, rgb(24,43,59) 0%, #0a1622 46%, #000 100%);}
+  /* ── Floating nodes: drift on scroll (via JS) + gently float when idle ── */
+  .bgfloat{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;will-change:transform;opacity:.5}
+  .bgfloat .fl{position:absolute;border-radius:50%;will-change:transform}
+  /* Depth-of-field: dim the whole layer + blur a subset so some dots recede out of focus */
+  .bgfloat .fl:nth-child(3n){filter:blur(3.5px)}
+  .bgfloat .fl:nth-child(5n){filter:blur(1.8px)}
+  @keyframes floatA{from{transform:translate(0,0)}to{transform:translate(16px,-24px)}}
+  @keyframes floatB{from{transform:translate(0,0)}to{transform:translate(-20px,-14px)}}
+  @keyframes floatC{from{transform:translate(0,0)}to{transform:translate(12px,22px)}}
+  @keyframes floatD{from{transform:translate(0,0)}to{transform:translate(-14px,18px)}}
+  @media (prefers-reduced-motion: reduce){ .bgfloat .fl{animation:none !important} }
+  .wrap{max-width:1000px;margin:0 auto;padding:0 26px 120px}
+  code{font-family:var(--mono);font-size:.85em;background:#0a0a0e;color:#a9def4;padding:1.5px 6px;border-radius:6px;border:1px solid var(--line)}
+  a{color:var(--blue);text-decoration:none}
+  b{color:#fff}
+  .icon{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.85;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+
+  /* ── Hero ── */
+  header.hero{padding:78px 0 10px}
+  .eyebrow{color:var(--orange);font-weight:800;font-size:12.5px;letter-spacing:3px;text-transform:uppercase}
+  h1{margin:16px 0 14px;font-size:52px;font-weight:900;letter-spacing:-1.8px;line-height:1.03;color:#fff}
+  h1 .accent{background:linear-gradient(100deg,var(--blue),var(--orange));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{color:var(--mut);font-size:18px;max-width:700px;margin:0}
+  .lede b{color:var(--ink)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:26px 0 0;font-size:13px;color:var(--mut)}
+  .legend span{display:inline-flex;align-items:center;gap:8px}
+  .contents-head{font-size:13px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--faint);margin:46px 0 16px;display:flex;align-items:center;gap:12px}
+  .contents-head::after{content:"";flex:1;height:1px;background:var(--line)}
+  .contents{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:0 0 6px}
+  .centry{display:flex;gap:16px;align-items:baseline;border:1px solid var(--line);border-radius:var(--r2);padding:18px 20px;background:var(--card);transition:border-color .15s ease,background .15s ease}
+  .centry:hover{border-color:var(--blue-dim);background:var(--card2)}
+  .centry .cnum{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--orange);font-variant-numeric:tabular-nums;flex:0 0 auto;padding-top:1px}
+  .centry .ctit{font-weight:800;font-size:16px;color:#fff;display:block;letter-spacing:-.2px}
+  .centry .cdesc{color:var(--mut);font-size:13px;margin-top:3px;display:block;line-height:1.5}
+  @media(max-width:720px){.contents{grid-template-columns:1fr}h1{font-size:36px}}
+
+  /* ── Section frame ── */
+  section{padding-top:34px;margin-top:52px;border-top:1px solid var(--line)}
+  .kick{display:inline-block;color:var(--bg);background:var(--orange);font-weight:900;font-size:14px;letter-spacing:1px;font-variant-numeric:tabular-nums;padding:3px 11px;border-radius:8px}
+  h2{font-size:35px;font-weight:900;letter-spacing:-.9px;margin:12px 0 10px;color:#fff}
+  h3{font-size:20px;font-weight:800;margin:44px 0 10px;letter-spacing:-.3px;color:#fff}
+  .sub{color:var(--mut);font-size:16.5px;max-width:730px;margin:0 0 10px}
+  p{color:#c6c6d4}
+  .note{color:var(--mut);font-size:14px;max-width:820px;background:var(--raise);border:1px solid var(--line);border-radius:var(--r2);padding:13px 16px}
+  .note b{color:var(--ink)}
+
+  /* ── Status pills ── */
+  .status{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:2.5px 10px;border-radius:999px;vertical-align:middle;border:1px solid}
+  .status.built{background:var(--green-bg);color:var(--green);border-color:var(--green-dim)}
+  .status.design{background:var(--amber-bg);color:var(--amber);border-color:var(--amber-dim)}
+  .statusrow{margin:40px 0 4px}
+
+  /* ── Stat band ── */
+  .invariants{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:34px 0 6px}
+  .inv{border:1px solid var(--line);border-radius:var(--r2);padding:15px 18px;background:linear-gradient(180deg,var(--card),var(--raise));position:relative;overflow:hidden}
+  .inv::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--blue),var(--orange))}
+  .inv .rule{font-size:14.5px;font-weight:700;color:var(--ink);line-height:1.4;letter-spacing:-.1px}
+  .inv .rule code{font-family:var(--mono);font-size:.94em;font-weight:700;color:var(--ink);background:none;border:none;padding:0}
+  .inv .how{font-size:12px;color:var(--faint);margin-top:6px;line-height:1.5}
+  @media(max-width:720px){.invariants{grid-template-columns:1fr}}
+
+  /* ── §01 Center spine ── */
+  .spine{position:relative;max-width:900px;margin:34px auto 8px;padding:6px 0}
+  .spine::before{content:"";position:absolute;left:50%;top:6px;bottom:6px;width:3px;transform:translateX(-50%);
+    background:linear-gradient(180deg,var(--blue),var(--violet) 45%,var(--orange));border-radius:3px}
+  .snode{position:relative;display:grid;grid-template-columns:1fr 84px 1fr;align-items:center;margin-bottom:22px}
+  .snode > *{grid-row:1}
+  .snum{grid-column:2;justify-self:center;align-self:center;width:50px;height:50px;border-radius:50%;display:grid;place-items:center;
+    font-weight:900;font-size:19px;font-variant-numeric:tabular-nums;background:linear-gradient(180deg,var(--orange),#c85a10);color:#1c0f04;
+    border:3px solid var(--bg);box-shadow:0 0 0 3px var(--blue-dim),0 6px 18px rgba(0,0,0,.6);z-index:2}
+  .scard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:15px 18px;box-shadow:var(--sh);border-top:2px solid var(--blue-dim)}
+  .scard .sk{font-size:10.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:var(--orange)}
+  .scard .st{font-weight:700;font-size:16px;margin-top:3px;display:flex;gap:9px;align-items:center;color:#fff}
+  .scard .st .icon{stroke:var(--blue)}
+  .scard .sp{color:var(--mut);font-size:14px;margin-top:8px;line-height:1.6}
+  .snode:nth-child(odd) .scard{grid-column:1;text-align:right}
+  .snode:nth-child(odd) .scard .st{justify-content:flex-end;flex-direction:row-reverse}
+  .snode:nth-child(even) .scard{grid-column:3}
+  .scard.op{border-top-color:var(--blue)} .scard.op .st .icon{stroke:var(--blue)}
+  .scard.agent{border-top-color:var(--violet)} .scard.agent .st .icon{stroke:var(--violet)}
+  .scard.gate{border-top-color:var(--orange)} .scard.gate .st .icon{stroke:var(--orange)}
+  @media(max-width:720px){
+    .spine::before{left:25px}
+    .snode{grid-template-columns:50px 1fr;column-gap:16px;margin-bottom:14px}
+    .snum{grid-column:1;width:44px;height:44px;font-size:16px}
+    .snode .scard{grid-column:2 !important;text-align:left !important}
+    .snode .scard .st{justify-content:flex-start !important;flex-direction:row !important}
+  }
+
+  /* ── Arrow-flow call graph (§02) ── */
+  .cg{max-width:840px;margin:22px auto 8px}
+  .cstep{background:linear-gradient(150deg,var(--card),var(--raise));border:1px solid var(--line);border-radius:14px;
+    padding:15px 18px;display:grid;grid-template-columns:172px 1fr 128px;gap:16px;align-items:center}
+  .cstep .cn{display:flex;align-items:center;gap:10px;font-weight:700;font-size:14.5px;color:#fff}
+  .cstep .cn .b{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;background:var(--blue-dim);color:#fff;flex:0 0 auto}
+  .cstep .cd{font-size:13.5px;color:var(--mut);line-height:1.55}
+  .cstep .cd b{color:var(--ink)}
+  .cstep .cw{font-family:var(--mono);font-size:11px;color:var(--faint);text-align:right;line-height:1.5}
+  .cstep.e-in{border-left:3px solid var(--blue)} .cstep.e-in .b{background:var(--blue-dim)}
+  .cstep.e-plan{border-left:3px solid var(--violet)} .cstep.e-plan .b{background:#4a3a80}
+  .cstep.e-gate{border-left:3px solid var(--orange)} .cstep.e-gate .b{background:var(--orange-dim)}
+  .cstep.e-out{border-left:3px solid var(--green)} .cstep.e-out .b{background:var(--green-dim)}
+  .conn{display:flex;flex-direction:column;align-items:center;position:relative;padding:3px 0}
+  .conn .ln{width:2.5px;height:24px;background:var(--edge)}
+  .conn .tip{width:0;height:0;border:6px solid transparent;border-top-color:var(--edge);margin-top:-1px}
+  .conn .cond{position:absolute;left:calc(50% + 14px);top:50%;transform:translateY(-50%);white-space:nowrap;
+    font-size:11px;font-weight:800;color:var(--orange);background:var(--orange-bg);border:1.5px solid var(--orange-dim);border-radius:999px;padding:3px 11px}
+  @media(max-width:720px){.cstep{grid-template-columns:1fr}.cstep .cw{text-align:left}.conn .cond{position:static;transform:none;margin-top:5px}}
+
+  /* ── §03 Impact ladder ── */
+  .ladder{display:grid;gap:10px;max-width:820px;margin:22px 0 8px}
+  .rung{display:grid;grid-template-columns:132px 1fr;gap:16px;align-items:center;border:1px solid var(--line);border-radius:var(--r2);padding:14px 18px;background:var(--card);border-left:3px solid var(--edge)}
+  .rung .rk{font-weight:800;font-size:15px;color:#fff;display:flex;align-items:center;gap:9px}
+  .rung .rv{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+  .rung .rd{font-size:13.5px;color:var(--mut);line-height:1.5;margin-top:2px}
+  .rung.obs{border-left-color:var(--green)} .rung.obs .rk{color:var(--green)} .rung.obs .rk .icon{stroke:var(--green)}
+  .rung.aff{border-left-color:var(--amber)} .rung.aff .rk{color:var(--amber)} .rung.aff .rk .icon{stroke:var(--amber)}
+  .rung.ctl{border-left-color:var(--red)} .rung.ctl .rk{color:var(--red)} .rung.ctl .rk .icon{stroke:var(--red)}
+  @media(max-width:720px){.rung{grid-template-columns:1fr}}
+
+  /* ── Formula band ── */
+  .formula{text-align:center;font-family:var(--mono);font-size:19px;color:var(--ink);background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--edge);border-radius:var(--r);padding:22px;margin:24px 0;letter-spacing:.3px}
+  .formula b{color:var(--orange)} .formula .op{color:var(--faint)} .formula .lhs{color:var(--blue)}
+  @media(max-width:720px){.formula{font-size:15px}}
+
+  /* ── Two-column cards ── */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:20px 0}
+  .cols.c3{grid-template-columns:repeat(3,1fr)}
+  .kv{border:1px solid var(--line);border-radius:var(--r);padding:17px 19px;background:var(--card)}
+  .kv h4{margin:0 0 7px;font-size:15px;display:flex;align-items:center;gap:9px;color:#fff}
+  .kv h4 .icon{stroke:var(--blue)}
+  .kv p{margin:0;color:var(--mut);font-size:13.5px;line-height:1.55}
+  .kv .kvt{font-family:var(--mono);font-size:11px;color:var(--orange);margin-top:9px}
+  @media(max-width:720px){.cols,.cols.c3{grid-template-columns:1fr}}
+
+  /* ── Stage rows ── */
+  .rows{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin:16px 0 8px}
+  .row{display:grid;grid-template-columns:150px 1fr 156px;border-top:1px solid var(--line);align-items:center;background:var(--card)}
+  .row:first-child{border-top:0}
+  .row .rn{padding:14px 18px;font-weight:700;font-size:14px;color:#fff}
+  .row .rd{padding:14px 16px;font-size:13.5px;color:var(--mut);border-left:1px solid var(--line);line-height:1.6}
+  .row .rd code{font-size:.82em}
+  .row .rd b{color:var(--ink)}
+  .row .rw{padding:14px 16px;font-size:11px;font-family:var(--mono);color:var(--faint);border-left:1px solid var(--line);line-height:1.5}
+  .row.bl{border-left:3px solid var(--blue)} .row.or{border-left:3px solid var(--orange)}
+  .row.vi{border-left:3px solid var(--violet)} .row.gr{border-left:3px solid var(--green)} .row.re{border-left:3px solid var(--red)}
+  @media(max-width:720px){.row{grid-template-columns:1fr}.row .rd,.row .rw{border-left:0;border-top:1px dashed var(--line)}}
+
+  /* ── Plugin cards ── */
+  .plugs{display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:12px;margin:16px 0 6px}
+  .plug{border:1px solid var(--line);border-top:3px solid var(--edge);border-radius:14px;padding:15px;min-height:118px;display:flex;flex-direction:column;justify-content:space-between;background:var(--card)}
+  .plug .ptag{font-size:9px;font-weight:900;letter-spacing:.6px;text-transform:uppercase;color:var(--faint)}
+  .plug .pt{font-weight:800;font-size:16px;color:#fff;margin-top:auto}
+  .plug .pd{font-size:11.5px;color:var(--mut);margin-top:4px;line-height:1.45}
+  .plug.comp{background:linear-gradient(165deg,#0a2230,#08161e);border-color:var(--blue-dim);border-top-color:var(--blue)}
+  .plug.comp .pt{color:#a9def4} .plug.comp .ptag{color:var(--blue)}
+  .plug.rem{background:linear-gradient(165deg,#241206,#180c04);border-color:var(--orange-dim);border-top-color:var(--orange)}
+  .plug.rem .pt{color:#ffcfa0} .plug.rem .ptag{color:var(--orange)}
+
+  /* ── Topology strip ── */
+  .topo{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0 6px}
+  .tnode{border:1px solid var(--line);border-radius:var(--r2);padding:14px;background:var(--card);position:relative}
+  .tnode .tp{font-weight:700;font-size:13.5px;color:#fff}
+  .tnode .tport{font-family:var(--mono);font-size:11.5px;color:var(--blue);margin-top:3px}
+  .tnode .tdesc{font-size:11.5px;color:var(--mut);margin-top:6px;line-height:1.5}
+  .tnode .peri{position:absolute;top:12px;right:12px;font-size:8.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--blue)}
+  .tnode.ext{background:var(--red-bg);border-color:var(--red-dim)}
+  .tnode.ext .tport{color:var(--red)} .tnode.ext .peri{color:var(--red)}
+  @media(max-width:720px){.topo{grid-template-columns:1fr 1fr}}
+
+  /* ── Orchestration figure (SVG) ── */
+  .figure{background:radial-gradient(640px 320px at 28% -10%, #0b1a24 0%, transparent 62%),var(--raise);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin:24px 0 6px;overflow-x:auto}
+  .figure svg{display:block;width:100%;min-width:820px;height:auto}
+  .caption{color:var(--faint);font-size:12.5px;text-align:center;margin:10px 0 2px}
+  .caption b{color:var(--mut)}
+  /* svg node + edge primitives */
+  .n-txt{font-family:var(--mono);font-weight:700;font-size:11px;fill:#07070b}
+  .n-lab{font-family:var(--disp);font-weight:700;font-size:12px;fill:var(--ink)}
+  .e-line{stroke:var(--edge);stroke-width:2;fill:none}
+  .e-loop{stroke:var(--orange-dim);stroke-width:2;fill:none;stroke-dasharray:5 4}
+  .e-fail{stroke:var(--red-dim);stroke-width:2;fill:none}
+  .e-box{fill:var(--card2);stroke:var(--line);stroke-width:1}
+  .e-box.gold{fill:var(--orange-bg);stroke:var(--orange-dim)}
+  .e-box.red{fill:var(--red-bg);stroke:var(--red-dim)}
+  .e-txt{font-family:var(--disp);font-weight:700;font-size:11px;fill:var(--mut)}
+  .e-txt.gold{fill:var(--orange)} .e-txt.red{fill:var(--red)}
+
+  /* node glossary */
+  .glossary{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:10px;margin:22px 0 6px}
+  .gnode{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:var(--r2);padding:12px 14px;background:var(--card)}
+  .gnode .dot{width:30px;height:30px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;font-family:var(--mono);font-size:9px;font-weight:800;color:#07070b;margin-top:1px}
+  .gnode .gt{font-weight:700;font-size:14px;color:#fff}
+  .gnode .gd{font-size:12.5px;color:var(--mut);line-height:1.5;margin-top:2px}
+
+  /* ── Dependency-injection example ── */
+  .di{display:grid;grid-template-columns:1fr 54px 1fr;align-items:stretch;margin:18px 0 6px;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .dibox{background:var(--card);padding:15px 18px}
+  .dibox.out{background:var(--raise);border-left:1px solid var(--line)}
+  .dibox .dh{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--orange);margin:0 0 9px}
+  .dibox .dh.b{color:var(--blue)}
+  .dicode{font-family:var(--mono);font-size:12px;line-height:1.75;color:var(--mut);white-space:pre-wrap;margin:0}
+  .dicode .ref{color:var(--orange);font-weight:600} .dicode .val{color:var(--green)} .dicode .key{color:var(--blue)} .dicode .cm{color:var(--faint)}
+  .diarrow{display:flex;align-items:center;justify-content:center;background:var(--bg2);color:var(--orange);font-size:22px}
+  @media(max-width:720px){.di{grid-template-columns:1fr}.diarrow{padding:8px;transform:rotate(90deg)}.dibox.out{border-left:0;border-top:1px solid var(--line)}}
+
+  /* ── §08 memory boundary wall ── */
+  .wall{display:grid;grid-template-columns:1fr 46px 1fr;align-items:stretch;margin:22px 0 8px;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .wcol{padding:16px 19px;background:var(--card)}
+  .wcol h5{margin:0 0 7px;font-size:14.5px;color:#fff;display:flex;gap:9px;align-items:center}
+  .wcol h5 .icon{stroke:var(--green)}
+  .wcol p{margin:0;font-size:13.5px;color:var(--mut);line-height:1.55}
+  .wcol.exec{background:var(--red-bg)} .wcol.exec h5{color:var(--red)} .wcol.exec h5 .icon{stroke:var(--red)}
+  .wbar{background:repeating-linear-gradient(45deg,var(--orange-dim),var(--orange-dim) 3px,#120a04 3px,#120a04 8px);display:flex;align-items:center;justify-content:center;position:relative}
+  .wbar span{position:absolute;writing-mode:vertical-rl;font-size:9px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:var(--orange);background:var(--bg);padding:8px 2px;border-radius:5px;border:1px solid var(--orange-dim)}
+  @media(max-width:720px){.wall{grid-template-columns:1fr}.wbar{height:34px}.wbar span{writing-mode:horizontal-tb}}
+
+  footer{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--mut);font-size:13.5px}
+  footer code{color:#a9def4}
+</style>
+</head>
+<body>
+<div class="bgwaves" aria-hidden="true"></div>
+<div class="bgfloat" aria-hidden="true">
+  <span class="fl" style="top:8%;left:6%;width:5px;height:5px;background:#38bdf8;box-shadow:0 0 8px #38bdf8;opacity:.5;animation:floatA 12s ease-in-out -2s infinite alternate"></span>
+  <span class="fl" style="top:15%;left:82%;width:4px;height:4px;background:#a78bfa;box-shadow:0 0 6px #a78bfa;opacity:.42;animation:floatB 14s ease-in-out -5s infinite alternate"></span>
+  <span class="fl" style="top:26%;left:40%;width:6px;height:6px;background:#7dd3fc;box-shadow:0 0 10px #7dd3fc;opacity:.5;animation:floatC 11s ease-in-out -1s infinite alternate"></span>
+  <span class="fl" style="top:34%;left:12%;width:3px;height:3px;background:#818cf8;box-shadow:0 0 5px #818cf8;opacity:.4;animation:floatD 16s ease-in-out -7s infinite alternate"></span>
+  <span class="fl" style="top:42%;left:68%;width:5px;height:5px;background:#38bdf8;box-shadow:0 0 8px #38bdf8;opacity:.46;animation:floatB 13s ease-in-out -3s infinite alternate"></span>
+  <span class="fl" style="top:50%;left:90%;width:4px;height:4px;background:#f472b6;box-shadow:0 0 6px #f472b6;opacity:.4;animation:floatA 15s ease-in-out -6s infinite alternate"></span>
+  <span class="fl" style="top:56%;left:22%;width:6px;height:6px;background:#a78bfa;box-shadow:0 0 9px #a78bfa;opacity:.48;animation:floatC 12s ease-in-out -4s infinite alternate"></span>
+  <span class="fl" style="top:63%;left:50%;width:3px;height:3px;background:#7dd3fc;box-shadow:0 0 5px #7dd3fc;opacity:.4;animation:floatD 14s ease-in-out -2s infinite alternate"></span>
+  <span class="fl" style="top:70%;left:78%;width:5px;height:5px;background:#38bdf8;box-shadow:0 0 8px #38bdf8;opacity:.46;animation:floatB 11s ease-in-out -8s infinite alternate"></span>
+  <span class="fl" style="top:76%;left:34%;width:4px;height:4px;background:#818cf8;box-shadow:0 0 6px #818cf8;opacity:.42;animation:floatA 16s ease-in-out -3s infinite alternate"></span>
+  <span class="fl" style="top:83%;left:60%;width:6px;height:6px;background:#a78bfa;box-shadow:0 0 9px #a78bfa;opacity:.48;animation:floatC 13s ease-in-out -5s infinite alternate"></span>
+  <span class="fl" style="top:88%;left:16%;width:3px;height:3px;background:#f472b6;box-shadow:0 0 5px #f472b6;opacity:.4;animation:floatD 12s ease-in-out -1s infinite alternate"></span>
+  <span class="fl" style="top:20%;left:58%;width:4px;height:4px;background:#38bdf8;box-shadow:0 0 6px #38bdf8;opacity:.42;animation:floatA 15s ease-in-out -9s infinite alternate"></span>
+  <span class="fl" style="top:46%;left:6%;width:5px;height:5px;background:#7dd3fc;box-shadow:0 0 8px #7dd3fc;opacity:.46;animation:floatC 14s ease-in-out -4s infinite alternate"></span>
+  <span class="fl" style="top:66%;left:44%;width:3px;height:3px;background:#818cf8;box-shadow:0 0 5px #818cf8;opacity:.4;animation:floatB 13s ease-in-out -6s infinite alternate"></span>
+  <span class="fl" style="top:90%;left:88%;width:5px;height:5px;background:#a78bfa;box-shadow:0 0 8px #a78bfa;opacity:.46;animation:floatD 12s ease-in-out -2s infinite alternate"></span>
+</div>
+<div class="wrap">
+
+  <header class="hero">
+    <div style="display:flex;align-items:center;gap:13px;margin:0 0 18px">
+      <svg viewBox="0 11 100 100" width="52" height="52" fill="none" stroke="#818cf8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Kaiju logo" style="display:block;flex:none">
+        <g>
+          <g transform="translate(50,44) rotate(180)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+          <g transform="translate(29,57) rotate(90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+          <g transform="translate(71,57) rotate(-90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+          <g transform="translate(50,68)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+          <g transform="translate(50,79)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+        </g>
+        <line x1="42" y1="52" x2="42" y2="60" stroke="#f472b6" stroke-width="2.5"/>
+        <line x1="58" y1="52" x2="58" y2="60" stroke="#f472b6" stroke-width="2.5"/>
+      </svg>
+      <div class="eyebrow" style="margin:0">Kaiju · Architecture</div>
+    </div>
+    <h1>An executive kernel,<br><span class="accent">for secure execution.</span></h1>
+    <p class="lede"><b>Kaiju is not a general assistant.</b> It is designed to run alongside the operating system, interfacing directly with core system functions to carry out administrative tasks and operational workflows.</p>
+    <p class="lede" style="margin-top:14px">Every capability is exposed through <b>securely gated tools</b>. Actions are not executed implicitly: each request is interpreted for intent, scoped to the minimum required access, and then passed through explicit controls before it runs. This ensures that operations are <b>traceable, constrained, and verifiable</b> at every step.</p>
+    <p class="lede" style="margin-top:14px">Built in <b>Go</b> with a deliberately small dependency surface, Kaiju is designed to be <b>predictable, auditable, and reliable</b> in environments where correctness matters.</p>
+    <p class="lede" style="margin-top:14px">It does not sit above the system as a helper. It operates alongside it, as a <b>controlled execution layer for real work</b>.</p>
+  </header>
+
+  <div class="invariants">
+    <div class="inv">
+      <div class="rule"><code>impact ≤ min(intent, clearance, scope)</code></div>
+      <div class="how">The one rule every side-effecting action must pass before it runs — the tool's impact can never exceed what the request asked for, what the caller is trusted for, or what the scope allows.</div>
+    </div>
+    <div class="inv">
+      <div class="rule">Every decision is audited — allow or deny</div>
+      <div class="how">A blocked action is written to the log and never runs; an allowed one is written with its outcome. There is no unrecorded action.</div>
+    </div>
+    <div class="inv">
+      <div class="rule">No ambient data between steps</div>
+      <div class="how">A step reads a prior step's output only through an explicit <code>${step.N}</code> edge. Nothing leaks in implicitly — the data path is the declared graph.</div>
+    </div>
+    <div class="inv">
+      <div class="rule">Small core, heavy things isolated</div>
+      <div class="how">One static Go binary. PDF parsing and the JavaScript-rendering web reader are build-tag plugins or an out-of-process host, so the default binary links neither their code nor their dependencies.</div>
+    </div>
+  </div>
+  <p class="note">These four hold for <b>every</b> request — there is no fast path that skips the gate, the audit, or the edge model. They are enforced in the core execution path, not by convention.</p>
+
+  <div class="contents-head">Contents</div>
+  <nav class="contents">
+    <a class="centry" href="#life"><span class="cnum">01</span><span><span class="ctit">Life of a request</span><span class="cdesc">One request, from arrival to answer</span></span></a>
+    <a class="centry" href="#dag"><span class="cnum">02</span><span><span class="ctit">Graphed execution</span><span class="cdesc">A loop of per-plan DAGs, every node</span></span></a>
+    <a class="centry" href="#di"><span class="cnum">03</span><span><span class="ctit">Dependency injection</span><span class="cdesc">How <code>${step.N}</code> edges carry data</span></span></a>
+    <a class="centry" href="#igx"><span class="cnum">04</span><span><span class="ctit">Intent-Gate Execution</span><span class="cdesc">impact ≤ min(intent, clearance, scope)</span></span></a>
+    <a class="centry" href="#tools"><span class="cnum">05</span><span><span class="ctit">Tools &amp; the registry</span><span class="cdesc">The built-in catalogue, ranked by impact</span></span></a>
+    <a class="centry" href="#plugins"><span class="cnum">06</span><span><span class="ctit">Plugins</span><span class="cdesc">Compiled in-process, or a supervised host</span></span></a>
+    <a class="centry" href="#routing"><span class="cnum">07</span><span><span class="ctit">Model routing</span><span class="cdesc">Heavy · light · answer · vision lanes</span></span></a>
+    <a class="centry" href="#memory"><span class="cnum">08</span><span><span class="ctit">Memory &amp; sessions</span><span class="cdesc">The full memory structure, walled off</span></span></a>
+    <a class="centry" href="#lifecycle"><span class="cnum">09</span><span><span class="ctit">Run lifecycle</span><span class="cdesc">Stop, interject, preempt, reconcile</span></span></a>
+    <a class="centry" href="#topology"><span class="cnum">10</span><span><span class="ctit">What runs where</span><span class="cdesc">The process topology &amp; ports</span></span></a>
+  </nav>
+
+  <!-- ═══ 01 Life of a request ═══ -->
+  <section id="life">
+    <div class="kick">01</div><h2>Life of a request</h2>
+    <p class="sub">Follow one request from arrival to answer. The numbered spine is the journey; each card is one stop. Nothing with a side effect runs until it clears the gate at step&nbsp;5.</p>
+    <div class="spine">
+      <div class="snode"><div class="scard op"><div class="sk">Caller</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg> Request arrives</div><div class="sp">A query or alert reaches the single gateway on <code>:8090</code> over an authenticated session. A JWT identifies the principal and carries its <b>tool allowlist</b> and an <b>intent ceiling</b> — deny by default: a tool absent from the scope is invisible.</div></div><div class="snum">1</div></div>
+      <div class="snode"><div class="scard"><div class="sk">Preflight</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Classify &amp; scope</div><div class="sp">One light-model call decides <b>chat</b>, <b>meta</b>, or <b>investigate</b>. Chat short-circuits to a direct reply. Investigate also picks the few relevant guidance skills (capped) and the intent the plan will need.</div></div><div class="snum">2</div></div>
+      <div class="snode"><div class="scard agent"><div class="sk">Executive</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="8.5" y="14" width="7" height="7" rx="1"/><path d="M6.5 10v2.5h11V10M12 12.5V14"/></svg> Plan the DAG</div><div class="sp">The executive makes <b>one</b> call to emit a plan: a DAG of tool steps, each step wired to earlier ones by <code>${step.N}</code> references. Broken wiring — a self-reference, a missing producer — is rejected and re-planned before anything runs. <a href="#dag">See §02.</a></div></div><div class="snum">3</div></div>
+      <div class="snode"><div class="scard"><div class="sk">Scheduler</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H13a2 2 0 0 1 2 2v2M8.5 18H13a2 2 0 0 0 2-2v-2"/></svg> Fire node batches</div><div class="sp">Every step whose dependencies are done fires at once, as its own goroutine. Independent steps run concurrently; a step's typed output feeds its dependents through the <code>${step}</code> wiring. This is the parallelism spine.</div></div><div class="snum">4</div></div>
+      <div class="snode"><div class="scard gate"><div class="sk">IGX gate</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 8 11 8 11s8-6 8-11V5z"/><path d="M9 12l2 2 4-4"/></svg> Gate every action</div><div class="sp">Before a tool runs, the triad gate checks <b>impact ≤ min(intent, clearance, scope)</b>. A read-only step (impact&nbsp;0) always passes; anything that writes, kills, or controls must clear on all three. A block is audited, never silent. <a href="#igx">See §04.</a></div></div><div class="snum">5</div></div>
+      <div class="snode"><div class="scard"><div class="sk">Execute</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M12 19h8"/></svg> Run the tool</div><div class="sp">The tool runs — <code>bash</code>, <code>file_*</code>, <code>web_*</code>, <code>compute</code>, <code>service</code>, or a plugin — sandboxed to the workspace. Its result is a typed envelope (ok / empty / error), and <code>empty</code> is first-class, so absence is never mistaken for content.</div></div><div class="snum">6</div></div>
+      <div class="snode"><div class="scard agent"><div class="sk">Reflection</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg> Continue, replan, conclude</div><div class="sp">After each batch a reflector decides. <b>Replan</b> grows the graph to repair a failure (via a root-cause debugger) or to expand the search. A conclusion cannot fire while a structural precondition is unmet — e.g. concluding without reading the sources it found.</div></div><div class="snum">7</div></div>
+      <div class="snode"><div class="scard"><div class="sk">Aggregate</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg> Synthesize the answer</div><div class="sp">The aggregator streams a final answer built <b>only</b> on what was gathered. "Edge" reframes make gaps explicit — failed or empty steps, the exact URLs a search returned — so it acknowledges absence instead of fabricating to fill the shape of the request.</div></div><div class="snum">8</div></div>
+      <div class="snode"><div class="scard op"><div class="sk">Return</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v3"/></svg> Stream &amp; record</div><div class="sp">The answer streams back token-by-token over SSE, filtered per-principal so one caller never sees another's events. The run is recorded, and its full DAG trace is snapshotted server-side for the frontend.</div></div><div class="snum">9</div></div>
+      <div class="snode"><div class="scard gate"><div class="sk">Audit</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg> Audit the decisions</div><div class="sp">Along the way every gate decision was written to the audit log: the tool, its impact, the intent and clearance in force, and allow or block. That trail — not the model's word — is the record of what the system was permitted to do.</div></div><div class="snum">10</div></div>
+    </div>
+    <p class="note">This is the interactive path, end to end, and it runs today. The same engine also serves a planner-less <b>chat</b> lane (a direct reply, no tools) and a <b>ReAct</b> loop, selected per request. The rest of this document opens up each stage: the DAG engine (§02), the gate (§03), the tools (§04), and the plugin, routing, memory, and lifecycle machinery around them.</p>
+  </section>
+
+  <!-- ═══ 02 The DAG engine ═══ -->
+  <section id="dag">
+    <div class="kick">02</div><h2>Graphed execution</h2>
+    <p class="sub">The run as a whole is a <b>loop</b>, not one acyclic graph — reflection can replan, and a repair cycle can graft new work, so execution comes back around. But <b>within each planned execution</b> it is a <b>directed acyclic graph</b>: typed nodes whose edges are data dependencies, run the way a build system runs a Makefile — everything that can run in parallel does, and each node waits only for the outputs it actually needs. Below is the whole orchestration: <b>circles are nodes</b>, <b>lines are edges</b>, and every node type that can appear in a run.</p>
+
+    <div class="figure">
+      <svg viewBox="0 -40 940 540" role="img" aria-label="Kaiju orchestration flow">
+        <defs>
+          <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#2b2b34"/></marker>
+          <marker id="ahg" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#9a4a12"/></marker>
+          <marker id="ahr" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#7f2222"/></marker>
+        </defs>
+
+        <!-- batch container -->
+        <rect x="350" y="24" width="100" height="172" rx="12" fill="#0d0d11" stroke="#2b2b34" stroke-dasharray="4 4"/>
+        <text x="400" y="16" text-anchor="middle" class="e-txt" fill="#8a8a98">batch · parallel</text>
+
+        <!-- ── edges ── -->
+        <!-- pre → exe -->
+        <line class="e-line" x1="86" y1="88" x2="175" y2="88" marker-end="url(#ah)"/>
+        <g><rect class="e-box" x="102" y="66" width="60" height="18" rx="9"/><text class="e-txt" x="132" y="79" text-anchor="middle">classify</text></g>
+        <!-- exe → batch -->
+        <line class="e-line" x1="226" y1="90" x2="348" y2="104" marker-end="url(#ah)"/>
+        <g><rect class="e-box gold" x="250" y="82" width="70" height="18" rx="9"/><text class="e-txt gold" x="285" y="95" text-anchor="middle">plan → DAG</text></g>
+        <!-- DI edge within/across the batch: t1 → t2 -->
+        <path class="e-line" d="M382 74 C 352 100 352 140 382 164" marker-end="url(#ahg)" stroke="#9a4a12"/>
+        <g><rect class="e-box gold" x="300" y="103" width="66" height="18" rx="9"/><text class="e-txt gold" x="333" y="116" text-anchor="middle">${step}·DI</text></g>
+        <!-- batch → rfl -->
+        <line class="e-line" x1="452" y1="110" x2="573" y2="110" marker-end="url(#ah)"/>
+        <g><rect class="e-box" x="486" y="88" width="52" height="18" rx="9"/><text class="e-txt" x="512" y="101" text-anchor="middle">batch</text></g>
+        <!-- rfl → exe : replan loop (arc over the top, clearing the batch) -->
+        <path class="e-loop" d="M598 84 C 560 -48 236 -48 200 60" marker-end="url(#ahg)"/>
+        <g><rect class="e-box gold" x="368" y="-27" width="60" height="18" rx="9"/><text class="e-txt gold" x="398" y="-14" text-anchor="middle">replan</text></g>
+        <!-- rfl → agg : conclude -->
+        <line class="e-line" x1="600" y1="136" x2="600" y2="292" marker-end="url(#ah)"/>
+        <g><rect class="e-box gold" x="612" y="196" width="66" height="18" rx="9"/><text class="e-txt gold" x="645" y="209" text-anchor="middle">conclude</text></g>
+        <!-- agg → answer -->
+        <line class="e-line" x1="626" y1="318" x2="742" y2="318" marker-end="url(#ah)"/>
+        <g><rect class="e-box" x="648" y="296" width="92" height="18" rx="9"/><text class="e-txt" x="694" y="309" text-anchor="middle">stream verdict</text></g>
+        <!-- t2 → dbg : on failure -->
+        <path class="e-fail" d="M384 178 C 350 220 330 250 312 278" marker-end="url(#ahr)"/>
+        <g><rect class="e-box red" x="300" y="222" width="70" height="18" rx="9"/><text class="e-txt red" x="335" y="235" text-anchor="middle">on failure</text></g>
+        <!-- dbg → hol -->
+        <line class="e-line" x1="300" y1="324" x2="300" y2="384" marker-end="url(#ah)"/>
+        <g><rect class="e-box" x="312" y="345" width="76" height="18" rx="9"/><text class="e-txt" x="350" y="358" text-anchor="middle">root cause</text></g>
+        <!-- hol → mpl -->
+        <line class="e-line" x1="324" y1="404" x2="452" y2="398" marker-end="url(#ah)"/>
+        <g><rect class="e-box" x="356" y="378" width="70" height="18" rx="9"/><text class="e-txt" x="391" y="391" text-anchor="middle">diagnosis</text></g>
+        <!-- mpl → batch : graft fix (arc back up) -->
+        <path class="e-loop" d="M482 378 C 478 300 440 236 406 198" marker-end="url(#ahg)"/>
+        <g><rect class="e-box gold" x="450" y="286" width="66" height="18" rx="9"/><text class="e-txt gold" x="483" y="299" text-anchor="middle">graft fix</text></g>
+        <!-- obs → rfl -->
+        <line class="e-line" x1="762" y1="66" x2="620" y2="100" marker-end="url(#ah)"/>
+        <!-- inj → rfl -->
+        <line class="e-line" x1="862" y1="66" x2="626" y2="106" marker-end="url(#ah)"/>
+        <g><rect class="e-box" x="676" y="60" width="58" height="18" rx="9"/><text class="e-txt" x="705" y="73" text-anchor="middle">steer</text></g>
+
+        <!-- ── nodes ── -->
+        <!-- pre -->
+        <circle cx="60" cy="88" r="23" fill="#22c55e" stroke="#166534" stroke-width="2"/><text class="n-txt" x="60" y="92" text-anchor="middle">PRE</text><text class="n-lab" x="60" y="128" text-anchor="middle">preflight</text>
+        <!-- exe -->
+        <circle cx="200" cy="88" r="23" fill="#38bdf8" stroke="#1a6f97" stroke-width="2"/><text class="n-txt" x="200" y="92" text-anchor="middle">EXE</text><text class="n-lab" x="200" y="128" text-anchor="middle">executive</text>
+        <!-- batch: t1, cmp, t2 -->
+        <circle cx="400" cy="55" r="21" fill="#8a8a98" stroke="#4a4a54" stroke-width="2"/><text class="n-txt" x="400" y="59" text-anchor="middle">TOOL</text>
+        <circle cx="400" cy="110" r="21" fill="#60a5fa" stroke="#2a5a9a" stroke-width="2"/><text class="n-txt" x="400" y="114" text-anchor="middle">CMP</text>
+        <circle cx="400" cy="165" r="21" fill="#8a8a98" stroke="#4a4a54" stroke-width="2"/><text class="n-txt" x="400" y="169" text-anchor="middle">TOOL</text>
+        <!-- rfl -->
+        <circle cx="600" cy="110" r="23" fill="#f97316" stroke="#9a4a12" stroke-width="2"/><text class="n-txt" x="600" y="114" text-anchor="middle">RFL</text><text class="n-lab" x="600" y="150" text-anchor="middle">reflection</text>
+        <!-- obs / inj -->
+        <circle cx="780" cy="50" r="20" fill="#eab308" stroke="#8a6a08" stroke-width="2"/><text class="n-txt" x="780" y="54" text-anchor="middle">OBS</text><text class="n-lab" x="780" y="86" text-anchor="middle" font-size="11">observer</text>
+        <circle cx="880" cy="50" r="20" fill="#eab308" stroke="#8a6a08" stroke-width="2"/><text class="n-txt" x="880" y="54" text-anchor="middle">INJ</text><text class="n-lab" x="880" y="86" text-anchor="middle" font-size="11">interject</text>
+        <!-- dbg -->
+        <circle cx="300" cy="300" r="23" fill="#ef4444" stroke="#7f2222" stroke-width="2"/><text class="n-txt" x="300" y="304" text-anchor="middle">DBG</text><text class="n-lab" x="300" y="340" text-anchor="middle">debug</text>
+        <!-- hol -->
+        <circle cx="300" cy="404" r="23" fill="#a78bfa" stroke="#4a3a80" stroke-width="2"/><text class="n-txt" x="300" y="408" text-anchor="middle">HOL</text><text class="n-lab" x="300" y="444" text-anchor="middle">holmes · RCA</text>
+        <!-- mpl -->
+        <circle cx="478" cy="398" r="23" fill="#f97316" stroke="#9a4a12" stroke-width="2"/><text class="n-txt" x="478" y="402" text-anchor="middle">MPL</text><text class="n-lab" x="478" y="438" text-anchor="middle">micro-planner</text>
+        <!-- agg -->
+        <circle cx="600" cy="318" r="23" fill="#38bdf8" stroke="#1a6f97" stroke-width="2"/><text class="n-txt" x="600" y="322" text-anchor="middle">AGG</text><text class="n-lab" x="600" y="358" text-anchor="middle">aggregator</text>
+        <!-- answer -->
+        <rect x="744" y="300" width="98" height="36" rx="10" fill="#082818" stroke="#166534" stroke-width="2"/><text class="n-lab" x="793" y="323" text-anchor="middle" fill="#22c55e" font-weight="800">answer</text>
+      </svg>
+    </div>
+    <p class="caption"><b>One run.</b> Preflight classifies, the executive plans a DAG, nodes fire in node batches wired by <code>${step}</code> dependency injection, a reflector loops (replan) or ends it (conclude), a failure detours through the debugger → Holmes → micro-planner and grafts a fix, and the aggregator streams the answer. Observer and interjection steer from the side.</p>
+
+    <h3>Every node, what it is</h3>
+    <div class="glossary">
+      <div class="gnode"><span class="dot" style="background:#22c55e">PRE</span><div><div class="gt">Preflight</div><div class="gd">One light-model call: chat / meta / investigate, the relevant skills, and the intent ceiling. Chat short-circuits; investigate proceeds.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#38bdf8">EXE</span><div><div class="gt">Executive</div><div class="gd">The planner. One heavy call emits the DAG of steps (and, on a replan, grows it). Broken <code>${step}</code> wiring is rejected before the run.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#8a8a98;color:#fff">TOOL</span><div><div class="gt">Tool</div><div class="gd">A single capability invocation — <code>bash</code>, <code>file_*</code>, <code>web_*</code>, <code>service</code>, a plugin. Gated by IGX, returns a typed envelope.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#60a5fa">CMP</span><div><div class="gt">Compute</div><div class="gd">A coder model writes a real script, kaiju runs it sandboxed, stdout flows back into the graph — for precision or a library a model can't do in its head.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#f97316">RFL</span><div><div class="gt">Reflection</div><div class="gd">After each batch (and at quiescence): continue, replan, or conclude. A diminishing-returns brake and a conclusion floor keep it honest.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#eab308">OBS</span><div><div class="gt">Observer</div><div class="gd">A lightweight watcher that can continue, inject a step, cancel, or ask for a reflection — bounded by its own budget.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#eab308">INJ</span><div><div class="gt">Interjection</div><div class="gd">A human message sent into a running query. It becomes the next reflection's focus, steering the run without restarting it.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#ef4444">DBG</span><div><div class="gt">Debug</div><div class="gd">The repair entry-point. A failure grafts a <code>debug</code> super-tool step that opens a root-cause cycle instead of blindly retrying.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#a78bfa">HOL</span><div><div class="gt">Holmes</div><div class="gd">A ReAct root-cause loop: it investigates the failure — reads logs, inspects state — and produces a diagnosis, not just a stack trace.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#f97316">MPL</span><div><div class="gt">Micro-planner</div><div class="gd">Turns the diagnosis into a concrete fix, grafts it as new nodes, and re-arms the stored validators so a fixed failure stops being re-reported.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#38bdf8">AGG</span><div><div class="gt">Aggregator</div><div class="gd">Synthesizes the final answer from the gathered evidence and streams it token-by-token. Skipped when the reflector's verdict already stands.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#f97316">ACT</span><div><div class="gt">Actuator</div><div class="gd">An optional recommended follow-up action the aggregator can surface (a suggested next step), distinct from the tools it ran.</div></div></div>
+    </div>
+
+    <h3 class="statusrow">From plan to graph</h3>
+    <p class="sub" style="margin-bottom:6px">The executive emits steps; two passes turn them into a live graph. The <code>${step.N.field}</code> references are the edges — a fetch reads the URL a prior search produced. Wiring that can't resolve is caught <b>before</b> the run, and the planner gets one correction round with the exact fault.</p>
+    <div class="cg">
+      <div class="cstep e-in"><div class="cn"><span class="b">1</span> Plan call</div><div class="cd">One heavy-model call, the <code>plan</code> tool-choice pinned so even a weak model must emit structured steps. Each step is a tool, its params, its <code>depends_on</code>, and a tag.</div><div class="cw">executive · heavy lane</div></div>
+      <div class="conn"><div class="ln"></div><div class="tip"></div><span class="cond">steps returned</span></div>
+      <div class="cstep e-gate"><div class="cn"><span class="b">2</span> Edge validation</div><div class="cd">Every <code>${step.N.field}</code> is checked against the plan and the producing tool's output schema. Three mis-wirings are rejected: a step that reads <b>its own</b> output, an <b>out-of-range</b> index, and a <b>wrong producer</b> — reading <code>results[].url</code> off a <code>web_fetch</code>, when only <code>web_search</code> makes a result list.</div><div class="cw">validatePlanEdges</div></div>
+      <div class="conn"><div class="ln"></div><div class="tip"></div><span class="cond">clean, or one re-plan with the fault</span></div>
+      <div class="cstep e-plan"><div class="cn"><span class="b">3</span> Build the graph</div><div class="cd">Steps become nodes; <code>depends_on</code> resolves to node IDs (never self-wired), and each <code>${step.N}</code> rewrites to <code>${node.&lt;id&gt;}</code> so the dispatcher can resolve it from a dependency's real output at run time.</div><div class="cw">planStepsToNodes</div></div>
+      <div class="conn"><div class="ln"></div><div class="tip"></div><span class="cond">graph ready</span></div>
+      <div class="cstep e-out"><div class="cn"><span class="b">4</span> Batches</div><div class="cd">The scheduler fires every node whose deps are terminal, as concurrent goroutines, then blocks for completions and repeats. Independent nodes share a batch; dependent ones chain. A per-tool throttle and a node/LLM/per-skill budget bound the blast radius.</div><div class="cw">scheduler loop</div></div>
+    </div>
+    <p class="note">Node types beyond plain tools: <b>compute</b> (an LLM writes and runs a real script when precision or a library is needed), <b>reflection</b> and <b>observer</b> (steer the run), and a repair pipeline — a <b>debug</b> super-tool spawns a Holmes root-cause loop, a micro-planner grafts the fix, and stored validators re-check it, so a fixed failure stops being re-reported. The plan is grown by <b>replan</b>, never rewritten from scratch.</p>
+
+    <h3>Edges — why it doesn't make things up</h3>
+    <p class="sub" style="margin-bottom:6px">An "edge" is a gated reframe on the hand-off between steps: a small amount of code collects the structural facts (which gather steps came back empty, which URLs a search actually returned), and a short LLM pass frames them so the next step treats absence as absence.</p>
+    <div class="cg">
+      <div class="cstep e-gate"><div class="cn"><span class="b">·</span> Coverage</div><div class="cd">Frames empty or failed gather steps for the aggregator, so a request whose evidence didn't materialise gets an honest "not found", not an invented answer.</div><div class="cw">coverageEdge</div></div>
+      <div class="conn"><div class="ln"></div><div class="tip"></div></div>
+      <div class="cstep e-gate"><div class="cn"><span class="b">·</span> Grounding</div><div class="cd">Lists the only URLs a real search returned, so a replan re-searches those instead of hallucinating new links to fetch.</div><div class="cw">groundingEdge</div></div>
+      <div class="conn"><div class="ln"></div><div class="tip"></div></div>
+      <div class="cstep e-gate"><div class="cn"><span class="b">·</span> Conclusion floor</div><div class="cd">Blocks a "conclude" while a structural precondition is unmet — concluding without reading the sources it found — and grafts remediation instead.</div><div class="cw">conclusionFloor</div></div>
+    </div>
+    <p class="note">Every edge is <b>gated</b>: a clean run with no gaps pays nothing. Together with the edge validation above, this is the anti-fabrication layer — the planner is kept from inventing wiring, and the aggregator from inventing evidence.</p>
+  </section>
+
+  <!-- ═══ 03 Dependency injection ═══ -->
+  <section id="di">
+    <div class="kick">03</div><h2>Dependency injection</h2>
+    <p class="sub">The edges in the graph don't just order the work — they carry <b>data</b>. A node reads an earlier node's output by reference, and the engine injects the real value at run time. This is what lets a whole plan be built before any result exists, and it is checked for soundness before a single node fires.</p>
+
+    <h3>How a reference resolves</h3>
+    <p class="sub" style="margin-bottom:6px">A param can contain <code>${step.N.field}</code> — "the <code>field</code> of step N's result". It goes through two phases:</p>
+    <div class="rows">
+      <div class="row or"><div class="rn">Plan time</div><div class="rd">Each <code>${step.N.field}</code> is rewritten to <code>${node.&lt;id&gt;.field}</code> via the step-index → node-id map, and step N is added to the node's dependencies so it can't run first. <b>validatePlanEdges</b> rejects a reference to a step that can't produce it — a self-reference, an out-of-range index, or a field the producing tool's schema never emits — and sends the planner back for one correction.</div><div class="rw">rewriteStepTemplates<br>validatePlanEdges</div></div>
+      <div class="row bl"><div class="rn">Run time</div><div class="rd">When the node is ready, the dispatcher resolves <code>${node.&lt;id&gt;.field}</code> from the dependency's <b>real, typed output</b>. A bare placeholder preserves the value's type (an object stays an object); an embedded one interpolates as text. A dependency that came back empty fails fast rather than injecting nothing.</div><div class="rw">substituteTemplates</div></div>
+    </div>
+
+    <h3>Worked example</h3>
+    <p class="sub" style="margin-bottom:6px">A search feeds a fetch. The plan names the wiring; the engine fills it in once the search returns.</p>
+    <div class="di">
+      <div class="dibox"><div class="dh b">The plan · before any run</div><pre class="dicode"><span class="cm"># step 0 — produces a results[] list</span>
+<span class="key">web_search</span>  query=<span class="val">"acme status page"</span>
+
+<span class="cm"># step 1 — reads the first result's url</span>
+<span class="key">web_fetch</span>   url=<span class="ref">${step.0.results.0.url}</span>
+           depends_on:[<span class="ref">0</span>]</pre></div>
+      <div class="diarrow">▶</div>
+      <div class="dibox out"><div class="dh">At run time · once step 0 resolves</div><pre class="dicode"><span class="cm"># step 0's typed output</span>
+step 0 → { <span class="key">results</span>: [
+    { url: <span class="val">"https://acme.io/status"</span> },
+    … ] }
+
+<span class="cm"># step 1's url, injected</span>
+url = <span class="val">"https://acme.io/status"</span></pre></div>
+    </div>
+    <p class="note"><code>web_search</code> declares a <b>results[]</b> output; <code>web_fetch</code> does not. So the plan above is valid, but the reverse — a <code>web_fetch</code> reading <code>${step.N.results.0.url}</code> off another <code>web_fetch</code> — is caught at plan time as a <b>wrong-producer</b> edge and re-planned. Sound wiring is a precondition of running, not something discovered by failing. See <a href="#dag">§02</a> for where this sits in the flow.</p>
+  </section>
+
+  <!-- ═══ 04 Intent-Gate Execution ═══ -->
+  <section id="igx">
+    <div class="kick">04</div><h2>Intent-Gate Execution</h2>
+    <p class="sub">This is the heart of kaiju's security posture, and the reason it can be trusted with a shell. Every tool call is graded by the side effect it would actually have, and that grade is checked against three independent ceilings. If any one of them sits below the action's impact, the action is refused — and the refusal is audited.</p>
+
+    <h3 class="statusrow">Impact — graded per call</h3>
+    <p class="sub" style="margin-bottom:6px">Impact is not a property of a tool, it is a property of <b>this invocation</b>. <code>bash</code> is capable of anything, but <code>bash("ls")</code> is read-only — the gate sees the real effect of the actual params, not the tool's worst case.</p>
+    <div class="ladder">
+      <div class="rung obs"><div class="rk"><svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg> Observe</div><div><div class="rv">impact 0 · always passes</div><div class="rd">Read-only. Inspect files, list processes, search and read the web, recall memory. No state changes, nothing created — never gated.</div></div></div>
+      <div class="rung aff"><div class="rk"><svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> Affect</div><div><div class="rv">impact 100 · the default working level</div><div class="rd">Reversible side effects. Write a file, run code, install a dependency, start a service, edit configuration — where real work happens.</div></div></div>
+      <div class="rung ctl"><div class="rk"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 8 11 8 11s8-6 8-11V5z"/><path d="M15 9l-6 6M9 9l6 6"/></svg> Control</div><div><div class="rv">impact 200 · requires elevation</div><div class="rd">Destructive or irreversible. Kill, force, wipe, uninstall. Reached only by <code>process_kill</code> and a destructively-classified <code>bash</code>/<code>git</code>.</div></div></div>
+    </div>
+    <p class="note">The tiers are configurable, not hardcoded — seeded from config into a database, extensible with custom ranks. The three shown (<code>observe 0</code>, <code>operate 100</code>, <code>override 200</code>) are the built-in ladder.</p>
+
+    <h3>The triad — three ceilings, all must hold</h3>
+    <div class="formula"><span class="lhs">impact</span> &nbsp;<span class="op">≤</span>&nbsp; <span class="op">min(</span> <b>intent</b><span class="op">,</span> <b>clearance</b><span class="op">,</span> <b>scope</b> <span class="op">)</span></div>
+    <div class="cols c3">
+      <div class="kv"><h4><svg class="icon" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Intent</h4><p>What the <b>plan</b> may attempt. Set at preflight from the request and capped by the caller's ceiling — a read-only question can't quietly plan a destructive step.</p><div class="kvt">preflight → capped</div></div>
+      <div class="kv"><h4><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Clearance</h4><p>The <b>node's</b> standing authority — the rank the engine itself is cleared to. An optional external endpoint can be asked per tool, and it <b>fails closed</b>: unreachable means deny.</p><div class="kvt">node rank · fail-closed</div></div>
+      <div class="kv"><h4><svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg> Scope</h4><p>The <b>caller's</b> per-tool ceiling, from the JWT and a database. <b>Deny by default</b>: a tool not in your scope isn't merely blocked — it is invisible to the planner in the first place.</p><div class="kvt">JWT + DB · deny-by-default</div></div>
+    </div>
+    <p class="note">The gate runs at <b>dispatch</b>, not planning — so it sees the real params. <code>impact 0</code> always passes; a global <b>lockdown</b> blocks everything above it at once; and every decision, allow or block, is appended to an audit log with the tool, its impact, and the three ceilings in force. Authority is never asserted by the model — it is enforced by the kernel and recorded.</p>
+  </section>
+
+  <!-- ═══ 04 Tools & the registry ═══ -->
+  <section id="tools">
+    <div class="kick">05</div><h2>Skills &amp; tools</h2>
+    <p class="sub">Everything the agent can do is one of two things: a <b>tool</b> it calls to act on the world, or a <b>skill</b> that shapes how it plans and works. Tools are capabilities; skills are guidance. Both are picked for the request and both are cheap to add.</p>
+
+    <h3 class="statusrow">Skills — guidance, not capability</h3>
+    <p class="sub" style="margin-bottom:6px">A handful of skills relevant to the request are chosen at preflight and folded into the prompts. Two kinds:</p>
+    <div class="cols">
+      <div class="kv"><h4><svg class="icon" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> Guidance skills</h4><p>Markdown <code>SKILL.md</code> playbooks. The relevant ones inject their <code>## Planning Guidance</code> / <code>## RULES</code> into the executive, and their coder/aggregator guidance where those run. A skill that declares a <b>command-dispatch</b> instead becomes a real callable tool.</p><div class="kvt">skillGuidance · hot-reloaded</div></div>
+      <div class="kv"><h4><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 18v3M16 18v3"/></svg> Capability cards</h4><p>A small set of embedded cards — <code>data_retrieval</code>, <code>general_reasoning</code>, <code>self_awareness</code>, <code>system_operations</code> — with named sections the executive, aggregator, and compute pull from. Additive, always available.</p><div class="kvt">capabilities · embedded</div></div>
+    </div>
+    <p class="note">Selection happens once, at preflight: the query is matched against the union of cards + skills, de-duplicated, and capped, and the choice rides on the graph so concurrent runs never clobber each other. Full detail in the <a href="skills.md">skills reference</a>.</p>
+
+    <h3>Tools — the catalogue</h3>
+    <p class="sub" style="margin-bottom:6px">Every capability is a <code>Tool</code> with one job and a <b>per-invocation</b> impact — <code>bash("ls")</code> is graded 0 even though <code>bash</code> can reach Control. ~30 built-ins live in one in-process registry, each returning a typed <b>envelope</b> (<code>ok</code> / <code>empty</code> / <code>error</code> — <code>empty</code> is first-class, so "found nothing" is a real outcome). To the planner, a compiled tool and one a plugin added at runtime are indistinguishable.</p>
+    <div class="rows">
+      <div class="row gr"><div class="rn">Observe · 0</div><div class="rd"><code>file_read</code> · <code>file_list</code> · <code>web_search</code> · <code>web_fetch</code> · <code>web_research</code> · <code>office_extract</code> · <code>net_info</code> · <code>disk_usage</code> · <code>env_list</code> · <code>process_list</code> · <code>sysinfo</code> · <code>image_read</code> · <code>memory_*</code> · <code>plugin_list</code></div><div class="rw">read-only<br>never gated</div></div>
+      <div class="row or"><div class="rn">Affect · 100</div><div class="rd"><code>file_write</code> · <code>compute</code> (write &amp; run a real script) · <code>edit_file</code> · <code>archive</code> · <code>service</code> · <code>clipboard</code> · <code>plugin_enable</code> · <code>plugin_option</code> · <code>debug</code></div><div class="rw">reversible<br>gated</div></div>
+      <div class="row re"><div class="rn">Control · 200</div><div class="rd"><code>process_kill</code>, and any <code>bash</code> / <code>git</code> whose command is classified destructive (a workspace-scoped destructive command downgrades to Affect)</div><div class="rw">elevation<br>required</div></div>
+    </div>
+    <p class="note"><b>compute</b> is the deep one: when precision or a library is needed, an LLM writes a real program, kaiju runs it sandboxed, and its stdout flows back into the graph — so the agent is not limited to what a language model can do in its head. Tools may also declare an <b>output schema</b>, which is what makes the <code>${step.N.field}</code> wiring (<a href="#di">§03</a>) checkable before a run, and a <b>display</b> hint, which pushes a result panel to the frontend. Full catalogue in the <a href="tools.md">tools reference</a>.</p>
+  </section>
+
+  <!-- ═══ 05 Plugins ═══ -->
+  <section id="plugins">
+    <div class="kick">06</div><h2>Plugins</h2>
+    <p class="sub">The core stays small on purpose. Anything heavy — a PDF parser, a headless browser — is opt-in and lives outside the default binary. There are two ways in, and both land in the same tool registry, so the planner never has to care which is which.</p>
+    <div class="plugs">
+      <div class="plug comp"><span class="ptag">compiled · in-process</span><div class="pt">pdf</div><div class="pd">a Go build-tag plugin; adds <code>pdf_extract</code> and teaches <code>web_fetch</code> to read PDFs</div></div>
+      <div class="plug rem"><span class="ptag">remote · out-of-process</span><div class="pt">webreader</div><div class="pd">a Python host over REST; adds <code>web_read</code>, rendering JavaScript pages when a plain fetch is thin</div></div>
+      <div class="plug"><span class="ptag">built-in</span><div class="pt">office_extract</div><div class="pd">pure-stdlib .docx/.pptx/.xlsx — no dependency, so it needs no plugin at all</div></div>
+    </div>
+    <div class="cols">
+      <div class="kv"><h4><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg> Compiled plugins</h4><p>Registered from an <code>init()</code> behind a build tag, so the default binary links neither the plugin nor its heavy library. It contributes a tool and/or a <b>seam</b> that enriches <code>web_fetch</code> — the pdf plugin does both.</p><div class="kvt">-tags plugin_pdf</div></div>
+      <div class="kv"><h4><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18"/></svg> Remote bridge</h4><p>A generic REST bridge to an out-of-process host. It reads the host's manifest and synthesizes one kaiju tool per advertised tool — so adding a plugin to the host needs <b>no kaiju rebuild</b>. A stalled host can never hang a run: every call is capped at 60s, then <code>web_fetch</code> falls back to its built-in reader.</p><div class="kvt">-tags plugin_remote</div></div>
+    </div>
+
+    <h3>The host: one gateway, per-service queues, supervised</h3>
+    <p class="sub" style="margin-bottom:6px">The out-of-process host is one process that fronts every remote plugin. Plugins load once and stay <b>warm</b> — a browser pool, a loaded model — across calls. Concurrency is enforced where the state lives:</p>
+    <div class="rows">
+      <div class="row bl"><div class="rn">Per-service queue</div><div class="rd">Each plugin has its own concurrency limit (webreader serves <b>4</b> reads at once). All of a plugin's calls share one queue; different plugins have independent queues, so a slow render never blocks another service. Overflow waits for a slot.</div><div class="rw">host · semaphore/plugin</div></div>
+      <div class="row or"><div class="rn">Supervised</div><div class="rd">Kaiju runs the host through its <b>own</b> service manager, not an external supervisor — tracked, health-checked every 10s, auto-restarted on crash. Before every spawn the port is cleared, so exactly <b>one</b> instance can ever bind; port-conflict skip and fast-crash backoff stop restart loops.</div><div class="rw">service manager</div></div>
+      <div class="row gr"><div class="rn">Self-healing</div><div class="rd">Enabling verifies <b>real tools</b> registered, not a stale flag — so a host that died after boot heals instead of lying. On startup, any configured remote capability is reconnected and, if down, relaunched. The reader survives a kaiju restart and a host crash without a human.</div><div class="rw">enable · boot self-heal</div></div>
+    </div>
+  </section>
+
+  <!-- ═══ 06 Model routing ═══ -->
+  <section id="routing">
+    <div class="kick">07</div><h2>Model routing</h2>
+    <p class="sub">One request touches several models, each on the job it does best. A request carries a model <b>selection</b>, never a key — keys live only in config — and an unselected lane falls through to the engine default, so routing is invisible until you use it.</p>
+    <div class="rows">
+      <div class="row vi"><div class="rn">Heavy</div><div class="rd">The reasoning lane: the executive planner, the aggregator, validators, root-cause analysis. Where thinking happens.</div><div class="rw">a.llm</div></div>
+      <div class="row bl"><div class="rn">Light</div><div class="rd">The cheap lane: classify, reflect, preflight, observe, compact. Small, fast, and frequent.</div><div class="rw">a.executor</div></div>
+      <div class="row or"><div class="rn">Answer</div><div class="rd">Kept separate so a user's <b>thinking</b> answer-model writes the final reply without ever being handed the planner's forced tool calls.</div><div class="rw">answer lane</div></div>
+      <div class="row gr"><div class="rn">Vision</div><div class="rd">A direct image lane, plus an <code>image_read</code> tool; a request's images attach only to a model that can actually see.</div><div class="rw">vision lane</div></div>
+    </div>
+    <p class="note">Providers speak two wire protocols — OpenAI-compatible (which covers OpenRouter and any self-hosted endpoint) and Anthropic. An org or user chooses which models are enabled and the defaults per lane; a user may override the reasoning model only. Every non-streamed call passes one token-accounting chokepoint, so spend is metered. A raw <code>/oneshot</code> completion bypasses the whole agent — the passthrough a compliance host uses for its own model stage.</p>
+  </section>
+
+  <!-- ═══ 07 Memory & sessions ═══ -->
+  <section id="memory">
+    <div class="kick">08</div><h2>Memory &amp; sessions</h2>
+    <p class="sub">Memory is deliberately walled off. It is reachable <b>only at the chat boundary</b> — where a human is talking to the system — and <b>never</b> from inside the execution layer. A tool result cannot read or write memory, which shuts the door on prompt-injection carried in gathered content. This is the single most important property of the subsystem, so the wall is drawn first.</p>
+
+    <div class="wall">
+      <div class="wcol"><h5><svg class="icon" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Chat boundary</h5><p>Where a human message enters and an answer leaves. History and long-term memory are read, written, and folded into the system prompt for the turn <b>at this boundary — and nowhere else.</b></p></div>
+      <div class="wbar"><span>no memory access</span></div>
+      <div class="wcol exec"><h5><svg class="icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg> Execution layer</h5><p>The DAG, the tools, the models reasoning over gathered text. It <b>cannot</b> reach your conversation history or long-term memory — so a malicious web page or uploaded file can neither read your history nor inject a false long-term "memory" into a later turn.</p></div>
+    </div>
+
+    <h3>Two distinct stores</h3>
+    <p class="sub" style="margin-bottom:6px">"Memory" is really two separate stores — easy to conflate, so they're worth separating:</p>
+    <div class="cols">
+      <div class="kv"><h4><svg class="icon" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg> Conversation &amp; long-term · SQLite</h4><p>The <b>memory manager</b>: sessions and messages, plus a long-term store of <b>semantic / episodic / procedural</b> entries namespaced per user. Owner-scoped, loaded and injected at the chat boundary.</p><div class="kvt">internal/memory + internal/db</div></div>
+      <div class="kv"><h4><svg class="icon" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7 7 5 5 0 0 1 7-7zm0 0L15 8m0 0l3 3 3-3-3-3"/></svg> Agent key-value · JSON</h4><p>A <b>separate</b> flat JSON store that the <code>memory_store</code> / <code>memory_recall</code> / <code>memory_search</code> <i>tools</i> read and write — the one sanctioned way the agent itself touches memory, distinct from the DB manager above.</p><div class="kvt">internal/agent · memory.json</div></div>
+    </div>
+
+    <h3>The memory types</h3>
+    <p class="sub" style="margin-bottom:6px">Within those stores are five kinds, each scoped and used differently. Definitions, namespaces, and how facts are extracted are in the <a href="memory.md">memory reference</a>.</p>
+    <div class="rows">
+      <div class="row bl"><div class="rn">Short-term</div><div class="rd">Per-session <b>conversation history</b> — every message in the thread.</div><div class="rw">sessions + messages</div></div>
+      <div class="row gr"><div class="rn">Semantic</div><div class="rd">Per-user, cross-session <b>facts</b> — "prefers Python", "prod DB is <code>db.internal:5432</code>".</div><div class="rw">memories · {user}/semantic</div></div>
+      <div class="row gr"><div class="rn">Episodic</div><div class="rd">Per-user, cross-session <b>experiences</b> — "the last migration took 45 min", "that deploy broke".</div><div class="rw">memories · {user}/episodic</div></div>
+      <div class="row or"><div class="rn">Procedural</div><div class="rd">Per-user self-modifying instructions — the namespace is reserved, not yet used.</div><div class="rw">memories · {user}/procedural</div></div>
+      <div class="row vi"><div class="rn">Scratch (KV)</div><div class="rd">A flat key/value pad the agent jots to and recalls via the <code>memory_*</code> tools during a run — the separate store above.</div><div class="rw">agent · memory.json</div></div>
+    </div>
+
+    <h3>How history is served</h3>
+    <p class="sub" style="margin-bottom:6px">The same conversation is presented differently depending on who's asking, and trimmed so a long session stays affordable.</p>
+    <div class="rows">
+      <div class="row bl"><div class="rn">Planner</div><div class="rd">Gets a <b>truncated</b> history — long assistant and user turns clipped head-and-tail — so the plan has context without drowning the window.</div><div class="rw">LoadHistory</div></div>
+      <div class="row gr"><div class="rn">Chat lane</div><div class="rd">Gets the recent turns <b>verbatim</b>, untruncated, because a conversational reply needs the exact words.</div><div class="rw">LoadChatHistory</div></div>
+      <div class="row or"><div class="rn">Long-term</div><div class="rd">A bounded set (~20 semantic + 10 episodic) is folded into the system prompt as a "Your Memory" block — at the chat boundary only.</div><div class="rw">InjectLongTermContext</div></div>
+      <div class="row vi"><div class="rn">Compaction</div><div class="rd">Past a threshold (~30 turns), all but the last ~10 are summarized by the model and replaced with a "[Conversation summary]" so the window stays bounded.</div><div class="rw">Compact</div></div>
+    </div>
+    <p class="note">Two safety properties fall out. <b>Tenant isolation:</b> the memory manager is constructed per-request and scoped to the caller, so one principal's history and memory are never visible to another. <b>Restart resilience:</b> a run killed mid-flight leaves a question with no answer, which the UI reads as "still running" forever — so on boot, kaiju reconciles those dangling turns with a terminal note (<a href="#lifecycle">§09</a>). Full detail in the <a href="memory.md">memory reference</a>.</p>
+  </section>
+
+  <!-- ═══ 08 Run lifecycle ═══ -->
+  <section id="lifecycle">
+    <div class="kick">09</div><h2>Run lifecycle</h2>
+    <p class="sub">A long run is not a black box. It can be steered while it runs, stopped for real, or quietly superseded by a newer message — each with a distinct, deliberate mechanism.</p>
+    <div class="rows">
+      <div class="row or"><div class="rn">Stop</div><div class="rd">The Stop button cancels the <b>job's context</b>, which unwinds the DAG — pending nodes drop, the aggregator is skipped. This is a real teardown: a client simply disconnecting only stops the caller waiting, while the worker keeps running. Stop cancels the work itself.</div><div class="rw">/stop → job.cancel()</div></div>
+      <div class="row bl"><div class="rn">Interject</div><div class="rd">A message sent <b>into</b> a running query. It becomes the primary focus of the next reflection — steering the run without restarting it, and never spawning a second query.</div><div class="rw">/interject</div></div>
+      <div class="row vi"><div class="rn">Preempt</div><div class="rd">A newer message for a session whose job is still <b>queued</b> supersedes the old one — newest wins. If that session's job is already <b>running</b>, the newer message is routed as an interject instead, so a running query is never abandoned mid-flight.</div><div class="rw">scheduler</div></div>
+      <div class="row gr"><div class="rn">Reconcile</div><div class="rd">A run killed by a process restart gives no cleanup code a chance to run. On the next boot, kaiju closes out any turn left dangling, so a restart never leaves a session's progress bar spinning forever.</div><div class="rw">boot</div></div>
+    </div>
+  </section>
+
+  <!-- ═══ 09 What runs where ═══ -->
+  <section id="topology">
+    <div class="kick">10</div><h2>What runs where</h2>
+    <p class="sub">A small footprint. The engine is one Go process; the only other moving part is the optional plugin host, which kaiju supervises itself. Model providers are the only thing outside the perimeter, and they hold no keys of their own.</p>
+    <div class="topo">
+      <div class="tnode"><span class="peri">core</span><div class="tp">Kaiju</div><div class="tport">:8090 · Go</div><div class="tdesc">The single gateway and the whole engine — auth, the DAG scheduler, the IGX gate, the tools, memory, SSE, and the embedded web UI.</div></div>
+      <div class="tnode"><span class="peri">supervised</span><div class="tp">Plugin host</div><div class="tport">:8092 · Python</div><div class="tdesc">The optional out-of-process host (webreader). Localhost-only, warm, per-service queued, and kept alive by kaiju's own service manager.</div></div>
+      <div class="tnode"><span class="peri">embedded</span><div class="tp">SQLite</div><div class="tport">file · WAL</div><div class="tdesc">Sessions, messages, memory, the audit log, intents and scopes — one embedded database file, no server.</div></div>
+      <div class="tnode ext"><span class="peri">external</span><div class="tp">Providers</div><div class="tport">OpenAI · Anthropic · …</div><div class="tdesc">The models. Keys are held by kaiju, never the browser; a request carries only a selection.</div></div>
+    </div>
+    <p class="note">Everything with a side effect is inside the core process and passes the gate; the audit log is the record of what it was permitted to do. Kaiju runs standalone, or embedded as the reasoning engine behind a compliance host such as <b>makeen</b>, which fronts it with identity, redaction, and oversight. Either way the contract is the same: <b>identity and control on the outside, gated execution on the inside.</b></p>
+  </section>
+
+  <footer>
+    <b style="color:var(--ink)">Kaiju</b> · executive kernel · <code>github.com/Compdeep/kaiju</code><br>
+    Written in Go, with a small dependency surface. Intent-Gate Execution on every action. Built for system administration and enterprise workflows — to run critical work, not just assist with it.
+  </footer>
+
+</div>
+<script>
+// Subtle scroll parallax for the ambient background. Drifts the whole ribbon
+// field by a BOUNDED amount (based on scroll progress 0→1, not raw scrollY) so
+// it never over-travels on a long page. Composes with the per-path sweep
+// animations — the ribbons keep sweeping while the field gently shifts.
+(function(){
+  var fl = document.querySelector('.bgfloat');
+  if(!fl) return;
+  var ticking = false;
+  function update(){
+    var max = document.documentElement.scrollHeight - window.innerHeight;
+    var p = max > 0 ? window.scrollY / max : 0;      // 0 at top → 1 at bottom
+    fl.style.transform = 'translate3d(' + (p*-28).toFixed(1) + 'px,' + (p*-96).toFixed(1) + 'px,0)';
+    ticking = false;
+  }
+  window.addEventListener('scroll', function(){
+    if(!ticking){ requestAnimationFrame(update); ticking = true; }
+  }, {passive:true});
+  update();
+})();
+</script>
+</body>
+</html>

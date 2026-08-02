@@ -180,6 +180,14 @@ func (t *remoteTool) Impact(map[string]any) int {
 	}
 }
 
+// invokeHTTPClient bounds every tool invocation on a plugin host at 60s. A host
+// that accepts the connection but then HANGS (a stuck render, a crash-looping
+// process, a wedged worker) must never hang a web_fetch or the whole run — the
+// call fails fast and web_fetch falls back to its built-in reader. This is a hard
+// per-request ceiling on top of the caller's ctx, whichever fires first. (The
+// manifest/health calls elsewhere use a shorter context timeout.)
+var invokeHTTPClient = &http.Client{Timeout: 60 * time.Second}
+
 func (t *remoteTool) Execute(ctx context.Context, params map[string]any) (string, error) {
 	body, _ := json.Marshal(map[string]any{"params": params})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.base+"/invoke/"+t.spec.Name, bytes.NewReader(body))
@@ -190,9 +198,10 @@ func (t *remoteTool) Execute(ctx context.Context, params map[string]any) (string
 	if t.token != "" {
 		req.Header.Set("Authorization", "Bearer "+t.token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := invokeHTTPClient.Do(req)
 	if err != nil {
-		// A down host is a tool failure, not a kaiju crash — report it as one.
+		// A down/stalled host is a tool failure, not a kaiju crash — report it as
+		// one (a timeout here is exactly the "hung reader" case, now capped at 60s).
 		return agenttools.ToolFail(t.spec.Name, "plugin host unreachable: "+err.Error(), nil).JSON(), nil
 	}
 	defer resp.Body.Close()

@@ -14,7 +14,6 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/prompt"
-	"github.com/Compdeep/kaiju/internal/agent/tools"
 )
 
 // ContextGate is the SINGLETON context API for an investigation. There is
@@ -1274,22 +1273,7 @@ func (s *toolIndexSource) Load(g *Graph, t *Trigger, a *Agent, params map[string
 	if len(names) == 0 {
 		return "", nil
 	}
-	var sb strings.Builder
-	sb.WriteString("## Tools (* = required param)\n")
-	for _, name := range names {
-		skill, ok := a.registry.Get(name)
-		if !ok {
-			continue
-		}
-		sig := compactParamSignature(skill.Parameters())
-		sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, skill.Description()))
-		if outSchema := tools.GetOutputSchema(skill); outSchema != nil {
-			if shape := compactOutputShape(outSchema); shape != "" {
-				sb.WriteString("  → returns: " + shape + "\n")
-			}
-		}
-	}
-	return sb.String(), nil
+	return compileToolIndex(a.registry, names), nil
 }
 
 // compactOutputShape renders a tool's OutputSchema as a concise one-line(ish)

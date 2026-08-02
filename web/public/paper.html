@@ -250,11 +250,11 @@
                 <span class="ref">reflect #3</span>  <span class="dim">(8s &mdash; "conclude: all checks complete")</span></div>
 
 <p class="prose">
-  The planner under-planned on this query, producing only one node initially. The reflection loop compensated: three reflections identified gaps and replanned with targeted follow-ups across two additional waves. Despite this, the DAG completed in 41.8 seconds versus ReAct&rsquo;s 64.5 seconds because each wave executed tools in parallel and each reflection saw only the current wave&rsquo;s results (bounded context) rather than the full conversation history. The CVE search in wave 3 used the kernel version discovered in wave 2. Total: 4 LLM calls (planner + 3 reflections), 10 tool executions, 41.8 seconds. The final reflection produced the verdict directly, skipping the aggregator.
+  The planner under-planned on this query, producing only one node initially. The reflection loop compensated: three reflections identified gaps and replanned with targeted follow-ups across two additional batches. Despite this, the DAG completed in 41.8 seconds versus ReAct&rsquo;s 64.5 seconds because each batch executed tools in parallel and each reflection saw only the current batch&rsquo;s results (bounded context) rather than the full conversation history. The CVE search in batch 3 used the kernel version discovered in batch 2. Total: 4 LLM calls (planner + 3 reflections), 10 tool executions, 41.8 seconds. The final reflection produced the verdict directly, skipping the aggregator.
 </p>
 
 <div class="insight warm">
-  <strong>The running example illustrates three key properties.</strong> (1) Parallel execution within dependency waves reduces wall clock time even when the planner under-plans; the reflection loop compensates by identifying gaps and launching targeted follow-up waves. (2) Bounded context per LLM call: each reflection evaluates only the current wave&rsquo;s evidence, not all prior tool results, avoiding the cumulative context growth visible in the ReAct trace (2K &rarr; 6.2K). (3) The execution layer persists through incomplete plans via structural replanning; the model cannot decide to stop early or defer to the user.
+  <strong>The running example illustrates three key properties.</strong> (1) Parallel execution within dependency batches reduces wall clock time even when the planner under-plans; the reflection loop compensates by identifying gaps and launching targeted follow-up batches. (2) Bounded context per LLM call: each reflection evaluates only the current batch&rsquo;s evidence, not all prior tool results, avoiding the cumulative context growth visible in the ReAct trace (2K &rarr; 6.2K). (3) The execution layer persists through incomplete plans via structural replanning; the model cannot decide to stop early or defer to the user.
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
@@ -289,13 +289,13 @@
 </p>
 
 <p class="prose">
-  This mechanism enables completion of multi-phase tasks. Without it, the system would complete the first wave of tool calls, skip deeper follow-ups, and hand incomplete evidence to the aggregator. With it, the reflection loop drives the task to completion: search &rarr; fetch &rarr; reflect &rarr; need more data &rarr; fetch again &rarr; reflect &rarr; sufficient &rarr; aggregate.
+  This mechanism enables completion of multi-phase tasks. Without it, the system would complete the first batch of tool calls, skip deeper follow-ups, and hand incomplete evidence to the aggregator. With it, the reflection loop drives the task to completion: search &rarr; fetch &rarr; reflect &rarr; need more data &rarr; fetch again &rarr; reflect &rarr; sufficient &rarr; aggregate.
 </p>
 
 <h4>Edges: ordering and data flow</h4>
 
 <p class="prose">
-  <strong><code>depends_on</code></strong> establishes execution ordering. A node will not fire until all referenced nodes have completed. Nodes without dependencies execute immediately and in parallel. This creates a natural wave structure: all root nodes (those with no dependencies) fire concurrently in the first wave, and subsequent waves fire as their dependencies resolve.
+  <strong><code>depends_on</code></strong> establishes execution ordering. A node will not fire until all referenced nodes have completed. Nodes without dependencies execute immediately and in parallel. This creates a natural batch structure: all root nodes (those with no dependencies) fire concurrently in the first batch, and subsequent batches fire as their dependencies resolve.
 </p>
 
 <p class="prose">
@@ -358,7 +358,7 @@
 </p>
 
 <p class="prose">
-  Allowing user input directly into the execution layer runs against the separation principle laid out in this paper, and the feature should be used with caution. However, the interjection is mediated rather than direct: the user does not talk to the LLM during execution; the message enters as a reflection checkpoint, the same execution layer construct used for wave boundaries and replanning; the reflection decides what to do (continue, conclude, or replan) using the same logic as any other reflection; and the LLM does not know whether the message came from a user or from the system. The separation is narrowed rather than broken: the reasoning layer can signal the execution layer, but the execution layer&rsquo;s own control flow mediates the response.
+  Allowing user input directly into the execution layer runs against the separation principle laid out in this paper, and the feature should be used with caution. However, the interjection is mediated rather than direct: the user does not talk to the LLM during execution; the message enters as a reflection checkpoint, the same execution layer construct used for batch boundaries and replanning; the reflection decides what to do (continue, conclude, or replan) using the same logic as any other reflection; and the LLM does not know whether the message came from a user or from the system. The separation is narrowed rather than broken: the reasoning layer can signal the execution layer, but the execution layer&rsquo;s own control flow mediates the response.
 </p>
 
 <h4>The execution layer abstraction</h4>
@@ -384,7 +384,7 @@
 <div class="mode-grid">
   <div class="mode-card mc-reflect">
     <h4>Reflect</h4>
-    <p>Reflection checkpoints are injected between dependency waves. At each boundary, the system evaluates all completed results and may replan. Execution pauses only at wave boundaries. Lowest LLM call count. Most predictable.</p>
+    <p>Reflection checkpoints are injected between dependency batches. At each boundary, the system evaluates all completed results and may replan. Execution pauses only at batch boundaries. Lowest LLM call count. Most predictable.</p>
   </div>
   <div class="mode-card mc-nreflect">
     <h4>nReflect</h4>
@@ -396,7 +396,7 @@
   </div>
 </div>
 
-<p class="dag-label">Reflect &mdash; reflection gates between dependency waves</p>
+<p class="dag-label">Reflect &mdash; reflection gates between dependency batches</p>
 <div class="dag"><span class="dim">planner</span>
   <span class="arrow">|</span>
   <span class="arrow">|--</span> <span class="nd">tool A</span> -+
@@ -914,7 +914,7 @@
 </p>
 
 <div class="insight warm">
-  <strong>DAG advantage scales with complexity.</strong> nReflect outperforms ReAct on targeted (6.3s vs 11.3s), complex (9.5s vs 28.9s), and computational queries (25.2s vs 43.7s) through the same system. The crossover occurs because DAG executes independent operations in parallel waves with bounded LLM context per call, while ReAct accumulates all prior results into each successive LLM call. At higher complexity, DAG&rsquo;s parallel execution, compiled tool context, and dual-model delegation increasingly outweigh the planner overhead.
+  <strong>DAG advantage scales with complexity.</strong> nReflect outperforms ReAct on targeted (6.3s vs 11.3s), complex (9.5s vs 28.9s), and computational queries (25.2s vs 43.7s) through the same system. The crossover occurs because DAG executes independent operations in parallel batches with bounded LLM context per call, while ReAct accumulates all prior results into each successive LLM call. At higher complexity, DAG&rsquo;s parallel execution, compiled tool context, and dual-model delegation increasingly outweigh the planner overhead.
 </div>
 
 <h4>Structured execution vs conversational shortcuts</h4>
@@ -1023,7 +1023,7 @@
 </div>
 
 <p class="prose">
-  This pattern recurs across the benchmark: ReAct&rsquo;s sequential accumulation of tool results creates a context growth problem that manifests as degraded output quality or complete failure on multi-step computational queries. DAG&rsquo;s bounded context windows (each reflection sees only the current wave&rsquo;s evidence, not all prior turns) avoid this failure mode structurally.
+  This pattern recurs across the benchmark: ReAct&rsquo;s sequential accumulation of tool results creates a context growth problem that manifests as degraded output quality or complete failure on multi-step computational queries. DAG&rsquo;s bounded context windows (each reflection sees only the current batch&rsquo;s evidence, not all prior turns) avoid this failure mode structurally.
 </p>
 
 <h4>GAIA benchmark (127 text-only questions)</h4>
@@ -1079,7 +1079,7 @@
 </p>
 
 <p class="prose">
-  <strong>Speed through parallelism.</strong> ReAct with parallel function calling is faster on simple queries (3.6s vs 3.9s) due to the absence of planner overhead. As complexity increases, the DAG architecture overtakes: nReflect outperforms ReAct at 9.5s vs 28.9s on complex queries and 25.2s vs 43.7s on computational queries requiring real-time astronomical data, both through the same system with identical tools and safety gates. The advantage comes from executing independent tool calls in parallel dependency waves with bounded context per LLM call, while ReAct accumulates results across sequential reasoning turns. All three DAG modes complete every computational query; ReAct fails on 2 of 10 due to context exhaustion.
+  <strong>Speed through parallelism.</strong> ReAct with parallel function calling is faster on simple queries (3.6s vs 3.9s) due to the absence of planner overhead. As complexity increases, the DAG architecture overtakes: nReflect outperforms ReAct at 9.5s vs 28.9s on complex queries and 25.2s vs 43.7s on computational queries requiring real-time astronomical data, both through the same system with identical tools and safety gates. The advantage comes from executing independent tool calls in parallel dependency batches with bounded context per LLM call, while ReAct accumulates results across sequential reasoning turns. All three DAG modes complete every computational query; ReAct fails on 2 of 10 due to context exhaustion.
 </p>
 
 <p class="prose">
@@ -1091,7 +1091,7 @@
 </p>
 
 <p class="prose">
-  <strong>Limitations.</strong> The planner is only as good as its prompt and the model&rsquo;s decomposition ability. If the plan under-specifies the task (too few steps) or over-specifies it (unnecessary tool calls), latency increases. In practice we did not observe degraded output quality even when the planner under-planned, because the reflection loop compensated by identifying gaps and launching targeted follow-up waves; however, increased latency was observed in these cases. A dual-model architecture (stronger reasoning model for planning, cheaper executor model for reflections) reduces cost and latency but introduces a quality ceiling on reflection and aggregation stages. Dynamic impact classification for general-purpose tools (e.g. shell commands) relies on pattern matching, which provides granular control when a tool is permitted at elevated impact levels; the default policy blocks tools that exceed the intent ceiling regardless of pattern matching. Finally, the DAG architecture incurs a fixed planning overhead that makes it slower than ReAct on simple queries requiring few or no tool calls; an adaptive mechanism that bypasses the planner for straightforward queries would eliminate this penalty.
+  <strong>Limitations.</strong> The planner is only as good as its prompt and the model&rsquo;s decomposition ability. If the plan under-specifies the task (too few steps) or over-specifies it (unnecessary tool calls), latency increases. In practice we did not observe degraded output quality even when the planner under-planned, because the reflection loop compensated by identifying gaps and launching targeted follow-up batches; however, increased latency was observed in these cases. A dual-model architecture (stronger reasoning model for planning, cheaper executor model for reflections) reduces cost and latency but introduces a quality ceiling on reflection and aggregation stages. Dynamic impact classification for general-purpose tools (e.g. shell commands) relies on pattern matching, which provides granular control when a tool is permitted at elevated impact levels; the default policy blocks tools that exceed the intent ceiling regardless of pattern matching. Finally, the DAG architecture incurs a fixed planning overhead that makes it slower than ReAct on simple queries requiring few or no tool calls; an adaptive mechanism that bypasses the planner for straightforward queries would eliminate this penalty.
 </p>
 
 <h4>Future work</h4>

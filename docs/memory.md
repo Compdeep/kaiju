@@ -2,13 +2,23 @@
 
 Kaiju implements a multi-layered memory system following LangChain's memory framework. Memory is fully multi-tenant — every operation is scoped by user ID, with no cross-user data leakage.
 
+## Two distinct stores
+
+Kaiju keeps memory in **two separate places**. They are not the same store, and it's easy to conflate them:
+
+1. **The Memory Manager (DB-backed)** — `internal/memory/manager.go` on top of `internal/db/memories.go`, persisting to SQLite (`kaiju.db`). This is the **chat-boundary** memory: per-session conversation **history** (the `sessions` + `messages` tables) plus per-user **long-term** semantic / episodic / procedural facts (the `memories` table, namespaced `{user}/{type}`). It is loaded and written **only** at the chat boundary in `handleExecute`, is user-scoped for multi-tenant isolation, and is what compaction and the "## Your Memory" injection (below) operate on. Everything in this doc about history, long-term facts, namespacing, and compaction refers to this store.
+
+2. **The agent KV store (JSON-backed)** — `internal/agent/memory.go`, a plain key/value store persisted to `<data_dir>/agent/memory.json`, with optional per-entry TTL and tags. This is the store the LLM **tools** `memory_store` / `memory_recall` / `memory_search` read and write. It is a flat scratchpad the model can jot to and recall from during a run; it is **not** the DB, not the `memories` table, and not per-user namespaced.
+
+Keep them straight: the DB Memory Manager holds memory *about the conversation and the user*, injected automatically at the chat boundary; the agent KV store holds memory *the model deliberately pokes at through tools*.
+
 ## Architectural Boundary (Security)
 
 **Memory lives at the chat boundary, never inside the execution layer.** This is a deliberate architectural rule, not a coincidence — it's an anti-prompt-injection security boundary.
 
 The two and only legitimate access points are:
 
-1. **Chat input** — `internal/api/api.go` `handleChat`. Loads conversation history into `Trigger.History`, prepends long-term semantic and episodic memories as a system message, and stores the user's incoming message.
+1. **Chat input** — `internal/api/api.go` `handleExecute` (the entry point for `POST /api/v1/execute`; there is no `handleChat` handler or `/chat` route). Loads conversation history into `Trigger.History`, prepends long-term semantic and episodic memories as a system message, and stores the user's incoming message.
 2. **Chat output** — same handler, after the aggregator runs. Stores the assistant's verdict as the next message and may extract new facts.
 
 The agent's **execution layer** (ContextGate, source implementations, graph nodes — executive, compute, reflector, debugger, observer, aggregator) **must never query or write memory directly**. ContextGate has no `memory` source by design, and graph node code must not import the `memory` package.
@@ -25,6 +35,8 @@ By keeping memory at the chat boundary, both reads and writes are attested by th
 ### The one exception: explicit memory tools
 
 The LLM tools `memory_store`, `memory_recall`, and `memory_search` exist as deliberate, auditable actions the LLM can take, the same way it can call `bash` or `file_write`. They appear in the worklog as explicit tool calls. This is allowed because it requires the LLM to make an active decision rather than memory being injected automatically by code processing untrusted input.
+
+Note that these tools operate on the **agent KV store** (`internal/agent/memory.go`), not the DB-backed Memory Manager — see [Two distinct stores](#two-distinct-stores). So even this sanctioned execution-layer path never reaches the chat-boundary conversation/long-term store; it writes to a separate scratchpad.
 
 ### How to know if you're crossing the boundary
 
@@ -75,10 +87,11 @@ Facts that persist across all conversations. These are injected into the system 
 - The CSV export script works better with pandas than raw file I/O
 ```
 
-Facts can be stored three ways:
-1. **Agent tool** — the agent has `memory_store` / `memory_recall` / `memory_search` tools and can decide to remember facts during conversation
-2. **Explicit** — user says "remember that I prefer Python" or uses the UI
-3. **API** — `POST /api/v1/memories`
+Facts in this DB `memories` table are written two ways:
+1. **Explicit** — the user says "remember that I prefer Python", or uses the UI
+2. **API** — `POST /api/v1/memories`
+
+(The `memory_store` / `memory_recall` / `memory_search` tools do **not** write here — they use the separate agent KV store described in [Two distinct stores](#two-distinct-stores).)
 
 ### Long-term Episodic Memory (Experiences)
 

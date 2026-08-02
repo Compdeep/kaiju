@@ -162,7 +162,7 @@ type Config struct {
 	MaxObserverCalls            int    // separate budget for observer LLM calls (default: 50)
 	BatchSize                   int    // nodes completed before injecting reflection in nReflect mode (default: 5)
 	MaxInvestigations           int    // max investigation cycles (Holmes + fix attempts) before forcing conclude (default: 1)
-	MaxReplans                  int    // max EXPAND replan cycles (successful wave → executive plans next steps) before forcing conclude (default: 3)
+	MaxReplans                  int    // max EXPAND replan cycles (successful batch → executive plans next steps) before forcing conclude (default: 3)
 	MaxHolmesIters              int    // max ReAct iterations per Holmes investigation (default: 5)
 	ExecutionMode               string // "interactive" (chat allowed) or "autonomous" (always investigate)
 	DAGWallClock                time.Duration
@@ -679,6 +679,16 @@ func (a *Agent) Interject(session, msg string) bool {
 		return false
 	}
 	return a.kernel.Interject(session, msg)
+}
+
+// Cancel stops the running investigation for a session — the Stop button. Returns
+// true if one was running. Unlike a client disconnect (which only stops the API
+// handler waiting), this cancels the job's context so the DAG actually unwinds.
+func (a *Agent) Cancel(session string) bool {
+	if a.kernel == nil {
+		return false
+	}
+	return a.kernel.Cancel(session)
 }
 
 /*

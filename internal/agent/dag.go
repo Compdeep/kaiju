@@ -13,7 +13,7 @@ import (
  * DAG execution modes control how the investigation adapts during execution.
  *
  *   reflect:        Forced serialization. Reflection nodes are injected structurally
- *                   between depth waves, gating all downstream nodes. The executive's
+ *                   between depth batches, gating all downstream nodes. The executive's
  *                   depends_on edges get rewritten through reflection barriers.
  *                   Most conservative — pauses everything between each "layer" of work.
  *
@@ -46,7 +46,7 @@ const (
 	NodeMicroPlanner                 // scoped failure-repair LLM call
 	NodeAggregator                   // final synthesis LLM call
 	NodeActuator                     // terminal action after aggregator
-	NodeReflection                   // inter-wave reflection checkpoint
+	NodeReflection                   // inter-batch reflection checkpoint
 	NodeObserver                     // per-node completion observer (observer mode)
 	NodeInterjection                 // human-triggered reflection (operator message)
 	NodeHolmes                       // ReAct investigator iteration (root-cause analysis)
@@ -138,7 +138,11 @@ type Node struct {
 	Children  []string     // node IDs spawned by this node
 	SpawnedBy string       // parent node ID (empty for executive-created nodes)
 	Tag       string       // human-readable label from executive
-	Source    string       // tool source: "builtin", "skillmd", "custom"
+	// OperatorMessage, on an interjection node, is the human's injected query
+	// text. Kept on the node so the trace can show what the operator asked,
+	// distinct from the reflection decision that message produced.
+	OperatorMessage string
+	Source          string // tool source: "builtin", "skillmd", "custom"
 	Actions   []NodeAction // side-effects from tool execution
 	Skills    []string     // guidance skill names whose sections shaped this node's prompts (compute only)
 	StartedAt time.Time
@@ -225,6 +229,8 @@ type NodeInfo struct {
 	TokensIn   int          `json:"tokens_in,omitempty"`   // prompt tokens
 	TokensOut  int          `json:"tokens_out,omitempty"`  // completion tokens
 	StartedAt  string       `json:"started_at,omitempty"`  // "Apr 13 11:30:05"
+	// OperatorMessage is the human's injected query on an interjection node.
+	OperatorMessage string `json:"operator_message,omitempty"`
 }
 
 /*
@@ -346,6 +352,11 @@ func (g *Graph) nodeInfo(n *Node) *NodeInfo {
 		DependsOn: n.DependsOn,
 		SpawnedBy: n.SpawnedBy,
 		Source:    n.Source,
+	}
+	// Interjection nodes carry the operator's query so the trace can show it
+	// even before the reflection decision lands (Result is still empty then).
+	if n.OperatorMessage != "" {
+		info.OperatorMessage = n.OperatorMessage
 	}
 	if !n.StartedAt.IsZero() {
 		end := n.EndedAt
@@ -1168,7 +1179,7 @@ func (g *Graph) SkipAllPending() int {
 
 /*
  * Budget enforces resource limits on the DAG execution.
- * desc: Tracks total nodes, LLM calls, observer calls, and per-tool wave
+ * desc: Tracks total nodes, LLM calls, observer calls, and per-tool batch
  *       counters using atomic operations for concurrency safety.
  */
 type Budget struct {
@@ -1182,14 +1193,14 @@ type Budget struct {
 	llmCount      atomic.Int32
 	observerCount atomic.Int32 // observer calls used
 	perSkill      sync.Map     // string → *atomic.Int32 (total across investigation)
-	wavePerSkill  sync.Map     // string → *atomic.Int32 (resets at reflection boundaries)
+	batchPerSkill  sync.Map     // string → *atomic.Int32 (resets at reflection boundaries)
 }
 
 /*
  * NewBudget creates a budget with the given limits.
  * desc: Initializes a Budget struct with the specified maximum values.
  * param: maxNodes - maximum total nodes allowed.
- * param: maxPerSkill - maximum calls per skill per wave.
+ * param: maxPerSkill - maximum calls per skill per batch.
  * param: maxLLMCalls - maximum LLM calls allowed.
  * param: maxObserverCalls - maximum observer LLM calls allowed.
  * param: wallClock - maximum wall-clock duration.
@@ -1243,11 +1254,11 @@ func (b *Budget) LLMRemaining() int32 {
 
 /*
  * TrySpawnNode atomically checks and increments counters.
- * desc: Enforces total node, LLM, and per-skill wave limits using CAS loops.
- *       Pass skillName="" to skip per-skill wave limits (used at plan time).
+ * desc: Enforces total node, LLM, and per-skill batch limits using CAS loops.
+ *       Pass skillName="" to skip per-skill batch limits (used at plan time).
  *       Budget enforcement uses CAS loops on nodeCount and llmCount to prevent
- *       races. The per-skill wave counter uses optimistic increment since
- *       overshooting the soft per-wave limit by 1-2 is acceptable.
+ *       races. The per-skill batch counter uses optimistic increment since
+ *       overshooting the soft per-batch limit by 1-2 is acceptable.
  * param: skillName - the skill name for per-skill tracking ("" to skip).
  * param: isLLM - true if this node consumes an LLM call.
  * return: false if any limit would be exceeded.
@@ -1288,11 +1299,11 @@ func (b *Budget) TrySpawnNode(skillName string, isLLM bool) bool {
 		}
 	}
 
-	// Per-skill wave counter (soft limit — optimistic increment is acceptable
+	// Per-skill batch counter (soft limit — optimistic increment is acceptable
 	// since this only caps batching, not correctness)
 	if skillName != "" {
-		waveCounter := b.getWaveSkillCounter(skillName)
-		if waveCounter.Load() >= b.MaxPerSkill {
+		batchCounter := b.getBatchSkillCounter(skillName)
+		if batchCounter.Load() >= b.MaxPerSkill {
 			// Roll back counters
 			if !infraOnly {
 				b.nodeCount.Add(-1)
@@ -1303,18 +1314,18 @@ func (b *Budget) TrySpawnNode(skillName string, isLLM bool) bool {
 			return false
 		}
 		b.getSkillCounter(skillName).Add(1)
-		waveCounter.Add(1)
+		batchCounter.Add(1)
 	}
 	return true
 }
 
 /*
- * ResetWaveCounters clears the per-wave skill counters.
- * desc: Called at reflection boundaries so the next wave gets a fresh per-skill budget.
+ * ResetBatchCounters clears the per-batch skill counters.
+ * desc: Called at reflection boundaries so the next batch gets a fresh per-skill budget.
  */
-func (b *Budget) ResetWaveCounters() {
-	b.wavePerSkill.Range(func(key, _ any) bool {
-		b.wavePerSkill.Delete(key)
+func (b *Budget) ResetBatchCounters() {
+	b.batchPerSkill.Range(func(key, _ any) bool {
+		b.batchPerSkill.Delete(key)
 		return true
 	})
 }
@@ -1353,17 +1364,17 @@ func (b *Budget) getSkillCounter(name string) *atomic.Int32 {
 }
 
 /*
- * getWaveSkillCounter returns the atomic counter for per-wave calls to a skill.
- * desc: Lazily initializes a per-skill wave counter in the wavePerSkill sync.Map.
+ * getBatchSkillCounter returns the atomic counter for per-batch calls to a skill.
+ * desc: Lazily initializes a per-skill batch counter in the batchPerSkill sync.Map.
  * param: name - the skill name.
- * return: pointer to the atomic counter for this skill's current wave.
+ * return: pointer to the atomic counter for this skill's current batch.
  */
-func (b *Budget) getWaveSkillCounter(name string) *atomic.Int32 {
-	if v, ok := b.wavePerSkill.Load(name); ok {
+func (b *Budget) getBatchSkillCounter(name string) *atomic.Int32 {
+	if v, ok := b.batchPerSkill.Load(name); ok {
 		return v.(*atomic.Int32)
 	}
 	counter := &atomic.Int32{}
-	actual, _ := b.wavePerSkill.LoadOrStore(name, counter)
+	actual, _ := b.batchPerSkill.LoadOrStore(name, counter)
 	return actual.(*atomic.Int32)
 }
 

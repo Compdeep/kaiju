@@ -51,6 +51,7 @@ func prefixAssistantHistory(history []llm.Message) []llm.Message {
 func compileToolIndex(registry *tools.Registry, names []string) string {
 	var sb strings.Builder
 	sb.WriteString("## Tools (* = required param)\n")
+	sb.WriteString("The parameters shown for each tool are the only ones available — use only the parameters listed.\n")
 	for _, name := range names {
 		skill, ok := registry.Get(name)
 		if !ok {
@@ -58,6 +59,11 @@ func compileToolIndex(registry *tools.Registry, names []string) string {
 		}
 		sig := compactParamSignature(skill.Parameters())
 		sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, skill.Description()))
+		if outSchema := tools.GetOutputSchema(skill); outSchema != nil {
+			if shape := compactOutputShape(outSchema); shape != "" {
+				sb.WriteString("  → returns: " + shape + "\n")
+			}
+		}
 	}
 	return sb.String()
 }
@@ -326,7 +332,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("- Wire every input through `${step.N.field}` placeholders from prior gathering steps. Never plan compute over inputs that don't yet exist — it will hallucinate.\n")
 		sb.WriteString("- The compute architect handles ALL implementation details (dirs, deps, file gen, service start, validation). Do NOT plan these as separate bash/service steps.\n")
 		sb.WriteString("- **Use tools directly when they can do the job** — yt-dlp/curl in bash for downloads, web_fetch for pages, service for daemons. compute is for writing new code, not for wrapping existing tools in scripts.\n\n")
-		sb.WriteString("**Multi-wave example — a compute task that NEEDS real-world data first:**\n")
+		sb.WriteString("**Multi-batch example — a compute task that NEEDS real-world data first:**\n")
 		sb.WriteString("query: \"estimate the probability that a Starlink satellite passes within 5 km of the ISS in 14 days\"\n")
 		sb.WriteString("```json\n")
 		sb.WriteString("[\n")
@@ -337,7 +343,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"propagate ISS+Starlink TLEs over 14 days with sgp4, apply drag from given F10.7, count close-approaches within 5km, output probability as JSON\",\"mode\":\"shallow\",\"context.tle\":\"${step.2.content}\",\"context.flux\":\"${step.3.content}\"},\"depends_on\":[2,3],\"tag\":\"compute_probability\"}\n")
 		sb.WriteString("]\n")
 		sb.WriteString("```\n")
-		sb.WriteString("Three waves in one plan: search → fetch → compute. Every compute input is wired from real upstream content. If your plan for a quant task ends at search/fetch with no compute, you under-planned — the user's question requires actual computation that the aggregator can't do.\n\n")
+		sb.WriteString("Three batches in one plan: search → fetch → compute. Every compute input is wired from real upstream content. If your plan for a quant task ends at search/fetch with no compute, you under-planned — the user's question requires actual computation that the aggregator can't do.\n\n")
 		sb.WriteString("**Counter-example — a task that does NOT need compute:**\n")
 		sb.WriteString("query: \"what's the current ISS altitude?\"\n")
 		sb.WriteString("```json\n")
@@ -399,7 +405,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("- project/ — source code, application files\n")
 		sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
 		sb.WriteString("- blueprints/ — architecture blueprints (auto-managed by compute)\n")
-		sb.WriteString("- canvas/ — user-facing visual content\n")
+		sb.WriteString("- canvas/ — visual output that RENDERS LIVE in the UI (HTML pages, charts, images). Put any chart, plot, diagram, or interactive view here so the user actually SEES it.\n")
 		sb.WriteString("- uploads/<session-id>/ — user-uploaded attachments. When the query has an [attached files] preamble, the paths land here. Each file may have <name>.meta.json (preview) and <name>.summary.md (LLM summary) sidecars.\n")
 		// Workspace tree for orientation (what files exist in the workspace).
 		// We do NOT inject existing blueprints here — the mere presence of
@@ -821,6 +827,83 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			} else {
 				log.Printf("[dag] executive re-plan call failed (%v) — validating original", replanErr)
 			}
+		}
+
+		// Validate the plan and correct it with feedback before running it. Two
+		// checks, both at plan time, both feeding this one re-plan loop:
+		//
+		//   - validatePlanEdges  — the wiring BETWEEN steps: a ${step.N.field} that
+		//     points at its own step, a step index not in the plan, or a field the
+		//     producing tool never emits (classically ${step.0.results.0.url} off a
+		//     web_fetch, when a results[] list only comes from web_search).
+		//   - validatePlanParams — the parameters OF a step: a parameter name the
+		//     called tool doesn't declare (e.g. web_search(topn: …), where the count
+		//     knob is max_results). Caught here the planner re-plans with the real
+		//     names; left to dispatch, the call is rejected and the node just fails.
+		//
+		// Loop: validate → if broken, re-plan with the exact errors as feedback →
+		// re-validate the NEW plan → repeat, up to maxPlanCorrections times. If the
+		// plan still isn't clean after that many tries, FAIL the run rather than
+		// dispatch a plan we already know is broken.
+		//
+		// curToolCalls / curToolCallID track the plan() call that produced the steps
+		// being validated, so each correction is threaded onto the attempt it's
+		// correcting (initially the original plan; after a re-plan, that re-plan).
+		const maxPlanCorrections = 3
+		curToolCalls := choice.Message.ToolCalls
+		curToolCallID := tc.ID
+		for corrections := 0; ; corrections++ {
+			edgeErrs := validatePlanEdges(steps, a.registry)
+			paramErrs := validatePlanParams(steps, a.registry)
+			allErrs := append(append([]string{}, edgeErrs...), paramErrs...)
+			if len(allErrs) == 0 {
+				break // plan is clean — proceed
+			}
+			if corrections >= maxPlanCorrections {
+				return nil, fmt.Errorf("executive: plan still invalid after %d corrections: %s",
+					maxPlanCorrections, strings.Join(allErrs, "; "))
+			}
+			log.Printf("[dag] executive plan has %d problem(s) [%d edge, %d param], correction %d/%d: %v",
+				len(allErrs), len(edgeErrs), len(paramErrs), corrections+1, maxPlanCorrections, allErrs)
+			correction := "Error: your plan is invalid. Fix EVERY problem below and call plan() again:\n- " +
+				strings.Join(allErrs, "\n- ")
+			if len(edgeErrs) > 0 {
+				correction += "\n\nHow ${step.N.field} works: it reads step N's output, so N must be an EARLIER step whose tool actually produces `field`. To fetch web pages from a search, the plan MUST contain a web_search step first; then web_fetch steps reference ${step.<searchIndex>.results.0.url} with depends_on:[<searchIndex>]. Never point a fetch at its own step or at another fetch's output."
+			}
+			if len(paramErrs) > 0 {
+				correction += "\n\nUse ONLY the parameters each tool declares — never invent a parameter name."
+			}
+			// Fresh copy of the base messages each pass so the append can't mutate the
+			// shared slice across iterations.
+			replanMessages := append(append([]llm.Message{}, messages...),
+				llm.Message{Role: "assistant", Content: "", ToolCalls: curToolCalls},
+				llm.Message{Role: "tool", ToolCallID: curToolCallID, Name: "plan", Content: correction},
+			)
+			replanResp, replanErr := a.completeHeavy(ctx, &llm.ChatRequest{
+				Messages:    replanMessages,
+				Tools:       []llm.ToolDef{a.executiveToolDef()},
+				ToolChoice:  llm.ForceToolChoice("plan"),
+				Temperature: 0.1,
+				MaxTokens:   a.cfg.MaxTokens,
+			})
+			// A failed re-plan call (LLM error, or no usable steps) leaves `steps`
+			// unchanged; the loop re-validates the same plan next pass and burns a
+			// correction, so a persistently failing re-plan still hard-fails at the cap.
+			if replanErr != nil || len(replanResp.Choices) == 0 || len(replanResp.Choices[0].Message.ToolCalls) == 0 {
+				log.Printf("[dag] executive plan correction %d: re-plan call failed (%v) — re-checking", corrections+1, replanErr)
+				continue
+			}
+			rtc := replanResp.Choices[0].Message.ToolCalls[0]
+			var replanned executiveCallPayload
+			if perr := parseExecutivePayload(fixComputeStepParams(rtc.Function.Arguments), &replanned); perr != nil || len(replanned.Steps) == 0 {
+				log.Printf("[dag] executive plan correction %d: no usable steps (perr=%v) — re-checking", corrections+1, perr)
+				continue
+			}
+			log.Printf("[dag] executive re-planned after validation (correction %d, %d steps)", corrections+1, len(replanned.Steps))
+			steps = replanned.Steps
+			payload = replanned
+			curToolCalls = replanResp.Choices[0].Message.ToolCalls
+			curToolCallID = rtc.ID
 		}
 
 		isAuto := trigger.Intent() == gates.IntentAuto
@@ -1274,7 +1357,7 @@ func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
  * desc: Two-pass: first create all nodes (collecting IDs), then resolve index
  *       deps and rewrites ${step.N} placeholders to real node IDs. Filters duplicate tool+params
  *       against already-executed nodes (for replan grafts). Optionally injects
- *       reflection nodes between depth waves (reflect mode only).
+ *       reflection nodes between depth batches (reflect mode only).
  * param: steps - the parsed plan steps.
  * param: graph - the investigation graph.
  * param: budget - the execution budget.
@@ -1289,9 +1372,9 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 
 	for i, s := range steps {
 
-		// At plan time, only check total node count — not per-tool wave limits.
+		// At plan time, only check total node count — not per-tool batch limits.
 		// Per-tool limits are for execution batching, not planning.
-		// Pass "" for tool to skip wave counter; pass false for isLLM (tool node).
+		// Pass "" for tool to skip batch counter; pass false for isLLM (tool node).
 		if !budget.TrySpawnNode("", false) {
 			log.Printf("[dag] budget exhausted at step %d, truncating plan", i)
 			nodes = nodes[:i]
@@ -1365,9 +1448,9 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 		}
 	}
 
-	// Wave reflections removed — the scheduler handles reflection timing.
+	// Batch reflections removed — the scheduler handles reflection timing.
 	// Injecting reflections at plan time caused cascading debugger spawns
-	// when early waves failed and all reflection nodes became ready at once.
+	// when early batches failed and all reflection nodes became ready at once.
 
 	return nodes, nil
 }
@@ -1439,6 +1522,146 @@ func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string,
 }
 
 // (dotPrefix lives in dispatcher.go — same package.)
+
+// stepRef is a ${step.N(.field)?} reference found in a plan step's params.
+type stepRef struct {
+	idx   int
+	field string
+	raw   string
+}
+
+// stepRefsIn collects every ${step.N(.path)?} reference in a step's params.
+func stepRefsIn(params map[string]any) []stepRef {
+	var refs []stepRef
+	walkParams(params, func(s string) (any, bool) {
+		for _, m := range stepTemplateRe.FindAllStringSubmatch(s, -1) {
+			idx, _ := strconv.Atoi(m[1])
+			refs = append(refs, stepRef{idx: idx, field: m[2], raw: m[0]})
+		}
+		return s, false
+	})
+	return refs
+}
+
+// validatePlanEdges checks every ${step.N.field} reference against the plan and
+// the producer tool's declared output, returning one human-readable error per
+// broken edge (empty ⇒ clean). It catches the three ways the planner mis-wires a
+// hand-off between steps — generically, for any tool, from the output schemas:
+//
+//   - SELF-reference: a step reads its own output (${step.i…} inside step i).
+//   - OUT-OF-RANGE: a step reads a step index that isn't in the plan.
+//   - WRONG PRODUCER: a step reads a top-level field the producing tool never
+//     emits — classically ${step.N.results.0.url} off a web_fetch, when a
+//     results[] list only comes from web_search.
+//
+// The executive turns these into ONE re-plan with the messages as feedback,
+// rather than running a doomed plan: a self/out-of-range ref leaks its literal
+// placeholder to the tool ("invalid URL …"), and a wrong-producer ref dangles a
+// dead edge the reflector then re-plans forever. Only a tool that DECLARES an
+// output schema is checked, and only its top-level field — so an incomplete deep
+// schema can't cause a false reject.
+func validatePlanEdges(steps []PlanStep, registry *tools.Registry) []string {
+	var errs []string
+	for i, s := range steps {
+		for _, r := range stepRefsIn(s.Params) {
+			switch {
+			case r.idx == i:
+				errs = append(errs, fmt.Sprintf("step %d (%s): %s references its OWN output — a step cannot consume itself; reference an EARLIER step, or add the step that produces this value", i, s.Tool, r.raw))
+			case r.idx < 0 || r.idx >= len(steps):
+				errs = append(errs, fmt.Sprintf("step %d (%s): %s points at step %d, which does not exist (the plan has %d steps)", i, s.Tool, r.raw, r.idx, len(steps)))
+			case r.field != "" && registry != nil:
+				top := strings.SplitN(r.field, ".", 2)[0]
+				if isNumericPathSegment(top) {
+					continue
+				}
+				producer := steps[r.idx].Tool
+				skill, ok := registry.Get(producer)
+				if !ok {
+					continue
+				}
+				outSchema := tools.GetOutputSchema(skill)
+				if outSchema == nil {
+					continue
+				}
+				// Tool outputs are wrapped in a uniform envelope {kind,status,content,
+				// data:…}. A ${step.N.field} reference resolves against the unwrapped
+				// payload, so a field can sit at the envelope's top level (content,
+				// status) OR inside its data (e.g. web_search's results[]). Accept
+				// either — checking only the top level wrongly rejects `results`, which
+				// with the hard-fail loop kills every valid search→fetch plan.
+				if fieldExistsInSchema(outSchema, top) {
+					continue
+				}
+				if data := envelopeData(outSchema); data != nil && fieldExistsInSchema(data, top) {
+					continue
+				}
+				hint := ""
+				if top == "results" {
+					hint = fmt.Sprintf(" — a results[] list of URLs comes from web_search, not %s; add a web_search step and reference ITS results", producer)
+				}
+				errs = append(errs, fmt.Sprintf("step %d (%s): %s reads field %q from step %d (%s), but %s does not produce %q%s", i, s.Tool, r.raw, top, r.idx, producer, producer, top, hint))
+			}
+		}
+	}
+	return errs
+}
+
+// validatePlanParams checks each step's parameter NAMES against its tool's own
+// input schema, returning one human-readable error per invented parameter (empty
+// ⇒ clean). It is the plan-time twin of validatePlanEdges: that checks the wiring
+// BETWEEN steps (${step.N} references), this checks the parameters OF a step.
+//
+// Only tools whose schema is closed (additionalProperties:false) are checked — an
+// open-schema tool (compute, edit_file) legitimately takes extra dotted context.*
+// keys and is skipped. Catching a bad name here — web_search(topn: …), where the
+// count knob is max_results — lets the executive re-plan with the real names as
+// feedback, instead of the call being rejected later at dispatch and the node
+// just failing. The valid-name set comes from each tool's OWN schema, so it is not
+// a hardcoded list and covers any invented name, not specific ones.
+func validatePlanParams(steps []PlanStep, registry *tools.Registry) []string {
+	if registry == nil {
+		return nil
+	}
+	var errs []string
+	for i, s := range steps {
+		if len(s.Params) == 0 {
+			continue
+		}
+		skill, ok := registry.Get(s.Tool)
+		if !ok {
+			continue // unknown tool name — not this check's job
+		}
+		schema, err := parseToolSchema(skill.Parameters())
+		if err != nil || schema.AdditionalProperties {
+			continue // unreadable schema, or extras allowed → nothing to reject
+		}
+		for key := range s.Params {
+			if _, declared := schema.Properties[key]; declared {
+				continue
+			}
+			errs = append(errs, fmt.Sprintf("step %d (%s): parameter %q does not exist — %s accepts only: %s",
+				i, s.Tool, key, s.Tool, strings.Join(sortedKeys(schema.Properties), ", ")))
+		}
+	}
+	return errs
+}
+
+// envelopeData extracts the "data" sub-schema from a tool's envelope output
+// schema, or nil if absent. Tool results are wrapped as {kind,status,content,
+// data:<tool payload>}; a ${step.N.field} reference resolves against the
+// unwrapped payload, so a field like web_search's "results" lives under data,
+// not at the envelope's top level — field checks must look here too.
+func envelopeData(schemaJSON json.RawMessage) json.RawMessage {
+	var s struct {
+		Properties struct {
+			Data json.RawMessage `json:"data"`
+		} `json:"properties"`
+	}
+	if json.Unmarshal(schemaJSON, &s) != nil {
+		return nil
+	}
+	return s.Properties.Data
+}
 
 /*
  * fieldExistsInSchema checks if a dot-path field exists in a JSON Schema's properties.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,17 +30,53 @@ import (
  */
 type Service struct {
 	workspace string
-	mu        sync.Mutex // serializes registry file writes
+	mu        sync.Mutex     // serializes registry file writes
 	stopPoll  chan struct{}
+	crashes   map[string]int // name → consecutive fast-crash count (auto-restart backoff)
 }
 
 // Compile-time interface check
 var _ agenttools.Tool = (*Service)(nil)
 
 func NewService(workspace string) *Service {
-	s := &Service{workspace: workspace, stopPoll: make(chan struct{})}
+	s := &Service{workspace: workspace, stopPoll: make(chan struct{}), crashes: map[string]int{}}
 	go s.healthLoop()
 	return s
+}
+
+// maxFastCrashes: give up auto-restart after this many deaths within minUptime of
+// starting — otherwise a service that can't start (bad command, held port) loops
+// forever. portOpen lets us skip a restart when something already serves the port.
+const (
+	minUptime      = 15 * time.Second
+	maxFastCrashes = 5
+)
+
+// portOpen reports whether 127.0.0.1:port accepts a TCP connection — i.e. some
+// process is already serving it. Used to avoid respawning a host into a
+// bind-conflict loop when an orphan from a prior run still holds the port.
+func portOpen(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
+// freePort best-effort kills whatever holds the given TCP port, so a fresh spawn
+// binds cleanly instead of crash-looping behind — or piling a duplicate on top
+// of — an orphan from a prior run. Scoped to the EXACT port, so it can never
+// touch another service (e.g. the MCS worker on its own port).
+func freePort(port int) {
+	if port <= 0 {
+		return
+	}
+	_ = exec.Command("fuser", "-k", fmt.Sprintf("%d/tcp", port)).Run()
+	time.Sleep(400 * time.Millisecond) // let the socket release before we bind
 }
 
 // healthLoop polls registered services every 10 seconds and marks dead
@@ -57,29 +94,85 @@ func (s *Service) healthLoop() {
 	}
 }
 
-// reapDead checks all registered services and marks dead/zombie ones as crashed.
+// reapDead checks all registered services. Dead ones flagged AutoRestart are
+// respawned; the rest are marked crashed. This is what keeps a plugin's backing
+// host (e.g. webreader) up on its own — the reason the reader stops silently
+// today is that nothing brought its process back.
 func (s *Service) reapDead() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	recs, err := s.loadRegistry()
 	if err != nil || len(recs) == 0 {
+		s.mu.Unlock()
 		return
 	}
 	changed := false
+	var revive []ServiceRecord
 	for i := range recs {
 		if recs[i].Status != "running" {
 			continue
 		}
-		if !isAlive(recs[i].PID) {
+		if isAlive(recs[i].PID) {
+			s.crashes[recs[i].Name] = 0 // healthy — clear the fast-crash counter
+			continue
+		}
+		if !recs[i].AutoRestart {
 			log.Printf("[service] %s (pid %d) detected dead, marking crashed", recs[i].Name, recs[i].PID)
 			recs[i].Status = "crashed"
 			changed = true
+			continue
 		}
+		// Auto-restart candidate. If the port is ALREADY served, an orphan from a
+		// prior run holds it — spawning another just crash-loops on a bind conflict
+		// (the exact loop this fixes). Leave it: the service is effectively up via
+		// whatever answers the port.
+		if recs[i].Port > 0 && portOpen(recs[i].Port) {
+			log.Printf("[service] %s pid %d dead but port %d still served — not restarting (avoids bind-conflict loop)", recs[i].Name, recs[i].PID, recs[i].Port)
+			continue
+		}
+		// Genuinely down. Back off if it keeps dying right after starting — a
+		// service that can't start (bad command, missing dep) must not loop forever.
+		if time.Since(recs[i].StartedAt) < minUptime {
+			s.crashes[recs[i].Name]++
+			if s.crashes[recs[i].Name] >= maxFastCrashes {
+				log.Printf("[service] %s crashed %d× within %s of starting — giving up auto-restart", recs[i].Name, s.crashes[recs[i].Name], minUptime)
+				recs[i].Status = "crashed"
+				recs[i].AutoRestart = false
+				changed = true
+				continue
+			}
+		} else {
+			s.crashes[recs[i].Name] = 0 // ran healthily for a while before dying
+		}
+		// Leave the record in place; start() below replaces it. Restart happens
+		// after we drop the lock (start() touches the registry).
+		revive = append(revive, recs[i])
 	}
 	if changed {
 		s.saveRegistry(recs)
 	}
+	s.mu.Unlock()
+
+	for _, r := range revive {
+		log.Printf("[service] %s (pid %d) died — auto-restarting", r.Name, r.PID)
+		if _, err := s.start(map[string]any{
+			"name": r.Name, "command": r.Command, "workdir": r.Workdir,
+			"port": float64(r.Port), "auto_restart": true,
+		}); err != nil {
+			log.Printf("[service] %s auto-restart failed: %v", r.Name, err)
+		}
+	}
+}
+
+// StartManaged starts (or restarts) a supervised, auto-restarting service. Used
+// by plugin_enable to bring a plugin's backing host up through the SAME path as
+// the service tool — tracked, logged, health-checked, respawned on crash — so a
+// plugin host is never an unmanaged orphan again.
+func (s *Service) StartManaged(name, command, workdir string, port int) error {
+	_, err := s.start(map[string]any{
+		"name": name, "command": command, "workdir": workdir,
+		"port": float64(port), "auto_restart": true,
+	})
+	return err
 }
 
 // StopPolling shuts down the background health checker. Call on agent shutdown.
@@ -115,6 +208,7 @@ var serviceParamSchema = json.RawMessage(`{
 		"command": {"type": "string", "description": "Shell command to run — required for start"},
 		"workdir": {"type": "string", "description": "Working directory for the command (optional, defaults to workspace)"},
 		"port":    {"type": "integer", "description": "Port the service listens on — used for health checks (optional)"},
+		"auto_restart": {"type": "boolean", "description": "Respawn this service automatically if it crashes (optional, for start)"},
 		"lines":   {"type": "integer", "description": "Number of log lines to return (default 50, for logs action)"},
 		"stream":  {"type": "string", "enum": ["out","err","both"], "description": "Which log stream to tail (default both, for logs action)"}
 	},
@@ -125,15 +219,16 @@ func (s *Service) Parameters() json.RawMessage { return serviceParamSchema }
 
 // ServiceRecord is one entry in services.json.
 type ServiceRecord struct {
-	Name      string    `json:"name"`
-	Command   string    `json:"command"`
-	Workdir   string    `json:"workdir"`
-	Port      int       `json:"port,omitempty"`
-	PID       int       `json:"pid"`
-	StartedAt time.Time `json:"started_at"`
-	Status    string    `json:"status"` // running | stopped | crashed
-	LogOut    string    `json:"log_out"`
-	LogErr    string    `json:"log_err"`
+	Name        string    `json:"name"`
+	Command     string    `json:"command"`
+	Workdir     string    `json:"workdir"`
+	Port        int       `json:"port,omitempty"`
+	PID         int       `json:"pid"`
+	StartedAt   time.Time `json:"started_at"`
+	Status      string    `json:"status"`                  // running | stopped | crashed
+	LogOut      string    `json:"log_out"`
+	LogErr      string    `json:"log_err"`
+	AutoRestart bool      `json:"auto_restart,omitempty"` // health loop respawns this on crash
 }
 
 func (s *Service) Execute(_ context.Context, params map[string]any) (string, error) {
@@ -271,6 +366,7 @@ func (s *Service) start(params map[string]any) (string, error) {
 	command, _ := params["command"].(string)
 	workdir, _ := params["workdir"].(string)
 	port, _ := params["port"].(float64) // JSON numbers are float64
+	autoRestart, _ := params["auto_restart"].(bool)
 	if name == "" {
 		return "", fmt.Errorf("start: name is required")
 	}
@@ -355,6 +451,13 @@ func (s *Service) start(params map[string]any) (string, error) {
 	}
 	defer errFile.Close()
 
+	// Clear the target port of any stray listener before spawning. Without this,
+	// an orphan from a prior run (a detached process that outlived a kaiju restart)
+	// keeps the port, so the fresh process fails to bind and either crash-loops or
+	// piles up as a duplicate — the exact uvicorn-multiplication this prevents.
+	// One process can ever hold the port, so there is only ever one instance.
+	freePort(int(port))
+
 	// Spawn in a detached session so the child outlives kaiju.
 	// Setsid makes the child its own session leader.
 	cmd := exec.Command("sh", "-c", command)
@@ -369,15 +472,16 @@ func (s *Service) start(params map[string]any) (string, error) {
 	_ = cmd.Process.Release() // don't hold a reaper reference
 
 	record := ServiceRecord{
-		Name:      name,
-		Command:   command,
-		Workdir:   workdir,
-		Port:      int(port),
-		PID:       pid,
-		StartedAt: time.Now().UTC(),
-		Status:    "running",
-		LogOut:    logOut,
-		LogErr:    logErr,
+		Name:        name,
+		Command:     command,
+		Workdir:     workdir,
+		Port:        int(port),
+		PID:         pid,
+		StartedAt:   time.Now().UTC(),
+		Status:      "running",
+		LogOut:      logOut,
+		LogErr:      logErr,
+		AutoRestart: autoRestart,
 	}
 
 	if idx >= 0 {

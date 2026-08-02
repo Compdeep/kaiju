@@ -32,6 +32,13 @@ Endpoints that need **no** auth: `GET /health`, `POST /api/v1/auth/login`, the c
 
 Run a query. This is the single entry point for **all** answer lanes — the executive/DAG agent, plain chat, and vision — selected by the fields below. There is **no** separate `/chat` endpoint: conversational turns ride this route with `chat_mode: true`.
 
+**Answer lanes.** One request resolves to exactly one lane, chosen server-side from the fields below:
+
+- **Planner / investigate** (default) — the full executive → DAG → reflection → aggregator pipeline.
+- **Chat** (`chat_mode: true`) — a direct completion (`a.agent.Chat`), tool-less, for plain conversation and non-tool (roleplay) models. It may still escalate to the agent (see `agent`).
+- **Vision** — when the session has image uploads and a vision model is configured/selected, the image question is answered directly by that model (no planner/tools). See *Vision routing* below.
+- **ReAct loop** (`mode: "react"`) — a single interleaved reason/act loop (`RunReActSync`) instead of the batch-scheduled DAG. Selected per request via the `mode` field.
+
 **Request:**
 ```json
 {
@@ -48,7 +55,7 @@ Run a query. This is the single entry point for **all** answer lanes — the exe
 | `query` | string | yes* | The user's request. *Optional when `regenerate` is true (the query is taken from history). |
 | `session_id` | string | no | Conversation session for memory/history and per-session uploads. |
 | `intent` | string | no | Any intent name registered in the intent registry (see `GET /api/v1/intents`). When omitted, the planner infers the level from tool impacts; the result is still capped by the caller's token/scope ceiling. |
-| `mode` | string | no | Execution mode: `reflect`, `nReflect`, or `orchestrator`. |
+| `mode` | string | no | Execution mode: `reflect`, `nReflect`, or `orchestrator` — or `react` to run the interleaved ReAct loop instead of the batch-scheduled DAG. |
 | `agg_mode` | int | no | Aggregator mode: `0` = skip, `1` = executor model, `2` = reasoning model. Omit (or send `-1`) for auto — the reflector decides. |
 | `execution_mode` | string | no | Per-request override: `interactive` or `autonomous`. |
 | `provider` | string | no | Heavy-lane (answer/reasoning) provider: `openai`\|`anthropic`\|`openrouter`\|`selfhosted`. Empty ⇒ configured default. |
@@ -131,6 +138,19 @@ Send a message into a running DAG execution (human-in-the-loop).
 ```
 
 **Response:** `{"sent": true}` — or `{"sent": false, "reason": "no active investigation"}` if nothing is running.
+
+### POST `/api/v1/stop`
+
+Cancel the query currently running for a session — the Stop button. `handleStop` calls `Agent.Cancel`, which cancels the running job's context and unwinds its DAG (in-flight nodes are abandoned and the aggregator is skipped).
+
+This is **distinct from a client disconnect**: dropping the HTTP connection only stops the caller waiting on the result — the scheduler worker keeps running the job to completion. Stop is the only thing that actually tears the run down. See [scheduling.md](scheduling.md) for the full teardown path.
+
+**Request:**
+```json
+{"session_id": "sess-abc123"}
+```
+
+**Response:** `{"stopped": true}` — or `{"stopped": false}` if no query was running for that session.
 
 ### GET `/api/v1/status`
 

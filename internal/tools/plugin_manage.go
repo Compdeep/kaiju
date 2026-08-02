@@ -8,9 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
+	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
@@ -119,11 +118,14 @@ type PluginEnable struct {
 	reg       *agenttools.Registry
 	cfg       *config.Config
 	workspace string
+	svc       *Service // kaiju's process manager — brings up a plugin's backing host
 }
 
-// NewPluginEnable returns the plugin_enable tool, wired to the live registry + config.
-func NewPluginEnable(reg *agenttools.Registry, cfg *config.Config) *PluginEnable {
-	return &PluginEnable{reg: reg, cfg: cfg, workspace: cfg.Agent.Workspace}
+// NewPluginEnable returns the plugin_enable tool, wired to the live registry,
+// config, and the service manager (used to launch + supervise a remote plugin's
+// backing host through the same path as the `service` tool).
+func NewPluginEnable(reg *agenttools.Registry, cfg *config.Config, svc *Service) *PluginEnable {
+	return &PluginEnable{reg: reg, cfg: cfg, workspace: cfg.Agent.Workspace, svc: svc}
 }
 
 func (p *PluginEnable) Name() string { return "plugin_enable" }
@@ -183,76 +185,116 @@ func (p *PluginEnable) Execute(_ context.Context, params map[string]any) (string
 	return agenttools.ToolOK("plugin", msg, map[string]any{"enabled": name, "tools": host.added, "persisted": note == ""}).JSON(), nil
 }
 
-// enableRemote brings up the remote bridge pointed at the capability's host and
-// wires its tools (including web_fetch's reader), then persists it. The bridge
-// stays invisible — the user enabled "webreader", never "remote".
+// enableRemote brings up a remote capability (webreader, …): it connects the
+// bridge to the capability's host, wiring its tools (including web_fetch's reader
+// seam), and persists the choice. If the host isn't answering, it is launched
+// AND SUPERVISED through kaiju's own service manager (auto-restarted on crash),
+// not a fire-and-forget exec. The bridge stays invisible — the user enabled
+// "webreader", never "remote".
 func (p *PluginEnable) enableRemote(r plugins.RemoteInfo) (string, error) {
-	if plugins.IsActive("remote") {
-		return agenttools.ToolOK("plugin", fmt.Sprintf("%q is already active — web_fetch reads pages through it.", r.Name), map[string]any{"enabled": r.Name}).JSON(), nil
+	added, hostURL, err := p.ensureRemoteUp(r)
+	if err != nil {
+		return agenttools.ToolFail("plugin", err.Error(), nil).JSON(), nil
 	}
+	// Persist so it survives a restart: the bridge in `plugins`, and the host URL.
+	note := ""
+	if perr := p.cfg.SetPluginsPersisted(appendUnique(p.cfg.Plugins, "remote")); perr != nil {
+		note = fmt.Sprintf(" (active now, not persisted: %v)", perr)
+	} else if p.cfg.RemotePluginHost == "" {
+		_ = p.cfg.SetRemotePluginHostPersisted(hostURL)
+	}
+	return agenttools.ToolOK("plugin", fmt.Sprintf("Enabled %q — web_fetch reads pages through it, and its host is supervised by kaiju's service manager (auto-restarts if it dies).%s", r.Name, note), map[string]any{"enabled": r.Name, "tools": added, "host": hostURL}).JSON(), nil
+}
+
+// ensureRemoteUp connects the bridge to r's host and returns the tools it
+// registered plus the host URL. If the host isn't answering, it launches it via
+// the service manager (supervised + auto-restart) and retries. It does NOT trust
+// a stale "active" flag: it verifies real tools were registered, so an
+// active-but-toolless state (host died after boot) heals instead of falsely
+// reporting success. Shared by enableRemote (chat) and boot self-heal.
+func (p *PluginEnable) ensureRemoteUp(r plugins.RemoteInfo) ([]string, string, error) {
 	bridge, ok := plugins.Get("remote")
 	if !ok {
-		return agenttools.ToolFail("plugin", fmt.Sprintf("%q needs the remote bridge, which isn't built into this binary (rebuild with -tags plugin_remote).", r.Name), nil).JSON(), nil
+		return nil, "", fmt.Errorf("%q needs the remote bridge, which isn't built into this binary (rebuild with -tags plugin_remote)", r.Name)
 	}
-	url := strings.TrimRight(p.cfg.RemotePluginHost, "/")
-	if url == "" {
-		url = r.DefaultURL
+	hostURL := strings.TrimRight(p.cfg.RemotePluginHost, "/")
+	if hostURL == "" {
+		hostURL = r.DefaultURL
 	}
-	os.Setenv("KAIJU_PLUGIN_HOST", url)
+	os.Setenv("KAIJU_PLUGIN_HOST", hostURL)
 
+	// Try to connect + register straight away. If the host is up, this registers
+	// its tools (web_read + the reader seam) and we're done — idempotent when it
+	// was already connected.
 	host := &liveHost{reg: p.reg, workspace: p.workspace}
 	bridge.Register(host)
 
-	// If the host isn't up, START it ourselves and retry — enabling a capability
-	// brings up its service, so the user never has to start anything by hand.
+	// Host not answering (no tools)? Bring it up through kaiju's service manager —
+	// tracked, health-checked, auto-restarted on crash — then retry the connect.
 	if len(host.added) == 0 {
 		startCmd := p.cfg.RemotePluginStart
 		if startCmd == "" {
 			startCmd = r.StartCmd
 		}
-		if startCmd != "" && startHostAndWait(url, startCmd) {
-			host = &liveHost{reg: p.reg, workspace: p.workspace}
-			bridge.Register(host)
+		if startCmd != "" && p.svc != nil {
+			port := "8092"
+			if u, uerr := url.Parse(hostURL); uerr == nil && u.Port() != "" {
+				port = u.Port()
+			}
+			cmd := strings.ReplaceAll(startCmd, "{port}", port)
+			pnum, _ := strconv.Atoi(port)
+			log.Printf("[plugin] %s host at %s not answering — starting it via the service manager", r.Name, hostURL)
+			if serr := p.svc.StartManaged(r.Name, cmd, "", pnum); serr != nil {
+				return nil, hostURL, fmt.Errorf("couldn't start %q's host via the service manager: %v", r.Name, serr)
+			}
+			if waitHostUp(hostURL, 30*time.Second) {
+				host = &liveHost{reg: p.reg, workspace: p.workspace}
+				bridge.Register(host)
+			}
 		}
 	}
 	if len(host.added) == 0 {
-		return agenttools.ToolFail("plugin", fmt.Sprintf("Couldn't bring up %q's host at %s. Its service failed to start or answer — check that the host command works, or set a different URL with plugin_option {name:%q, key:\"host\", value:\"<url>\"}.", r.Name, url, r.Name), nil).JSON(), nil
+		return nil, hostURL, fmt.Errorf("couldn't bring up %q's host at %s — it failed to start or answer. Check `service logs %s`, or set a different URL with plugin_option {name:%q, key:\"host\", value:\"<url>\"}", r.Name, hostURL, r.Name, r.Name)
 	}
 	plugins.MarkActive("remote")
 	plugins.MarkActive(r.Name)
-
-	// Persist so it survives a restart: the bridge in `plugins`, and the host URL.
-	note := ""
-	if err := p.cfg.SetPluginsPersisted(appendUnique(p.cfg.Plugins, "remote")); err != nil {
-		note = fmt.Sprintf(" (active now, not persisted: %v)", err)
-	} else if p.cfg.RemotePluginHost == "" {
-		_ = p.cfg.SetRemotePluginHostPersisted(url)
-	}
-	return agenttools.ToolOK("plugin", fmt.Sprintf("Enabled %q — web_fetch now reads pages through it automatically.%s", r.Name, note), map[string]any{"enabled": r.Name, "tools": host.added, "host": url}).JSON(), nil
+	return host.added, hostURL, nil
 }
 
-// startHostAndWait launches a plugin host (StartCmd with {port} substituted from
-// the URL, detached via setsid so it outlives this call and a kaiju restart) and
-// polls until it answers, returning true once it's up. This is what makes "enable
-// webreader" bring the service up on its own.
-func startHostAndWait(rawURL, startCmd string) bool {
-	port := "8092"
-	if u, err := url.Parse(rawURL); err == nil && u.Port() != "" {
-		port = u.Port()
+// EnsureRemoteHostsUp is called at boot: for every remote capability already in
+// config, make sure its host is up and connected. This is what makes the reader
+// "just work" after a restart without the user re-enabling it — and, paired with
+// the service manager's auto-restart, keeps it working when the host later dies.
+func (p *PluginEnable) EnsureRemoteHostsUp() {
+	if !contains(p.cfg.Plugins, "remote") {
+		return
 	}
-	cmd := exec.Command("bash", "-c", strings.ReplaceAll(startCmd, "{port}", port))
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		log.Printf("[plugin] failed to start host: %v", err)
-		return false
+	for _, r := range plugins.RemoteCatalog {
+		if _, _, err := p.ensureRemoteUp(r); err != nil {
+			log.Printf("[plugin] boot: %v", err)
+		}
 	}
-	log.Printf("[plugin] started host: %s (waiting for %s)", cmd.String(), rawURL)
-	deadline := time.Now().Add(30 * time.Second)
+}
+
+func contains(ss []string, s string) bool {
+	for _, x := range ss {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// waitHostUp polls the plugin host until it answers GET /plugins with 200, up to
+// timeout, returning true once it's up. The host itself is launched + supervised
+// by the service manager (StartManaged); this just waits for it to come alive.
+func waitHostUp(rawURL string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		time.Sleep(1500 * time.Millisecond)
 		if hostUp(rawURL) {
 			return true
 		}
+		time.Sleep(1500 * time.Millisecond)
 	}
 	return false
 }

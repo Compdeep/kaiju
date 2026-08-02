@@ -2,6 +2,20 @@
   <div class="chat-page" @mousemove="onDrag" @mouseup="onDragEnd" @mouseleave="onDragEnd">
     <!-- Col 1: Session sidebar -->
     <div class="sidebar" :style="{ width: sidebarW + 'px' }" :class="{ collapsed: sidebarCollapsed }">
+      <router-link to="/chat" class="col-header sidebar-header">
+        <svg viewBox="0 11 100 100" width="26" height="26" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" class="kaiju-logo" :class="{ dark: settings.theme === 'dark' }">
+          <g class="k-body">
+            <g transform="translate(50,44) rotate(180)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+            <g transform="translate(29,57) rotate(90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+            <g transform="translate(71,57) rotate(-90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+            <g transform="translate(50,68)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+            <g transform="translate(50,79)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
+          </g>
+          <line x1="42" y1="52" x2="42" y2="60" class="k-eye" stroke-width="3"/>
+          <line x1="58" y1="52" x2="58" y2="60" class="k-eye" stroke-width="3"/>
+        </svg>
+        <span v-if="!sidebarCollapsed" class="wordmark">KAIJU</span>
+      </router-link>
       <template v-if="!sidebarCollapsed">
         <button class="sidebar-new" @click="chat.createSession()">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -37,6 +51,28 @@
 
     <!-- Col 2: Chat panel -->
     <div class="chat-panel">
+      <div class="col-header chat-header">
+        <div class="chat-title" :title="currentTitle">{{ currentTitle }}</div>
+        <div class="chat-header-actions">
+          <ModelSelector ref="modelSelectorRef" />
+          <button class="hdr-btn" :class="{ active: panel.open }" @click="panel.toggle()" :title="panel.open ? 'Close panel' : 'Open panel'">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+          </button>
+          <!-- Utility cluster: lives here only while the panel is CLOSED; when the
+               panel is open it renders in the panel header (see ComposablePanel
+               slot below). Exactly one instance is mounted at a time. -->
+          <template v-if="!panel.open">
+            <div class="hdr-sep"></div>
+            <HeaderTools
+              @open-tools="showTools = true"
+              @open-admin="adminTab = 'scopes'; showAdmin = true"
+              @open-advanced="showSettings = true"
+              @logout="doLogout"
+            />
+          </template>
+        </div>
+      </div>
+
       <div class="chat-messages" ref="messagesEl">
         <div v-if="!sessions.messages.length" class="empty-state">
           <svg viewBox="0 0 100 100" width="40" height="40" fill="none" stroke="var(--text-muted)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:12px;opacity:0.5">
@@ -122,92 +158,39 @@
           />
         </div>
         <div class="compose-row">
-          <!-- Inline controls (left of input) -->
+          <!-- Transient run controls: interject + stop, only live while a run is
+               in flight. The five persistent pills (mode/intent/aggregator/
+               execution/chat) now live in the chat-header settings popover. -->
           <div class="compose-controls">
-            <!-- Mode picker: triangular M -->
-            <div class="ctl-wrap" @click.stop="openMenu = openMenu === 'mode' ? null : 'mode'">
-              <div class="ctl-btn" :class="{ active: openMenu === 'mode' }">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,20 7,4 12,14 17,4 22,20"/></svg>
-              </div>
-              <span class="ctl-tip">Mode: {{ sessions.runMode }}</span>
-              <Transition name="menu">
-                <div v-if="openMenu === 'mode'" class="ctl-menu">
-                  <div v-for="m in ['reflect','nReflect','orchestrator','react']" :key="m"
-                    class="ctl-opt" :class="{ sel: sessions.runMode === m }"
-                    @click="sessions.setRunMode(m); openMenu = null">{{ m }}</div>
-                </div>
-              </Transition>
-            </div>
-            <!-- IGX gate: inverted shield triangle -->
-            <div class="ctl-wrap" @click.stop="openMenu = openMenu === 'intent' ? null : 'intent'">
-              <div class="ctl-btn" :class="{ active: openMenu === 'intent' }">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L3 7v4c0 7 9 11 9 11s9-4 9-11V7z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
-              </div>
-              <span class="ctl-tip">IGX: {{ sessions.intent || 'auto' }}</span>
-              <Transition name="menu">
-                <div v-if="openMenu === 'intent'" class="ctl-menu">
-                  <div v-for="i in availableIntents" :key="i.name"
-                    class="ctl-opt" :class="{ sel: sessions.intent === i.name }"
-                    :title="i.description"
-                    @click="sessions.intent = i.name; openMenu = null">{{ i.name }}</div>
-                </div>
-              </Transition>
-            </div>
-            <!-- Aggregator: triangular A -->
-            <div class="ctl-wrap" @click.stop="openMenu = openMenu === 'agg' ? null : 'agg'">
-              <div class="ctl-btn" :class="{ active: openMenu === 'agg' }">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,20 12,4 21,20"/><line x1="7.5" y1="14" x2="16.5" y2="14"/></svg>
-              </div>
-              <span class="ctl-tip">Agg: {{ {'-1':'auto','0':'skip','1':'mini','2':'full'}[sessions.aggMode] }}</span>
-              <Transition name="menu">
-                <div v-if="openMenu === 'agg'" class="ctl-menu">
-                  <div v-for="a in [{v:'-1',l:'auto'},{v:'0',l:'skip'},{v:'1',l:'mini'},{v:'2',l:'full'}]" :key="a.v"
-                    class="ctl-opt" :class="{ sel: sessions.aggMode === a.v }"
-                    @click="sessions.setAggMode(a.v); openMenu = null">{{ a.l }}</div>
-                </div>
-              </Transition>
-            </div>
-            <!-- Execution mode: bolt icon -->
-            <div class="ctl-wrap" @click.stop="sessions.setExecutionMode(sessions.executionMode === 'interactive' ? 'autonomous' : 'interactive')">
-              <div class="ctl-btn" :class="{ active: sessions.executionMode === 'autonomous' }">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-              </div>
-              <span class="ctl-tip">{{ sessions.executionMode === 'autonomous' ? 'auto' : 'live' }}</span>
-            </div>
-            <!-- Chat lane: direct reply, no planner/tools -->
-            <div class="ctl-wrap" @click.stop="sessions.toggleChatMode()" title="Chat mode — direct reply, no planner or tools (needed for roleplay models)">
-              <div class="ctl-btn" :class="{ active: sessions.chatMode }">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              </div>
-              <span class="ctl-tip">{{ sessions.chatMode ? 'direct' : 'agent' }}</span>
-            </div>
             <!-- Interject chip -->
             <Transition name="chip">
-              <span v-if="dag.interjectMode" class="interject-chip" @click="dag.interjectMode = false">
+              <span v-if="dag.interjectMode" class="interject-chip" title="Interject — send guidance into the running query" @click="dag.interjectMode = false">
                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 01-4 4H4"/></svg>
                 <span class="ij-x">&times;</span>
               </span>
             </Transition>
+            <!-- Stop button — manual cancel for the running query. Sits right of
+                 the interject chip. There is no automatic idle/timeout abort any
+                 more, so this is how a genuinely stuck run gets stopped. -->
+            <Transition name="chip">
+              <button v-if="sessions.loading" class="stop-btn" @click.stop="chat.stop()" title="Stop the running query">
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" stroke="none"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
+              </button>
+            </Transition>
           </div>
           <!-- Input -->
           <textarea
+            ref="composeInput"
             v-model="input"
             class="compose-input"
             rows="1"
             :placeholder="dag.interjectMode ? 'interject into running query...' : 'ask anything...'"
+            @input="autoGrow"
             @keydown.enter.exact.prevent="send"
           ></textarea>
-          <!-- Right-side actions -->
+          <!-- Right-side actions: attach + send only. Compact history and the
+               panel toggle moved to the chat header; run controls to the gear. -->
           <UploadButton :disabled="sessions.loading" @files="onFilesPicked" />
-          <button class="btn-icon" @click="chat.compactSession()" title="Compact history" :disabled="sessions.messages.length < 10">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-          </button>
-          <button class="btn-icon" @click="panel.toggle()" :title="panel.open ? 'Close panel' : 'Open panel'" :class="{ 'panel-active': panel.open }">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8">
-              <rect x="3" y="3" width="18" height="18" rx="2"/>
-              <line x1="15" y1="3" x2="15" y2="21"/>
-            </svg>
-          </button>
           <button class="btn-icon send" @click="send" :disabled="!input.trim() || sessions.loading">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
@@ -223,8 +206,30 @@
       @mousedown.prevent="startDrag('panel')"
     ></div>
 
-    <!-- Col 3: Composable panel -->
-    <ComposablePanel v-if="panel.open" />
+    <!-- Col 3: Composable panel. The utility cluster hops into its header (via
+         the #header-actions slot) whenever the panel is open. -->
+    <ComposablePanel v-if="panel.open">
+      <template #header-actions>
+        <HeaderTools
+          @open-tools="showTools = true"
+          @open-admin="adminTab = 'scopes'; showAdmin = true"
+          @open-advanced="showSettings = true"
+          @logout="doLogout"
+        />
+      </template>
+    </ComposablePanel>
+
+    <!-- Modals (moved here from App.vue with the header removal — opened from the
+         chat-header gear and the panel-header Tools / Users&Scopes buttons) -->
+    <transition name="modal">
+      <AdminModal v-if="showAdmin" :initial-tab="adminTab" @close="showAdmin = false" />
+    </transition>
+    <transition name="modal">
+      <SettingsModal v-if="showSettings" @close="onSettingsClose" />
+    </transition>
+    <transition name="modal">
+      <ToolsModal v-if="showTools" @close="showTools = false" />
+    </transition>
   </div>
 </template>
 
@@ -237,9 +242,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { useSessionsStore } from '../stores/sessions'
 import { useDagStore } from '../stores/dag'
 import { usePanelStore } from '../stores/panel'
+import { useAuthStore } from '../stores/auth'
+import { useSettingsStore } from '../stores/settings'
 import * as chat from '../services/chat'
 import * as tools from '../services/tools'
-import api from '../api/client'
 import { marked } from 'marked'
 import hljs from 'highlight.js/lib/core'
 import hljsJavascript from 'highlight.js/lib/languages/javascript'
@@ -258,6 +264,11 @@ import DAGTrace from '../components/DAGTrace.vue'
 import ComposablePanel from '../components/ComposablePanel.vue'
 import UploadButton from '../components/UploadButton.vue'
 import UploadChip from '../components/UploadChip.vue'
+import ModelSelector from '../components/ModelSelector.vue'
+import HeaderTools from '../components/HeaderTools.vue'
+import AdminModal from '../components/AdminModal.vue'
+import SettingsModal from '../components/SettingsModal.vue'
+import ToolsModal from '../components/ToolsModal.vue'
 import * as uploads from '../services/uploads'
 
 hljs.registerLanguage('javascript', hljsJavascript)
@@ -301,7 +312,51 @@ const router = useRouter()
 const sessions = useSessionsStore()
 const dag = useDagStore()
 const panel = usePanelStore()
+const auth = useAuthStore()
+const settings = useSettingsStore()
 const input = ref('')
+const composeInput = ref(null)     // <textarea> ref, for auto-grow
+const modelSelectorRef = ref(null) // <ModelSelector> ref, to re-sync after Advanced settings
+
+// ── Chat-header state ──
+const showAdmin = ref(false)
+const showSettings = ref(false)
+const showTools = ref(false)
+const adminTab = ref('scopes')
+
+// Active session's title (drives the center-header heading).
+const currentTitle = computed(() => {
+  const s = sessions.sessions.find(x => x.id === sessions.sessionId)
+  return (s && s.title) || 'New chat'
+})
+
+/**
+ * desc: Grow the compose textarea with its content up to a max, then scroll.
+ *       Reset to auto first so it also shrinks back when text is removed.
+ * @returns {void}
+ */
+function autoGrow() {
+  const el = composeInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+}
+
+/**
+ * desc: Sign out and return to the login screen.
+ * @returns {void}
+ */
+function doLogout() { auth.logout(); router.push('/login') }
+
+/**
+ * desc: Close the Advanced-settings modal and re-sync the header model selector
+ *       (the modal can also change the reasoning model).
+ * @returns {void}
+ */
+function onSettingsClose() {
+  showSettings.value = false
+  modelSelectorRef.value?.reload()
+}
 
 // ── Inline message editing / regenerate ──
 const editing = ref(null)   // index of the message being edited, or null
@@ -331,7 +386,6 @@ async function saveEdit(msg) {
   editing.value = null
 }
 const messagesEl = ref(null)
-const openMenu = ref(null)
 const dragOver = ref(false)
 
 /**
@@ -362,30 +416,8 @@ function onRemoveAttachment(att) {
   uploads.removeAttachment(att)
 }
 
-// Close menus on outside click
-if (typeof document !== 'undefined') {
-  document.addEventListener('click', () => { openMenu.value = null })
-}
-
-// Available intents loaded from the API (configurable via admin → intents tab).
-// The registry is the sole source of truth — no hardcoded fallback.
-const availableIntents = ref([])
-
-async function loadIntents() {
-  try {
-    const intents = await api.get('/api/v1/intents')
-    if (Array.isArray(intents)) {
-      availableIntents.value = intents.map(i => ({ name: i.name, description: i.description }))
-    }
-  } catch (e) {
-    console.error('[chat] failed to load intents registry:', e)
-    availableIntents.value = []
-  }
-}
-
 // Load sessions on mount; restore active session if saved
 onMounted(async () => {
-  await loadIntents()
   await chat.loadSessions()
 
   // Session from URL takes priority, then localStorage, then most recent
@@ -490,6 +522,7 @@ async function send() {
   const text = input.value.trim()
   if (!text) return
   input.value = ''
+  nextTick(autoGrow) // shrink the textarea back to one row
 
   const isInterject = sessions.loading && (dag.interjectMode || dag.running)
 
@@ -547,16 +580,49 @@ watch(() => sessions.sessionId, (newId) => {
 
 <style scoped>
 .chat-page {
-  display: flex; height: calc(100vh - 82px);
+  display: flex; height: 100vh;
   user-select: none;
 }
 .chat-page * { user-select: text; }
+
+/* ── Column headers ─────────────────────────────────────────────────────────── */
+/* Base .col-header (height / border / layout) is in global.css so all three
+   columns line up. Per-column tweaks live here. */
+
+/* Sidebar header: logo + wordmark */
+.sidebar-header {
+  gap: 8px; justify-content: flex-start;
+  text-decoration: none; cursor: pointer;
+}
+.sidebar.collapsed .sidebar-header { justify-content: center; padding: 0; }
+.wordmark {
+  font-family: var(--display); font-size: 15px; font-weight: 600;
+  letter-spacing: 0.14em; color: var(--text);
+}
+/* Logo colours — mirror the old AppHeader brand (cyan light / indigo+pink dark) */
+.kaiju-logo { transition: filter 0.2s ease, transform 0.2s ease; flex-shrink: 0; }
+.kaiju-logo .k-body { stroke: #4FC3F7; }
+.kaiju-logo .k-eye { stroke: #4FC3F7; }
+.sidebar-header:hover .kaiju-logo { filter: drop-shadow(0 0 8px #4FC3F7); transform: scale(1.06); }
+.kaiju-logo.dark .k-body { stroke: #818cf8; }
+.kaiju-logo.dark .k-eye { stroke: #f472b6; filter: drop-shadow(0 0 5px #f472b6); }
+.sidebar-header:hover .kaiju-logo.dark { filter: drop-shadow(0 0 12px #f472b6); }
+
+/* Chat header: title + action cluster (.hdr-btn / .hdr-sep are shared, in global.css) */
+.chat-title {
+  font-size: 13px; font-weight: 600; font-family: var(--display);
+  letter-spacing: 0.03em; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0; margin-right: 12px;
+}
+.chat-header-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 
 /* ── Gutter (drag handle) ───────────────────────────────────────────────────── */
 .gutter {
   width: 6px; min-width: 6px;
   cursor: col-resize;
-  background: var(--gutter-idle);
+  /* Invisible at rest; the divider line only appears on hover / while dragging. */
+  background: transparent;
   transition: background var(--transition);
   position: relative;
   z-index: 2;
@@ -572,7 +638,8 @@ watch(() => sessions.sessionId, (newId) => {
 .sidebar {
   display: flex; flex-direction: column;
   background: var(--surface);
-  border-right: 1px solid var(--border-subtle);
+  /* No visible column line at rest — the gutter reveals the divider on hover. */
+  border-right: 1px solid transparent;
   overflow: hidden;
   position: relative;
   min-width: 40px;
@@ -749,24 +816,82 @@ watch(() => sessions.sessionId, (newId) => {
   font-weight: 500;
 }
 
-/* Interjection */
+/* Interjection chip — the "return" affordance shown while a run is live. Green
+   (signal-green) so it stays distinct from Send (accent-blue) and Stop (red).
+   Palette-token backgrounds so it reads intentional in BOTH themes. Sized to
+   the action-button height so the whole compose row bottom-aligns cleanly. */
 .interject-chip {
-  display: flex; align-items: center; gap: 4px;
-  padding: 2px 8px; border-radius: 4px;
-  background: var(--accent-warm-subtle); color: var(--accent-warm);
-  font-size: 10px; font-weight: 600; font-family: var(--mono);
-  text-transform: uppercase; letter-spacing: 0.05em;
-  cursor: pointer; flex-shrink: 0;
-  transition: all var(--transition);
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  height: 30px; padding: 0 9px; flex-shrink: 0;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--signal-green) 45%, transparent);
+  background: var(--signal-green-bg);
+  color: var(--signal-green);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
 }
-.interject-chip:hover { opacity: 0.8; }
-.ij-x { font-size: 12px; font-weight: 400; opacity: 0.6; }
-.ij-x:hover { opacity: 1; }
+.interject-chip:hover {
+  background: color-mix(in srgb, var(--signal-green) 22%, transparent);
+  border-color: var(--signal-green);
+}
+.interject-chip:active { transform: scale(0.94); }
+.ij-x { font-size: 14px; line-height: 1; opacity: 0.7; }
+.interject-chip:hover .ij-x { opacity: 1; }
 
-/* Compose */
+/* Stop button — square glyph, sits by the interject chip while a run is live.
+   Red (signal-red) so it reads unambiguously as stop/cancel; palette-token
+   background keeps it clean in dark mode. Soft pulse signals it's actionable.
+   Matched to the action-button height so the row stays balanced. */
+.stop-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0; flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--signal-red) 45%, transparent);
+  border-radius: 7px;
+  background: var(--signal-red-bg);
+  color: var(--signal-red); cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+  animation: stop-pulse 1.8s ease-in-out infinite;
+}
+.stop-btn:hover {
+  background: color-mix(in srgb, var(--signal-red) 22%, transparent);
+  border-color: var(--signal-red);
+  transform: scale(1.06);
+}
+.stop-btn:active { transform: scale(0.92); }
+@keyframes stop-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal-red) 40%, transparent); }
+  50%      { box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-red) 0%, transparent); }
+}
+
+/* Dark mode: recolor the run controls into a cohesive blue/violet/orange trio
+   (Send stays accent-blue). Interject → violet, Stop → orange (warmer than red). */
+[data-theme="dark"] .interject-chip {
+  color: #a78bfa;
+  background: #171130;
+  border-color: color-mix(in srgb, #a78bfa 45%, transparent);
+}
+[data-theme="dark"] .interject-chip:hover {
+  background: color-mix(in srgb, #a78bfa 22%, transparent);
+  border-color: #a78bfa;
+}
+[data-theme="dark"] .stop-btn {
+  color: var(--accent-warm);
+  background: var(--accent-warm-subtle);
+  border-color: color-mix(in srgb, var(--accent-warm) 45%, transparent);
+  animation: stop-pulse-warm 1.8s ease-in-out infinite;
+}
+[data-theme="dark"] .stop-btn:hover {
+  background: color-mix(in srgb, var(--accent-warm) 22%, transparent);
+  border-color: var(--accent-warm);
+}
+@keyframes stop-pulse-warm {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-warm) 40%, transparent); }
+  50%      { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-warm) 0%, transparent); }
+}
+
+/* Compose — sits open on the messages surface, no separator line above it. */
 .chat-compose {
   padding: 12px 32px 16px 36px;
-  border-top: 1px solid var(--border-subtle);
   position: relative;
 }
 .chip-strip {
@@ -807,73 +932,34 @@ watch(() => sessions.sessionId, (newId) => {
   flex-wrap: wrap;
 }
 .compose-row:focus-within { box-shadow: 0 2px 12px rgba(0,0,0,0.08), 0 1px 0 rgba(255,255,255,0.9) inset; }
+/* Dark mode: a deep "dark-moon" surface — near-black with a faint moonlight
+   glow up top, and a soft accent glow ring on focus. */
 [data-theme="dark"] .compose-row {
   background:
-    linear-gradient(180deg,
-      rgba(8,8,12,0.95) 0%,
-      rgba(14,14,20,0.98) 49%,
-      rgba(6,6,9,0.90) 50%,
-      rgba(10,10,15,0.95) 100%
-    );
-  border-color: rgba(255,255,255,0.06);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.04) inset;
+    radial-gradient(120% 150% at 50% 0%, rgba(56,189,248,0.06) 0%, transparent 58%),
+    linear-gradient(180deg, #0b0e14 0%, #060809 100%);
+  border-color: rgba(120,160,220,0.10);
+  box-shadow: 0 6px 22px rgba(0,0,0,0.5), 0 1px 0 rgba(120,160,220,0.05) inset;
 }
-[data-theme="dark"] .compose-row:focus-within { box-shadow: 0 2px 12px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.05) inset; }
+[data-theme="dark"] .compose-row:focus-within {
+  border-color: rgba(56,189,248,0.38);
+  box-shadow: 0 6px 26px rgba(0,0,0,0.55), 0 0 0 3px rgba(56,189,248,0.10), 0 0 26px rgba(56,189,248,0.13);
+}
 .compose-controls {
-  display: flex; align-items: center; gap: 1px;
+  display: flex; align-items: flex-end; gap: 4px;
   flex-shrink: 0;
 }
-.ctl-wrap {
-  position: relative; user-select: none;
-}
-.ctl-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 6px;
-  color: var(--text-muted); cursor: pointer;
-  transition: all 0.12s ease;
-}
-.ctl-btn:hover, .ctl-btn.active { color: var(--accent); background: var(--bg-soft); }
-/* Tooltip */
-.ctl-tip {
-  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
-  padding: 3px 8px; border-radius: 4px;
-  background: var(--text); color: var(--surface);
-  font-size: 10px; font-family: var(--mono); white-space: nowrap;
-  pointer-events: none; opacity: 0;
-  transition: opacity 0.12s ease;
-}
-.ctl-wrap:hover .ctl-tip { opacity: 1; }
-/* Dropdown menu */
-.ctl-menu {
-  position: absolute; bottom: calc(100% + 4px); left: 0;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; padding: 4px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-  min-width: 110px; z-index: 100;
-}
-.ctl-opt {
-  padding: 5px 10px; border-radius: 5px;
-  font-size: 11px; font-family: var(--mono);
-  color: var(--text-secondary); cursor: pointer;
-  transition: all 0.08s ease;
-}
-.ctl-opt:hover { background: var(--bg-soft); color: var(--text); }
-.ctl-opt.sel { color: var(--accent); font-weight: 600; }
-/* Menu transition: slide up + fade */
-.menu-enter-active, .menu-leave-active { transition: all 0.12s ease; }
-.menu-enter-from, .menu-leave-to { opacity: 0; transform: translateY(6px); }
-.menu-enter-to, .menu-leave-from { opacity: 1; transform: translateY(0); }
 .compose-input {
   flex: 1; border: none;
   background: rgba(250,250,250,0.95);
   border-radius: 4px;
   resize: none; font-size: 14px; padding: 6px 8px;
-  min-height: 24px; max-height: 140px;
+  min-height: 24px; max-height: 200px; overflow-y: auto;
   font-family: var(--font); color: var(--text);
   min-width: 0;
 }
 [data-theme="dark"] .compose-input {
-  background: rgba(5,5,8,0.9);
+  background: transparent;
 }
 .compose-input:focus { outline: none; }
 .compose-input::placeholder { color: var(--text-muted); }
@@ -886,12 +972,22 @@ watch(() => sessions.sessionId, (newId) => {
   .compose-controls { width: 100%; padding-bottom: 4px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 2px; }
   .compose-input { width: 100%; }
 }
-.send { padding: 6px; }
-.send:not(:disabled):hover { color: var(--accent) !important; }
-.send:disabled { opacity: 0.2; cursor: default; }
+/* Send — the primary action. Accent-coloured at rest (so it reads as live, not
+   greyed out, in dark mode), with a clear hover glow + press feedback. Disabled
+   (empty input) falls back to muted so it still reads as inactive. */
+.send {
+  padding: 6px; border-radius: 7px;
+  color: var(--accent);
+  transition: color var(--transition), background var(--transition), filter var(--transition), transform var(--transition);
+}
+.send:not(:disabled):hover {
+  color: var(--accent-hover);
+  background: var(--accent-subtle);
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 55%, transparent));
+}
+.send:not(:disabled):active { transform: scale(0.9); }
+.send:disabled { color: var(--text-muted); opacity: 0.4; cursor: default; }
 
-/* Panel toggle button active state */
-.panel-active { color: var(--accent) !important; }
 
 @keyframes blink {
   0%, 80%, 100% { opacity: 0.3; }

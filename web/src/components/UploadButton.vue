@@ -25,7 +25,7 @@ import { ref } from 'vue'
 
 defineProps({
   disabled: { type: Boolean, default: false },
-  accept: { type: String, default: '.txt,.md,.log,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.py,.js,.ts,.jsx,.tsx,.go,.rs,.java,.c,.cpp,.h,.hpp,.sh,.rb,.php,.sql,.pdf,.png,.jpg,.jpeg,.gif,.webp' },
+  accept: { type: String, default: '.txt,.md,.log,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.py,.js,.ts,.jsx,.tsx,.go,.rs,.java,.c,.cpp,.h,.hpp,.sh,.rb,.php,.sql,.pdf,.docx,.pptx,.xlsx,.png,.jpg,.jpeg,.gif,.webp' },
 })
 const emit = defineEmits(['files'])
 const fileInput = ref(null)

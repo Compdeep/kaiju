@@ -21,7 +21,7 @@ import (
  */
 type PreflightResult struct {
 	Skills             []string     // which guidance cards/skills apply (union of capabilities + skillGuidance)
-	Mode               string       // "chat" | "meta" | "investigate"
+	Mode               string       // "chat" | "agent"
 	Intent             gates.Intent // inferred intent rank from the registry (used when trigger intent is Auto)
 	RequiredCategories []string     // tool categories the plan must include (network/filesystem/compute/process/info)
 	Context            string       // one-line framing of the user's intent based on conversation history
@@ -60,14 +60,44 @@ type preflightRaw struct {
 	NeedsSynthesis     bool     `json:"needs_synthesis"`
 }
 
+// mentionsLiveInventory reports whether the query asks about the actual plugins
+// or tools available right now — the class the route model keeps mis-sending to
+// chat. "what can you do" is deliberately NOT here: that's a general-capability
+// question the chat lane answers from the persona; only questions about the LIVE
+// inventory need the agent (which calls plugin_list).
+func mentionsLiveInventory(query string) bool {
+	q := strings.ToLower(query)
+	if strings.Contains(q, "plugin") {
+		return true
+	}
+	for _, p := range []string{"your tools", "what tools", "which tools", "tools do you", "tools available", "tools can you"} {
+		if strings.Contains(q, p) {
+			return true
+		}
+	}
+	return false
+}
+
 /*
  * routeQuery is the cheap first pass: it decides the handling mode
- * (chat / meta / investigate) with a tiny prompt and NO skill manifest. Only the
+ * (chat / investigate) with a tiny prompt and NO skill manifest. Only the
  * agentic path then pays for the full classify + skill selection, so a "hello"
- * never loads the skills it won't use. Fails safe to "investigate" so a real
- * request is never misrouted to chat.
+ * never loads the skills it won't use. Fails safe to "chat" (the cheap lane) on
+ * any classifier error.
  */
 func (a *Agent) routeQuery(ctx context.Context, alertID, query string, history []llm.Message) string {
+	// Deterministic override — decided in code, NOT by the classifier. A question
+	// about the live plugin/tool inventory ("do you have plugins?", "what tools do
+	// you have") must run the agent so it calls plugin_list: the real answer is in
+	// the registry, not the model's training. The route model reliably mis-reads
+	// these as answerable-from-self no matter the prompt (proven across three prompt
+	// rewrites), so we decide it here instead of asking. Over-routing is safe — a
+	// stray investigate costs one extra call; a missed one returns a hallucinated
+	// capability list.
+	if mentionsLiveInventory(query) {
+		log.Printf("[route] deterministic → agent (asks about live plugin/tool inventory)")
+		return "agent"
+	}
 	started := time.Now()
 	trace := LLMTrace{AlertID: alertID, NodeType: "preflight", Tag: "route", Started: started, System: prompt.Route, User: query}
 	// Give the router just enough context to interpret a terse follow-up, then the
@@ -113,7 +143,7 @@ func (a *Agent) routeQuery(ctx context.Context, alertID, query string, history [
 	}
 	WriteLLMTrace(trace)
 	switch out.Mode {
-	case "chat", "meta", "investigate":
+	case "chat", "agent":
 		return out.Mode
 	default:
 		return "chat"
@@ -276,33 +306,44 @@ func (a *Agent) buildSkillManifest() string {
  */
 func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 	out := &PreflightResult{
-		Mode:   "investigate",
+		Mode:   "agent",
 		Intent: gates.Intent(0),
 	}
 
-	// Skills — keep only keys that exist in either registry
+	// Skills — keep only keys that exist in either registry, DE-DUPLICATED and
+	// capped. A non-selective preflight otherwise repeats skills and attaches
+	// most of the library to one step: prompt bloat, a noisy "guided by" list,
+	// and irrelevant work (e.g. a system_operations skill dragging net_info into
+	// a market-research run). The prompt asks for a focused few; these are the
+	// backstops that hold even when the model over-lists.
+	const maxSkills = 6
+	seen := map[string]bool{}
 	for _, key := range raw.Skills {
-		if _, ok := a.capabilities[key]; ok {
-			out.Skills = append(out.Skills, key)
+		if seen[key] {
+			continue // duplicate — the model listed it twice
+		}
+		_, isCap := a.capabilities[key]
+		_, isGuide := a.skillGuidance[key]
+		if !isCap && !isGuide {
+			log.Printf("[dag] preflight: unknown skill %q, dropping", key)
 			continue
 		}
-		if _, ok := a.skillGuidance[key]; ok {
-			out.Skills = append(out.Skills, key)
-			continue
+		seen[key] = true
+		out.Skills = append(out.Skills, key)
+		if len(out.Skills) >= maxSkills {
+			log.Printf("[dag] preflight: capped skills at %d (model listed %d)", maxSkills, len(raw.Skills))
+			break
 		}
-		log.Printf("[dag] preflight: unknown skill %q, dropping", key)
 	}
 
 	// Mode — must be one of the three
 	switch strings.ToLower(strings.TrimSpace(raw.Mode)) {
 	case "chat":
 		out.Mode = "chat"
-	case "meta":
-		out.Mode = "meta"
-	case "investigate", "":
-		out.Mode = "investigate"
+	case "agent", "":
+		out.Mode = "agent"
 	default:
-		log.Printf("[dag] preflight: unknown mode %q, defaulting to investigate", raw.Mode)
+		log.Printf("[dag] preflight: unknown mode %q, defaulting to agent", raw.Mode)
 	}
 
 	// Intent — resolve via the registry. Unknown names keep the safe default (rank 0).
@@ -354,14 +395,14 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 /*
  * defaultPreflight returns a neutral preflight result used when the LLM
  * call fails or returns garbage.
- * desc: Safe defaults: no skills, investigate mode, rank 0 intent, no
+ * desc: Safe defaults: no skills, agent mode, rank 0 intent, no
  *       category requirements. The planner proceeds as if no preflight
  *       hints were given.
  * return: neutral PreflightResult.
  */
 func defaultPreflight() *PreflightResult {
 	return &PreflightResult{
-		Mode:   "investigate",
+		Mode:   "agent",
 		Intent: gates.Intent(0),
 	}
 }

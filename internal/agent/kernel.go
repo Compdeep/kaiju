@@ -127,6 +127,12 @@ func (k *Kernel) Interject(session, msg string) bool {
 	return k.scheduler.Interject(session, msg)
 }
 
+// Cancel stops the query running for a session (the Stop button) by cancelling
+// its job context. Returns true if a query was running.
+func (k *Kernel) Cancel(session string) bool {
+	return k.scheduler.Cancel(session)
+}
+
 // SetConcurrency live-resizes how many investigations run at once.
 func (k *Kernel) SetConcurrency(n int) { k.scheduler.SetConcurrency(n) }
 

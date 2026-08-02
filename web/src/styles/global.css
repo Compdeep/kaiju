@@ -43,6 +43,28 @@ a { color: var(--accent); text-decoration: none; }
 .btn-icon { padding: 6px; border: none; background: transparent; cursor: pointer; color: var(--text-muted); display: flex; align-items: center; transition: color var(--transition); }
 .btn-icon:hover { color: var(--accent); }
 
+/* ─── Column header (shared by sidebar / chat / panel columns) ─────────── */
+/* No bottom border — the columns blend into one open surface at rest. */
+.col-header {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 52px; min-height: 52px;
+  padding: 0 12px;
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+/* ─── Header icon buttons (chat header + movable HeaderTools cluster) ───── */
+.hdr-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 50%;
+  color: var(--text-muted); background: none; border: 1px solid transparent;
+  cursor: pointer; transition: all var(--transition);
+}
+.hdr-btn:hover:not(:disabled) { color: var(--accent); background: var(--surface-hover); border-color: var(--border); }
+.hdr-btn.active { color: var(--accent); background: var(--accent-subtle); }
+.hdr-btn:disabled { opacity: 0.3; cursor: default; }
+.hdr-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
+
 /* ─── Badges ──────────────────────────────────────────── */
 .badge {
   display: inline-flex; align-items: center;

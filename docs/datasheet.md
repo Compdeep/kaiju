@@ -1,6 +1,6 @@
 # KAIJU
 
-**Kaiju is an AI assistant that plans before it acts.** It builds structured workflows, executes tasks in parallel, and completes complex work reliably instead of responding step by step.
+**Kaiju is an executive kernel for system administration and enterprise workflows.** A small Go agent engine that plans before it acts — it builds structured workflows, executes tasks in parallel, and gates every action through Intent-Gated Execution, completing complex work reliably instead of responding step by step.
 
 ## Overview
 
@@ -62,9 +62,9 @@ Full-stack development through the architect-coder pipeline. The architect desig
 
 ## Autonomous Sentry
 
-Continuous monitoring with autonomous response within strict security bounds. Kaiju evaluates threats, gathers evidence, and takes graduated action — observe by default, operate on confirmed threat, override only with explicit clearance. Paired with the gossip mesh (libp2p) for multi-node coordination.
+Continuous monitoring with autonomous response within strict security bounds. Kaiju evaluates threats, gathers evidence, and takes graduated action — observe by default, operate on confirmed threat, override only with explicit clearance. Because IGX enforces the boundary in compiled code, an unattended node can be trusted to act.
 
-**Example**: A fleet of Kaiju instances monitoring network segments. Each node observes locally, shares findings via pub/sub, and escalates to a coordinator node that has override clearance to isolate compromised hosts. Every action is gated — a compromised node cannot escalate its own clearance.
+**Example**: A Kaiju node watching a network segment. It observes locally, correlates findings, and escalates from read-only inspection to a scoped remediation only when a threat is confirmed — and only up to the clearance it was granted. Every action is gated: the agent cannot escalate its own clearance, no matter how it's prompted.
 
 ## Edge Compute Agent
 

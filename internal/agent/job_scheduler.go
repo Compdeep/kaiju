@@ -208,6 +208,23 @@ func (s *Scheduler) Interject(session, msg string) bool {
 	return true
 }
 
+// Cancel stops the running query for a session — the Stop button. It cancels the
+// job's context, which unwinds its DAG. This is the real stop: a client
+// disconnect only makes SubmitSync stop waiting (the worker keeps running the
+// job), whereas cancelling the job context tears the run down. Returns true if a
+// query was running. Mirrors the same job.cancel() used to preempt on a newer
+// same-session message.
+func (s *Scheduler) Cancel(session string) bool {
+	s.mu.Lock()
+	job := s.running[session]
+	s.mu.Unlock()
+	if job == nil {
+		return false
+	}
+	job.cancel()
+	return true
+}
+
 // SetConcurrency live-resizes the worker pool. Growing spawns workers
 // immediately; shrinking retires idle or just-finished workers down to n (jobs
 // in flight are never interrupted). n < 1 is clamped to 1. Also retunes the

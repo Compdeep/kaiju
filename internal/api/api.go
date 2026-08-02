@@ -107,6 +107,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", a.handleDeleteMemory)
 	// Interjection
 	mux.HandleFunc("POST /api/v1/interject", a.handleInterject)
+	// Stop — cancel the running query for a session (the Stop button)
+	mux.HandleFunc("POST /api/v1/stop", a.handleStop)
 	// Clearance endpoints
 	mux.HandleFunc("GET /api/v1/clearance", a.handleListClearanceEndpoints)
 	mux.HandleFunc("POST /api/v1/clearance", a.handleUpsertClearanceEndpoint)
@@ -148,6 +150,22 @@ func failureVerdict(err error) string {
 // emptyVerdictNotice is returned when a run finishes with no verdict at all — the
 // run technically completed but produced nothing, which still must be reported.
 const emptyVerdictNotice = "The request finished but produced no answer — nothing usable was gathered. Nothing was fabricated; please try rephrasing or narrowing the request."
+
+// stripAttachmentBlock removes the "[attached files] … [query]" preamble the
+// frontend prepends when files are attached, returning just the user's typed
+// text. Used for the PERSISTED message only: the preamble's file paths are
+// ephemeral to the turn (they drive extraction now), and must not linger in
+// history where they'd make the agent re-read the files on every later turn.
+func stripAttachmentBlock(q string) string {
+	if !strings.HasPrefix(strings.TrimLeft(q, " \n"), "[attached files]") {
+		return q
+	}
+	// The preamble ends with a "[query]" line; the user's text follows it.
+	if i := strings.Index(q, "[query]\n"); i >= 0 {
+		return q[i+len("[query]\n"):]
+	}
+	return q
+}
 
 /*
  * handleExecute processes a DAG execution request.
@@ -294,8 +312,15 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		// user-side turn). The assistant turn is stored after the aggregator
 		// runs, also outside the execution layer. On regenerate the user message
 		// is already in history, so don't duplicate it.
+		//
+		// Persist the CLEAN text, not the "[attached files] … [query]" preamble the
+		// frontend prepends. That preamble is EPHEMERAL: its file paths drive
+		// extraction for THIS turn (req.Query still carries them into the trigger
+		// below), but if persisted they sit in history forever and the agent
+		// re-reads the files on every later turn — even after the attachment is
+		// gone from the UI. Strip it so an attachment is scoped to the turn it's on.
 		if !regenerating {
-			memMgr.StoreMessage(req.SessionID, "user", req.Query)
+			memMgr.StoreMessage(req.SessionID, "user", stripAttachmentBlock(req.Query))
 		}
 	}
 	if req.Mode != "" {
@@ -533,6 +558,25 @@ func (a *API) handleInterject(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[api] interjection sent: %s", req.Message)
 	jsonResponse(w, map[string]any{"sent": true}, http.StatusOK)
+}
+
+/*
+ * handleStop cancels the running query for a session — the Stop button. A client
+ * disconnect only stops the API handler waiting; the DAG keeps running in the
+ * scheduler worker. This cancels the job's context so the run actually unwinds.
+ * param: w - HTTP response writer
+ * param: r - HTTP request with a JSON body carrying "session_id"
+ */
+func (a *API) handleStop(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	stopped := a.agent.Cancel(req.SessionID)
+	if stopped {
+		log.Printf("[api] stop: cancelled running query for session %s", req.SessionID)
+	}
+	jsonResponse(w, map[string]any{"stopped": stopped}, http.StatusOK)
 }
 
 /*

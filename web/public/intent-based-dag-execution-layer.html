@@ -173,7 +173,7 @@
 <ol class="contributions">
   <li><strong>Optimistic DAG execution with three adaptive modes.</strong> A planner emits a parallel dependency graph; three modes differ in how they evaluate intermediate results: structural phase boundaries (Reflect), periodic batch checkpoints (nReflect), and per-node observers (Orchestrator). All three reduce token complexity from O(n&sup2;k) to O(nk) or O(nkd) and serial latency from O(n) to O(d).</li>
   <li><strong>Parameter dependency injection.</strong> A <code>param_refs</code> mechanism enables the planner to express data flow between steps at plan time, with concrete values resolved at execution time from upstream JSON outputs. This bridges the gap between upfront planning and runtime data availability without collapsing to sequential execution.</li>
-  <li><strong>Iterative reflection with replan loops.</strong> When all planned work completes, the system evaluates whether the gathered evidence is sufficient. If not, it replans with new tool calls, executes them, and reflects again&mdash;looping until the reflection concludes or budget is exhausted. This ensures multi-phase tasks complete fully rather than stopping after the first wave.</li>
+  <li><strong>Iterative reflection with replan loops.</strong> When all planned work completes, the system evaluates whether the gathered evidence is sufficient. If not, it replans with new tool calls, executes them, and reflects again&mdash;looping until the reflection concludes or budget is exhausted. This ensures multi-phase tasks complete fully rather than stopping after the first batch.</li>
   <li><strong>Four-variable scoped intent gate.</strong> Every tool call is checked against scope (which tools are visible), intent (how destructive the caller permits), impact (what the tool declares), and clearance (what an external authority approves). The gate is structural&mdash;compiled into the tool interface, not communicated via prompt.</li>
   <li><strong>Delegated resource clearance.</strong> Resource-level authorization is delegated to external HTTP endpoints. The gate sends tool name, parameters, and caller identity; the endpoint returns allow/deny. This enables deployment across hospitals, drones, enterprise IT, and filesystem environments without domain-specific logic in the agent.</li>
   <li><strong>Execution layer abstraction.</strong> The LLM has no knowledge of parallel scheduling, dependency resolution, parameter injection, or failure recovery. Each LLM call operates on a clean, bounded context. The execution layer translates high-level intent into precise operational actions.</li>
@@ -234,11 +234,11 @@
                 <span class="agg">aggregator</span> <span class="dim">(1 LLM call &mdash; synthesizes all evidence)</span></div>
 
 <p class="prose">
-  Seven tools fire in parallel in the first wave. The reflection evaluates all results, identifies gaps (no CVE search, no git status), and replans with targeted follow-ups. The CVE search uses <code>param_refs</code> to inject the kernel version discovered by sysinfo. A second reflection confirms sufficiency. The aggregator synthesizes everything into a structured report. Total: 3&ndash;4 LLM calls, ~22K tokens, 10&ndash;15 seconds. The LLM never sees more than one phase of results at a time.
+  Seven tools fire in parallel in the first batch. The reflection evaluates all results, identifies gaps (no CVE search, no git status), and replans with targeted follow-ups. The CVE search uses <code>param_refs</code> to inject the kernel version discovered by sysinfo. A second reflection confirms sufficiency. The aggregator synthesizes everything into a structured report. Total: 3&ndash;4 LLM calls, ~22K tokens, 10&ndash;15 seconds. The LLM never sees more than one phase of results at a time.
 </p>
 
 <div class="insight warm">
-  <strong>The running example illustrates three key properties.</strong> (1) Parallel execution reduces latency from 12 serial round-trips to the depth of the dependency graph (2 phases). (2) The reflection loop ensures multi-phase tasks complete fully&mdash;the system does not stop after the first wave of results. (3) Parameter dependency injection bridges plan-time structure and runtime data, enabling the planner to express &ldquo;search for CVEs affecting whatever kernel version sysinfo returns&rdquo; without knowing the version at plan time.
+  <strong>The running example illustrates three key properties.</strong> (1) Parallel execution reduces latency from 12 serial round-trips to the depth of the dependency graph (2 phases). (2) The reflection loop ensures multi-phase tasks complete fully&mdash;the system does not stop after the first batch of results. (3) Parameter dependency injection bridges plan-time structure and runtime data, enabling the planner to express &ldquo;search for CVEs affecting whatever kernel version sysinfo returns&rdquo; without knowing the version at plan time.
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
@@ -334,7 +334,7 @@
 <div class="mode-grid">
   <div class="mode-card mc-reflect">
     <h4>Reflect</h4>
-    <p>Reflection checkpoints are injected between dependency waves. At each boundary, the system evaluates all completed results and may replan. Execution pauses only at wave boundaries. Lowest LLM call count.</p>
+    <p>Reflection checkpoints are injected between dependency batches. At each boundary, the system evaluates all completed results and may replan. Execution pauses only at batch boundaries. Lowest LLM call count.</p>
   </div>
   <div class="mode-card mc-nreflect">
     <h4>nReflect</h4>
@@ -346,7 +346,7 @@
   </div>
 </div>
 
-<p class="dag-label">Reflect &mdash; reflection gates between dependency waves</p>
+<p class="dag-label">Reflect &mdash; reflection gates between dependency batches</p>
 <div class="dag"><span class="dim">planner</span>
   <span class="arrow">│</span>
   <span class="arrow">├──</span> <span class="nd">tool A</span> ─┐
@@ -385,7 +385,7 @@
 </p>
 
 <p class="prose">
-  This mechanism is critical for multi-phase tasks. Without it, the system would complete the first wave of tool calls, skip deeper follow-ups, and hand incomplete evidence to the aggregator. With it, the reflection loop drives the task to completion: search → fetch → reflect → need more data → fetch again → reflect → sufficient → aggregate.
+  This mechanism is critical for multi-phase tasks. Without it, the system would complete the first batch of tool calls, skip deeper follow-ups, and hand incomplete evidence to the aggregator. With it, the reflection loop drives the task to completion: search → fetch → reflect → need more data → fetch again → reflect → sufficient → aggregate.
 </p>
 
 <h4>Preemption</h4>

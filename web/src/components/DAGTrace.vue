@@ -13,29 +13,38 @@
       <span v-if="totalTokens > 0" class="h-val">{{ fmtTokens(totalTokens) }}</span>
       <span v-if="totalTokens > 0" class="h-dim">tok</span>
       <span :class="['h-status', status]">{{ statusLabel }}</span>
-      <span v-if="!expanded && latestTag" class="h-latest">{{ latestTag }}</span>
+      <!-- Live activity ticker: visible while running whether or not the trace is
+           expanded. The spinner + elapsed clock keep MOVING even when a single
+           slow step (a thinking model, a heavy fetch) emits nothing, so a live run
+           never looks frozen. The activity text names the current step. -->
+      <template v-if="running">
+        <span class="h-spin">{{ spinner }}</span>
+        <span class="h-activity">{{ activity }}</span>
+        <span class="h-elapsed">{{ liveElapsed }}</span>
+      </template>
+      <span v-else-if="!expanded && latestTag" class="h-latest">{{ latestTag }}</span>
     </div>
 
     <transition name="expand">
       <div v-if="expanded" class="trace-body">
         <template v-for="(item, i) in layout" :key="item.key">
 
-          <div v-if="item.type === 'wave-open'" class="tl tl-wave">
+          <div v-if="item.type === 'batch-open'" class="tl tl-batch">
             <span class="t-idx"></span>
             <span class="t-pipe">│</span>
-            <span class="t-wf">┬</span>
+            <span class="t-bf">┬</span>
           </div>
 
-          <div v-if="item.type === 'wave-close'" class="tl tl-wave">
+          <div v-if="item.type === 'batch-close'" class="tl tl-batch">
             <span class="t-idx"></span>
             <span class="t-pipe">│</span>
-            <span class="t-wf">┴</span>
+            <span class="t-bf">┴</span>
           </div>
 
           <div v-if="item.type === 'node'" class="tl tl-clickable" @click="toggleResult(item.node.id)">
             <span class="t-idx">{{ pad(item.index) }}</span>
             <span class="t-pipe">│</span>
-            <span v-if="item.inWave" class="t-wf">├</span>
+            <span v-if="item.inBatch" class="t-bf">├</span>
             <span :class="['t-ty', item.node.type, { 'is-skill': item.node.source === 'skillmd' }]">{{ item.node.source === 'skillmd' ? 'SKI' : tyLabel(item.node.type) }}</span>
             <span :class="['t-name', { 'is-skill': item.node.source === 'skillmd' }]">{{ item.node.type === 'tool' ? '[' + (item.node.tool || item.node.tag || item.node.id) + ']' : (item.node.tag || item.node.tool || item.node.id) }}</span>
             <span v-if="item.node.params" class="t-params">→ {{ '{' + compactParams(item.node.params) + '}' }}</span>
@@ -57,10 +66,19 @@
             <pre v-else class="t-result-content">{{ item.node.result }}</pre>
           </div>
 
+          <div v-if="item.type === 'interject'" class="tl tl-sub">
+            <span class="t-idx"></span>
+            <span class="t-pipe">│</span>
+            <span v-if="item.inBatch" class="t-bf">│</span>
+            <span class="t-art">╰──</span>
+            <span class="t-interject-label">you asked</span>
+            <span class="t-interject-msg">"{{ item.msg }}"</span>
+          </div>
+
           <div v-if="item.type === 'dep'" class="tl tl-sub">
             <span class="t-idx"></span>
             <span class="t-pipe">│</span>
-            <span v-if="item.inWave" class="t-wf">│</span>
+            <span v-if="item.inBatch" class="t-bf">│</span>
             <span class="t-art">╰──</span>
             <span class="t-dep-arrow">←</span>
             <span class="t-dep-ref">{{ item.name }}</span>
@@ -69,7 +87,7 @@
           <div v-if="item.type === 'spawn'" class="tl tl-sub">
             <span class="t-idx"></span>
             <span class="t-pipe">│</span>
-            <span v-if="item.inWave" class="t-wf">│</span>
+            <span v-if="item.inBatch" class="t-bf">│</span>
             <span class="t-art">╰──</span>
             <span class="t-spawn">spawned by {{ item.name }}</span>
           </div>
@@ -77,7 +95,7 @@
           <div v-if="item.type === 'skills'" class="tl tl-sub">
             <span class="t-idx"></span>
             <span class="t-pipe">│</span>
-            <span v-if="item.inWave" class="t-wf">│</span>
+            <span v-if="item.inBatch" class="t-bf">│</span>
             <span class="t-art">╰──</span>
             <span class="t-skill-label">guided by</span>
             <span v-for="s in item.skills" :key="s" class="t-skill-chip">{{ s }}</span>
@@ -86,7 +104,7 @@
           <div v-if="item.type === 'error'" class="tl tl-sub tl-clickable" @click="toggleResult('err-' + item.key)">
             <span class="t-idx"></span>
             <span class="t-pipe">│</span>
-            <span v-if="item.inWave" class="t-wf">│</span>
+            <span v-if="item.inBatch" class="t-bf">│</span>
             <span :class="['t-err-badge', item.errType || 'exec']">{{ errLabel(item.errType) }}</span>
             <span class="t-err-msg">{{ trunc(item.msg, 55) }}</span>
             <span class="t-expand">{{ expandedResults['err-' + item.key] ? '−' : '+' }}</span>
@@ -116,9 +134,9 @@
 
 <script setup>
 /**
- * desc: DAG execution trace visualizer that renders nodes, dependencies, waves, and errors in a terminal-style layout
+ * desc: DAG execution trace visualizer that renders nodes, dependencies, batches, and errors in a terminal-style layout
  */
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -129,6 +147,76 @@ const expanded = ref(false)
 const expandedResults = ref({})
 watch(() => props.running, (val) => { if (!val && props.nodes.length > 0) setTimeout(() => { expanded.value = false }, 2500) })
 watch(() => props.nodes.length, (n, o) => { if (n > 0 && o === 0) expanded.value = false })
+
+// ── Live activity ticker ──────────────────────────────────────────────────────
+// A local clock that runs only while the DAG is live. It drives a braille spinner
+// and an elapsed counter so the header visibly MOVES even during a silent step,
+// and it re-evaluates `activity` (the current running node) on every frame.
+const now = ref(0)
+const runStart = ref(0)
+let ticker = null
+const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+function startTicker() {
+  runStart.value = performance.now()
+  now.value = runStart.value
+  if (ticker) clearInterval(ticker)
+  ticker = setInterval(() => { now.value = performance.now() }, 120)
+}
+function stopTicker() { if (ticker) { clearInterval(ticker); ticker = null } }
+
+watch(() => props.running, (r) => { r ? startTicker() : stopTicker() })
+onMounted(() => { if (props.running) startTicker() })
+onUnmounted(stopTicker)
+
+const spinner = computed(() => SPIN[Math.floor(now.value / 120) % SPIN.length])
+
+const liveElapsed = computed(() => {
+  const s = Math.max(0, (now.value - runStart.value) / 1000)
+  if (s < 60) return s.toFixed(1) + 's'
+  const m = Math.floor(s / 60)
+  return `${m}m ${String(Math.floor(s % 60)).padStart(2, '0')}s`
+})
+
+// Plain-English verb for the type of the step currently doing the work.
+const ACT_VERB = {
+  aggregator: 'synthesizing answer', reflection: 'reflecting', observer: 'observing',
+  micro_planner: 'planning sub-steps', compute: 'computing', interjection: 'handling your note',
+  holmes: 'reasoning about root cause', actuator: 'acting',
+}
+
+// What the run is doing RIGHT NOW — the running node(s), named the way a person
+// would say it, with the tool's target (url/path/query) when there is one.
+const activity = computed(() => {
+  const live = props.nodes.filter(n => n.state === 'running')
+  if (!live.length) return 'working'
+  if (live.length > 1) return `${live.length} steps running`
+  const n = live[0]
+  if (n.type === 'executive') return n.tag === 'replan' ? 're-planning' : 'planning'
+  if (n.type === 'tool') {
+    const target = firstParam(n.params)
+    const name = n.tool || n.tag || 'tool'
+    return target ? `${name} → ${target}` : name
+  }
+  return ACT_VERB[n.type] || n.tag || n.tool || 'working'
+})
+
+/** Pull the most meaningful single param value (url/path/query/…) for display. */
+function firstParam(p) {
+  if (!p) return ''
+  try {
+    const obj = typeof p === 'string' ? JSON.parse(p) : p
+    for (const k of ['url', 'path', 'query', 'command', 'q', 'name']) {
+      if (obj[k]) return shortTarget(String(obj[k]))
+    }
+    const v = Object.values(obj)[0]
+    return v != null ? shortTarget(String(v)) : ''
+  } catch { return '' }
+}
+function shortTarget(s) {
+  s = s.replace(/^https?:\/\//, '')
+  return s.length > 32 ? s.slice(0, 32) + '…' : s
+}
 
 /**
  * desc: Toggle the expanded/collapsed state of a node's result content
@@ -188,8 +276,8 @@ const latestTag = computed(() => {
 })
 
 /**
- * desc: Build the flat layout array from nodes, grouping independent tools into waves and attaching deps/spawns/errors
- * @returns {Array<Object>} Layout items for rendering (node, wave-open, wave-close, dep, spawn, error)
+ * desc: Build the flat layout array from nodes, grouping independent tools into batches and attaching deps/spawns/errors
+ * @returns {Array<Object>} Layout items for rendering (node, batch-open, batch-close, dep, spawn, error)
  */
 const layout = computed(() => {
   const nodes = [...props.nodes]
@@ -213,19 +301,19 @@ const layout = computed(() => {
     const n = nodes[i]
 
     if (n.type === 'tool' && (!n.deps || !n.deps.length) && !n.spawn) {
-      let waveEnd = i + 1
-      while (waveEnd < nodes.length &&
-             nodes[waveEnd].type === 'tool' &&
-             (!nodes[waveEnd].deps || !nodes[waveEnd].deps.length) &&
-             !nodes[waveEnd].spawn) {
-        waveEnd++
+      let batchEnd = i + 1
+      while (batchEnd < nodes.length &&
+             nodes[batchEnd].type === 'tool' &&
+             (!nodes[batchEnd].deps || !nodes[batchEnd].deps.length) &&
+             !nodes[batchEnd].spawn) {
+        batchEnd++
       }
 
-      if (waveEnd - i >= 2) {
-        items.push({ type: 'wave-open', key: `wo-${i}` })
-        for (let j = i; j < waveEnd; j++) pushNode(items, nodes[j], idx++, true)
-        items.push({ type: 'wave-close', key: `wc-${i}` })
-        i = waveEnd
+      if (batchEnd - i >= 2) {
+        items.push({ type: 'batch-open', key: `wo-${i}` })
+        for (let j = i; j < batchEnd; j++) pushNode(items, nodes[j], idx++, true)
+        items.push({ type: 'batch-close', key: `wc-${i}` })
+        i = batchEnd
         continue
       }
     }
@@ -241,13 +329,19 @@ const layout = computed(() => {
  * @param {Array<Object>} items - The layout items array to push onto
  * @param {Object} n - The DAG node object
  * @param {number} idx - The sequential index for display
- * @param {boolean} inWave - Whether this node is inside a parallel wave group
+ * @param {boolean} inBatch - Whether this node is inside a parallel batch group
  * @returns {void}
  */
-function pushNode(items, n, idx, inWave) {
-  items.push({ type: 'node', key: `n-${n.id}`, node: n, index: idx, inWave })
+function pushNode(items, n, idx, inBatch) {
+  items.push({ type: 'node', key: `n-${n.id}`, node: n, index: idx, inBatch })
+  // Interjection nodes show the operator's original query directly under the
+  // node, so it reads as "you asked X → decided Y" instead of the query
+  // blurring into the reflection decision.
+  if (n.type === 'interjection' && n.operator_message) {
+    items.push({ type: 'interject', key: `ij-${n.id}`, msg: n.operator_message, inBatch })
+  }
   if (n.skills && n.skills.length) {
-    items.push({ type: 'skills', key: `sk-${n.id}`, skills: n.skills, inWave })
+    items.push({ type: 'skills', key: `sk-${n.id}`, skills: n.skills, inBatch })
   }
   // Show only the immediate parent (spawner or first dep), not the full chain.
   // Use tag first (descriptive), then tool type as fallback.
@@ -255,14 +349,14 @@ function pushNode(items, n, idx, inWave) {
     const parentId = n.deps[n.deps.length - 1] // last dep = most direct parent
     const dn = props.nodes.find(x => x.id === parentId)
     const label = dn ? (dn.tag || dn.tool || dn.id) : parentId
-    items.push({ type: 'dep', key: `d-${n.id}-${parentId}`, name: label, inWave })
+    items.push({ type: 'dep', key: `d-${n.id}-${parentId}`, name: label, inBatch })
   }
   if (n.spawn) {
     const sn = props.nodes.find(x => x.id === n.spawn)
-    if (sn) items.push({ type: 'spawn', key: `s-${n.id}`, name: sn.tool || sn.tag || sn.id, inWave })
+    if (sn) items.push({ type: 'spawn', key: `s-${n.id}`, name: sn.tool || sn.tag || sn.id, inBatch })
   }
   if (n.err) {
-    items.push({ type: 'error', key: `e-${n.id}`, msg: n.err, errType: n.err_type, inWave })
+    items.push({ type: 'error', key: `e-${n.id}`, msg: n.err, errType: n.err_type, inBatch })
   }
 }
 
@@ -366,6 +460,17 @@ function parseRCA(result) {
 .h-fail { color: var(--signal-red); font-weight: 600; font-size: 10px; } /* kept for compat */
 .h-latest { color: var(--text-secondary); font-size: 10px; margin-left: 4px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; opacity: 0.7; }
 .h-status { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Live ticker — spinner + current-step text + elapsed clock, shown while running. */
+.h-spin { color: var(--accent); font-weight: 700; width: 10px; display: inline-block; text-align: center; }
+.h-activity {
+  color: var(--accent); font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  animation: activity-pulse 1.6s ease-in-out infinite;
+}
+@keyframes activity-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.h-elapsed { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+
 .h-status.live { color: var(--accent); }
 .h-status.done { color: var(--signal-green); }
 .h-status.partial { color: var(--signal-amber); }
@@ -375,13 +480,13 @@ function parseRCA(result) {
 
 .tl { display: flex; align-items: baseline; gap: 5px; padding: 2px 0; white-space: nowrap; }
 .tl-sub { padding: 0; }
-.tl-wave { padding: 0; }
+.tl-batch { padding: 0; }
 
 .t-idx { width: 16px; text-align: right; color: var(--text-muted); font-size: 10px; flex-shrink: 0; }
 .t-pipe { color: var(--border); flex-shrink: 0; width: 8px; }
 
-/* Wave fork chars */
-.t-wf { color: var(--accent); opacity: 0.4; flex-shrink: 0; width: 8px; }
+/* Batch fork chars */
+.t-bf { color: var(--accent); opacity: 0.4; flex-shrink: 0; width: 8px; }
 
 /* Type — now before name */
 .t-ty { width: 34px; flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -419,6 +524,12 @@ function parseRCA(result) {
 .t-dep-arrow { color: #a78bfa; }
 .t-dep-ref { color: #a78bfa; font-size: 10px; font-weight: 500; }
 .t-spawn { color: var(--accent-warm); font-size: 10px; }
+
+/* Interjection query line — amber to match the INJ node type, so "you asked …"
+   visually belongs to the interjection it sits under, distinct from the
+   reflection decision the node renders as its summary. */
+.t-interject-label { color: var(--signal-amber); font-size: 10px; font-weight: 600; font-style: italic; }
+.t-interject-msg { color: var(--text-secondary); font-size: 10px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .t-skill-label { color: var(--text-dim); font-size: 10px; font-style: italic; }
 .t-skill-chip {
   display: inline-block;

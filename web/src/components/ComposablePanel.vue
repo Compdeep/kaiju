@@ -1,5 +1,12 @@
 <template>
   <div class="panel-root" :style="{ width: panel.width + 'px' }">
+    <!-- Column header: hosts the movable utility cluster (passed in from ChatPage
+         via the #header-actions slot) while the panel is open. No title — the
+         columns read as one open surface. -->
+    <div class="col-header panel-header">
+      <slot name="header-actions" />
+    </div>
+
     <!-- Top tab bar: shows open tabs for the active section -->
     <div class="panel-tabs" v-if="sectionTabs.length">
       <button
@@ -600,9 +607,14 @@ watch(() => panel.activeTab, (tab) => {
 .panel-root {
   display: flex; flex-direction: column;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+  /* No visible column line at rest — the gutter reveals the divider on hover. */
+  border-left: 1px solid transparent;
   height: 100%; min-width: 320px;
 }
+
+/* ── Column header ───────────────────────────────────────── */
+/* Right-aligned so the utility cluster lines up with the chat header's. */
+.panel-header { justify-content: flex-end; }
 
 /* ── Tab bar ─────────────────────────────────────────────── */
 .panel-tabs {

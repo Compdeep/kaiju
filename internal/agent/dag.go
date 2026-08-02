@@ -132,6 +132,10 @@ type Node struct {
 	ToolName  string
 	Params    map[string]any // may embed ${node.<id>(.path)?} templates resolved by the dispatcher before execution
 	DependsOn []string       // node IDs that must resolve before this fires
+	// Target names the machine this node runs on; empty means here. Opaque to
+	// this package and passed through exactly as the planner set it — see
+	// remote.go.
+	Target    string
 	Result    string
 	Body      NodeBody // typed output; Result is a cached render of this during the migration
 	Error     error

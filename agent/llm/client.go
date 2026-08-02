@@ -241,10 +241,13 @@ func (c *Client) setAuthHeaders(req *http.Request) {
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
-	// OpenRouter requires HTTP-Referer and X-Title for ranking/attribution
+	// OpenRouter requires HTTP-Referer and X-Title for ranking/attribution.
+	// Which application gets the credit is the embedding application's to
+	// decide, so both are settable — see SetAttribution.
 	if c.provider == ProviderOpenRouter {
-		req.Header.Set("HTTP-Referer", "https://github.com/Compdeep/kaiju")
-		req.Header.Set("X-Title", "Kaiju")
+		referer, title := attribution()
+		req.Header.Set("HTTP-Referer", referer)
+		req.Header.Set("X-Title", title)
 	}
 }
 

@@ -139,3 +139,44 @@ func TestNoObserverIsSafe(t *testing.T) {
 		t.Fatalf("Complete with no observer: %v", err)
 	}
 }
+
+func TestAttributionDefaultsAndOverride(t *testing.T) {
+	t.Cleanup(func() {
+		attrMu.Lock()
+		attrReferer, attrTitle = defaultReferer, defaultTitle
+		attrMu.Unlock()
+	})
+
+	var gotReferer, gotTitle string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotReferer = r.Header.Get("HTTP-Referer")
+		gotTitle = r.Header.Get("X-Title")
+		_ = json.NewEncoder(w).Encode(ChatResponse{Choices: []Choice{{Message: Message{Content: "ok"}}}})
+	}))
+	defer srv.Close()
+
+	call := func() {
+		c := NewClientWithProvider(ProviderOpenRouter, srv.URL, "k", "m")
+		if _, err := c.Complete(context.Background(), &ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}}); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+	}
+
+	call()
+	if gotTitle != defaultTitle || gotReferer != defaultReferer {
+		t.Errorf("defaults not sent: referer=%q title=%q", gotReferer, gotTitle)
+	}
+
+	SetAttribution("https://example.invalid/app", "Omamori")
+	call()
+	if gotTitle != "Omamori" || gotReferer != "https://example.invalid/app" {
+		t.Errorf("override not sent: referer=%q title=%q", gotReferer, gotTitle)
+	}
+
+	// An empty value must not blank a header — it leaves the current value.
+	SetAttribution("", "")
+	call()
+	if gotTitle != "Omamori" {
+		t.Errorf("empty override clobbered the title: %q", gotTitle)
+	}
+}

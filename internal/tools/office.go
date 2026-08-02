@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"strings"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // officeMaxChars caps returned text so a huge document can't blow the context

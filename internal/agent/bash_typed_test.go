@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // The self-repair trigger: a failed command body MUST be detected so the node is

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/llm"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 func searchNode(g *Graph, tag string, urls ...string) {

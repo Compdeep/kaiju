@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent"
-	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/tools"
 )
 
 // ─── MemoryStore ────────────────────────────────────────────────────────────

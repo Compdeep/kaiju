@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/prompt"
-	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/tools"
 )
 
 // VisionTool lets the planner hand an image to the configured vision model

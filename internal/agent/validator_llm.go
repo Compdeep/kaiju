@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 // validatorClassifierPrompt is the system prompt for the LLM validator.

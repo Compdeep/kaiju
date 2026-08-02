@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // decideAutoAggMode is the answer-writer choice. The behavioral change this guards:

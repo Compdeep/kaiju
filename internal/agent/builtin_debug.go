@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/tools"
 )
 
 // debugToolName is the registered name of the debug super-tool. It is pruned

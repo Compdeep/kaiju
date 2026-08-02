@@ -13,14 +13,14 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent"
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/prompt"
 	"github.com/Compdeep/kaiju/internal/agent/uploads"
 	"github.com/Compdeep/kaiju/internal/clearance"
 	"github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
 	"github.com/Compdeep/kaiju/internal/memory"
-	"github.com/Compdeep/kaiju/internal/tokens"
+	"github.com/Compdeep/kaiju/tokens"
 )
 
 /*

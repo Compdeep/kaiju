@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/Compdeep/kaiju/internal/agent/llm"
+import "github.com/Compdeep/kaiju/agent/llm"
 
 // EditorEvalResult is the parsed coder tool-call response, stripped down
 // to what an editor-layer harness needs. Production compute code goes

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // ─── ProcessList ────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ package agent
 import (
 	"strings"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // toolMessageBody adapts a tool's ToolMessage envelope to the NodeBody

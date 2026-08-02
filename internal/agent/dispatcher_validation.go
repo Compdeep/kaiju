@@ -31,7 +31,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/tools"
 )
 
 // parsedSchema is the minimal JSON-Schema shape the validator needs.

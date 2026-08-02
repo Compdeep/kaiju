@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/Compdeep/kaiju/internal/tokens"
+	"github.com/Compdeep/kaiju/tokens"
 )
 
 // tagTokens marks ctx so every LLM call in this run is attributed to the right

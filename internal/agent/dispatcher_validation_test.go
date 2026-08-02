@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/tools"
 )
 
 // fakeTool implements tools.Tool with caller-specified Parameters JSON,

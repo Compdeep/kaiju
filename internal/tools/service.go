@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 /*

@@ -17,7 +17,7 @@ import (
 	"sort"
 	"sync"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // Deps are the shared services a Host is built from. Extend this as plugins need

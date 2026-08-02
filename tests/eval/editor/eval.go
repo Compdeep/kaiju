@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/internal/agent"
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/internal/config"
 )
 

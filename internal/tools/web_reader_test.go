@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // A search hit that is a PDF must be read through the registered binary decoder

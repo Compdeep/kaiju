@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 // captureServer is a fake OpenAI-compatible endpoint that records the model id

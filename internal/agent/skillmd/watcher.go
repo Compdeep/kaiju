@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/tools"
 )
 
 // Watcher polls skill directories for changes and hot-reloads SKILL.md files.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 // visionImagesKey carries a turn's uploaded images (base64 data: URIs or URLs)

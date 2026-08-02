@@ -59,7 +59,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/internal/db"
 )
 

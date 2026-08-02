@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/compat/store"
 )
 
@@ -145,6 +145,33 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			ch <- nodeCompletion{NodeID: n.ID, Err: err}
 			return
 		}
+	}
+
+	// Remote execution: the planner named a machine and the embedding
+	// application supplied an executor, so hand the call over rather than
+	// running it here. Local throttling is deliberately skipped — the cooldown
+	// protects THIS process's rate limits, and the work is not happening in
+	// this process.
+	//
+	// Whatever authorisation the far end applies is its own business; nothing
+	// here assumes the receiving side trusts the intent travelling with the
+	// request.
+	if a.remoteFor(n) {
+		if err := a.validateTarget(n.Target); err != nil {
+			log.Printf("[dag] node %s: invalid target %q: %v", n.ID, n.Target, err)
+			ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf("invalid target %q: %w", n.Target, err)}
+			return
+		}
+		log.Printf("[dag] remote exec %s (%s) -> %s", n.ID, n.ToolName, Text.TruncateLog(n.Target, 12))
+		result, err := a.remoteExec.Execute(ctx, RemoteRequest{
+			Target:        n.Target,
+			Tool:          n.ToolName,
+			Params:        n.Params,
+			Intent:        int(intent),
+			CorrelationID: alertID,
+		})
+		ch <- nodeCompletion{NodeID: n.ID, Result: result, Err: err}
+		return
 	}
 
 	// Enforce per-tool cooldown before executing

@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
+	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/internal/agent/prompt"
 	"github.com/Compdeep/kaiju/internal/agent/skillmd"
-	"github.com/Compdeep/kaiju/agent/tools"
 	"github.com/Compdeep/kaiju/internal/compat/ipc"
 	"github.com/Compdeep/kaiju/internal/compat/protocol"
 	"github.com/Compdeep/kaiju/internal/compat/store"
@@ -232,6 +232,9 @@ type ClearanceChecker interface {
  *       embeddings, skill watching, fleet context, and live DAG streaming.
  */
 type Agent struct {
+	remoteExec  RemoteExecutor  // nil = steps naming a machine run locally
+	targetValid TargetValidator // nil = any non-empty target accepted
+
 	cfg      Config
 	llm      *llm.Client // reasoning model (executive, aggregator, classifier)
 	executor *llm.Client // executor model (reflection, observer, micro-planner)
@@ -244,11 +247,11 @@ type Agent struct {
 	visionProvider string
 	visionModel    string
 	// Chat lane default — direct completion, no planner/tools. Empty ⇒ reasoning.
-	chatProvider      string
-	chatModel         string
-	chatTools         []string
-	routeProvider     string
-	routeModel        string
+	chatProvider  string
+	chatModel     string
+	chatTools     []string
+	routeProvider string
+	routeModel    string
 	// Answer lane default — the model that writes the FINAL answer (aggregator +
 	// chat). Empty ⇒ the heavy/reasoning lane. Open-ended generation, so a thinking
 	// model is fine here (unlike the planner/executor/router tool-call lanes).

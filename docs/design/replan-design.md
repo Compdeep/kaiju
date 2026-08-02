@@ -32,13 +32,13 @@ Research runs fabricate sources. Root cause, traced through a real DAG:
 
 ## Core insight
 The graph grows for exactly two reasons:
-- **EXPAND** — a wave *succeeded* and revealed more work (found URLs → fetch them).
+- **EXPAND** — a batch *succeeded* and revealed more work (found URLs → fetch them).
   **This path does not exist today.** ← `replan` adds it.
 - **REPAIR** — a step *failed* (today: `investigate` → Holmes RCA → MicroPlanner
   grafts fix → validators verify).
 
 Repair is just replan with a diagnosis in front of it. We keep the DAG for the
-parallel *triage* wave (fan out N searches — DAG is good at this, ReAct is not) and
+parallel *triage* batch (fan out N searches — DAG is good at this, ReAct is not) and
 add a replan loop for the *adapt* (ReAct-flavored, because you can't predict results).
 
 ## Architecture decisions

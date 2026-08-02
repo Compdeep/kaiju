@@ -18,6 +18,7 @@ process.
 """
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import inspect
 import os
@@ -40,6 +41,9 @@ class Registry:
     def __init__(self) -> None:
         self._plugins: list[dict] = []            # manifest entries, in load order
         self._invokers: dict[str, Callable] = {}  # tool name -> the plugin's invoke
+        self._plugin_of: dict[str, str] = {}      # tool name -> owning plugin name
+        self._limit: dict[str, int] = {}          # plugin name -> max concurrent calls
+        self._sem: dict[str, asyncio.Semaphore] = {}  # plugin name -> its gate (lazy)
 
     def manifest(self) -> dict:
         return {"plugins": self._plugins}
@@ -47,14 +51,28 @@ class Registry:
     def has_tool(self, tool: str) -> bool:
         return tool in self._invokers
 
+    def _gate(self, tool: str) -> asyncio.Semaphore:
+        """The concurrency gate for a tool's PLUGIN. All tools of one plugin share
+        one gate (a per-service queue); different plugins have independent gates, so
+        a busy/slow service never blocks another. Created lazily so it binds to the
+        running loop. A plugin's max_concurrency (default 1 = serialize) is the
+        number of slots — requests beyond it await a slot instead of piling on."""
+        name = self._plugin_of.get(tool, tool)
+        sem = self._sem.get(name)
+        if sem is None:
+            sem = asyncio.Semaphore(self._limit.get(name, 1))
+            self._sem[name] = sem
+        return sem
+
     async def invoke(self, tool: str, params: dict) -> dict:
-        fn = self._invokers[tool]
-        try:
-            result = fn(tool, params or {})
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception as e:  # a plugin crash is an error envelope, never a 500
-            return envelope(tool, "error", detail=f"{type(e).__name__}: {e}")
+        async with self._gate(tool):
+            fn = self._invokers[tool]
+            try:
+                result = fn(tool, params or {})
+                if inspect.isawaitable(result):
+                    result = await result
+            except Exception as e:  # a plugin crash is an error envelope, never a 500
+                return envelope(tool, "error", detail=f"{type(e).__name__}: {e}")
         if not isinstance(result, dict) or "status" not in result:
             # Be forgiving: a plugin that returns a bare string becomes ok content.
             return envelope(tool, "ok", content=str(result))
@@ -72,8 +90,14 @@ class Registry:
             "tools": man.get("tools", []),
         }
         self._plugins.append(entry)
+        pname = entry["name"]
+        # max_concurrency: how many calls this plugin runs at once (default 1 =
+        # serialize). webreader sets it higher; a single-threaded plugin leaves it
+        # at 1 and its requests queue behind one another.
+        self._limit[pname] = max(1, int(man.get("max_concurrency", 1)))
         for tool in entry["tools"]:
             self._invokers[tool["name"]] = fn
+            self._plugin_of[tool["name"]] = pname
 
 
 def load_plugins(root: str) -> Registry:

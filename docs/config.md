@@ -67,6 +67,8 @@ called out.
     "execution_mode": "interactive",
     "route_provider": "openrouter",
     "route_model": "openai/gpt-4.1-mini",
+    "answer_provider": "",
+    "answer_model": "",
     "wall_clock_sec": 180,
     "max_turns": 15,
     "rate_limit": 100,
@@ -116,7 +118,10 @@ called out.
   },
 
   "skills_dirs": ["~/.kaiju/skills"],
-  "plugins": []
+  "plugins": [],
+  "allow_runtime_plugin_activation": false,
+  "remote_plugin_host": "",
+  "remote_plugin_start": ""
 }
 ```
 
@@ -132,6 +137,7 @@ only required one; the rest fall back to it (or to the executor) when empty.
 | Chat | `chat` | Direct-completion conversation lane (no planner/DAG). Empty ⇒ reasoning model |
 | Vision | `vision` | Answers questions about attached images via direct completion. Empty ⇒ no dedicated lane (images fall back to the reasoning model if it supports vision) |
 | Router | `agent.route_provider` / `agent.route_model` | The cheap per-turn "chat vs. investigate" routing decision |
+| Answer | `agent.answer_provider` / `agent.answer_model` | The final-answer lane — the aggregator's verdict and the chat reply, i.e. the prose the user reads. Kept separate from the planner's heavy lane. Empty ⇒ reasoning model |
 
 The `providers` block (below) is a separate concern: it is the **credential
 catalog** that per-request model routing draws from. A lane's own `provider`
@@ -217,7 +223,7 @@ any name works as long as the host selects it.
 | `dag_enabled` | `true` | Enable DAG parallel execution (false = ReAct fallback for async triggers) |
 | `dag_mode` | `"orchestrator"` | Default DAG mode: `reflect`, `nReflect`, `orchestrator` |
 | `max_nodes` | `100` | Max total DAG nodes per investigation |
-| `max_per_skill` | `10` | Max invocations of a single skill per wave. Resets at reflection boundaries |
+| `max_per_skill` | `10` | Max invocations of a single skill per batch. Resets at reflection boundaries |
 | `max_llm_calls` | `20` | Max LLM calls per investigation (planner + reflections + aggregator) |
 | `max_observer_calls` | `50` | Max observer LLM calls (orchestrator mode) |
 | `batch_size` | `5` | Skill completions before reflection (nReflect mode) |
@@ -228,6 +234,8 @@ any name works as long as the host selects it.
 | `execution_mode` | `"interactive"` | `interactive` (default) or `autonomous` |
 | `route_provider` | `"openrouter"` | Provider for the per-turn chat-vs-investigate routing decision. Empty ⇒ executor lane. See below |
 | `route_model` | `"openai/gpt-4.1-mini"` | Model for the routing decision. See below |
+| `answer_provider` | — | Provider for the final-answer lane (aggregator + chat), kept separate from the planner's heavy lane. Empty ⇒ reasoning lane. See below |
+| `answer_model` | — | Model that writes the final answer. Empty ⇒ reasoning lane. See below |
 | `wall_clock_sec` | `180` | Investigation timeout in seconds |
 | `max_turns` | `15` | Max ReAct loop turns |
 | `rate_limit` | `100` | Max tool invocations per hour |
@@ -247,6 +255,15 @@ The default `openrouter` / `openai/gpt-4.1-mini` benched 100% route-accuracy,
 tokens and silently falls back to chat. See `docs/router-model-bench.md` for the
 full comparison. Empty ⇒ the executor lane. Overridable via config, the config
 API, or the CLI.
+
+#### `agent.answer_provider` / `agent.answer_model`
+
+These pin the model that writes the **final answer** — the aggregator's verdict
+and the chat lane, i.e. "the AI" the user actually hears. It's kept **separate
+from the planner's heavy lane**: the answer lane does open-ended prose generation
+with **no forced tool calls**, so a reasoning/thinking model is a perfectly good
+(often better) choice here — unlike the planner, executor, and router lanes, which
+need reliable tool-callers. Empty ⇒ the reasoning lane writes the answer too.
 
 #### `agent.intents`
 
@@ -322,16 +339,49 @@ file changes. Default `["~/.kaiju/skills"]`.
 
 ### `plugins`
 
-Array naming the optional, build-tag-gated plugins to switch on at startup
-(e.g. `["pdf"]`). A name here only takes effect if the binary was compiled with
-that plugin's tag (`-tags plugin_pdf`); otherwise it's reported as missing and
-ignored. Default `[]` (none). See `internal/plugins`.
+Array naming the optional, build-tag-gated plugins to switch on at startup. A
+name here only takes effect if the binary was compiled with that plugin's tag;
+otherwise it's reported as missing and ignored. Default `[]` (none).
+
+Two different kinds of plugin share this one list:
+
+- **Go build-tag tool plugins** — compiled in-process (e.g. `"pdf"`, built with
+  `-tags plugin_pdf`). Each contributes planner-callable tools and/or `web_fetch`
+  reader seams directly inside the kaiju binary.
+- **The `remote` bridge** — the build-tag plugin (`-tags plugin_remote`) that
+  fronts the **out-of-process** plugin host (a separate long-running process, e.g.
+  the Python host). Listing `"remote"` turns the bridge on; it then fetches the
+  host's manifest and synthesizes one tool per advertised remote tool, so adding a
+  remote tool needs no kaiju rebuild. The host URL and launch command come from
+  `remote_plugin_host` / `remote_plugin_start` below.
+
+The planner can't tell a compiled tool from a remote one — both land in the same
+tool registry. See `plugins.md` for the full plugin architecture, and
+`internal/plugins`.
+
+### `allow_runtime_plugin_activation`
+
+Top-level boolean, default `false`. When `true`, the `plugin_enable` tool is
+registered and may switch a compiled-in plugin (or the `remote` bridge) on at
+runtime — persisting the change back to this config file — so an operator can turn
+a capability on from chat without a restart. Off by default; the embedding host
+(e.g. makeen) opts in. When `false`, `plugin_enable` is not registered at all.
+
+### `remote_plugin_host` / `remote_plugin_start`
+
+Top-level strings that configure the out-of-process plugin host the `remote`
+bridge talks to.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `remote_plugin_host` | — | Base URL of the plugin host (e.g. `http://127.0.0.1:8091`). Exported to `KAIJU_PLUGIN_HOST` for the bridge at startup and on enable. Set from chat via the `plugin_option` tool, which persists it here. Empty ⇒ the plugin catalog's default URL |
+| `remote_plugin_start` | — | Shell command that LAUNCHES the host when it isn't already running (`{port}` is substituted). Empty ⇒ the plugin catalog's default start command. Enabling the capability runs this so the host "just works" without a separate manual start |
 
 ## DAG Modes
 
 | Mode | Behavior | Best for |
 |------|----------|----------|
-| `reflect` | Serialized with reflection barriers between depth waves | Conservative, high-stakes tasks |
+| `reflect` | Serialized with reflection barriers between depth batches | Conservative, high-stakes tasks |
 | `nReflect` | Parallel with batched reflection every N completions | Balanced autonomy/oversight |
 | `orchestrator` | Parallel with per-node observer LLM calls | Interactive chat, maximum responsiveness (default) |
 

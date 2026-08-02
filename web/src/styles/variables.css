@@ -1,23 +1,24 @@
 :root {
-  --bg: #F0F2F5;
-  --surface: rgba(255,255,255,0.7);
-  --surface-hover: rgba(255,255,255,0.85);
-  --surface-raised: rgba(255,255,255,0.8);
-  --border: rgba(255,255,255,0.4);
-  --border-subtle: rgba(255,255,255,0.25);
-  --text: #1A1A1A;
-  --text-secondary: #6B6B6B;
-  --text-muted: #A0A0A0;
+  /* ── Light — softened: warm off-white, calm blue accent (was neon cyan) ── */
+  --bg: #F6F5F3;
+  --surface: #FFFFFF;
+  --surface-hover: #FAF9F7;
+  --surface-raised: #FFFFFF;
+  --border: #E7E5E0;
+  --border-subtle: #EFEEEA;
+  --text: #26251F;
+  --text-secondary: #67665D;
+  --text-muted: #9D9C92;
 
-  --accent: #38BDF8;
-  --accent-hover: #0EA5E9;
-  --accent-subtle: #F0F9FF;
-  --accent-warm: #F97316;
-  --accent-warm-subtle: #FFF7ED;
+  --accent: #2F6FED;
+  --accent-hover: #1E5BD6;
+  --accent-subtle: #EEF3FF;
+  --accent-warm: #E8590C;
+  --accent-warm-subtle: #FFF2E8;
 
-  --signal-green: #22C55E;
-  --signal-amber: #EAB308;
-  --signal-red: #EF4444;
+  --signal-green: #16A34A;
+  --signal-amber: #CA8A04;
+  --signal-red: #DC2626;
   --signal-green-bg: #F0FDF4;
   --signal-amber-bg: #FEFCE8;
   --signal-red-bg: #FEF2F2;
@@ -25,7 +26,7 @@
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
   --shadow: 0 2px 8px rgba(0,0,0,0.06), 0 1px 0 rgba(255,255,255,0.6) inset;
   --shadow-md: 0 4px 16px rgba(0,0,0,0.08), 0 1px 0 rgba(255,255,255,0.5) inset;
-  --shadow-lg: 0 8px 32px rgba(0,0,0,0.12), 0 1px 0 rgba(255,255,255,0.4) inset;
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.10), 0 1px 0 rgba(255,255,255,0.4) inset;
   --radius: 8px;
   --radius-sm: 5px;
   --radius-lg: 14px;
@@ -34,13 +35,13 @@
   --display: 'Michroma', 'Exo 2', sans-serif;
   --mono: 'JetBrains Mono', 'Fira Code', monospace;
 
-  --scrollbar-thumb: #D4D4D4;
+  --scrollbar-thumb: #D8D6D0;
   --scrollbar-track: transparent;
   --chat-accent: var(--accent);
 
   /* Panel layout */
-  --gutter-idle: #E8E8E8;
-  --gutter-hover: #D4D4D4;
+  --gutter-idle: #E7E5E0;
+  --gutter-hover: #D4D2CC;
   --gutter-active: var(--accent);
   --sidebar-w: 220px;
   --sidebar-min: 160px;
@@ -54,39 +55,40 @@
 }
 
 [data-theme="dark"] {
+  /* ── Dark — architecture-aligned: #050506, blue primary, indigo/pink logo ── */
   --bg: #050506;
-  --surface: #0A0A0D;
-  --surface-hover: #111114;
-  --surface-raised: #0D0D10;
-  --border: #1A1A1F;
-  --border-subtle: #121215;
-  --text: #FAFAFA;
-  --text-secondary: #A1A1AA;
-  --text-muted: #71717A;
+  --surface: #0C0C11;
+  --surface-hover: #14141B;
+  --surface-raised: #101016;
+  --border: #1F1F26;
+  --border-subtle: #16161B;
+  --text: #EAEAF1;
+  --text-secondary: #9A9AA8;
+  --text-muted: #63636F;
 
-  --accent: #c0428a;
-  --accent-hover: #d946a8;
-  --accent-subtle: #1a0515;
-  --accent-warm: #38BDF8;
-  --accent-warm-subtle: #0c2d4a;
+  --accent: #38BDF8;
+  --accent-hover: #7DD3FC;
+  --accent-subtle: #0A2230;
+  --accent-warm: #F97316;
+  --accent-warm-subtle: #2A1608;
 
-  --signal-green: #86EFAC;
-  --signal-amber: #FDE68A;
-  --signal-red: #FCA5A5;
-  --signal-green-bg: #052E16;
-  --signal-amber-bg: #1C1A00;
-  --signal-red-bg: #2A0A0A;
+  --signal-green: #4ADE80;
+  --signal-amber: #FBBF24;
+  --signal-red: #F87171;
+  --signal-green-bg: #082818;
+  --signal-amber-bg: #201A05;
+  --signal-red-bg: #260D0D;
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
-  --shadow: 0 2px 8px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.06) inset;
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.05) inset;
-  --shadow-lg: 0 8px 32px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.04) inset;
+  --shadow: 0 2px 8px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.05) inset;
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.04) inset;
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.03) inset;
 
-  --scrollbar-thumb: #333;
+  --scrollbar-thumb: #2A2A32;
   --chat-accent: var(--accent);
 
   /* Panel gutter for dark */
-  --gutter-idle: #1A1A1F;
-  --gutter-hover: #252528;
+  --gutter-idle: #1F1F26;
+  --gutter-hover: #2A2A32;
   --gutter-active: var(--accent);
 }

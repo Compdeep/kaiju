@@ -1,151 +1,66 @@
 # Kaiju Architecture
 
-Kaiju is a general-purpose AI assistant built in Go. It combines a battle-tested DAG-based agent engine with a modular channel system, REST API, and pluggable tool registry.
+Kaiju is an **executive kernel** — a Go agent engine that runs system-administration
+and enterprise workflows *alongside* the operating system, gating every action
+through **Intent-Gate Execution**. It is a single compiled binary with a small
+dependency surface; heavy capabilities are opt-in plugins kept out of the default
+build.
 
-## High-Level Overview
+> **Read the architecture overview:** a rendered, illustrated walkthrough of the
+> whole system — life of a request, the DAG engine, IGX, plugins, routing, memory,
+> lifecycle, topology — lives at **[`/docs/architecture`](architecture.html)**
+> (served by kaiju on `:8090`).
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                        cmd/kaiju                         │
-│              chat │ serve │ run "query"                   │
-└──────────┬───────────────┬───────────────────────────────┘
-           │               │
-    ┌──────▼──────┐  ┌─────▼──────┐
-    │  Channels   │  │  REST API  │
-    │ cli│web│tg  │  │ /execute   │
-    └──────┬──────┘  └─────┬──────┘
-           │               │
-     ┌─────▼───────────────▼─────┐
-     │        Agent Engine       │
-     │  Planner → DAG Scheduler  │
-     │  → Reflection → Aggregator│
-     └─────────────┬─────────────┘
-                   │
-     ┌─────────────▼─────────────┐
-     │       Tool Registry       │
-     │  bash│file│web│sysinfo│…  │
-     └─────────────┬─────────────┘
-                   │
-     ┌─────────────▼─────────────┐
-     │    IGX Gate (Safety)      │
-     │ observe│operate│override  │
-     └──────────────────────────-┘
-```
+This directory holds the detailed reference docs behind that overview.
 
-## Core Packages
+## Engine
+- **[graph.md](graph.md)** — the authoritative DAG engine: route → preflight →
+  executive plan → scheduler → dispatcher → reflection → debug/Holmes → aggregator,
+  the `${step.N}` edge wiring, the edges (coverage / grounding / conclusion-floor)
+  anti-fabrication layer, compute, and run cancellation.
+- **[scheduling.md](scheduling.md)** — the priority worker pool, node batches,
+  preemption, stop/cancel, and interject.
+- **[prompt-context.md](prompt-context.md)** — the ContextGate: the single context
+  API and its sources, and the memory security boundary.
 
-| Package | Purpose |
-|---------|---------|
-| `cmd/kaiju` | Entry point — CLI, daemon, one-shot modes |
-| `internal/agent` | DAG agent engine — planner, preflight, scheduler, reflection, compute, contextual executor |
-| `internal/agent/llm` | OpenAI/Anthropic-compatible HTTP client |
-| `internal/agent/tools` | Tool interface + thread-safe registry |
-| `internal/agent/gates` | Intent-Gated Execution (IGX) safety gate |
-| `internal/agent/skillmd` | SKILL.md hot-reload loader for user-defined guidance skills |
-| `internal/db` | SQLite persistence for users, scopes, intents, sessions, memories, audit |
-| `internal/channels` | Channel plugin interface + registry |
-| `internal/gateway` | HTTP server, WebSocket, SSE streaming |
-| `internal/api` | REST execution API |
-| `internal/tools` | General-purpose tools (bash, file, web, sysinfo, memory) |
-| `internal/config` | JSON config loader with env var expansion |
-| `internal/compat` | Shim layer for omamori dependencies (store, protocol, ipc) |
-| `pkg/gossip` | Optional P2P mesh networking module |
-| `pkg/bridge` | Optional IPC bridge protocol for external integrations |
+## Security
+- **[authorization.md](authorization.md)** — the scope / intent / clearance triad
+  and the gate that enforces `impact ≤ min(intent, clearance, scope)`.
+- **[intents.md](intents.md)** — the configurable intent ladder, custom intents,
+  and per-tool assignment.
+- **[examples-igx.md](examples-igx.md)** — worked IGX scenarios.
 
-## Agent Execution Flow
+## Tools & plugins
+- **[tools.md](tools.md)** — the built-in tool catalogue, by impact tier.
+- **[plugins.md](plugins.md)** — the dual plugin architecture (compiled in-process
+  + the remote bridge to a supervised out-of-process host) and the service manager.
+- **[uploads-extraction.md](uploads-extraction.md)** — office/PDF extraction, the
+  uploads pipeline, and the `web_fetch` decoder / reader seams.
+- **[actions.md](actions.md)** — node actions and frontend display hints.
 
-1. **Trigger** arrives (chat query, API call, or channel message)
-2. **Preflight** (executor LLM call) classifies the query in one shot — returns `{skills, mode, intent, required_categories}`. If `mode=chat` or `mode=meta`, short-circuits past the planner. Otherwise its classification flows into the planner's prompt as context.
-3. **Planner** LLM call generates a DAG of tool invocations with dependencies. Sees preflight-selected skills via `a.activeCards`, scope-filtered tools, and configurable intent descriptions from the registry.
-4. **Scheduler** executes the DAG with mode-specific behavior:
-   - `reflect`: serialized with reflection barriers between depth waves
-   - `nReflect`: parallel with batched reflection every N completions
-   - `orchestrator`: parallel with per-node observer LLM calls
-5. **Reflection** checkpoints decide: continue, conclude early, or replan. Reflector requires direct evidence of goal achievement to conclude — writing files is not achievement, only verified working behavior counts.
-6. **Micro-planner** handles individual node failures (skip, retry, or replace)
-7. **Aggregator** synthesizes all tool results into a final verdict
-8. **Actuator** executes any follow-up actions (gated by IGX)
+## Memory, skills, models
+- **[memory.md](memory.md)** — sessions, long-term memory, compaction, tenant
+  isolation, and the chat-boundary rule.
+- **[skills.md](skills.md)** — guidance skills vs capability cards, and how they are
+  selected and injected.
+- **[router-model-bench.md](router-model-bench.md)** — the model lanes and the
+  benchmark behind the route-model default.
 
-## Preflight
+## Config & operations
+- **[config.md](config.md)** — the full configuration reference.
+- **[service.md](service.md)** — the `service` process-manager tool and its
+  supervisor (health loop, auto-restart, one-instance guarantee).
+- **[workspace.md](workspace.md)** — `data_dir` vs `workspace`, the sandbox, and
+  bootstrap files.
 
-Single executor-model LLM call at investigation start that replaces the legacy classifier. Returns a structured `PreflightResult` with four fields:
+## API
+- **[api.md](api.md)** — the REST + SSE reference (execute, stop, interject,
+  sessions, uploads, memories, clearance, …).
 
-- **skills**: names of guidance skills the query matches (from classifier manifest)
-- **mode**: `chat | meta | investigate` — chat and meta short-circuit past the planner
-- **intent**: `observe | operate | override | <custom>` — the safety level this query needs, resolved via the intent registry
-- **required_categories**: tool categories the plan must include (`network`, `filesystem`, `compute`, `process`, `info`)
+## Examples & positioning
+- **[examples-office.md](examples-office.md)** — a narrative no-code walkthrough.
+- **[datasheet.md](datasheet.md)** — the product one-pager.
 
-Preflight sees conversation history (last 5 turns, assistant replies truncated to 500 chars) so it can resolve short follow-ups like "yeah do it." Its output is cached on `a.preflight` for the duration of the investigation.
-
-## Skills and capabilities
-
-Kaiju has two distinct concepts with related names:
-
-- **Tools** — compiled Go code that implements the `Tool` interface. They have an `Execute()` method that actually does work. Examples: `bash`, `file_read`, `compute`, `web_search`, `service`.
-- **Skills** — markdown files that provide planning guidance via prompt injection. They never execute. Two flavors:
-  - **CapabilityCards** (`internal/agent/prompts/capabilities/*.md`, embedded in binary) — small domain buckets (`data_retrieval`, `system_operations`, etc.)
-  - **SkillMD** (`skills/bundled/<name>/SKILL.md`, loaded from disk) — user-editable, full-featured guidance cards with `## When to Use`, `## Planning Guidance`, `## Architect Guidance`, `## Coder Guidance` sections
-
-Both types are selected per-query by the preflight call and injected into relevant prompts:
-
-- **Planner** reads `## Planning Guidance` from active skills
-- **Architect** (inside compute) reads `## Architect Guidance` from active skills
-- **Coder** (inside compute) reads `## Coder Guidance` from active skills
-- **Aggregator** reads `## Aggregator Guidance` from active capability cards
-
-Guidance-only skills are stored in `a.skillGuidance` — separate from the tool registry to avoid confusing executable tools with prompt guidance.
-
-## Compute and the validation wave
-
-For code-generation and multi-file work, kaiju uses the `compute` tool which runs a four-phase pipeline: architect decomposes → setup commands → parallel coders → execute/service → validation wave. See `docs/compute.md` for details.
-
-Failed nodes in a dependency chain use a **retry proxy pattern**: the original node stays "running" while the micro-planner retries, blocking dependents until a replacement succeeds or retries exhaust. Leaf nodes (no dependents) fail optimistically — their errors flow as signals to the reflector. This keeps the pipeline sequentially correct where ordering matters while staying optimistic everywhere else.
-
-## Intent system
-
-Intent levels (`observe`/`operate`/`override`) are stored in the DB and are configurable. Admins can add custom intents (e.g. `triage`, `kill`) with sparse integer ranks. Each tool's intent can be overridden per-tool via the admin UI. See `docs/intents.md` for the full intent system and `docs/authorization.md` for gate enforcement.
-
-## Session contract
-
-Each conversation has shared interfaces at `<workspace>/blueprints/interfaces.json` (keyed by session ID) holding cumulative API contracts and schema. The architect reads them as authoritative current state on every turn and merges new values back on completion. Blueprints (`<workspace>/blueprints/<tag>.blueprint.md`) are full markdown design documents that coders and reflectors read as the single source of truth.
-
-## Budget & Resource Limits
-
-The DAG engine enforces resource limits at two levels:
-
-**Plan time** (planner creates nodes):
-- `max_nodes` — hard cap on total nodes in the investigation
-- Per-skill wave limits are NOT enforced at plan time — they apply at execution time only
-
-**Execution time** (scheduler fires nodes):
-- `max_per_skill` — per-skill wave limit (resets at reflection boundaries)
-- `max_llm_calls` — total LLM calls (planner + reflections + aggregator)
-- `wall_clock_sec` — investigation timeout
-
-This separation matters: a plan like `web_search → 5 × web_fetch` is one logical chain.
-The web_fetch nodes can't fire until their dependency completes, so they don't add parallel
-pressure. Enforcing per-skill limits at plan time would truncate mid-chain, breaking
-dependency injection (`${step.N.field}` placeholders) and causing nodes to fire without their dependencies.
-
-## Intent-Gated Execution (IGX)
-
-Every tool declares an impact rank. Every request carries an intent rank.
-The gate enforces: `tool.Impact(params) ≤ min(intent, clearance, scope_cap)`.
-
-Intent names and ranks are loaded from the config/DB via the intent registry.
-Admins can add custom intents at any rank. Default ladder:
-
-| Rank | Name      | Meaning                    | Examples |
-|------|-----------|----------------------------|----------|
-| 0    | observe   | Read-only                  | sysinfo, file_read, web_fetch |
-| 100  | operate   | Reversible side effects    | file_write, bash (non-destructive) |
-| 200  | override  | Destructive / irreversible | bash (rm, kill), system modification |
-
-## Configuration
-
-See `docs/config.md` for the full config reference.
-
-## Optional Modules
-
-- **Gossip mesh** (`pkg/gossip`): P2P agent coordination via libp2p. See `docs/gossip.md`.
-- **Bridge IPC** (`pkg/bridge`): External process integration via NDJSON pipes. See `docs/bridge.md`.
+## Design notes (history)
+- **[design/](design/)** — shipped design docs kept for rationale
+  (`replan-design.md`, `pre-plan-strategist-note.md`).

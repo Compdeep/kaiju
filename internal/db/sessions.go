@@ -128,6 +128,42 @@ func (d *DB) AddMessage(sessionID, role, content string) error {
 	return err
 }
 
+// ReconcileDanglingTurns writes a terminal assistant reply to every session whose
+// LAST message is a user turn. Such a turn means a run was killed mid-flight —
+// almost always by a process restart or crash, which bypasses the execute
+// handler's normal "store a terminal message even on disconnect" path. Without
+// this, the UI heuristic "last message is a user turn ⇒ a run is still in flight"
+// latches a progress bar FOREVER after a restart (no 'done' event ever arrives).
+// Run once at startup; safe because at startup no run from a prior process can
+// still be live. Returns how many turns it repaired.
+func (d *DB) ReconcileDanglingTurns() (int, error) {
+	const note = "_(This run was interrupted by a restart and produced no answer. Please re-send your message.)_"
+	rows, err := d.conn.Query(`
+		SELECT m.session_id FROM messages m
+		WHERE m.id = (
+			SELECT id FROM messages m2 WHERE m2.session_id = m.session_id
+			ORDER BY created_at DESC, id DESC LIMIT 1
+		) AND m.role = 'user'`)
+	if err != nil {
+		return 0, err
+	}
+	var sids []string
+	for rows.Next() {
+		var sid string
+		if err := rows.Scan(&sid); err == nil {
+			sids = append(sids, sid)
+		}
+	}
+	rows.Close()
+	n := 0
+	for _, sid := range sids {
+		if err := d.AddMessage(sid, "assistant", note); err == nil {
+			n++
+		}
+	}
+	return n, nil
+}
+
 /*
  * GetMessages returns all messages for a session in chronological order.
  * desc: Queries messages for a session ordered by created_at, defaulting to 1000 if limit is non-positive

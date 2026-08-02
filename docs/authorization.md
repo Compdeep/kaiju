@@ -128,13 +128,18 @@ Layer 3: Gate caps impact per-tool
 
 ### Assignment
 
-Users get scopes through:
-1. **Direct assignment** — `user.scopes: ["operator"]`
-2. **Group inheritance** — user is in group "engineering" which has scopes ["operator", "full"]
+Users get scopes through **direct assignment** — `user.scopes: ["operator"]`.
 
 When a user has multiple scopes, they merge:
 - **Tools**: union — tool is allowed if ANY scope allows it
 - **Caps**: min — if two scopes cap the same tool, strictest wins
+
+**Groups do not grant scopes today.** The `groups` table and the `users.groups`
+column exist and are CRUD-able via the API, but `ResolveUserScope`
+(`internal/db/scopes.go`) only walks a user's *direct* `scopes` list — it never
+expands a user's group memberships into tools or caps. Putting a user in a group
+has no effect on what that user is allowed to do. Assign scopes directly until
+group-to-scope inheritance is wired into resolution.
 
 ### API
 

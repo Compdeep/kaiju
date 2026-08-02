@@ -21,8 +21,22 @@ Kaiju separates **system state** from **user content** using two directory trees
     ├── skills/                     # Workspace-specific skill overrides
     │   └── my-custom-skill/
     │       └── SKILL.md
-    └── canvas/                     # Panel/canvas files (generated content)
+    ├── project/                    # Agent-written code and files (sandbox zone)
+    ├── media/                      # Downloaded / generated media (sandbox zone)
+    ├── canvas/                     # Panel/canvas files (sandbox zone)
+    ├── blueprints/                 # Architect specs and plans (sandbox zone)
+    ├── uploads/                    # User-uploaded files, per session (sandbox zone)
+    │   └── <session-id>/
+    ├── sessions/                   # Per-session working state
+    ├── .services/                  # stdout/stderr logs for managed services
+    └── .services.json              # Registry of supervised services
 ```
+
+On first run (web mode) the bootstrap creates `project/`, `media/`, `skills/`,
+`blueprints/`, and `sessions/`. `uploads/`, `.services/`, and `.services.json`
+are created on demand by the upload processor and the service manager. In CLI
+mode the workspace is the current directory, so only `.kaiju/blueprints/` and
+`.kaiju/sessions/` are seeded — no MD files are written into your directory.
 
 ## System State vs User Content
 
@@ -67,6 +81,38 @@ On first run, Kaiju seeds the workspace with default bootstrap files:
 These files are read at session start. Edit them to customize the agent.
 
 Bootstrap never overwrites existing files. If you delete one, it will be re-created on next startup.
+
+## Write Sandbox
+
+Agent-generated files can only land inside a fixed set of workspace zones. Every
+write resolves through `SafeJoin` (`internal/workspace/safepath.go`), which joins
+the requested path onto the workspace and then verifies it falls inside one of the
+**allowed zones**:
+
+```
+project · media · canvas · blueprints · uploads
+```
+
+`SafeJoin` rejects absolute paths (`/etc/passwd`), `../` escapes
+(`project/../cmd/main.go`), and writes at the workspace root
+(`compute.py` must be `project/compute.py`). Anything outside the allowed zones —
+`cmd/`, `internal/`, `.kaiju/`, or a sibling project — is denied.
+
+This is the last line of defense that stops the planner or coder from writing into
+the agent's own source tree. It matters most in CLI mode, where the workspace is
+the current working directory and a stray write could clobber real code.
+Prompt-level rules alone proved insufficient, so the boundary is enforced in
+compiled code, not just instructed.
+
+Some directories under the workspace are runtime state rather than write targets:
+
+| Directory | Written by | Contents |
+|-----------|-----------|----------|
+| `sessions/` | engine | Per-session working state |
+| `blueprints/` | architect | Design specs and plans (also a sandbox zone) |
+| `uploads/<session-id>/` | upload processor | Uploaded files + `.meta.json` sidecars |
+| `.services/` | service manager | stdout/stderr logs for managed services |
+| `.services.json` | service manager | Registry of supervised services |
 
 ## Configuration
 

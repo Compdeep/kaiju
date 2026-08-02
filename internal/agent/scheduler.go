@@ -226,15 +226,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			// Pure agent: no routing (its result would only be discarded). Prepare
 			// the plan directly, so autonomous always has full skills/context.
 			pf = a.classifyInvestigate(ctx, trigger.AlertID, query, trigger.History)
-			pf.Mode = "investigate"
+			pf.Mode = "agent"
 		} else {
-			// Interactive: route first; chat & meta short-circuit before plan-prep.
+			// Interactive: route first; chat short-circuits before plan-prep, agent plans.
 			switch a.routeQuery(ctx, trigger.AlertID, query, trigger.History) {
 			case "chat":
 				pf = &PreflightResult{Mode: "chat"}
-			case "meta":
-				pf = &PreflightResult{Mode: "meta"}
-			default:
+			default: // "agent"
 				pf = a.classifyInvestigate(ctx, trigger.AlertID, query, trigger.History)
 			}
 		}
@@ -245,9 +243,9 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		log.Printf("[dag] preflight: mode=%s intent=%s skills=%v categories=%v context=%q",
 			pf.Mode, pf.Intent, pf.Skills, pf.RequiredCategories, Text.TruncateLog(pf.Context, 120))
 
-		// Short-circuit chat/meta — skip the executive entirely. Interactive only;
-		// autonomous never produces these modes.
-		if pf.Mode == "chat" || pf.Mode == "meta" {
+		// Short-circuit chat — skip the executive entirely. Interactive only;
+		// autonomous never produces this mode.
+		if pf.Mode == "chat" {
 			log.Printf("[dag] preflight short-circuit: mode=%s, skipping planner", pf.Mode)
 			return nil, &ExecutiveConversationalError{Text: ""}
 		}
@@ -416,8 +414,9 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				return false
 			}
 			rNode := &Node{
-				Type: NodeInterjection,
-				Tag:  "operator",
+				Type:            NodeInterjection,
+				Tag:             "operator",
+				OperatorMessage: msg, // the human's injected query, shown on the trace node
 			}
 			rID := graph.AddNode(rNode)
 
@@ -504,7 +503,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			batchCtxResp = &ContextResponse{Sources: map[string]string{}}
 		}
 		go a.fireReflection(ctx, rNode, graph, budget, completionCh, trigger, batchCtxResp, intent)
-		budget.ResetWaveCounters()
+		budget.ResetBatchCounters()
 		batchCounter = 0
 		log.Printf("[dag] batch reflection injected at %s", rID)
 	}
@@ -514,7 +513,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		maxInvestigations = 1
 	}
 	investigationCount := 0
-	// Replan is the graph's growth path — a wave succeeds and reveals more work
+	// Replan is the graph's growth path — a batch succeeds and reveals more work
 	// (expand), or a failure needs a debug step (repair). Capped so a run can't
 	// grow forever; the diminishing→conclude brake below is the soft backstop.
 	// The cap is the configured base (a floor) auto-scaled UP by how hard the
@@ -535,7 +534,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	schedulerStart := time.Now()
 	// diminishingStreak tracks consecutive reflector passes that reported
 	// progress=diminishing. Two in a row downgrades the current decision
-	// from "replan" to "conclude" so we don't spawn fresh debug/expand waves
+	// from "replan" to "conclude" so we don't spawn fresh debug/expand batches
 	// when work isn't moving the needle.
 	diminishingStreak := 0
 	// debuggerInflight is declared above (alongside other top-level state)
@@ -707,7 +706,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 								obsCtxResp = &ContextResponse{Sources: map[string]string{}}
 							}
 							go a.fireReflection(ctx, rNode, graph, budget, completionCh, trigger, obsCtxResp, intent)
-							budget.ResetWaveCounters()
+							budget.ResetBatchCounters()
 							log.Printf("[dag] observer triggered reflection (%s)", obs.Reason)
 						}
 					}
@@ -1054,7 +1053,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				} else {
 					// Progress classification brake — only "diminishing" has
 					// scheduler-visible effect. Two consecutive diminishing
-					// waves downgrade investigate/replan→conclude so Holmes
+					// batches downgrade investigate/replan→conclude so Holmes
 					// cycles stop spawning and the graph stops expanding when
 					// work isn't moving the needle. Empty / unknown /
 					// "productive" resets the streak.
@@ -1109,9 +1108,9 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					switch ref.Decision {
 					case "continue":
 						graph.SetBody(comp.NodeID, ReflectionBody{Out: *ref, Raw: comp.Result})
-						budget.ResetWaveCounters()
+						budget.ResetBatchCounters()
 						investigationCount = 0 // reset — if previous investigation worked, next reflection starts fresh
-						log.Printf("[dag] reflection: continue (%s), wave counters reset", ref.Reason)
+						log.Printf("[dag] reflection: continue (%s), batch counters reset", ref.Reason)
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONTINUE", Text.TruncateLog(ref.Reason, 200))
 						launchReady()
 						// If nothing launched, the reflector expected pending steps that
@@ -1124,13 +1123,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						}
 
 					case "replan":
-						// EXPAND: a wave succeeded and revealed the next move. Re-invoke
+						// EXPAND: a batch succeeded and revealed the next move. Re-invoke
 						// the executive to plan the next steps, graft them, keep looping.
 						// This is the growth path that mirrors investigate's REPAIR path —
 						// but with a diagnosis of SUCCESS ("here's what to do next") rather
 						// than failure. The failure pipeline is untouched.
 						graph.SetBody(comp.NodeID, ReflectionBody{Out: *ref, Raw: comp.Result})
-						budget.ResetWaveCounters()
+						budget.ResetBatchCounters()
 
 						next := ref.Next
 						if next == "" {
@@ -1697,7 +1696,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							log.Printf("[dag] compute plan → grafted top-level service node %s: %s", sID, svc.Command)
 						}
 
-						// Phase 4: validation wave — architect-declared checks.
+						// Phase 4: validation batch — architect-declared checks.
 						// Each validation entry becomes a bash node running its
 						// check command, depending on all Phase 1-3 grafted
 						// nodes so it runs only after setup + coders complete.
@@ -1750,7 +1749,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 								log.Printf("[dag] compute plan → grafted %d validation checks", len(validationNodes))
 							}
 						} else {
-							log.Printf("[dag] compute plan emitted no validation — no validation wave grafted")
+							log.Printf("[dag] compute plan emitted no validation — no validation batch grafted")
 						}
 
 						// Rewrite downstream nodes to depend on all grafted nodes

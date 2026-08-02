@@ -14,19 +14,17 @@
 
 # Kaiju
 
-An enterprise-grade dual-purpose AI agent. Deploy it as a general assistant with a modern web UI, or extend it as an executive kernel to control and manage systems — IT infrastructure, robotic operators, drone fleets, data pipelines, or any domain where an AI needs to plan, execute, and adapt safely.
+Kaiju is an **executive kernel** — a small Go agent engine for system administration and enterprise workflows. It plans work as a dependency graph, executes tools in parallel, and gates every action through **Intent-Gated Execution (IGX)**, so an autonomous agent can be given real authority without exceeding it. Point it at IT infrastructure, robotic operators, drone fleets, data pipelines, or any domain where an AI needs to plan, execute, and adapt safely. A modern web UI ships in the same binary.
 
 MIT License
 
 ## What it does
 
-Kaiju serves two roles: a **conversational assistant** and an **autonomous execution kernel**.
+Kaiju separates **reasoning from execution**. The LLM produces a dependency graph of tool calls; the kernel then schedules, gates, and adapts that graph independently. Tools fire in parallel where dependencies allow. A ReAct investigator (Holmes) diagnoses failures with structured root-cause analysis. A clean-room debugger plans fixes. Reflection checkpoints evaluate intermediate results and replan when needed. An intent-based execution gate (IGX) enforces tool authorization at runtime — the LLM plans, but compiled code decides what runs.
 
-As an assistant, it provides a chat interface with session history, a composable side panel (file browser, media viewer, code preview, canvas), configurable execution modes, and a modular skill system inspired by OpenClaw.
+The same architecture drives a system-administration task ("monitor this service and restart it if it fails"), an enterprise workflow ("build me an internal dashboard"), and an ordinary chat query — all through one engine. Skills teach the kernel domain-specific strategies without changing the core.
 
-As an execution kernel, it separates reasoning from execution. The LLM produces a dependency graph of tool calls, then the kernel schedules, gates, and adapts the graph independently. Tools fire in parallel where dependencies allow. A ReAct investigator (Holmes) diagnoses failures with structured root-cause analysis. A clean-room debugger plans fixes. Reflection checkpoints evaluate intermediate results and replan when needed. An intent-based execution gate (IGX) enforces tool authorization at runtime — the LLM plans, but compiled code decides what runs.
-
-The same architecture handles a chat query ("download some videos"), a web development task ("build me a website"), and an autonomous system operation ("monitor this service and restart it if it fails"). Skills teach the kernel domain-specific strategies without changing the core engine.
+A web UI ships in the same binary: chat with session history, a composable side panel (file browser, media viewer, code preview, canvas), configurable execution modes, and a modular skill system inspired by OpenClaw.
 
 ## Quick start
 
@@ -35,8 +33,7 @@ The same architecture handles a chat query ("download some videos"), a web devel
 make build
 
 # Configure
-cp kaiju.json.example kaiju.json
-# Edit kaiju.json — set your LLM API key
+# Create a kaiju.json with your LLM API key (see Configuration below)
 
 # Run
 ./kaiju serve              # Start daemon (web UI + API on :8080)
@@ -73,8 +70,8 @@ Minimal configuration:
   },
   "agent": {
     "dag_enabled": true,
-    "dag_mode": "reflect",
-    "safety_level": 1,
+    "dag_mode": "orchestrator",
+    "safety_level": 100,
     "data_dir": "~/.kaiju",
     "workspace": "~/.kaiju/workspace"
   },
@@ -83,6 +80,8 @@ Minimal configuration:
   }
 }
 ```
+
+`safety_level` is the node's IGX clearance rank on the same `0` / `100` / `200` ladder as intents (observe / operate / override) — the ceiling on how impactful any tool call may be. Default is `100`.
 
 ### LLM providers
 
@@ -104,7 +103,7 @@ An optional executor model (cheaper, used for reflection/aggregation) can be con
 
 | Mode | How it works | Best for |
 |------|-------------|----------|
-| **Reflect** | Reflection checkpoints between dependency waves | Predictable, lowest LLM calls |
+| **Reflect** | Reflection checkpoints between dependency batches | Predictable, lowest LLM calls |
 | **nReflect** | Reflection every N node completions | Balanced throughput and oversight |
 | **Orchestrator** | Per-node observer evaluates each result | Highest quality, most thorough |
 | **React** | Sequential reason-act-observe loop (for benchmarking) | Baseline comparison |
@@ -258,7 +257,7 @@ Reasoning Layer             Execution Layer (Executive Kernel)
                      Verdict ──→ User
 ```
 
-The LLM is invoked at discrete points (plan, reflect, aggregate) with no visibility into scheduling, gating, or dispatch mechanics. Each LLM call operates on bounded context — reflections see current-wave evidence, not full conversation history. Data flows from the reasoning layer to the execution layer at call time and back only at return time, creating a closed execution loop.
+The LLM is invoked at discrete points (plan, reflect, aggregate) with no visibility into scheduling, gating, or dispatch mechanics. Each LLM call operates on bounded context — reflections see current-batch evidence, not full conversation history. Data flows from the reasoning layer to the execution layer at call time and back only at return time, creating a closed execution loop.
 
 ## Build
 
@@ -284,14 +283,13 @@ internal/
   gateway/          HTTP server, WebSocket, SSE, JWT auth
   db/               SQLite (users, sessions, memories, audit)
   config/           Configuration loading
-  channels/         Channel plugins (CLI, web, Telegram, Discord)
+  channels/         Channel plugins (CLI, web)
   memory/           Session history + semantic memory
   auth/             JWT service
   workspace/        Workspace bootstrapping
 skills/bundled/     19 bundled skills
 web/                Vue 3 frontend (Vite + Pinia)
 docs/               Architecture, API, config, authorization docs
-benchmarks/         GAIA, solar triage, and DAG vs ReAct benchmarks
 ```
 
 ## Documentation

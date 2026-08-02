@@ -90,14 +90,33 @@ The native planner prompt has a hard rule:
 
 The planner picks `service` whenever the task involves starting something that doesn't terminate.
 
-## What's NOT in v1
+## Self-supervision
 
-- **Systemd / pm2 / launchd proxies** — the tool only has the native backend. Adding proxies later would let it control existing OS services (stash: see `plan_service_tool.md` memory).
-- **Auto-restart on crash** — no health check goroutine in v1. Services that crash stay crashed until explicitly restarted.
-- **Log rotation** — logs grow unbounded. Truncate manually if they get big.
-- **Startup reconciliation** — on kaiju restart, the registry is not re-scanned. Services from a previous kaiju run appear as "running" in the registry but may actually be dead. Run `service(action="status", ...)` to reconcile the state.
+`service` is not a fire-and-forget spawner — it supervises the processes it starts.
 
-These are deliberate omissions. Each is easy to add if a user hits the limitation. Starting lean.
+### Health loop
+
+`NewService` launches a background `healthLoop` that ticks every **10 seconds** and calls `reapDead`. `reapDead` walks the registry and checks each `running` record with `isAlive` (signal 0 plus a `/proc/<pid>/status` zombie check). A process that's still alive clears its fast-crash counter; a dead one is either restarted or marked `crashed`.
+
+### Auto-restart with fast-crash backoff
+
+A dead service started with `auto_restart: true` is respawned by `reapDead`. To keep a service that simply *can't* start (bad command, missing dependency) from looping forever, restarts are backed off: if the process died within `minUptime` (**15s**) of starting, a per-name counter increments, and after `maxFastCrashes` (**5**) fast deaths in a row kaiju gives up — it marks the service `crashed` and clears `AutoRestart`. A service that ran healthily for a while before dying resets the counter, so a genuine long-uptime crash is always restarted.
+
+### One-instance guarantee
+
+Two mechanisms together ensure a port is only ever served by one instance:
+
+- **Port-skip** — if a dead auto-restart service's `port` is *still being served* (`portOpen`), kaiju does **not** respawn it: an orphan from a prior run already holds the port, and a second process would just crash-loop on the bind conflict. It's left alone — the service is effectively up via whatever answers the port.
+- **`freePort` before every spawn** — `start` calls `freePort(port)` (`fuser -k <port>/tcp` plus a short settle) *before* launching, so a stray listener left by a previous run is cleared and the fresh process binds cleanly instead of piling up as a duplicate. It's scoped to the exact port, so it can never touch another service (e.g. an MCS worker on its own port). This is what stops uvicorn-style process multiplication.
+
+### `StartManaged` — supervising the remote plugin host
+
+`StartManaged(name, command, workdir, port)` is `start` with `auto_restart: true` baked in. It's the path `plugin_enable` uses to bring the out-of-process **remote plugin host** up through this same machinery — tracked in the registry, logged, health-checked, and respawned on crash — so a plugin host is never an unmanaged orphan. (See `config.md` `remote_plugin_host` / `remote_plugin_start` and `plugins.md`.)
+
+## Still not in v1
+
+- **Systemd / pm2 / launchd proxies** — the tool only manages processes kaiju spawned itself; it does not control existing OS-managed services.
+- **Log rotation** — logs are truncated on each `start` (each start is a fresh run) but otherwise grow unbounded within a run; there's no rotation.
 
 ## Configuration
 

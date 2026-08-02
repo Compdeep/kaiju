@@ -81,7 +81,7 @@ func reflectorToolDef() llm.ToolDef {
 					"progress": {
 						"type": "string",
 						"enum": ["productive", "diminishing"],
-						"description": "How the recent cycles are trending. Defaults to 'productive' if unsure. Two consecutive 'diminishing' waves downgrade replan→conclude; see prompt for rules."
+						"description": "How the recent cycles are trending. Defaults to 'productive' if unsure. Two consecutive 'diminishing' batches downgrade replan→conclude; see prompt for rules."
 					},
 					"summary": {
 						"type": "string",
@@ -257,7 +257,7 @@ func preflightToolDef() llm.ToolDef {
 				"properties": {
 					"mode": {
 						"type": "string",
-						"enum": ["chat", "meta", "investigate"]
+						"enum": ["chat", "agent"]
 					},
 					"intent": {
 						"type": "string",
@@ -304,7 +304,7 @@ func routeToolDef() llm.ToolDef {
 			Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {
-					"mode": { "type": "string", "enum": ["chat", "meta", "investigate"] }
+					"mode": { "type": "string", "enum": ["chat", "agent"] }
 				},
 				"required": ["mode"]
 			}`),

@@ -54,6 +54,10 @@ var allowedExt = map[string]string{
 	".sh": "text/x-shellscript", ".rb": "text/x-ruby", ".php": "text/x-php",
 	".sql": "application/sql",
 	".pdf": "application/pdf",
+	// Office Open XML — read by the built-in office_extract tool (pure stdlib).
+	".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+	".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 	".gif": "image/gif", ".webp": "image/webp",
 }

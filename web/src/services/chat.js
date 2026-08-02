@@ -4,6 +4,48 @@ import { useDagStore } from '../stores/dag'
 
 /** Chat service — session CRUD, send, interject. Writes to per-session stores. */
 
+// Per-session AbortController for the in-flight /execute call. There is NO
+// automatic idle/timeout abort any more — a long run is allowed to take as long
+// as it needs. The user drives cancellation with the Stop button, which calls
+// stop(sid) → aborts this fetch → the request context cancels → kaiju tears the
+// DAG down server-side. Keyed by session so switching chats still stops the
+// right run.
+const stopControllers = new Map()
+
+/**
+ * desc: Stop a session's in-flight run. Aborts its /execute fetch (cancelling the
+ *       request context, which stops the DAG on the server). Flagged `manual` so
+ *       send()'s catch renders a clean "stopped" note, not an error.
+ * @param {string} [sid] - session id; defaults to the active session
+ * @returns {boolean} whether a run was actually stopped
+ */
+export function stop(sid) {
+  const s = useSessionsStore()
+  const id = sid || s.sessionId
+  if (!id) return false
+  // The REAL stop: tell the server to cancel the running job. A client-side fetch
+  // abort alone only stops us waiting — the DAG keeps running in the scheduler
+  // worker and keeps streaming. POST /stop cancels the job's context so the run
+  // actually unwinds. Fire it regardless of whether we hold a local controller
+  // (e.g. after a page reload mid-run there's a server job but no controller).
+  api.post('/api/v1/stop', { session_id: id }).catch(() => {})
+  // Also abort the in-flight fetch so the UI unlocks now and keeps any partial
+  // streamed answer.
+  const c = stopControllers.get(id)
+  if (c) {
+    c.manual = true
+    c.abort()
+    stopControllers.delete(id)
+  }
+  return true
+}
+
+/** Whether the given (or active) session currently has a stoppable run. */
+export function isRunning(sid) {
+  const s = useSessionsStore()
+  return stopControllers.has(sid || s.sessionId)
+}
+
 /**
  * desc: Build the [attached files] preamble that gets prepended to a user
  * query when uploads are attached. The format mirrors how the agent's
@@ -165,6 +207,9 @@ export async function regenerate() {
   }
   sess.loading = true
   dag.archiveAndClear()
+  // Same manual-stop wiring as send() so the Stop button works during a regenerate.
+  const stopController = new AbortController()
+  stopControllers.set(sid, stopController)
   try {
     await api.post('/api/v1/execute', {
       session_id: sid,
@@ -173,10 +218,11 @@ export async function regenerate() {
       mode: s.runMode,
       agg_mode: parseInt(s.aggMode),
       execution_mode: s.executionMode || undefined,
-    })
+    }, { signal: stopController.signal, timeoutMs: 0 })  // no auto-abort — Stop button + server 30-min wall clock only
   } catch (err) {
-    console.error('regenerate:', err)
+    if (!(stopController.manual || err?.name === 'AbortError')) console.error('regenerate:', err)
   } finally {
+    stopControllers.delete(sid)
     sess.loading = false
     dag.archiveAndClear()
     await refreshMessages(sid)
@@ -257,23 +303,11 @@ export async function send(text) {
   // Clear the chip strip — files stay on disk; the agent has the paths.
   sendingSess.attachments = []
 
-  // Idle watchdog. A long agent run is fine as long as it keeps making progress;
-  // what we want to stop is a genuinely STALLED request (a hung LLM/tool call, a
-  // dropped connection). We fingerprint DAG activity — node count, node states,
-  // and the streaming verdict length — and abort only if NOTHING changes for
-  // IDLE_MS. Node start/complete events and the token-streamed aggregator keep
-  // the fingerprint moving on a healthy run, so this never clips active work.
-  const IDLE_MS = 120000 // 2 min of zero progress ⇒ stalled
-  const idleController = new AbortController()
-  const fingerprint = () =>
-    dag.nodes.length + '|' + (dag.streamingVerdict || '').length + '|' + dag.nodes.map(n => n.state).join(',')
-  let lastFp = fingerprint()
-  let lastMoveAt = Date.now()
-  const idleTimer = setInterval(() => {
-    const fp = fingerprint()
-    if (fp !== lastFp) { lastFp = fp; lastMoveAt = Date.now(); return }
-    if (Date.now() - lastMoveAt > IDLE_MS) { idleController.abort(); clearInterval(idleTimer) }
-  }, 5000)
+  // Manual stop only — no idle/timeout abort. The user clicks Stop (compose bar)
+  // when they judge a run is genuinely stuck; that calls stop(sendingSid), which
+  // aborts this controller. See stopControllers above.
+  const stopController = new AbortController()
+  stopControllers.set(sendingSid, stopController)
 
   try {
     const data = await api.post('/api/v1/execute', {
@@ -281,14 +315,14 @@ export async function send(text) {
       session_id: sendingSid,
       intent: s.intent,
       // The chat toggle picks the lane. ON ⇒ chat_mode ⇒ the chat lane: a direct
-      // reply from the chat model (e.g. a roleplay tune). OFF ⇒ the agent, and we
-      // send execution_mode=autonomous so it ALWAYS plans — skipping the
-      // chat-vs-investigate classifier that would otherwise short-circuit a real
-      // task to a tool-less reply. So "agent" reliably means planner + tools + a
-      // DAG every time, never Euryale.
+      // reply from the chat model (e.g. a roleplay tune). OFF ⇒ the agent — but we
+      // do NOT force a plan on every message. We pass the execution-mode toggle
+      // (default "interactive"), which lets preflight classify each query: chatter
+      // gets a quick conversational reply, a real task gets the planner + tools +
+      // DAG. Flip the bolt to "autonomous" to force a plan on every turn.
       chat_mode: s.chatMode || undefined,
-      execution_mode: s.chatMode ? undefined : 'autonomous',
-    }, { signal: idleController.signal })
+      execution_mode: s.chatMode ? undefined : (s.executionMode || undefined),
+    }, { signal: stopController.signal, timeoutMs: 0 })  // no auto-abort — Stop button + server 30-min wall clock only
     const msg = {
       role: 'assistant',
       content: data.error ? `[error] ${data.error}` : (data.verdict || dag.streamingVerdict || 'No response'),
@@ -298,9 +332,19 @@ export async function send(text) {
     sendingSess.messages.push(msg)
     dag.streamingVerdict = ''
   } catch (err) {
-    sendingSess.messages.push({ role: 'assistant', content: `[error] ${err.message}` })
+    // A manual Stop is not an error: keep whatever streamed so far and mark it
+    // clearly, rather than showing "[error] The user aborted a request".
+    if (stopController.manual || err?.name === 'AbortError') {
+      const partial = (dag.streamingVerdict || '').trim()
+      const msg = { role: 'assistant', content: partial ? `${partial}\n\n_⏹ stopped_` : '_⏹ stopped_' }
+      if (dag.nodes.length) msg.trace = [...dag.nodes]
+      sendingSess.messages.push(msg)
+      dag.streamingVerdict = ''
+    } else {
+      sendingSess.messages.push({ role: 'assistant', content: `[error] ${err.message}` })
+    }
   } finally {
-    clearInterval(idleTimer)
+    stopControllers.delete(sendingSid)
     sendingSess.loading = false
     dag.interjectMode = false
     dag.interjections = []
@@ -324,9 +368,14 @@ export async function send(text) {
  * @returns {Promise<boolean>} Whether the interjection was delivered
  */
 export async function interject(text) {
+  const s = useSessionsStore()
   const dag = useDagStore()
   try {
-    const data = await api.post('/api/v1/interject', { message: text })
+    // The backend routes the steer by session (scheduler looks up the running
+    // job via s.running[session_id]); without session_id it matches nothing and
+    // returns sent:false — so the message never steers the run and no
+    // interjection node appears. Target the active session, same as stop().
+    const data = await api.post('/api/v1/interject', { session_id: s.sessionId, message: text })
     if (data.sent) {
       const truncated = text.length > 40 ? text.slice(0, 40) + '\u2026' : text
       dag.interjections.push({ text, truncated })
@@ -334,7 +383,10 @@ export async function interject(text) {
         const num = parseInt((n.id || '').replace(/\D/g, '')) || 0
         return num > m ? num : m
       }, 0)
-      dag.nodes.push({ id: `inj${maxNum + 1}`, type: 'interjection', state: 'running', tag: truncated, tool: '' })
+      // operator_message carries the full query so the trace can show what was
+      // asked. tag:'operator' matches the backend node that replaces this one,
+      // so there's no visible flip when the real interjection node streams in.
+      dag.nodes.push({ id: `inj${maxNum + 1}`, type: 'interjection', state: 'running', tag: 'operator', tool: '', operator_message: text })
     } else {
       dag.interjections.push({ text, truncated: '(not delivered \u2014 no active query)' })
     }

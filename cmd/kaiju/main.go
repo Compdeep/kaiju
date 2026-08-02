@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Compdeep/kaiju/docs"
 	"github.com/Compdeep/kaiju/internal/agent"
 	"github.com/Compdeep/kaiju/internal/agent/llm"
 	"github.com/Compdeep/kaiju/internal/agent/uploads"
@@ -438,7 +439,12 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	// System tools (always enabled)
 	reg.Replace(kaijutools.NewProcessList(), "builtin")
 	reg.Replace(kaijutools.NewProcessKill(), "builtin")
-	reg.Replace(kaijutools.NewService(cfg.Agent.Workspace), "builtin")
+	svc := kaijutools.NewService(cfg.Agent.Workspace)
+	reg.Replace(svc, "builtin")
+	// office_extract: Word/PowerPoint/Excel (.docx/.pptx/.xlsx) reading. Built-in
+	// (not a plugin) because it's pure stdlib — no third-party dependency to gate.
+	reg.Replace(kaijutools.NewOfficeExtract(cfg.Agent.Workspace), "builtin")
+	kaijutools.RegisterOfficeDecoders() // let web_fetch read linked Office files too
 	reg.Replace(kaijutools.NewNetInfo(), "builtin")
 	reg.Replace(kaijutools.NewEnvList(), "builtin")
 	reg.Replace(kaijutools.NewDiskUsage(), "builtin")
@@ -459,10 +465,12 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	// which are active (read-only) — only worth registering when at least one
 	// plugin is compiled in. plugin_enable (runtime activation) is offered ONLY
 	// when the host opts in via AllowRuntimePluginActivation.
+	var pluginEnable *kaijutools.PluginEnable
 	if len(plugins.Compiled()) > 0 {
 		reg.Replace(kaijutools.NewPluginList(), "builtin")
 		if cfg.AllowRuntimePluginActivation {
-			reg.Replace(kaijutools.NewPluginEnable(reg, cfg), "builtin")
+			pluginEnable = kaijutools.NewPluginEnable(reg, cfg, svc)
+			reg.Replace(pluginEnable, "builtin")
 			reg.Replace(kaijutools.NewPluginOption(cfg), "builtin")
 		}
 	}
@@ -490,6 +498,15 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		}
 	} else if compiled := plugins.Compiled(); len(compiled) > 0 {
 		log.Printf("[kaiju] plugins compiled in but none activated (set config `plugins` or --plugins): %s", strings.Join(compiled, ", "))
+	}
+
+	// Boot self-heal: for any remote capability already in config (webreader, …),
+	// make sure its host is up and connected — starting it through the service
+	// manager if the boot Activate found it down (active-but-toolless). Paired with
+	// the service manager's auto-restart, this makes the reader "just work" across
+	// restarts and host crashes, instead of silently coming up dead.
+	if pluginEnable != nil {
+		pluginEnable.EnsureRemoteHostsUp()
 	}
 
 	// Load SKILL.md user skills
@@ -709,6 +726,15 @@ func runServe() {
 	defer kaijuDB.Close()
 	log.Printf("[kaiju] database opened: %s/kaiju.db", cfg.Agent.DataDir)
 
+	// Safeguard: a run killed by a restart/crash leaves a user turn with no reply,
+	// which the UI reads as "still running" and spins a progress bar forever. On
+	// startup, close out any such dangling turn so no session comes back stuck.
+	if n, rerr := kaijuDB.ReconcileDanglingTurns(); rerr != nil {
+		log.Printf("[kaiju] dangling-turn reconcile: %v", rerr)
+	} else if n > 0 {
+		log.Printf("[kaiju] reconciled %d dangling user turn(s) from an interrupted run", n)
+	}
+
 	// Seed intents from config. This is the sole source of intent definitions
 	// on first run — Go code contains no defaults. INSERT OR IGNORE means
 	// edits made via the admin UI survive restarts.
@@ -834,6 +860,7 @@ func runServe() {
 	mux.Handle("/api/v1/execute", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/oneshot", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/interject", gateway.WithJWTAuth(jwtSvc)(execMux))
+	mux.Handle("/api/v1/stop", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/tools", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/status", gateway.WithJWTAuth(jwtSvc)(execMux))
 	mux.Handle("/api/v1/usage", gateway.WithJWTAuth(jwtSvc)(execMux))
@@ -869,6 +896,10 @@ func runServe() {
 	})
 
 	// Web UI (embedded static files)
+	// Docs — the architecture overview + markdown reference docs, served public
+	// (no auth) at /docs/, before the SPA catch-all below.
+	mux.Handle("/docs/", docs.Handler())
+
 	mux.Handle("/", gateway.WebUIHandler())
 
 	// Message router goroutine

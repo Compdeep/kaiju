@@ -65,7 +65,7 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// agent directly, callers use execute mode (chat_mode=false), not this lane.
 	// ChatTools is the palette the agent uses if it escalates, never the trigger.
 	mayEscalate := t.Agent == nil || *t.Agent
-	if mayEscalate && a.routeQuery(ctx, t.AlertID, t.Query, t.History) == "investigate" {
+	if mayEscalate && a.routeQuery(ctx, t.AlertID, t.Query, t.History) == "agent" {
 		// Chat answers can be long. Force the aggregator (agg_mode=2, reasoning
 		// lane, full synthesis budget) so a reflection-concluded run doesn't hand
 		// back the 1024-token-capped reflection verdict truncated mid-sentence.

@@ -25,6 +25,12 @@ except Exception:  # dependency not installed yet
 MANIFEST = {
     "name": "webreader",
     "description": "Read web pages as clean text, rendering JavaScript when needed.",
+    # Serve up to this many reads at once (a DAG wave fans out several parallel
+    # web_fetches). Static reads offload to a threadpool and renders are async, so
+    # these run truly concurrently; the cap bounds memory (each render is a browser
+    # context). Requests beyond it queue for a slot (kaiju's 60s call timeout caps
+    # the wait, then it falls back to the built-in reader).
+    "max_concurrency": 4,
     "tools": [
         {
             "name": "web_read",

@@ -28,9 +28,9 @@ Every kaiju investigation is a DAG. Components emit nodes, the scheduler fires t
                         ▼
     ┌──────────────────────────────────────────────┐
     │  Scheduler                                    │
-    │    walks the Graph in dependency waves        │
+    │    walks the Graph in dependency batches        │
     │    fires ready Nodes via the Dispatcher       │
-    │    injects a Reflector between waves           │
+    │    injects a Reflector between batches           │
     └──────┬───────────────────────────────┬───────┘
            │                               │
            ▼                               ▼
@@ -42,7 +42,7 @@ Every kaiju investigation is a DAG. Components emit nodes, the scheduler fires t
               ┌───────────────────────────┼───────────────────────────┐
               │ continue                  │ replan                     │ conclude
               ▼                           ▼                            ▼
-        fire next wave          Executive re-plans               Aggregator
+        fire next batch          Executive re-plans               Aggregator
                                 (fresh replan frame)         (or verdict verbatim)
                                           │
                     ┌─────────────────────┴─────────────────────┐
@@ -157,19 +157,21 @@ Output is validated by `validatePlanSteps`:
 - Unknown tool names → the step is dropped with a log line.
 - All gaps, no valid tools → `ExecutiveConversationalError` surfaces the gap text to the user.
 
+Broken `${step.N.field}` wiring is caught separately by `validatePlanEdges` *before* the plan runs — one re-plan carrying the exact fault, rather than a doomed run. It sits alongside the parse-fail and hallucinated-tool retries as an executive repair round; see [Edges — anti-fabrication layer](#edges--anti-fabrication-layer).
+
 **The Executive DOES re-plan.** When the reflector returns `replan`, the scheduler re-invokes `runExecutive` with a **replan frame** appended to the user query. That frame is a fresh sandbox: prior results have ALREADY FINISHED and are pasted into the worklog as literal DATA, so the new plan must reference those values *literally* (paste the actual URL/text) and set `depends_on: []` for anything already done. Crucially, `${step.N}` and `depends_on:[N]` indices in a replan are **plan-local** — they address only the NEW steps in *this* plan, never the concluded ones. `planStepsToNodes` / `rewriteStepTemplates` enforce this: an index that would point at a prior-frame node (or at the node itself) is left as an unresolved placeholder rather than wired into a dead/self edge (the old bug where a stale `depends_on:[0]` made a node wait on itself, get skipped, and re-plan the same fetch forever). If the replan move is to fix a failure, the frame instructs the Executive to plan a single `debug` step (a leaf) carrying the failure text.
 
 ### Scheduler
 
-`internal/agent/scheduler.go`. Walks the Graph in topological waves. For each wave:
+`internal/agent/scheduler.go`. Walks the Graph in topological batches. For each batch:
 
 1. Find all nodes with every dependency resolved.
 2. Fire them through the Dispatcher concurrently.
 3. Wait for the batch to complete (success or failure).
-4. Between waves, inject a Reflector node so the classifier can steer.
+4. Between batches, inject a Reflector node so the classifier can steer.
 
 Reflection *timing* depends on the DAG mode (`dag.go`: `DAGModeReflect` / `DAGModeNReflect` / `DAGModeOrchestrator`):
-- **reflect** — reflections are structural (forced serialization; the reflector gates downstream waves).
+- **reflect** — reflections are structural (forced serialization; the reflector gates downstream batches).
 - **nReflect** — true DAG scheduling; a reflection is injected every `BatchSize` tool completions.
 - **orchestrator** — true DAG scheduling plus a lightweight per-node observer LLM spawned after each tool completes.
 
@@ -177,7 +179,7 @@ The Scheduler also owns:
 - **Budget** (`MaxNodes`, `MaxLLMCalls`, plus replan/debug round caps `maxReplans` / `maxInvestigations`). Each LLM-bearing node decrements. Exhaustion prunes downstream work.
 - **Graft hooks** — the architect's compute output spawns setup/coder/execute/service nodes as children; a service start spawns an auto-grafted health check; a resolved **`debug`** node grafts the first Holmes iteration (`spawnFirstHolmes`); a concluded Holmes grafts the **microplanner**, whose fix steps are grafted in turn (and validators are re-grafted after them).
 - **Cascade prune** — when a node fails and no debug cycle recovers it, its dependent subtree is marked `StateSkipped` so the reflector knows those results never exist.
-- **Diminishing-returns brake** — two consecutive reflector `diminishing` rounds downgrade a `replan` to `conclude`, so debug/expand waves stop being spawned when fixes aren't moving the answer forward.
+- **Diminishing-returns brake** — two consecutive reflector `diminishing` rounds downgrade a `replan` to `conclude`, so debug/expand batches stop being spawned when fixes aren't moving the answer forward.
 
 ### Dispatcher
 
@@ -201,7 +203,7 @@ Both failure modes — unknown direct param, malformed template — log a `[disp
 
 ### Reflector
 
-`internal/agent/reflection.go`, prompt `=== REFLECTOR ===`. Between scheduler waves (or when a batch threshold is hit), one LLM call classifies the state into **one of three decisions** and emits:
+`internal/agent/reflection.go`, prompt `=== REFLECTOR ===`. Between scheduler batches (or when a batch threshold is hit), one LLM call classifies the state into **one of three decisions** and emits:
 
 ```json
 {
@@ -221,7 +223,7 @@ Decisions steer the scheduler:
 - **replan** — the graph needs to GROW and the goal isn't answered yet. Two shapes, same decision:
   - *a success revealed the next move* — e.g. searches returned URLs → "fetch the 3 URLs the searches surfaced".
   - *a step FAILED and needs fixing* — describe the failure (exact error text, file paths, module names) in `next`. The Executive then plans a `debug` step; the reflector names the move, the Executive plans HOW.
-- **conclude** — the goal is met, OR the request is too vague/underspecified to act on (ask the user to clarify instead of guessing). If `aggregate=false` the reflector's `verdict` is the final answer verbatim; if `aggregate=true` the Aggregator runs.
+- **conclude** — the goal is met, OR the request is too vague/underspecified to act on (ask the user to clarify instead of guessing). If `aggregate=false` the reflector's `verdict` is the final answer verbatim; if `aggregate=true` the Aggregator runs. A `conclude` still passes the **conclusion floor** first — a structural precondition (e.g. found search URLs but read none) grafts remediation and defers the conclusion once (see [Edges — anti-fabrication layer](#edges--anti-fabrication-layer)).
 
 The prompt leans hard on the anti-hallucination rule: conclude ONLY when the evidence *answers* the goal — an unfetched URL or an un-followed lead is `replan`, never a confident guess from memory. Transient tool output (empty fetch, HTTP 5xx, timeout, rate limit), out-of-scope failures, and truly-unfixable environment failures are `conclude`, not `replan` — they don't belong in the debugger.
 
@@ -287,13 +289,37 @@ Any `debug` step in the plan is dropped (no debug-in-debug). The microplanner ex
 
 `internal/agent/aggregator.go`, prompt `=== AGGREGATOR ===`. The final LLM call. It synthesises the user-facing answer from the graph's Node Results and worklog and cannot call tools — everything it writes is synthesis of prior node outputs.
 
-Whether it runs, and on which lane, is driven by `agg_mode` (`-1` auto / `0` skip / `1` executor / `2` reasoning):
+Whether it runs, and on which lane, is driven by `agg_mode` (`-1` auto / `0` skip / `1` executor / `2` reasoning). In auto (`-1`) the lane is chosen at preflight by `decideAutoAggMode` over structural signals (`NeedsSynthesis`, fanout, evidence, compute), not by the model at the end — see [Edges — anti-fabrication layer](#edges--anti-fabrication-layer):
 
 - When the reflector concluded with `aggregate=false`, the aggregator is **skipped** and the reflector's `verdict` is the final answer verbatim.
 - Otherwise it runs on the **reasoning (heavy) lane by default**. `aggregate=true` from the reflector routes here explicitly (`agg_mode=2`).
 - The **executor lane** is used only when `agg_mode=1` — including the forced case where the graph contains compute nodes (compute runs always need the aggregator for a properly formatted response).
 
 The aggregator is exempt from the budget — it always runs to give the user a response — and the prompt forbids inventing data, narrating prior-run actions as if they happened now, or passing internal Kaiju errors through to the user.
+
+## Edges — anti-fabrication layer
+
+An *edge* frames a hand-off between two steps: it gets the previous step's output ready to be the next step's input. It FRAMES — it does not verify or police. A **code edge** is structural (it reads the shape of what ran — envelope Status signals, failed nodes, declared output schemas — and interprets no meaning); an **LLM edge** reframes that structural fact against the request in words. Kaiju layers several such edges over the graph whose one job is to keep a run from *fabricating* — inventing a URL, vouching for a source it never read, concluding from memory. Every one is **gated**: it inspects the structural signal first and returns `""` when the run is clean, so the common path pays nothing. Where an edge calls an LLM it **fails open** to the structural note alone — a reframe never blocks the run.
+
+The composition is the same throughout: **code decides WHETHER** the edge fires (and supplies the hard facts); **the LLM decides WHAT** they mean against the request. The generator/hook prompt pairs live in `prompts.md` (`COVERAGE_GEN`/`COVERAGE_HOOK`, `GROUNDING_GEN`/`GROUNDING_HOOK`), host-overridable without a rebuild.
+
+- **`validatePlanEdges`** (`executive.go`) — runs at plan time, BEFORE any node fires, over every `${step.N.field}` reference in the plan. It rejects the three ways the planner mis-wires a hand-off, generically for any tool, from the declared output schemas:
+  - **self-reference** — a step reads its own output (`${step.i…}` inside step `i`); a step cannot consume itself.
+  - **out-of-range** — the index points at a step the plan does not contain.
+  - **wrong-producer** — a top-level field the producing tool never emits, classically `${step.N.results.0.url}` off a `web_fetch` when a `results[]` list only comes from `web_search`. Only a tool that DECLARES an output schema is checked, and only its top-level field (`fieldExistsInSchema`), so an incomplete deep schema can't false-reject.
+  Any broken edge becomes **one re-plan** carrying the exact fault as feedback, rather than a doomed run — a self/out-of-range ref would leak its literal placeholder into the tool (an "invalid URL …"), and a wrong-producer ref would dangle a dead edge the reflector then re-plans forever.
+
+- **`coverageEdge`** (`edge_coverage.go`) — frames the hand-off INTO the aggregator. `collectGaps` reads the graph for gather steps that came back empty or failed (envelope Status `empty`/`error`, plus `FailedNodes`); when any exist it emits a `## Coverage` checklist so absence is explicit and the aggregator acknowledges the gap instead of fabricating to fill the shape of the request. A second, deterministic part — `## Referenced but not retrieved` — lists URLs a search surfaced that no fetch ever read, so the aggregator can't present a merely-referenced source as one it verified. Clean gathering ⇒ `""`.
+
+- **`groundingEdge`** (`edge_grounding.go`) — frames the hand-off FROM gathering INTO the reflector / next plan, the moment a planner staring at a thin result is tempted to fill the gap with URLs from memory. `collectGrounded` is the only set of URLs a real `web_search` returned; subtracting `collectFetched` (what `web_fetch` already read) gives the found-but-unread leads. The edge biases toward READING: when unread grounded URLs exist it says FETCH those before searching again; only with no unread leads does it say re-search — and always, *only a URL a search returned may be fetched or cited*. Gated on gaps: clean gathering pays nothing.
+
+- **`conclusionFloor`** (`edge_grounding.go`) — a hard structural precondition the scheduler consults before it lets a reflection CONCLUDE. Today's one floor is grounding: a run that found real search URLs but read NONE of them must read some first, or the answer rests on snippets or invention. It returns deterministic `web_fetch` steps for the top unread URLs (sourced from the search, never model-invented); the scheduler grafts them and loops ONCE (`floorForced`), then lets the conclusion stand. The scheduler stays domain-agnostic — it grafts whatever steps come back, knowing nothing about them — so a future floor adds a branch HERE, never in the scheduler. Self-limiting: a run with no search has no grounded URLs and nothing fires.
+
+- **`NeedsSynthesis` / `decideAutoAggMode`** — the aggregator-mode decision (see Aggregator above) is made at **preflight over structural signals**, not left to the model at the end. `NeedsSynthesis` is a preflight flag ("this run must end with a written synthesis"); a run also counts as *complex* when it structurally fanned out to ≥ `complexFanoutFloor` (6) resolved tool nodes. In auto mode (`agg_mode -1`), `decideAutoAggMode` then picks the lane purely over `{compute, complex, evidence, reflector-wants}`:
+  - **compute present** → executor lane (a compute run always needs a formatted answer).
+  - **complex + usable evidence** → reasoning model (a real synthesis, with the honesty framing).
+  - **complex + NO usable evidence** → **skip**, so the reflector's honest "couldn't get the data" verdict stands rather than an aggregator pass over emptiness — the reflector's override.
+  - simple + reflector wants it → reasoning model; simple + reflector done → skip.
 
 ## Compute subsystem
 
@@ -410,27 +436,39 @@ Both direct-param rejection and template failures emit `[dispatch:reject]` log l
 
 Every LLM-bearing component decrements a counter in `Budget`. `MaxLLMCalls` is the global cap; `maxReplans` and `maxInvestigations` cap replan and debug rounds (the replan cap auto-scales with plan difficulty). Exhausting the budget before:
 
-- Reflector → a canned "budget exhausted" summary is written; no more waves.
+- Reflector → a canned "budget exhausted" summary is written; no more batches.
 - Holmes → the investigation is marked halted with a provisional hypothesis (`SuggestedStrategy` says so) and hands off to the microplanner anyway.
 - Aggregator → the last reflector `verdict` is surfaced verbatim (the aggregator itself is exempt and still runs when reached).
 
 `MaxNodes` caps the graph size. When a graft would push past it, the scheduler logs "budget exhausted, truncating plan" and skips the graft — partial completion over runaway spawn.
+
+## Run cancellation & lifecycle
+
+`RunDAGSync` wraps the whole DAG in `dagCtx, cancel := context.WithCancel(ctx)` — a DAG-wide cancel that is a **child of the job context** the scheduler minted for this run. There is no hard DAG wall clock; that nesting is what makes Stop clean:
+
+- **Stop** (the button) — `API.handleStop → Agent.Cancel → Kernel.Cancel → Scheduler.Cancel → job.cancel()` cancels the job context, the parent of `dagCtx`, so the whole DAG unwinds: the scheduler loop drops through `<-ctx.Done()`, inflight nodes are abandoned, and the **aggregator is skipped** (it bails on `dagCtx.Err()` before running). The run ends with no synthesized answer, by design.
+- **Client disconnect is NOT a Stop.** It only stops the caller that was blocked in `SubmitSync` from waiting — the job keeps running to completion on its worker. Cancelling the job context (Stop) is the only thing that actually tears the run down.
+- **A newer same-session message preempts.** A still-queued job for the session is **superseded** (chat = newest wins; its caller gets `ErrPreempted`). If a job for the session is already RUNNING, the new message is not a cancel — it is routed into the live run as an **interjection** on the per-query steering channel, so the running query is redirected rather than killed.
+
+The priority queue, worker pool, preemption, stop/cancel, and interject machinery are documented in **[scheduling.md](scheduling.md)**.
 
 ## Relevant source
 
 | file | responsibility |
 |---|---|
 | `internal/agent/dag.go` | Graph, Node, NodeType, NodeState, topological ordering, DAG modes |
-| `internal/agent/scheduler.go` | wave execution, graft hooks (debug/Holmes/microplanner), budget, cascade prune |
+| `internal/agent/scheduler.go` | batch execution, graft hooks (debug/Holmes/microplanner), budget, cascade prune |
 | `internal/agent/dispatcher.go` | per-node execute: injection, throttle, gate, dispatch, audit |
 | `internal/agent/dispatcher_validation.go` | `validateDirectParams`, `validateParamRef`, `parseToolSchema` |
 | `internal/agent/preflight.go` | `routeQuery` (cheap route) + `classifyInvestigate` (plan-prep) |
 | `internal/agent/executive.go` | native `plan()` planner + replan-frame re-plan + `planStepsToNodes` |
-| `internal/agent/reflection.go` | between-wave classifier: continue / replan / conclude |
+| `internal/agent/reflection.go` | between-batch classifier: continue / replan / conclude |
 | `internal/agent/builtin_debug.go` | `debug` super-tool — the door that grafts Holmes |
 | `internal/agent/rca.go` | Holmes ReAct root-cause investigator + `spawnFirstHolmes` + RCAReport |
 | `internal/agent/microplanner.go` | clean-room debugger — RCA → fix plan |
-| `internal/agent/aggregator.go` | final answer synthesis |
+| `internal/agent/aggregator.go` | final answer synthesis + `coverageEdge` hook + `decideAutoAggMode` |
+| `internal/agent/edge_coverage.go` | coverage edge — frames empty/failed gathers so the aggregator acknowledges absence |
+| `internal/agent/edge_grounding.go` | grounding edge + conclusion floor — only-real-search URLs; blocks a conclude that read no sources |
 | `internal/agent/compute.go` | runCompute, computePlan, computeCode |
 | `internal/agent/builtin_compute.go` | ComputeTool schema + dispatch wrapper |
 | `internal/agent/builtin_edit_file.go` | EditFileTool — task_files-required wrapper over the coder |

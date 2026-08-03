@@ -53,12 +53,12 @@ func TestExecutivePrompt_TeachesStepWiring(t *testing.T) {
 // web_research", which made every research plan flat. This scans every skill so the
 // ban can't creep back in through any of them.
 func TestBundledSkills_DoNotBanStepWiring(t *testing.T) {
-	files, err := filepath.Glob("../../skills/bundled/*/SKILL.md")
+	files, err := filepath.Glob("../skills/bundled/*/SKILL.md")
 	if err != nil {
 		t.Fatalf("glob skills: %v", err)
 	}
 	if len(files) == 0 {
-		t.Fatal("no bundled skills found at ../../skills/bundled/*/SKILL.md — fix the test path")
+		t.Fatal("no bundled skills found at ../skills/bundled/*/SKILL.md — fix the test path")
 	}
 	banned := []string{
 		"never plan a separate web_search",

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/internal/config"
 )
 

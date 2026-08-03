@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/internal/db"
 )
 

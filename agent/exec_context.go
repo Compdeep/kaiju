@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/Compdeep/kaiju/internal/agent/gates"
+	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
 )
 

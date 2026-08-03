@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/internal/auth"
 	"github.com/Compdeep/kaiju/internal/db"
 )

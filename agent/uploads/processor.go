@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/internal/workspace"
 )

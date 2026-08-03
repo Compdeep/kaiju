@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/internal/db"
 )
 

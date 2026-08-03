@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
-	"github.com/Compdeep/kaiju/internal/agent/uploads"
+	"github.com/Compdeep/kaiju/agent/uploads"
 	"github.com/Compdeep/kaiju/internal/clearance"
 	"github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"

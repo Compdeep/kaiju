@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent"
+	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/tools"
 )
 

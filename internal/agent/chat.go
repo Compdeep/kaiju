@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/internal/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
 // ChatTurn is the input to the chat lane. History is the conversation so far

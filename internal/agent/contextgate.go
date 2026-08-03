@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/internal/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
 // ContextGate is the SINGLETON context API for an investigation. There is

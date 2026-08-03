@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Compdeep/kaiju/internal/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
 // These guard the regression where the planner stopped emitting wired multi-step

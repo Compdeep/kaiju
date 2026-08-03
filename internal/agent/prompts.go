@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Compdeep/kaiju/internal/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
 // Embedded prompt files — compiled into the binary so they are always available.

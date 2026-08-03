@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
+	"github.com/Compdeep/kaiju/agent/prompt"
 	"github.com/Compdeep/kaiju/agent/tools"
 	"github.com/Compdeep/kaiju/internal/agent/gates"
-	"github.com/Compdeep/kaiju/agent/prompt"
 	"github.com/Compdeep/kaiju/internal/agent/skillmd"
 	"github.com/Compdeep/kaiju/internal/compat/ipc"
 	"github.com/Compdeep/kaiju/internal/compat/protocol"
@@ -59,6 +59,11 @@ type ResolvedScope struct {
  *       access scope, session ID, and conversation history.
  */
 type Trigger struct {
+	// TargetNode names the machine this run is about, if any. Steps calling
+	// tools that require a target inherit it; see applyRunTarget. What goes
+	// in here, and how it is chosen, is the caller's business.
+	TargetNode string `json:"target_node,omitempty"`
+
 	Type          string          `json:"type"` // "chat_query", "api_query", "scheduled", "event", "command"
 	AlertID       string          `json:"alert_id"`
 	Data          json.RawMessage `json:"data"`

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
 	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/internal/agent/gates"
 )
 
 /*
@@ -158,7 +158,11 @@ type PlanStep struct {
 	Params    map[string]any `json:"params"`
 	DependsOn FlexInts       `json:"depends_on"` // index-based references
 	Tag       string         `json:"tag"`
-	Gap       string         `json:"gap,omitempty"` // capability gap: what's needed but unavailable
+	// Target names the machine this step runs on. Usually left to
+	// applyRunTarget rather than written by the planner, since a tool's own
+	// declaration says whether it needs one.
+	Target string `json:"target,omitempty"`
+	Gap    string `json:"gap,omitempty"` // capability gap: what's needed but unavailable
 }
 
 // UnmarshalJSON tolerates LLMs that still emit a legacy `param_refs`
@@ -312,76 +316,76 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		// and no "ONE compute(deep) node" rule, so it tends to plan multiple
 		// compute steps and forget the params on the second one.
 		if !a.cfg.DisableCoding {
-		sb.WriteString("## Compute Nodes\n")
-		sb.WriteString("**Compute is the right tool whenever real computation is required.** The aggregator at the end of the plan is an LLM call that can handle small math, summarisation, and qualitative synthesis — but it CANNOT propagate orbits, run sgp4 / skyfield / pandas / scipy, parse thousand-row CSVs, or compute precision floating-point values. When the question needs any of those, **add a compute step.** The Persistence litany in your system prompt is explicit: the way to answer a hard quant question is to compute it, not to recommend an external app.\n\n")
-		sb.WriteString("Only omit compute when the answer truly is a lookup (a static value from a press release, a fact from Wikipedia, a short web summary). \"Looks like a lookup\" is not the same as \"is a lookup\" — *next visible Starlink passes over Tokyo tonight* is NOT pre-computed on any page; it requires sgp4 propagation. If a known web tool exists for it (Heavens-Above, in-the-sky.org), assume the tool is a JS widget that computes on click — not a fetchable answer. Fetch the underlying TLE catalogue from CelesTrak and compute it yourself.\n\n")
-		sb.WriteString("**Use compute ONLY when one of these is true:**\n")
-		sb.WriteString("- A library is needed to do the work — numpy, scipy, sgp4, pandas, BeautifulSoup, jq, etc. The LLM can't run code.\n")
-		sb.WriteString("- Data is too large for LLM context — CSVs with thousands of rows, log files, big JSON dumps.\n")
-		sb.WriteString("- Precision matters in a way the LLM is bad at — financial math, exact floating-point, date arithmetic, sgp4, statistical inference.\n")
-		sb.WriteString("- The user explicitly asked for code, a script, or a deliverable file.\n")
-		sb.WriteString("- The output must be a structured value feeding another tool (not prose for the user).\n\n")
-		sb.WriteString("**Do NOT use compute when:**\n")
-		sb.WriteString("- Simple arithmetic the aggregator can do (one sum, one percentage, ranking <10 items).\n")
-		sb.WriteString("- Pure information retrieval (\"what is X\", \"current value of Y\", \"summarise this article\").\n")
-		sb.WriteString("- Qualitative analysis or conversational synthesis.\n")
-		sb.WriteString("- Anything where the aggregator can read the evidence and write the answer directly.\n\n")
-		sb.WriteString("When in doubt, omit compute. A wrongly-omitted compute costs nothing (aggregator handles it). A wrongly-added compute wastes an LLM call and can hallucinate when its inputs aren't real.\n\n")
-		sb.WriteString("**When you DO use compute:**\n")
-		sb.WriteString("- Provide the GOAL, never the code. Never write code in bash params or file_write content.\n")
-		sb.WriteString("- Wire every input through `${step.N.field}` placeholders from prior gathering steps. Never plan compute over inputs that don't yet exist — it will hallucinate.\n")
-		sb.WriteString("- The compute architect handles ALL implementation details (dirs, deps, file gen, service start, validation). Do NOT plan these as separate bash/service steps.\n")
-		sb.WriteString("- **Use tools directly when they can do the job** — yt-dlp/curl in bash for downloads, web_fetch for pages, service for daemons. compute is for writing new code, not for wrapping existing tools in scripts.\n\n")
-		sb.WriteString("**Multi-batch example — a compute task that NEEDS real-world data first:**\n")
-		sb.WriteString("query: \"estimate the probability that a Starlink satellite passes within 5 km of the ISS in 14 days\"\n")
-		sb.WriteString("```json\n")
-		sb.WriteString("[\n")
-		sb.WriteString("  {\"tool\":\"web_search\",\"params\":{\"query\":\"current Starlink TLE celestrak\"},\"depends_on\":[],\"tag\":\"search_tle\"},\n")
-		sb.WriteString("  {\"tool\":\"web_search\",\"params\":{\"query\":\"current solar flux F10.7\"},\"depends_on\":[],\"tag\":\"search_flux\"},\n")
-		sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":{\"url\":\"${step.0.results.0.url}\",\"format\":\"text\"},\"depends_on\":[0],\"tag\":\"fetch_tle\"},\n")
-		sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":{\"url\":\"${step.1.results.0.url}\",\"format\":\"text\"},\"depends_on\":[1],\"tag\":\"fetch_flux\"},\n")
-		sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"propagate ISS+Starlink TLEs over 14 days with sgp4, apply drag from given F10.7, count close-approaches within 5km, output probability as JSON\",\"mode\":\"shallow\",\"context.tle\":\"${step.2.content}\",\"context.flux\":\"${step.3.content}\"},\"depends_on\":[2,3],\"tag\":\"compute_probability\"}\n")
-		sb.WriteString("]\n")
-		sb.WriteString("```\n")
-		sb.WriteString("Three batches in one plan: search → fetch → compute. Every compute input is wired from real upstream content. If your plan for a quant task ends at search/fetch with no compute, you under-planned — the user's question requires actual computation that the aggregator can't do.\n\n")
-		sb.WriteString("**Counter-example — a task that does NOT need compute:**\n")
-		sb.WriteString("query: \"what's the current ISS altitude?\"\n")
-		sb.WriteString("```json\n")
-		sb.WriteString("[\n")
-		sb.WriteString("  {\"tool\":\"web_search\",\"params\":{\"query\":\"current ISS altitude\"},\"depends_on\":[],\"tag\":\"search_alt\"},\n")
-		sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":{\"url\":\"${step.0.results.0.url}\",\"format\":\"summary\",\"focus\":\"altitude in km\"},\"depends_on\":[0],\"tag\":\"fetch_alt\"}\n")
-		sb.WriteString("]\n")
-		sb.WriteString("```\n")
-		sb.WriteString("The aggregator reads `fetch_alt.content` and reports the altitude. No compute needed.\n\n")
-		// Preflight owns the compute-depth decision. Inject it here so the
-		// planner treats it as authoritative rather than re-deriving deep vs
-		// shallow from workspace residue.
-		if graph != nil && graph.Preflight != nil && graph.Preflight.ComputeMode != "" {
-			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", graph.Preflight.ComputeMode))
-		} else {
-			sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss astrodynamics / financial / statistical / ephemeris queries that *sound* like lookups. If the question requires a library (sgp4, pandas, scipy, skyfield, ephem) or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — adding a compute step is always cheaper than refusing the task.\n\n")
-		}
-		sb.WriteString("Level reference:\n")
-		sb.WriteString("- **Direct tools** (bash, service, file_read, web_search): default for downloads, searches, restarts, reads.\n")
-		sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or injected via `${step.N.field}` from an upstream step).\n")
-		sb.WriteString("- **edit_file**: LLM-backed edit or create of a specific file. Use whenever you know the path and want the Coder to produce the content. task_files is REQUIRED.\n")
-		sb.WriteString("- **compute(shallow)**: compute a VALUE for downstream use — analytics, rankings, scores, derived constants. The Coder emits a runnable script, the script runs, stdout is captured on `.output` so downstream steps can read it via `${step.N.output}`. NOT for editing files you already know the path of — use edit_file for that.\n")
-		sb.WriteString("- **compute(deep)**: new codebases (webapp, CLI tool, service, library) built from scratch. ONE deep node per build.\n\n")
-		sb.WriteString("Required params:\n")
-		sb.WriteString("- compute: `goal` + `mode`. If a follow-up compute step needs data from a prior step, wire it via `${step.N.field}` placeholders AND still provide `goal` and `mode` in `params`.\n")
-		sb.WriteString("- edit_file: `task_files` (at least one path) + `goal`. Skip the path and the Coder will refuse to guess — the step fails.\n\n")
-		sb.WriteString("**Known-path file operations — pick the right tool:**\n")
-		sb.WriteString("- Need an LLM to EDIT or CREATE a file at a known path? → `edit_file` with `task_files=[\"project/...\"]`.\n")
-		sb.WriteString("- Have the exact bytes already (literal or from upstream) and need them written? → `file_write` with `path` and `content`.\n")
-		sb.WriteString("- Need to COMPUTE a value (not a file) for downstream steps? → `compute(shallow)`, chain its `.output`.\n")
-		sb.WriteString("NEVER use the pattern `compute(shallow) → file_write` to edit a known file — that double-writes and the wiring fails when `.output` isn't produced. Use `edit_file` for edits; `compute` is for computing values, not for producing file content to be written elsewhere.\n\n")
-		sb.WriteString("Example — \"build a web app with auth\":\n")
-		sb.WriteString("```json\n")
-		sb.WriteString("[\n")
-		sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"build a Vue 3 + Express webapp with JWT auth and SQLite database\",\"mode\":\"deep\",\"query\":\"build a Vue 3 webapp with auth\"},\"depends_on\":[],\"tag\":\"build_webapp\"}\n")
-		sb.WriteString("]\n")
-		sb.WriteString("```\n")
-		sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
+			sb.WriteString("## Compute Nodes\n")
+			sb.WriteString("**Compute is the right tool whenever real computation is required.** The aggregator at the end of the plan is an LLM call that can handle small math, summarisation, and qualitative synthesis — but it CANNOT propagate orbits, run sgp4 / skyfield / pandas / scipy, parse thousand-row CSVs, or compute precision floating-point values. When the question needs any of those, **add a compute step.** The Persistence litany in your system prompt is explicit: the way to answer a hard quant question is to compute it, not to recommend an external app.\n\n")
+			sb.WriteString("Only omit compute when the answer truly is a lookup (a static value from a press release, a fact from Wikipedia, a short web summary). \"Looks like a lookup\" is not the same as \"is a lookup\" — *next visible Starlink passes over Tokyo tonight* is NOT pre-computed on any page; it requires sgp4 propagation. If a known web tool exists for it (Heavens-Above, in-the-sky.org), assume the tool is a JS widget that computes on click — not a fetchable answer. Fetch the underlying TLE catalogue from CelesTrak and compute it yourself.\n\n")
+			sb.WriteString("**Use compute ONLY when one of these is true:**\n")
+			sb.WriteString("- A library is needed to do the work — numpy, scipy, sgp4, pandas, BeautifulSoup, jq, etc. The LLM can't run code.\n")
+			sb.WriteString("- Data is too large for LLM context — CSVs with thousands of rows, log files, big JSON dumps.\n")
+			sb.WriteString("- Precision matters in a way the LLM is bad at — financial math, exact floating-point, date arithmetic, sgp4, statistical inference.\n")
+			sb.WriteString("- The user explicitly asked for code, a script, or a deliverable file.\n")
+			sb.WriteString("- The output must be a structured value feeding another tool (not prose for the user).\n\n")
+			sb.WriteString("**Do NOT use compute when:**\n")
+			sb.WriteString("- Simple arithmetic the aggregator can do (one sum, one percentage, ranking <10 items).\n")
+			sb.WriteString("- Pure information retrieval (\"what is X\", \"current value of Y\", \"summarise this article\").\n")
+			sb.WriteString("- Qualitative analysis or conversational synthesis.\n")
+			sb.WriteString("- Anything where the aggregator can read the evidence and write the answer directly.\n\n")
+			sb.WriteString("When in doubt, omit compute. A wrongly-omitted compute costs nothing (aggregator handles it). A wrongly-added compute wastes an LLM call and can hallucinate when its inputs aren't real.\n\n")
+			sb.WriteString("**When you DO use compute:**\n")
+			sb.WriteString("- Provide the GOAL, never the code. Never write code in bash params or file_write content.\n")
+			sb.WriteString("- Wire every input through `${step.N.field}` placeholders from prior gathering steps. Never plan compute over inputs that don't yet exist — it will hallucinate.\n")
+			sb.WriteString("- The compute architect handles ALL implementation details (dirs, deps, file gen, service start, validation). Do NOT plan these as separate bash/service steps.\n")
+			sb.WriteString("- **Use tools directly when they can do the job** — yt-dlp/curl in bash for downloads, web_fetch for pages, service for daemons. compute is for writing new code, not for wrapping existing tools in scripts.\n\n")
+			sb.WriteString("**Multi-batch example — a compute task that NEEDS real-world data first:**\n")
+			sb.WriteString("query: \"estimate the probability that a Starlink satellite passes within 5 km of the ISS in 14 days\"\n")
+			sb.WriteString("```json\n")
+			sb.WriteString("[\n")
+			sb.WriteString("  {\"tool\":\"web_search\",\"params\":{\"query\":\"current Starlink TLE celestrak\"},\"depends_on\":[],\"tag\":\"search_tle\"},\n")
+			sb.WriteString("  {\"tool\":\"web_search\",\"params\":{\"query\":\"current solar flux F10.7\"},\"depends_on\":[],\"tag\":\"search_flux\"},\n")
+			sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":{\"url\":\"${step.0.results.0.url}\",\"format\":\"text\"},\"depends_on\":[0],\"tag\":\"fetch_tle\"},\n")
+			sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":{\"url\":\"${step.1.results.0.url}\",\"format\":\"text\"},\"depends_on\":[1],\"tag\":\"fetch_flux\"},\n")
+			sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"propagate ISS+Starlink TLEs over 14 days with sgp4, apply drag from given F10.7, count close-approaches within 5km, output probability as JSON\",\"mode\":\"shallow\",\"context.tle\":\"${step.2.content}\",\"context.flux\":\"${step.3.content}\"},\"depends_on\":[2,3],\"tag\":\"compute_probability\"}\n")
+			sb.WriteString("]\n")
+			sb.WriteString("```\n")
+			sb.WriteString("Three batches in one plan: search → fetch → compute. Every compute input is wired from real upstream content. If your plan for a quant task ends at search/fetch with no compute, you under-planned — the user's question requires actual computation that the aggregator can't do.\n\n")
+			sb.WriteString("**Counter-example — a task that does NOT need compute:**\n")
+			sb.WriteString("query: \"what's the current ISS altitude?\"\n")
+			sb.WriteString("```json\n")
+			sb.WriteString("[\n")
+			sb.WriteString("  {\"tool\":\"web_search\",\"params\":{\"query\":\"current ISS altitude\"},\"depends_on\":[],\"tag\":\"search_alt\"},\n")
+			sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":{\"url\":\"${step.0.results.0.url}\",\"format\":\"summary\",\"focus\":\"altitude in km\"},\"depends_on\":[0],\"tag\":\"fetch_alt\"}\n")
+			sb.WriteString("]\n")
+			sb.WriteString("```\n")
+			sb.WriteString("The aggregator reads `fetch_alt.content` and reports the altitude. No compute needed.\n\n")
+			// Preflight owns the compute-depth decision. Inject it here so the
+			// planner treats it as authoritative rather than re-deriving deep vs
+			// shallow from workspace residue.
+			if graph != nil && graph.Preflight != nil && graph.Preflight.ComputeMode != "" {
+				sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", graph.Preflight.ComputeMode))
+			} else {
+				sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss astrodynamics / financial / statistical / ephemeris queries that *sound* like lookups. If the question requires a library (sgp4, pandas, scipy, skyfield, ephem) or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — adding a compute step is always cheaper than refusing the task.\n\n")
+			}
+			sb.WriteString("Level reference:\n")
+			sb.WriteString("- **Direct tools** (bash, service, file_read, web_search): default for downloads, searches, restarts, reads.\n")
+			sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or injected via `${step.N.field}` from an upstream step).\n")
+			sb.WriteString("- **edit_file**: LLM-backed edit or create of a specific file. Use whenever you know the path and want the Coder to produce the content. task_files is REQUIRED.\n")
+			sb.WriteString("- **compute(shallow)**: compute a VALUE for downstream use — analytics, rankings, scores, derived constants. The Coder emits a runnable script, the script runs, stdout is captured on `.output` so downstream steps can read it via `${step.N.output}`. NOT for editing files you already know the path of — use edit_file for that.\n")
+			sb.WriteString("- **compute(deep)**: new codebases (webapp, CLI tool, service, library) built from scratch. ONE deep node per build.\n\n")
+			sb.WriteString("Required params:\n")
+			sb.WriteString("- compute: `goal` + `mode`. If a follow-up compute step needs data from a prior step, wire it via `${step.N.field}` placeholders AND still provide `goal` and `mode` in `params`.\n")
+			sb.WriteString("- edit_file: `task_files` (at least one path) + `goal`. Skip the path and the Coder will refuse to guess — the step fails.\n\n")
+			sb.WriteString("**Known-path file operations — pick the right tool:**\n")
+			sb.WriteString("- Need an LLM to EDIT or CREATE a file at a known path? → `edit_file` with `task_files=[\"project/...\"]`.\n")
+			sb.WriteString("- Have the exact bytes already (literal or from upstream) and need them written? → `file_write` with `path` and `content`.\n")
+			sb.WriteString("- Need to COMPUTE a value (not a file) for downstream steps? → `compute(shallow)`, chain its `.output`.\n")
+			sb.WriteString("NEVER use the pattern `compute(shallow) → file_write` to edit a known file — that double-writes and the wiring fails when `.output` isn't produced. Use `edit_file` for edits; `compute` is for computing values, not for producing file content to be written elsewhere.\n\n")
+			sb.WriteString("Example — \"build a web app with auth\":\n")
+			sb.WriteString("```json\n")
+			sb.WriteString("[\n")
+			sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":{\"goal\":\"build a Vue 3 + Express webapp with JWT auth and SQLite database\",\"mode\":\"deep\",\"query\":\"build a Vue 3 webapp with auth\"},\"depends_on\":[],\"tag\":\"build_webapp\"}\n")
+			sb.WriteString("]\n")
+			sb.WriteString("```\n")
+			sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
 		}
 		sb.WriteString("## Rules\n")
 		sb.WriteString("NEVER guess values you don't know. Only use names, paths, and parameters that are visible in the evidence (workspace files, blueprint, conversation). If you don't know the exact service name, file path, or port — plan a diagnostic step first (file_read, service list, bash ls) to discover it.\n")
@@ -401,35 +405,35 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
 		sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
 		if !a.cfg.DisableCoding {
-		sb.WriteString("\n## Workspace Layout\n")
-		sb.WriteString("- project/ — source code, application files\n")
-		sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
-		sb.WriteString("- blueprints/ — architecture blueprints (auto-managed by compute)\n")
-		sb.WriteString("- canvas/ — visual output that RENDERS LIVE in the UI (HTML pages, charts, images). Put any chart, plot, diagram, or interactive view here so the user actually SEES it.\n")
-		sb.WriteString("- uploads/<session-id>/ — user-uploaded attachments. When the query has an [attached files] preamble, the paths land here. Each file may have <name>.meta.json (preview) and <name>.summary.md (LLM summary) sidecars.\n")
-		// Workspace tree for orientation (what files exist in the workspace).
-		// We do NOT inject existing blueprints here — the mere presence of
-		// a blueprint in the workspace must not bias the planner toward
-		// compute(deep). Whether this query needs architecture is the
-		// preflight's call based on the user's actual request, not workspace
-		// residue from prior runs.
-		if graph != nil && graph.Context != nil {
-			gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
-				// Depth 5 shows typical nested projects (e.g. workdir/project/<app>/<component>/src/<file>)
-				// up front so the Executive doesn't have to probe for entrypoints. The
-				// scanWorkspaceTree cap at 120 entries (round-robin across buckets) prevents
-				// runaway on monorepo-sized trees; MaxBudget:10000 is the secondary byte cap.
-				ReturnSources: Sources(WorkspaceTree(5)),
-				MaxBudget:     10000,
-			})
-			if gerr != nil {
-				log.Printf("[dag] executive context build failed: %v", gerr)
-			} else if tree := gateResp.Sources[SourceWorkspaceTree]; tree != "" {
-				sb.WriteString("\n### Current files\n")
-				sb.WriteString(tree)
-				sb.WriteString("\n")
+			sb.WriteString("\n## Workspace Layout\n")
+			sb.WriteString("- project/ — source code, application files\n")
+			sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
+			sb.WriteString("- blueprints/ — architecture blueprints (auto-managed by compute)\n")
+			sb.WriteString("- canvas/ — visual output that RENDERS LIVE in the UI (HTML pages, charts, images). Put any chart, plot, diagram, or interactive view here so the user actually SEES it.\n")
+			sb.WriteString("- uploads/<session-id>/ — user-uploaded attachments. When the query has an [attached files] preamble, the paths land here. Each file may have <name>.meta.json (preview) and <name>.summary.md (LLM summary) sidecars.\n")
+			// Workspace tree for orientation (what files exist in the workspace).
+			// We do NOT inject existing blueprints here — the mere presence of
+			// a blueprint in the workspace must not bias the planner toward
+			// compute(deep). Whether this query needs architecture is the
+			// preflight's call based on the user's actual request, not workspace
+			// residue from prior runs.
+			if graph != nil && graph.Context != nil {
+				gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
+					// Depth 5 shows typical nested projects (e.g. workdir/project/<app>/<component>/src/<file>)
+					// up front so the Executive doesn't have to probe for entrypoints. The
+					// scanWorkspaceTree cap at 120 entries (round-robin across buckets) prevents
+					// runaway on monorepo-sized trees; MaxBudget:10000 is the secondary byte cap.
+					ReturnSources: Sources(WorkspaceTree(5)),
+					MaxBudget:     10000,
+				})
+				if gerr != nil {
+					log.Printf("[dag] executive context build failed: %v", gerr)
+				} else if tree := gateResp.Sources[SourceWorkspaceTree]; tree != "" {
+					sb.WriteString("\n### Current files\n")
+					sb.WriteString(tree)
+					sb.WriteString("\n")
+				}
 			}
-		}
 
 		}
 
@@ -1399,6 +1403,10 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 			ToolName: s.Tool,
 			Params:   s.Params,
 			Tag:      s.Tag,
+			// Carried from the plan so the dispatcher knows where to run it.
+			// Empty means here, which is the case for every application that
+			// never sets a target.
+			Target: s.Target,
 		}
 		// Tag the node with its tool source for frontend display
 		if registry != nil {
@@ -1737,4 +1745,73 @@ func isNumericPathSegment(s string) bool {
 		}
 	}
 	return true
+}
+
+/*
+ * applyRunTarget propagates a run's target onto the steps that need one.
+ * desc: A plan is written by a model that may or may not repeat the target on
+ *       every step. Rather than rely on it, fill in what the tool declares it
+ *       needs: a step whose tool requires a target inherits the run's, and a
+ *       step whose tool does not is stripped of one it should never have had.
+ *
+ *       A step needing a target when the run has none is left alone and
+ *       logged. It is not quietly run here — a tool that must name a machine
+ *       has no sensible default, and running it locally would produce a
+ *       plausible answer about the wrong host.
+ * param: steps - the plan, modified in place.
+ * param: target - the run's target, or "" when it has none.
+ * param: registry - used to read each tool's target requirement.
+ */
+func applyRunTarget(steps []PlanStep, target string, registry *tools.Registry) {
+	if registry == nil {
+		return
+	}
+	for i := range steps {
+		tool, ok := registry.Get(steps[i].Tool)
+		if !ok {
+			continue
+		}
+		if tools.RequiresTarget(tool) {
+			if steps[i].Target != "" {
+				continue
+			}
+			if target == "" {
+				log.Printf("[plan] step %d (%s) needs a target machine but the run has none; leaving it unset rather than running it here",
+					i, steps[i].Tool)
+				continue
+			}
+			steps[i].Target = target
+			continue
+		}
+		if steps[i].Target != "" {
+			log.Printf("[plan] step %d (%s) does not take a target; clearing %q",
+				i, steps[i].Tool, steps[i].Target)
+			steps[i].Target = ""
+		}
+	}
+}
+
+/*
+ * stripHeaderTag removes a leading bracketed label from a model's reply.
+ * desc: Some models prefix their output with a tag like "[plan]" or
+ *       "[thinking]". Only strips a short label with no JSON punctuation in it,
+ *       so a reply that genuinely begins with a JSON array is left alone.
+ * param: s - the raw reply.
+ * return: the reply without its leading label.
+ */
+func stripHeaderTag(s string) string {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "[") {
+		return t
+	}
+	close := strings.Index(t, "]")
+	if close <= 0 || close > 60 {
+		return t
+	}
+	inside := t[1:close]
+	// Reject if the label contains JSON punctuation — it may be a real plan.
+	if strings.ContainsAny(inside, `":{},`) {
+		return t
+	}
+	return strings.TrimSpace(t[close+1:])
 }

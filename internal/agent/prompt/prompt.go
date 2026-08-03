@@ -119,6 +119,33 @@ func init() {
 // section, or any required section left empty returns a non-nil error. A
 // missing override file is fine — the embedded defaults stand. Runs once at
 // boot; performs no per-query IO.
+/*
+ * Apply overlays prompt sections supplied in-process by the embedding
+ * application, before any operator override from disk.
+ * desc: Load reads a file from dataDir, which suits an operator tweaking a
+ *       running install. An application embedding kaiju needs something else:
+ *       its prompts are part of the product and belong in its binary, not in a
+ *       directory a deployment might not have, or might lose. Apply is that
+ *       path — the caller passes its own embedded prompts.md and gets the same
+ *       per-section semantics and the same fail-closed validation.
+ *
+ *       Precedence ends up: kaiju defaults, then the application, then the
+ *       operator. Each layer overrides only the sections it names.
+ *
+ *       Call once at startup, before anything reads a prompt. The section
+ *       variables are package-level and read on every LLM call, so applying
+ *       them while work is in flight is a data race.
+ * param: source - a label for logs and errors (e.g. "enbarr/prompts.md").
+ * param: data - the prompts.md content, `=== NAME ===` delimited.
+ * return: an error if the content is malformed or names an empty section.
+ */
+func Apply(source string, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	return applyOverride(source, data)
+}
+
 func Load(dataDir string) error {
 	if dataDir != "" {
 		path := filepath.Join(dataDir, "prompts.md")

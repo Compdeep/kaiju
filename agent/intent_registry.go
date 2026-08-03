@@ -258,4 +258,3 @@ func (r *IntentRegistry) MaxRank() int {
 	}
 	return r.ordered[len(r.ordered)-1].Rank
 }
-

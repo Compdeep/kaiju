@@ -742,7 +742,6 @@ func sanitizeTag(s string) string {
 	return strings.Trim(s, "_")
 }
 
-
 // skipDirs are directories never entered during workspace scans.
 var skipDirs = map[string]bool{
 	".git": true, "node_modules": true, "__pycache__": true,
@@ -883,20 +882,20 @@ var binaryExts = map[string]bool{
 }
 
 var signaturePatterns = map[string][]string{
-	"py":  {"def ", "class ", "import ", "from "},
-	"go":  {"func ", "type ", "package "},
-	"js":  {"function ", "export ", "class ", "const ", "module.exports"},
-	"mjs": {"function ", "export ", "class ", "const "},
-	"ts":  {"function ", "export ", "class ", "interface ", "type ", "const "},
-	"tsx": {"function ", "export ", "class ", "interface ", "type ", "const "},
-	"vue": {"<template", "<script", "export default", "defineProps", "defineEmits"},
-	"rb":  {"def ", "class ", "module ", "require "},
-	"rs":  {"fn ", "struct ", "enum ", "impl ", "pub ", "mod ", "use "},
-	"c":   {"int ", "void ", "char ", "struct ", "#include"},
-	"h":   {"int ", "void ", "char ", "struct ", "#include", "#define"},
-	"cpp": {"int ", "void ", "class ", "struct ", "#include", "namespace"},
+	"py":   {"def ", "class ", "import ", "from "},
+	"go":   {"func ", "type ", "package "},
+	"js":   {"function ", "export ", "class ", "const ", "module.exports"},
+	"mjs":  {"function ", "export ", "class ", "const "},
+	"ts":   {"function ", "export ", "class ", "interface ", "type ", "const "},
+	"tsx":  {"function ", "export ", "class ", "interface ", "type ", "const "},
+	"vue":  {"<template", "<script", "export default", "defineProps", "defineEmits"},
+	"rb":   {"def ", "class ", "module ", "require "},
+	"rs":   {"fn ", "struct ", "enum ", "impl ", "pub ", "mod ", "use "},
+	"c":    {"int ", "void ", "char ", "struct ", "#include"},
+	"h":    {"int ", "void ", "char ", "struct ", "#include", "#define"},
+	"cpp":  {"int ", "void ", "class ", "struct ", "#include", "namespace"},
 	"java": {"public ", "private ", "protected ", "class ", "interface ", "import "},
-	"sh":  {"function ", "#!/"},
+	"sh":   {"function ", "#!/"},
 }
 
 // ── Function Scanner ────────────────────────────────────────────────────────

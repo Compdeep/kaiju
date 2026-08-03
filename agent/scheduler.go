@@ -12,7 +12,6 @@ import (
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/tools"
-	"github.com/Compdeep/kaiju/internal/compat/store"
 )
 
 // ── Scheduler: DAG execution engine ─────────────────────────────────────────
@@ -1907,11 +1906,11 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 			mode = trigger.DAGMode
 		}
 		refCount, investigationCount := graph.ReflectionStats()
-		a.eventStore.InsertInvestigation(store.Investigation{
+		a.eventStore.InsertRun(Run{
 			ID:              trigger.AlertID,
 			NodeID:          a.cfg.NodeID,
 			TriggerType:     trigger.Type,
-			TriggerAlertID:  trigger.AlertID,
+			CorrelationID:   trigger.AlertID,
 			StartedAt:       startTime.Unix(),
 			CompletedAt:     time.Now().Unix(),
 			DurationMs:      elapsed.Milliseconds(),
@@ -2115,11 +2114,11 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 			mode = trigger.DAGMode
 		}
 		refCount, investigationCount := graph.ReflectionStats()
-		a.eventStore.InsertInvestigation(store.Investigation{
+		a.eventStore.InsertRun(Run{
 			ID:              trigger.AlertID,
 			NodeID:          a.cfg.NodeID,
 			TriggerType:     trigger.Type,
-			TriggerAlertID:  trigger.AlertID,
+			CorrelationID:   trigger.AlertID,
 			StartedAt:       startTime.Unix(),
 			CompletedAt:     time.Now().Unix(),
 			DurationMs:      elapsed.Milliseconds(),

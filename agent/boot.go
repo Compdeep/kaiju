@@ -10,11 +10,11 @@ import (
 
 // BootLLMConfig holds LLM settings from BOOT.md frontmatter.
 type BootLLMConfig struct {
-	Endpoint    string  `json:"endpoint"`
-	Model       string  `json:"model"`
+	Endpoint    string   `json:"endpoint"`
+	Model       string   `json:"model"`
 	Temperature *float64 `json:"temperature"`
 	MaxTokens   *int     `json:"max_tokens"`
-	APIKey      string  `json:"api_key"`
+	APIKey      string   `json:"api_key"`
 }
 
 // BootEmbConfig holds embedding settings from BOOT.md frontmatter.
@@ -36,14 +36,14 @@ type BootGatesConfig struct {
 
 // BootDAGConfig holds DAG engine settings from BOOT.md frontmatter.
 type BootDAGConfig struct {
-	Enabled       *bool  `json:"enabled"`
-	Mode          string `json:"mode"` // "reflect", "nReflect", "orchestrator"
-	MaxNodes      *int   `json:"max_nodes"`
-	MaxPerSkill   *int   `json:"max_per_skill"`
-	MaxLLMCalls   *int   `json:"max_llm_calls"`
-	MaxObserverCalls *int `json:"max_observer_calls"`
-	BatchSize     *int   `json:"batch_size"`
-	WallClockSec  *int   `json:"wall_clock_sec"`
+	Enabled          *bool  `json:"enabled"`
+	Mode             string `json:"mode"` // "reflect", "nReflect", "orchestrator"
+	MaxNodes         *int   `json:"max_nodes"`
+	MaxPerSkill      *int   `json:"max_per_skill"`
+	MaxLLMCalls      *int   `json:"max_llm_calls"`
+	MaxObserverCalls *int   `json:"max_observer_calls"`
+	BatchSize        *int   `json:"batch_size"`
+	WallClockSec     *int   `json:"wall_clock_sec"`
 }
 
 // BootConfig is the parsed representation of a BOOT.md file.

@@ -77,12 +77,12 @@ func TestScaleReplanCap(t *testing.T) {
 		steps []PlanStep
 		want  int
 	}{
-		{"tiny lookup keeps base", 3, mk(2, 0), 3},          // 2/4=0
-		{"8 plain steps add two", 3, mk(8, 0), 5},           // 8/4=2
+		{"tiny lookup keeps base", 3, mk(2, 0), 3},             // 2/4=0
+		{"8 plain steps add two", 3, mk(8, 0), 5},              // 8/4=2
 		{"compute steps each add one", 3, mk(4, 3), 3 + 1 + 3}, // 4/4=1 + 3 computes
-		{"base is a floor", 8, mk(1, 0), 8},                 // 1/4=0, floor holds
-		{"huge plan clamped at ceiling", 3, mk(100, 0), 12}, // 100/4=25 → clamp 12
-		{"high base raises ceiling", 15, mk(1, 0), 15},      // base above 12 stays
+		{"base is a floor", 8, mk(1, 0), 8},                    // 1/4=0, floor holds
+		{"huge plan clamped at ceiling", 3, mk(100, 0), 12},    // 100/4=25 → clamp 12
+		{"high base raises ceiling", 15, mk(1, 0), 15},         // base above 12 stays
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

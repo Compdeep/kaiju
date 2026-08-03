@@ -9,35 +9,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
-	"github.com/Compdeep/kaiju/agent/tools"
-	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/skillmd"
-	"github.com/Compdeep/kaiju/internal/compat/ipc"
-	"github.com/Compdeep/kaiju/internal/compat/protocol"
-	"github.com/Compdeep/kaiju/internal/compat/store"
+	"github.com/Compdeep/kaiju/agent/tools"
 	"github.com/Compdeep/kaiju/internal/db"
 )
-
-/*
- * GossipPublisher is the interface for publishing gossip messages.
- * desc: Provides methods for broadcasting alert and murmur messages
- *       to fleet peers, plus access to the message sequencer.
- */
-type GossipPublisher interface {
-	PublishAlert(ctx context.Context, data []byte) error
-	PublishMurmur(ctx context.Context, data []byte) error
-	Sequencer() *protocol.Sequencer
-}
-
-/*
- * IPCSender is the interface for sending IPC messages to the C++ service.
- * desc: Single-method interface for envelope-based IPC communication.
- */
-type IPCSender interface {
-	Send(env ipc.Envelope) error
-}
 
 /*
  * ResolvedScope defines the effective tool permissions for a request.
@@ -271,8 +249,6 @@ type Agent struct {
 	clearance         *localClearance  // IGX node clearance
 	clearanceExplicit bool             // true if cfg.NodeClearance was set; false means we're on the bootstrap default
 	memory            *Memory
-	gossip            GossipPublisher
-	ipc               IPCSender
 	triggers          chan Trigger
 	embedStore        *EmbeddingStore // nil if embeddings disabled
 	embedClient       *llm.Client     // nil if embeddings disabled
@@ -286,7 +262,7 @@ type Agent struct {
 	// Per-investigation state (active skill cards, preflight result) lives on the
 	// Graph (Graph.ActiveCards / Graph.Preflight), not on the Agent — concurrent
 	// investigations each carry their own Graph, so nothing here is shared or raced.
-	eventStore *store.Store // nil if no event store
+	eventStore EventStore // nil if no event store
 
 	kernel *Kernel // core runtime — owns the scheduler + investigation lifecycle
 
@@ -304,7 +280,7 @@ type Agent struct {
  *       tool execution audit trails.
  * param: s - pointer to the event store.
  */
-func (a *Agent) SetEventStore(s *store.Store) {
+func (a *Agent) SetEventStore(s EventStore) {
 	a.eventStore = s
 }
 
@@ -322,13 +298,9 @@ func (a *Agent) SetFleet(f FleetContextProvider) {
  * desc: Initializes all subsystems: LLM client, tool registry, IGX gate,
  *       memory, prompts, and capability cards. Returns the configured agent.
  * param: cfg - agent configuration.
- * param: gossip - gossip publisher for fleet communication.
- * param: ipcSender - IPC sender for C++ service communication.
- * param: nodeID - this node's unique identifier.
  * return: pointer to the new Agent, or error.
  */
-func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string) (*Agent, error) {
-	cfg.NodeID = nodeID
+func New(cfg Config) (*Agent, error) {
 	if cfg.MetadataDir == "" {
 		cfg.MetadataDir = cfg.Workspace
 	}
@@ -412,8 +384,6 @@ func New(cfg Config, gossip GossipPublisher, ipcSender IPCSender, nodeID string)
 		clearance:         clr,
 		clearanceExplicit: clearanceExplicit,
 		memory:            mem,
-		gossip:            gossip,
-		ipc:               ipcSender,
 		triggers:          make(chan Trigger, 16),
 		dagSubs:           make(map[int]chan DAGEvent),
 		skillGuidance:     make(map[string]*skillmd.SkillMD),

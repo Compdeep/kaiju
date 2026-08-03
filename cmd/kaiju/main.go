@@ -13,18 +13,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Compdeep/kaiju/docs"
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/uploads"
+	"github.com/Compdeep/kaiju/docs"
 	"github.com/Compdeep/kaiju/internal/api"
 	"github.com/Compdeep/kaiju/internal/auth"
 	"github.com/Compdeep/kaiju/internal/channels"
 	"github.com/Compdeep/kaiju/internal/channels/cli"
 	"github.com/Compdeep/kaiju/internal/channels/web"
 	kaijuclr "github.com/Compdeep/kaiju/internal/clearance"
-	"github.com/Compdeep/kaiju/internal/compat/ipc"
-	"github.com/Compdeep/kaiju/internal/compat/protocol"
 	"github.com/Compdeep/kaiju/internal/config"
 	kaijudb "github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
@@ -358,7 +356,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		}
 	}
 
-	ag, err := agent.New(agentCfg, noopGossip{}, noopIPC{}, "kaiju-local")
+	ag, err := agent.New(agentCfg)
 	if err != nil {
 		log.Fatalf("agent: %v", err)
 	}
@@ -1334,19 +1332,3 @@ func runSkillCmd() {
 		os.Exit(1)
 	}
 }
-
-// ─── No-op implementations for fleet interfaces ─────────────────────────────
-
-type noopGossip struct{}
-
-func (noopGossip) PublishAlert(context.Context, []byte) error  { return nil }
-func (noopGossip) PublishMurmur(context.Context, []byte) error { return nil }
-func (noopGossip) Sequencer() *protocol.Sequencer              { return protocol.NewSequencer("builtin") }
-
-type noopIPC struct{}
-
-func (noopIPC) Send(ipc.Envelope) error { return nil }
-
-// Ensure these satisfy the agent's interfaces at compile time.
-var _ agent.GossipPublisher = noopGossip{}
-var _ agent.IPCSender = noopIPC{}

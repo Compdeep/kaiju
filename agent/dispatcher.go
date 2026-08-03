@@ -9,9 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Compdeep/kaiju/agent/tools"
 	"github.com/Compdeep/kaiju/agent/gates"
-	"github.com/Compdeep/kaiju/internal/compat/store"
+	"github.com/Compdeep/kaiju/agent/tools"
 )
 
 /*
@@ -535,16 +534,16 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 				paramsJSON = string(b)
 			}
 		}
-		a.eventStore.InsertAction(store.Action{
-			ID:              fmt.Sprintf("act-%d", time.Now().UnixNano()),
-			NodeID:          a.cfg.NodeID,
-			Timestamp:       time.Now().Unix(),
-			ActionType:      toolName,
-			Params:          paramsJSON,
-			Result:          Text.TruncateLog(result, 500),
-			InvestigationID: alertID,
-			Intent:          int(intent),
-			Impact:          impact,
+		a.eventStore.InsertAction(Action{
+			ID:         fmt.Sprintf("act-%d", time.Now().UnixNano()),
+			NodeID:     a.cfg.NodeID,
+			Timestamp:  time.Now().Unix(),
+			ActionType: toolName,
+			Params:     paramsJSON,
+			Result:     Text.TruncateLog(result, 500),
+			RunID:      alertID,
+			Intent:     int(intent),
+			Impact:     impact,
 		})
 	}
 

@@ -59,10 +59,13 @@ type ResolvedScope struct {
  *       access scope, session ID, and conversation history.
  */
 type Trigger struct {
-	// TargetNode names the machine this run is about, if any. Steps calling
-	// tools that require a target inherit it; see applyRunTarget. What goes
-	// in here, and how it is chosen, is the caller's business.
-	TargetNode string `json:"target_node,omitempty"`
+	// Target names the machine this run is about, if any. Steps calling tools
+	// that require a target inherit it; see applyRunTarget. What goes in here,
+	// and how it is chosen, is the caller's business.
+	//
+	// Named Target, not TargetNode: "node" already means a DAG node in this
+	// package, and a machine is not one.
+	Target string `json:"target,omitempty"`
 
 	Type          string          `json:"type"` // "chat_query", "api_query", "scheduled", "event", "command"
 	AlertID       string          `json:"alert_id"`

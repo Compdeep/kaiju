@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/internal/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/prompt"
 	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 

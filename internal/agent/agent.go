@@ -12,7 +12,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/tools"
 	"github.com/Compdeep/kaiju/internal/agent/gates"
-	"github.com/Compdeep/kaiju/internal/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/prompt"
 	"github.com/Compdeep/kaiju/internal/agent/skillmd"
 	"github.com/Compdeep/kaiju/internal/compat/ipc"
 	"github.com/Compdeep/kaiju/internal/compat/protocol"

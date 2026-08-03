@@ -12,7 +12,7 @@ import (
 
 	"github.com/Compdeep/kaiju/internal/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/internal/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
 /*

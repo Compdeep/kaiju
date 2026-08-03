@@ -185,6 +185,15 @@ func applyOverride(path string, data []byte) error {
 	for name, body := range overrides {
 		dst, known := targets[name]
 		if !known {
+			// Not a built-in. An application may have registered it as one of
+			// its own; only if it did not is the name genuinely unknown.
+			if strings.TrimSpace(body) == "" {
+				return fmt.Errorf("prompt: section %q in %s is empty", name, path)
+			}
+			if setCustom(name, body) {
+				log.Printf("[prompt] overriding %s from %s (application section)", name, path)
+				continue
+			}
 			log.Printf("[prompt] override %s: ignoring unknown section %q", path, name)
 			continue
 		}

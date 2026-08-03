@@ -249,3 +249,36 @@ func ToToolDef(t Tool) llm.ToolDef {
 		},
 	}
 }
+
+// ─── Target requirement ─────────────────────────────────────────────────────
+
+// Targeted is an optional interface a tool implements to say whether it runs
+// on a nominated machine.
+//
+// The engine can dispatch a step to a target (see RemoteExecutor) but has no
+// way to know which tools that makes sense for. A tool aggregating data the
+// agent already holds should never carry one; a tool inspecting a host is
+// meaningless without one. Declaring it here lets the planner be told the
+// difference, and lets a bad plan be rejected before it runs rather than
+// failing at dispatch.
+//
+// Same shape as Impact: the tool author states a property about the tool, and
+// compiled code acts on it.
+type Targeted interface {
+	// RequiresTarget reports whether a step calling this tool must name the
+	// machine to run on.
+	RequiresTarget() bool
+}
+
+// RequiresTarget reports whether a tool must be given a target.
+//
+// Tools that do not implement Targeted default to true: most tools act on a
+// specific machine, and defaulting the other way would silently let a step
+// omit the target and run somewhere unintended. An application with no notion
+// of remote execution never sets one, so the default costs it nothing.
+func RequiresTarget(t Tool) bool {
+	if v, ok := t.(Targeted); ok {
+		return v.RequiresTarget()
+	}
+	return true
+}

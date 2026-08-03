@@ -42,7 +42,7 @@ func NewSkillMD(fm *Frontmatter, body, baseDir, filePath string, modTime time.Ti
 }
 
 func (s *SkillMD) Name() string        { return s.fm.Name }
-func (s *SkillMD) Description() string  { return s.fm.Description }
+func (s *SkillMD) Description() string { return s.fm.Description }
 
 func (s *SkillMD) Parameters() json.RawMessage { return s.params }
 

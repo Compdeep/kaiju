@@ -342,10 +342,10 @@ func TestScanFunctionMap_Ruby(t *testing.T) {
 
 func TestScanFunctionMap_SkipDirs(t *testing.T) {
 	dir := setupTestDir(t, map[string]string{
-		"src/main.go":                    testGoFile,
-		"node_modules/pkg/index.js":      testJSFile,
-		".git/config":                    "not code",
-		"vendor/lib/util.go":             testGoFile,
+		"src/main.go":               testGoFile,
+		"node_modules/pkg/index.js": testJSFile,
+		".git/config":               "not code",
+		"vendor/lib/util.go":        testGoFile,
 	})
 	fm := ScanFunctionMap(dir, 5)
 
@@ -374,7 +374,6 @@ func TestScanFunctionMap_DepthLimit(t *testing.T) {
 		t.Error("a/b/c/d/e/f/deep.go should be beyond depth 3")
 	}
 }
-
 
 // ── ApplyEdits tests (text-match replacement) ──────────────────────────────
 

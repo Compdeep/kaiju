@@ -17,10 +17,10 @@ type fakeTool struct {
 	params json.RawMessage
 }
 
-func (f *fakeTool) Name() string                             { return f.name }
-func (f *fakeTool) Description() string                      { return "" }
-func (f *fakeTool) Parameters() json.RawMessage              { return f.params }
-func (f *fakeTool) Impact(map[string]any) int                { return 0 }
+func (f *fakeTool) Name() string                { return f.name }
+func (f *fakeTool) Description() string         { return "" }
+func (f *fakeTool) Parameters() json.RawMessage { return f.params }
+func (f *fakeTool) Impact(map[string]any) int   { return 0 }
 func (f *fakeTool) Execute(context.Context, map[string]any) (string, error) {
 	return "", nil
 }

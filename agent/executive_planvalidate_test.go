@@ -17,8 +17,8 @@ type outputTool struct {
 	output json.RawMessage
 }
 
-func (o *outputTool) Name() string                                             { return o.name }
-func (o *outputTool) Description() string                                      { return "" }
+func (o *outputTool) Name() string                                            { return o.name }
+func (o *outputTool) Description() string                                     { return "" }
 func (o *outputTool) Parameters() json.RawMessage                             { return o.params }
 func (o *outputTool) Impact(map[string]any) int                               { return 0 }
 func (o *outputTool) Execute(context.Context, map[string]any) (string, error) { return "", nil }

@@ -203,7 +203,6 @@ type computeService struct {
 	Port    int    `json:"port,omitempty"`
 }
 
-
 /*
  * computeCheck is one validation entry emitted by the architect.
  * desc: After all coder tasks and execute/service grafts complete, the
@@ -227,9 +226,9 @@ func computeSessionID(g *Graph) string {
 }
 
 // projectPrefix returns the project root path, resolved in order:
-//   1. graph.ProjectRoot (set by architect)
-//   2. common prefix of taskFiles (e.g. "project/kaiju_webapp/" from task_files paths)
-//   3. "project/" (legacy fallback)
+//  1. graph.ProjectRoot (set by architect)
+//  2. common prefix of taskFiles (e.g. "project/kaiju_webapp/" from task_files paths)
+//  3. "project/" (legacy fallback)
 func projectPrefix(g *Graph, taskFiles []string) string {
 	if g != nil && g.ProjectRoot != "" {
 		root := g.ProjectRoot

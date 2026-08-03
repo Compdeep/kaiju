@@ -58,7 +58,7 @@ var allowedExt = map[string]string{
 	".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 	".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 	".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+	".png":  "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 	".gif": "image/gif", ".webp": "image/webp",
 }
 
@@ -66,10 +66,10 @@ var allowedExt = map[string]string{
 // shape the frontend chip needs to render and the agent needs to
 // reference the file in subsequent queries.
 type Result struct {
-	Filename    string `json:"filename"`     // sanitised basename
-	Path        string `json:"path"`         // workspace-relative — what the agent sees
-	Type        string `json:"type"`         // mime as classified by allowedExt
-	Size        int64  `json:"size"`         // bytes
+	Filename    string `json:"filename"` // sanitised basename
+	Path        string `json:"path"`     // workspace-relative — what the agent sees
+	Type        string `json:"type"`     // mime as classified by allowedExt
+	Size        int64  `json:"size"`     // bytes
 	Lines       int    `json:"lines,omitempty"`
 	MetaPath    string `json:"meta_path,omitempty"`
 	SummaryPath string `json:"summary_path,omitempty"`
@@ -258,14 +258,14 @@ func (p *Processor) Process(ctx context.Context, sessionID, filename string, dec
 	if mem := p.agent.Memory(); mem != nil {
 		key := fmt.Sprintf("upload:%s:%s", sessionID, clean)
 		entry := map[string]any{
-			"path":         relPath,
-			"meta":         relMeta,
-			"summary":      res.SummaryPath,
-			"type":         mimeType,
-			"size_bytes":   written,
-			"lines":        meta.Lines,
-			"uploaded_at":  now,
-			"session_id":   sessionID,
+			"path":        relPath,
+			"meta":        relMeta,
+			"summary":     res.SummaryPath,
+			"type":        mimeType,
+			"size_bytes":  written,
+			"lines":       meta.Lines,
+			"uploaded_at": now,
+			"session_id":  sessionID,
 		}
 		if b, err := json.Marshal(entry); err == nil {
 			tags := []string{"upload", "session:" + sessionID, "type:" + simplifyMime(mimeType)}

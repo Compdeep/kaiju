@@ -13,8 +13,8 @@ import (
 // Later directories override earlier ones (same name = last wins).
 //
 // Precedence (low → high):
-//   1. <dataDir>/skills             user skills (seeded from repo's skills/bundled/ on install, editable)
-//   2. <workspace>/skills           workspace-specific overrides (highest)
+//  1. <dataDir>/skills             user skills (seeded from repo's skills/bundled/ on install, editable)
+//  2. <workspace>/skills           workspace-specific overrides (highest)
 func DefaultDirs(dataDir, workspace string) []string {
 	dirs := []string{
 		filepath.Join(dataDir, "skills"),

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
 )
 
 // ─── Intent-Gated Execution (IGX) ───────────────────────────────────────────
@@ -64,20 +63,20 @@ type AuditEntry struct {
 type Gate struct {
 	mu           sync.Mutex
 	maxTurns     int
-	rateLimit    int              // max invocations per hour
-	invocations  []time.Time      // sliding window
-	clearance    ClearanceSource  // nil = deny all (clearance 0)
-	lockdown     bool             // when true, all impact>0 is blocked
-	auditFile    *os.File         // append-only NDJSON
+	rateLimit    int             // max invocations per hour
+	invocations  []time.Time     // sliding window
+	clearance    ClearanceSource // nil = deny all (clearance 0)
+	lockdown     bool            // when true, all impact>0 is blocked
+	auditFile    *os.File        // append-only NDJSON
 	auditEncoder *json.Encoder
 }
 
 // GateConfig holds configuration for the safety gate.
 type GateConfig struct {
 	MaxTurns  int
-	RateLimit int              // max invocations per hour
-	AuditDir  string           // directory for audit.jsonl
-	Clearance ClearanceSource  // nil = deny all (clearance 0)
+	RateLimit int             // max invocations per hour
+	AuditDir  string          // directory for audit.jsonl
+	Clearance ClearanceSource // nil = deny all (clearance 0)
 }
 
 // NewGate creates a Gate with the given configuration.

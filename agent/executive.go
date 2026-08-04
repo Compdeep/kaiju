@@ -983,6 +983,12 @@ func quoteList(names []string) string {
 }
 
 func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent gates.Intent, trigger Trigger, preflight *PreflightResult) (*PlanResult, error) {
+	// Fill in each step's target from the run's, guided by what the tool says
+	// it needs. Done here rather than trusting the planner to repeat the target
+	// on every step. A no-op when the trigger names no target, which is every
+	// application that does not dispatch work to other machines.
+	applyRunTarget(steps, trigger.Target, a.registry)
+
 	// Extract gaps and filter unknown tools
 	var gaps []string
 	valid := steps[:0]

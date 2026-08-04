@@ -104,9 +104,9 @@ type Config struct {
 	// inert — every step runs locally, as before targets existed.
 	Remote RemoteExecutor
 
-	// Validate rejects a malformed target before Remote is called. Nil accepts
-	// any non-empty target.
-	Validate TargetValidator
+	// ValidateTarget rejects a malformed target before Remote is called. Nil
+	// accepts any non-empty target.
+	ValidateTarget TargetValidator
 
 	// Environment describes the surroundings a run happens in — which machines
 	// exist, what is reachable, whatever the application decides the planner

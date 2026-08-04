@@ -34,8 +34,8 @@ func (a *Agent) applyCapabilities(cfg Config) {
 	if cfg.Remote != nil {
 		a.remoteExec = cfg.Remote
 	}
-	if cfg.Validate != nil {
-		a.targetValid = cfg.Validate
+	if cfg.ValidateTarget != nil {
+		a.targetValid = cfg.ValidateTarget
 	}
 	if cfg.Environment != nil {
 		a.environment = cfg.Environment

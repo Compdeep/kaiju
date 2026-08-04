@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// fakeLookup returns a Lookup that resolves step indices and node IDs from
+// fakeLookup returns a TemplateLookup that resolves step indices and node IDs from
 // the two maps provided. Values are stored as parsed Go values, mirroring
 // how the dispatcher would feed parsed JSON results into the resolver.
-func fakeLookup(byStep map[int]any, byNode map[string]any) Lookup {
+func fakeLookup(byStep map[int]any, byNode map[string]any) TemplateLookup {
 	return func(ref TemplateRef) (any, bool) {
 		if ref.Kind == "node" {
 			v, ok := byNode[ref.NodeID]

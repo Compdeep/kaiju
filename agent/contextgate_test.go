@@ -29,8 +29,10 @@ func newTestContextGate(t *testing.T) (*ContextGate, *Graph, *Trigger, string) {
 	}
 	agent := &Agent{
 		cfg: Config{
-			Workspace:   dir,
-			MetadataDir: dir,
+			PathConfig: PathConfig{
+				Workspace:   dir,
+				MetadataDir: dir,
+			},
 		},
 	}
 	gate := NewContextGate(graph, trigger, agent)

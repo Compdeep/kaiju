@@ -39,10 +39,10 @@ func (r TemplateRef) Key() string {
 	return "step:" + strconv.Itoa(r.Index)
 }
 
-// Lookup returns the parsed result associated with a reference's base
+// TemplateLookup returns the parsed result associated with a reference's base
 // (the step index or node ID). The walker handles path traversal itself,
 // so the callback only needs to surface the root result.
-type Lookup func(ref TemplateRef) (any, bool)
+type TemplateLookup func(ref TemplateRef) (any, bool)
 
 // templatePattern matches ${step.<body>} or ${node.<body>} placeholders.
 // Body content stops at the first closing brace; anything else (alphanumerics,
@@ -111,11 +111,11 @@ func parseRef(raw, kind, body string) *TemplateRef {
 // A bare placeholder (whole-string template) preserves the resolved value's
 // underlying type, so objects and arrays pass through without stringification.
 // Mid-string interpolation always produces a string.
-func ResolveTemplates(v any, lookup Lookup) (any, error) {
+func ResolveTemplates(v any, lookup TemplateLookup) (any, error) {
 	return resolveValue(v, lookup)
 }
 
-func resolveValue(v any, lookup Lookup) (any, error) {
+func resolveValue(v any, lookup TemplateLookup) (any, error) {
 	switch x := v.(type) {
 	case string:
 		return resolveString(x, lookup)
@@ -144,7 +144,7 @@ func resolveValue(v any, lookup Lookup) (any, error) {
 	}
 }
 
-func resolveString(s string, lookup Lookup) (any, error) {
+func resolveString(s string, lookup TemplateLookup) (any, error) {
 	matches := templatePattern.FindAllStringSubmatchIndex(s, -1)
 	if len(matches) == 0 {
 		return s, nil
@@ -186,7 +186,7 @@ func resolveString(s string, lookup Lookup) (any, error) {
 	return b.String(), nil
 }
 
-func resolveOne(ref TemplateRef, lookup Lookup) (any, error) {
+func resolveOne(ref TemplateRef, lookup TemplateLookup) (any, error) {
 	base, ok := lookup(ref)
 	if !ok {
 		return nil, fmt.Errorf("unresolved template %s: upstream not available", ref.Raw)

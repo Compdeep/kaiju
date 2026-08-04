@@ -22,6 +22,19 @@ type FleetContextProvider interface {
  * return: fleet context markdown string, or empty string.
  */
 func (a *Agent) fleetSection() string {
+	// Config.Environment is the supported way to describe the surroundings.
+	// The application decides what to say and how to word it; this package
+	// appends the text and attaches no meaning to it.
+	if a.environment != nil {
+		if text := a.environment(); text != "" {
+			return "\n\n" + text
+		}
+		return ""
+	}
+
+	// Fallback for callers still using SetFleet, which is deprecated: its
+	// vocabulary — fleet, peer — belongs to one product rather than to an
+	// engine other products build on.
 	if a.fleet == nil {
 		return ""
 	}

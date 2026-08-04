@@ -59,21 +59,6 @@ type RemoteExecutor interface {
 type TargetValidator func(target string) error
 
 /*
- * SetRemoteExec wires an executor for steps that name a machine.
- * desc: Without one, a node's Target is recorded but never acted on.
- * param: r - the executor, or nil to disable remote execution.
- */
-func (a *Agent) SetRemoteExec(r RemoteExecutor) { a.remoteExec = r }
-
-/*
- * SetTargetValidator installs a check on target syntax.
- * desc: Runs before the executor is called, so an obviously wrong target costs
- *       a fast local error rather than a connection attempt and a timeout.
- * param: v - the validator, or nil to accept any non-empty target.
- */
-func (a *Agent) SetTargetValidator(v TargetValidator) { a.targetValid = v }
-
-/*
  * validateTarget applies the host-supplied validator, if any.
  * param: target - the target to check.
  * return: nil when acceptable.

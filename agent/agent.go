@@ -68,6 +68,19 @@ type Trigger struct {
 	AnswerProvider     string `json:"answer_provider,omitempty"`
 	AnswerModel        string `json:"answer_model,omitempty"`
 	HeartbeatThreshold int    `json:"heartbeat_threshold,omitempty"` // consecutive stuck ticks before kernel interjects (0 = default 3; raise for long-running work like downloads)
+
+	// Cause carries whatever the application knows about what prompted this
+	// run — a monitoring alert, a sensor reading, a support ticket. It is
+	// opaque here: carried, handed back, never interpreted.
+	//
+	// The only thing that reads it is the application's own DescribeTrigger,
+	// which turns it into the text the planner sees. That keeps the vocabulary
+	// of one product out of this package while still letting the planner be
+	// told what it is looking at.
+	//
+	// Deliberately not serialised: a Trigger is passed in-process, and typing
+	// this as `any` costs nothing because nothing marshals the struct whole.
+	Cause any `json:"-"`
 }
 
 /*
@@ -201,9 +214,13 @@ type Agent struct {
 	// environment is Config.Environment: the application's description of the
 	// surroundings a run happens in, appended to planning and reflection
 	// prompts. Replaces fleet, whose vocabulary belonged to one product.
-	environment    func() string
-	capabilities   CapabilityRegistry // composable prompt cards
-	intentRegistry *IntentRegistry    // DB-backed intent registry; loaded at startup
+	environment func() string
+	// describeTrigger is Config.DescribeTrigger: how the application words its
+	// own kinds of work for the planner. Nil falls back to the built-in
+	// rendering, so this is additive for every existing caller.
+	describeTrigger func(Trigger) string
+	capabilities    CapabilityRegistry // composable prompt cards
+	intentRegistry  *IntentRegistry    // DB-backed intent registry; loaded at startup
 	// Per-investigation state (active skill cards, preflight result) lives on the
 	// Graph (Graph.ActiveCards / Graph.Preflight), not on the Agent — concurrent
 	// investigations each carry their own Graph, so nothing here is shared or raced.

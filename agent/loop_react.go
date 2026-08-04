@@ -52,14 +52,14 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	startTime := time.Now()
 
 	// Get relevant tools and skills — same set the DAG planner sees
-	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
+	relevant := a.relevantTools(ctx, a.formatTrigger(trigger), trigger.Scope)
 	toolDefs := a.registry.ToolDefsForNames(relevant)
 
 	// Build initial messages — no skill guidance injection (same as native planner).
 	// Skills are available as tool descriptions in the API tools array.
 	messages := BuildMessagesWithHistory(
 		a.systemPrompt(nil),
-		formatTrigger(trigger),
+		a.formatTrigger(trigger),
 		trigger.History,
 	)
 
@@ -332,7 +332,31 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
  * param: t - the Trigger to format.
  * return: formatted trigger string for LLM consumption.
  */
-func formatTrigger(t Trigger) string {
+/*
+ * formatTrigger renders a run's starting point as the text the planner reads.
+ * desc: Asks the application first, through Config.DescribeTrigger. An empty
+ *       answer, or no callback at all, falls through to the built-in rendering
+ *       below — so an application describes only the kinds of work it knows
+ *       about and leaves chat queries and the generic case alone.
+ * param: t - the trigger.
+ * return: the text to put in front of the planner.
+ */
+func (a *Agent) formatTrigger(t Trigger) string {
+	if a != nil && a.describeTrigger != nil {
+		if s := a.describeTrigger(t); s != "" {
+			return s
+		}
+	}
+	return defaultFormatTrigger(t)
+}
+
+/*
+ * defaultFormatTrigger is the built-in rendering, covering the trigger kinds
+ * this package defines for itself.
+ * param: t - the trigger.
+ * return: the rendered text.
+ */
+func defaultFormatTrigger(t Trigger) string {
 	// Chat queries: present the user's question directly, not wrapped in alert format.
 	// The planner should see "what processes are running?" not "Alert ID: chat-173..."
 	if t.Type == "chat_query" {

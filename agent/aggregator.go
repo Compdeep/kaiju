@@ -43,7 +43,7 @@ func (a *Agent) runAggregatorWithIntent(ctx context.Context, trigger Trigger, gr
 func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, client *llm.Client, model string, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
 
 	// Assemble user prompt from gate context plus capability gaps from graph.
-	userPrompt := assembleAggregatorPrompt(trigger, graph, gateCtx)
+	userPrompt := a.assembleAggregatorPrompt(trigger, graph, gateCtx)
 
 	intentStr := intent.String()
 	// Per-investigation cards live on the graph.
@@ -133,7 +133,7 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 // assembleAggregatorPrompt builds the aggregator's user message from a gate
 // response and graph state. Sections: Original Request, Capability Gaps,
 // Failed Steps, Skipped Steps, All Results, Worklog.
-func assembleAggregatorPrompt(trigger Trigger, graph *Graph, gateCtx *ContextResponse) string {
+func (a *Agent) assembleAggregatorPrompt(trigger Trigger, graph *Graph, gateCtx *ContextResponse) string {
 	var sb strings.Builder
 
 	// Original Request — anchor the aggregator to what the user ACTUALLY
@@ -141,7 +141,7 @@ func assembleAggregatorPrompt(trigger Trigger, graph *Graph, gateCtx *ContextRes
 	// dominates the worklog, which can include entries from prior investigations
 	// in the same session. The worklog stays as secondary context (cross-query
 	// continuity matters), but the query is the primary signal.
-	if q := formatTrigger(trigger); q != "" {
+	if q := a.formatTrigger(trigger); q != "" {
 		sb.WriteString("## Original Request\n\n")
 		sb.WriteString(q)
 		sb.WriteString("\n\n")

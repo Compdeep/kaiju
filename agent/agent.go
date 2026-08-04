@@ -113,65 +113,6 @@ func (t Trigger) Intent() gates.Intent {
 }
 
 /*
- * Config holds agent configuration.
- * desc: Contains LLM endpoint settings, rate limits, IGX clearance,
- *       DAG engine parameters, embedding configuration, and paths.
- */
-type Config struct {
-	LLMEndpoint string
-	LLMAPIKey   string
-	LLMModel    string
-	// Providers is the credential catalog for per-request model routing,
-	// keyed by provider name (openai, anthropic, openrouter, selfhosted, …).
-	// Built into one llm.Client per provider at boot; a request selects a
-	// provider+model and kaiju routes to the matching keyed client. Keys live
-	// only here — requests carry a selection, never a key.
-	Providers     map[string]ProviderCreds
-	MaxTurns      int
-	Temperature   float64
-	MaxTokens     int
-	RateLimit     int
-	NodeClearance int    // IGX clearance (0 = default 1)
-	NodeRole      string // "node" or "coordinator"
-	DataDir       string
-	Workspace     string // where files are written (cwd in CLI mode, sandbox in web mode)
-	MetadataDir   string // where blueprints, worklog, sessions live (.kaiju/ in CLI, same as workspace in web)
-	CLIMode       bool   // true = workspace is cwd, no project/ prefix, .kaiju/ for metadata
-	NodeID        string
-
-	// DAG engine (optimistic parallel investigation)
-	DAGEnabled                  bool
-	DAGMode                     string // "reflect", "nReflect", "orchestrator" (default: "orchestrator")
-	MaxNodes                    int
-	MaxPerSkill                 int
-	MaxLLMCalls                 int
-	MaxObserverCalls            int    // separate budget for observer LLM calls (default: 50)
-	BatchSize                   int    // nodes completed before injecting reflection in nReflect mode (default: 5)
-	MaxInvestigations           int    // max investigation cycles (Holmes + fix attempts) before forcing conclude (default: 1)
-	MaxReplans                  int    // max EXPAND replan cycles (successful batch → executive plans next steps) before forcing conclude (default: 3)
-	MaxHolmesIters              int    // max ReAct iterations per Holmes investigation (default: 5)
-	ExecutionMode               string // "interactive" (chat allowed) or "autonomous" (always investigate)
-	DAGWallClock                time.Duration
-	MaxConcurrentInvestigations int // scheduler worker-pool size; 0 => defaultConcurrency (1). Raise once per-principal fairness lands.
-
-	// Embeddings (semantic skill routing)
-	EmbeddingsEnabled  bool
-	EmbedEndpoint      string
-	EmbedAPIKey        string
-	EmbedModel         string
-	EmbedTopK          int
-	EmbedThreshold     float64
-	AlwaysInclude      []string
-	CustomSystemPrompt string
-	BootMDPath         string
-	ClassifierEnabled  bool // enable per-query capability card classification (extra LLM call)
-
-	// Compute node
-	ComputeTimeout time.Duration // max code execution time for compute nodes (default 120s)
-	DisableCoding  bool          // when true, deep compute (architect/codebase building) is refused; shallow analytical compute still works
-}
-
-/*
  * localClearance implements gates.ClearanceSource with a mutex-protected int.
  * desc: Thread-safe wrapper around the node's IGX clearance level.
  */
@@ -253,12 +194,16 @@ type Agent struct {
 	embedStore        *EmbeddingStore // nil if embeddings disabled
 	embedClient       *llm.Client     // nil if embeddings disabled
 
-	soulPrompt     string // from SOUL.md → BOOT.md body → default
-	skillWatcher   *skillmd.Watcher
-	skillGuidance  map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
-	fleet          FleetContextProvider        // nil on standalone nodes
-	capabilities   CapabilityRegistry          // composable prompt cards
-	intentRegistry *IntentRegistry             // DB-backed intent registry; loaded at startup
+	soulPrompt    string // from SOUL.md → BOOT.md body → default
+	skillWatcher  *skillmd.Watcher
+	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
+	fleet         FleetContextProvider        // nil on standalone nodes
+	// environment is Config.Environment: the application's description of the
+	// surroundings a run happens in, appended to planning and reflection
+	// prompts. Replaces fleet, whose vocabulary belonged to one product.
+	environment    func() string
+	capabilities   CapabilityRegistry // composable prompt cards
+	intentRegistry *IntentRegistry    // DB-backed intent registry; loaded at startup
 	// Per-investigation state (active skill cards, preflight result) lives on the
 	// Graph (Graph.ActiveCards / Graph.Preflight), not on the Agent — concurrent
 	// investigations each carry their own Graph, so nothing here is shared or raced.
@@ -374,7 +319,7 @@ func New(cfg Config) (*Agent, error) {
 		log.Printf("[agent] model routing enabled, providers: %v", names)
 	}
 
-	return &Agent{
+	a := &Agent{
 		cfg:               cfg,
 		llm:               client,
 		executor:          executorClient,
@@ -390,7 +335,12 @@ func New(cfg Config) (*Agent, error) {
 		soulPrompt:        soul,
 		capabilities:      caps,
 		intentRegistry:    NewIntentRegistry(),
-	}, nil
+	}
+
+	// Wire the optional capabilities the application supplied, so the agent is
+	// fully formed when New returns rather than after a dozen further calls.
+	a.applyCapabilities(cfg)
+	return a, nil
 }
 
 /*

@@ -40,6 +40,9 @@ func (a *Agent) applyCapabilities(cfg Config) {
 	if cfg.Environment != nil {
 		a.environment = cfg.Environment
 	}
+	if cfg.DescribeTrigger != nil {
+		a.describeTrigger = cfg.DescribeTrigger
+	}
 }
 
 /*

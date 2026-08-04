@@ -97,7 +97,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// 3m40s elapsed") into the reflection node's params so the reflector can
 	// self-regulate. Empty for reflection sites that don't set it.
 	budgetLine, _ := rNode.Params["budget"].(string)
-	userPrompt := assembleReflectorPrompt(graph, gateCtx, trigger, budgetLine)
+	userPrompt := a.assembleReflectorPrompt(graph, gateCtx, trigger, budgetLine)
 	edgeInput := userPrompt // the clean request+evidence each edge reframes against
 
 	// Coverage edge on the conclude path: the reflector often writes the final
@@ -192,11 +192,11 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 // DETECTED, Evidence, Previous Debug Attempts. `budgetLine` is an optional
 // plain-English budget line the scheduler passes so the reflector knows its
 // position (replan round X of Y, elapsed) and self-regulates.
-func assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, trigger Trigger, budgetLine string) string {
+func (a *Agent) assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, trigger Trigger, budgetLine string) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Original Request\n\n")
-	sb.WriteString(formatTrigger(trigger))
+	sb.WriteString(a.formatTrigger(trigger))
 	sb.WriteString("\n\n")
 
 	// ## History — the running record of this investigation: the round counter +
@@ -312,7 +312,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	userBuf.WriteString(humanMsg)
 	userBuf.WriteString("\n\n")
 	userBuf.WriteString(fmt.Sprintf("## Intent Level\n\n%s\n\n", resolvedIntent.String()))
-	userBuf.WriteString(assembleReflectorPrompt(graph, gateCtx, trigger, ""))
+	userBuf.WriteString(a.assembleReflectorPrompt(graph, gateCtx, trigger, ""))
 
 	messages := []llm.Message{
 		{Role: "system", Content: sysPrompt},

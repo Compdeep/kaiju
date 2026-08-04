@@ -100,13 +100,13 @@ func TestAssembleReflectorPrompt_History(t *testing.T) {
 	trig := Trigger{Type: "chat_query", Data: []byte(`{"query":"find the CVEs"}`)}
 
 	// Budget line now leads the merged ## History section.
-	withBudget := assembleReflectorPrompt(nil, nil, trig, "replan round 2 of 3, 3m40s elapsed.")
+	withBudget := (&Agent{}).assembleReflectorPrompt(nil, nil, trig, "replan round 2 of 3, 3m40s elapsed.")
 	if !strings.Contains(withBudget, "## History") || !strings.Contains(withBudget, "replan round 2 of 3") {
 		t.Fatalf("budget line not injected into History:\n%s", withBudget)
 	}
 
 	// Empty budget + nil graph ⇒ no replans, no debug fixes ⇒ no History section.
-	noBudget := assembleReflectorPrompt(nil, nil, trig, "")
+	noBudget := (&Agent{}).assembleReflectorPrompt(nil, nil, trig, "")
 	if strings.Contains(noBudget, "## History") {
 		t.Fatalf("empty history should not emit a History section:\n%s", noBudget)
 	}

@@ -57,7 +57,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		Text.TruncateLog(completedNode.Result, 2000)))
 
 	sb.WriteString(fmt.Sprintf("\n## Intent Level: %s\n", resolvedIntent))
-	sb.WriteString(fmt.Sprintf("\n## Original Request\n\n%s\n", formatTrigger(trigger)))
+	sb.WriteString(fmt.Sprintf("\n## Original Request\n\n%s\n", a.formatTrigger(trigger)))
 
 	sb.WriteString("\n## Pending Steps\n")
 	pending := graph.PendingNodes()

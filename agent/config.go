@@ -117,4 +117,23 @@ type Config struct {
 	// interface would be ceremony. This package attaches no meaning to the
 	// text — how it is worded is the application's business.
 	Environment func() string
+
+	// DescribeTrigger renders a run's starting point as the text the planner
+	// reads. It is how an application explains its own kinds of work — an
+	// alert, a sensor reading, a ticket — without this package knowing what
+	// any of them are.
+	//
+	// Returning "" falls through to the built-in rendering, so an application
+	// handles only what it recognises and leaves the rest alone:
+	//
+	//	cfg.DescribeTrigger = func(t Trigger) string {
+	//		c, ok := t.Cause.(*MyCause)
+	//		if !ok {
+	//			return ""          // not mine — use the default
+	//		}
+	//		return render(c)
+	//	}
+	//
+	// Nil behaves the same as returning "" for everything.
+	DescribeTrigger func(Trigger) string
 }

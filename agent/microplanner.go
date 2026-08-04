@@ -151,7 +151,7 @@ func assembleDebuggerPrompt(mpNode *Node, gateCtx *ContextResponse, trigger Trig
 	var sb strings.Builder
 
 	sb.WriteString("## Original Request\n\n")
-	sb.WriteString(formatTrigger(trigger))
+	sb.WriteString(a.formatTrigger(trigger))
 	sb.WriteString("\n\n")
 
 	if problem, ok := mpNode.Params["problem"].(string); ok && problem != "" {

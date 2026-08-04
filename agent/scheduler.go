@@ -219,7 +219,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		if trigger.ExecutionMode != "" {
 			execMode = trigger.ExecutionMode
 		}
-		query := formatTrigger(trigger)
+		query := a.formatTrigger(trigger)
 		var pf *PreflightResult
 		if execMode == "autonomous" {
 			// Pure agent: no routing (its result would only be discarded). Prepare

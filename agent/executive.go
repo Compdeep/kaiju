@@ -625,7 +625,7 @@ func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
  * return: PlanResult pointer with steps and intent, or error.
  */
 func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *Graph, replanFrame ...string) (*PlanResult, error) {
-	relevant := a.relevantTools(ctx, formatTrigger(trigger), trigger.Scope)
+	relevant := a.relevantTools(ctx, a.formatTrigger(trigger), trigger.Scope)
 	log.Printf("[dag] executive (native) sees %d tools: %v", len(relevant), relevant)
 	if len(a.skillGuidance) > 0 {
 		log.Printf("[dag] executive (native) has %d guidance skills loaded", len(a.skillGuidance))
@@ -647,7 +647,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// One gate call for all runtime context the planner needs: worklog
 	// (system state) plus the tool index (signatures + output schemas so
 	// ${step.N.field} placeholders can be wired against correct result shapes).
-	userQuery := formatTrigger(trigger)
+	userQuery := a.formatTrigger(trigger)
 	if graph != nil && graph.Preflight != nil && graph.Preflight.Context != "" {
 		userQuery += "\n\n## Context\n" + graph.Preflight.Context
 	}

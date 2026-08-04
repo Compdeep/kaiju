@@ -220,25 +220,6 @@ type Agent struct {
 }
 
 /*
- * SetEventStore sets the event store for persisting investigations and actions.
- * desc: Assigns the store used for recording investigation metadata and
- *       tool execution audit trails.
- * param: s - pointer to the event store.
- */
-func (a *Agent) SetEventStore(s EventStore) {
-	a.eventStore = s
-}
-
-/*
- * SetFleet sets the fleet context provider.
- * desc: Call after New() for coordinator nodes to enable fleet situational awareness.
- * param: f - the fleet context provider.
- */
-func (a *Agent) SetFleet(f FleetContextProvider) {
-	a.fleet = f
-}
-
-/*
  * New creates an Agent with the given configuration.
  * desc: Initializes all subsystems: LLM client, tool registry, IGX gate,
  *       memory, prompts, and capability cards. Returns the configured agent.

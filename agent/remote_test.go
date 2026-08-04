@@ -23,7 +23,7 @@ func (s *stubExec) Execute(_ context.Context, req RemoteRequest) (string, error)
 func TestRemoteForOnlyTargetsToolNodes(t *testing.T) {
 	a := &Agent{}
 	a.cfg.NodeID = "self"
-	a.SetRemoteExec(&stubExec{})
+	a.remoteExec = &stubExec{}
 
 	cases := []struct {
 		name string
@@ -57,13 +57,13 @@ func TestTargetValidatorRejectsBeforeDialling(t *testing.T) {
 	ex := &stubExec{resp: "ok"}
 	a := &Agent{}
 	a.cfg.NodeID = "self"
-	a.SetRemoteExec(ex)
-	a.SetTargetValidator(func(target string) error {
+	a.remoteExec = ex
+	a.targetValid = func(target string) error {
 		if len(target) < 10 {
 			return errors.New("too short; copy one from the machine list")
 		}
 		return nil
-	})
+	}
 
 	if err := a.validateTarget("abc"); err == nil {
 		t.Fatal("short target should have been rejected")
@@ -92,7 +92,7 @@ func TestTargetIsPassedThroughUntouched(t *testing.T) {
 	ex := &stubExec{resp: "done"}
 	a := &Agent{}
 	a.cfg.NodeID = "self"
-	a.SetRemoteExec(ex)
+	a.remoteExec = ex
 
 	const odd = "  Mixed/Case:With Spaces_and-punctuation.42  "
 	out, err := a.remoteExec.Execute(context.Background(), RemoteRequest{

@@ -259,7 +259,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	// takes: the run ends, the question is the answer, and the user's next
 	// message continues the thread with the exchange in History.
 	if graph.Preflight != nil {
-		refined, reply := a.refinePreflight(ctx, graph.Preflight, trigger)
+		refined, reply := a.refinePreflight(ctx, graph.Preflight, &trigger)
 		if reply != "" {
 			log.Printf("[dag] preflight refinement replied instead of planning: %s", Text.TruncateLog(reply, 200))
 			a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: reply})

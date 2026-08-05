@@ -21,7 +21,7 @@ import (
 
 func TestRefineNilLeavesPreflightAlone(t *testing.T) {
 	pf := &PreflightResult{Mode: "agent", Intent: gates.Intent(1)}
-	got, reply := (&Agent{}).refinePreflight(context.Background(), pf, Trigger{})
+	got, reply := (&Agent{}).refinePreflight(context.Background(), pf, &Trigger{})
 
 	if got != pf {
 		t.Error("a nil refinement changed the result")
@@ -32,13 +32,13 @@ func TestRefineNilLeavesPreflightAlone(t *testing.T) {
 }
 
 func TestRefineCorrectsTheResult(t *testing.T) {
-	a := &Agent{refine: func(_ context.Context, pf *PreflightResult, _ Trigger) (*PreflightResult, string, error) {
+	a := &Agent{refine: func(_ context.Context, pf *PreflightResult, _ *Trigger) (*PreflightResult, string, error) {
 		out := *pf
 		out.Skills = []string{"fleet"}
 		return &out, "", nil
 	}}
 
-	got, reply := a.refinePreflight(context.Background(), &PreflightResult{Mode: "agent"}, Trigger{})
+	got, reply := a.refinePreflight(context.Background(), &PreflightResult{Mode: "agent"}, &Trigger{})
 	if reply != "" {
 		t.Fatalf("reply = %q, want none", reply)
 	}
@@ -50,11 +50,11 @@ func TestRefineCorrectsTheResult(t *testing.T) {
 // TestRefineCanAskInsteadOfPlanning is the capability being added.
 func TestRefineCanAskInsteadOfPlanning(t *testing.T) {
 	const question = "Which machine do you mean — web-1 or web-2?"
-	a := &Agent{refine: func(context.Context, *PreflightResult, Trigger) (*PreflightResult, string, error) {
+	a := &Agent{refine: func(context.Context, *PreflightResult, *Trigger) (*PreflightResult, string, error) {
 		return nil, question, nil
 	}}
 
-	_, reply := a.refinePreflight(context.Background(), &PreflightResult{Mode: "agent"}, Trigger{})
+	_, reply := a.refinePreflight(context.Background(), &PreflightResult{Mode: "agent"}, &Trigger{})
 	if reply != question {
 		t.Errorf("reply = %q, want the question verbatim", reply)
 	}
@@ -65,11 +65,11 @@ func TestRefineCanAskInsteadOfPlanning(t *testing.T) {
 // preflight's answer, not a precondition for having one.
 func TestRefineFailureDoesNotStopTheRun(t *testing.T) {
 	pf := &PreflightResult{Mode: "agent"}
-	a := &Agent{refine: func(context.Context, *PreflightResult, Trigger) (*PreflightResult, string, error) {
+	a := &Agent{refine: func(context.Context, *PreflightResult, *Trigger) (*PreflightResult, string, error) {
 		return nil, "", errors.New("the fleet store is unreachable")
 	}}
 
-	got, reply := a.refinePreflight(context.Background(), pf, Trigger{})
+	got, reply := a.refinePreflight(context.Background(), pf, &Trigger{})
 	if reply != "" {
 		t.Errorf("a failed refinement produced a reply (%q) — an error is not a question", reply)
 	}
@@ -84,7 +84,7 @@ func TestRefineFailureDoesNotStopTheRun(t *testing.T) {
 func TestRefineRunsBeforeThePlanner(t *testing.T) {
 	body := funcBody(t, readSource(t, "scheduler.go"), "runPlanAndSchedule")
 
-	refineAt := strings.Index(body, "a.refinePreflight(ctx, graph.Preflight, trigger)")
+	refineAt := strings.Index(body, "a.refinePreflight(ctx, graph.Preflight, &trigger)")
 	plannerAt := strings.Index(body, "a.runExecutive(ctx, trigger, graph)")
 
 	if refineAt < 0 {

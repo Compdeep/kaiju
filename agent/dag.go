@@ -187,6 +187,7 @@ type DAGEvent struct {
 	Nodes     []*NodeInfo `json:"nodes,omitempty"`      // for "start"/"done" (full snapshot)
 	AlertID   string      `json:"alert,omitempty"`      // for "start"
 	SessionID string      `json:"session_id,omitempty"` // session this event belongs to (for frontend routing)
+	Targets   []string    `json:"targets,omitempty"`    // for "start": the machines this run concerns, so a frontend can show each as busy
 	Text      string      `json:"text,omitempty"`       // for "verdict" (streaming token chunk)
 }
 

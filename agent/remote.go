@@ -85,3 +85,30 @@ func (a *Agent) remoteFor(n *Node) bool {
 		a.remoteExec != nil &&
 		n.Type == NodeTool
 }
+
+// TargetLister reports which machines a run concerns.
+//
+// A run may touch more machines than the one its Target names — the host it
+// came from, others the same condition was seen on, one a conversation is
+// about. Only the application knows which of those count, so it says.
+//
+// Used for reporting, not routing: nothing is dispatched from this list. Nil
+// falls back to the run's own Target, which is all this package can know.
+type TargetLister func(t Trigger) []string
+
+/*
+ * runTargets returns the machines a run concerns, for reporting.
+ * desc: The application's list when it supplies one, otherwise the trigger's
+ *       own target alone. Never nil-panics and never routes.
+ * param: t - the trigger.
+ * return: the machines, or nil when there are none.
+ */
+func (a *Agent) runTargets(t Trigger) []string {
+	if a != nil && a.targetLister != nil {
+		return a.targetLister(t)
+	}
+	if t.Target != "" {
+		return []string{t.Target}
+	}
+	return nil
+}

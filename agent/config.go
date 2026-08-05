@@ -177,6 +177,10 @@ type Capabilities struct {
 	// accepts any non-empty target.
 	ValidateTarget TargetValidator
 
+	// RunTargets reports which machines a run concerns, for reporting only —
+	// nothing is dispatched from it. Nil falls back to the run's own Target.
+	RunTargets TargetLister
+
 	// Environment describes the surroundings a run happens in — which machines
 	// exist, what is reachable, whatever the application decides the planner
 	// should know. Appended verbatim to planning and reflection prompts. Nil,

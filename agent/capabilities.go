@@ -25,6 +25,9 @@ func (a *Agent) applyCapabilities(cfg Config) {
 	if len(cfg.ChatTools) > 0 {
 		a.chatTools = cfg.ChatTools
 	}
+	if cfg.Admit != nil {
+		a.admitRun = cfg.Admit
+	}
 	if cfg.Clearance != nil {
 		a.clearanceCheck = cfg.Clearance
 	}

@@ -1833,6 +1833,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
  * param: trigger - the investigation trigger.
  */
 func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
+	// Run admission: the application may have reasons of its own not to start
+	// this — a licence, a window, a quota. Asked before any work or model call.
+	if ok, reason := a.admit(trigger); !ok {
+		log.Printf("[dag] run not admitted (type=%s alert=%s): %s", trigger.Type, trigger.AlertID, reason)
+		return
+	}
+
 	log.Printf("[dag] starting investigation: type=%s alert=%s source=%s",
 		trigger.Type, trigger.AlertID, trigger.Source)
 
@@ -1943,6 +1950,12 @@ type SyncResult struct {
 	// that produced it, not round-tripped back from the browser's live buffer
 	// (which a replan's start-event clear or an SSE/return race can empty).
 	Trace json.RawMessage
+
+	// NotAdmitted is true when the application's admission check refused this
+	// run. Verdict then carries its reason and no work was done. A separate
+	// field rather than a sentinel in Verdict, so a caller can tell a refusal
+	// from an answer without reading the text.
+	NotAdmitted bool
 }
 
 /*
@@ -1965,6 +1978,14 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// Route to ReAct loop if mode=react
 	if trigger.DAGMode == "react" {
 		return a.RunReActSync(ctx, trigger)
+	}
+
+	// Run admission, as in runDAG. A refusal comes back as a result carrying the
+	// application's own wording rather than an error: the caller asked for work
+	// the application had already decided not to do, which is not a failure.
+	if ok, reason := a.admit(trigger); !ok {
+		log.Printf("[dag] run not admitted (type=%s alert=%s): %s", trigger.Type, trigger.AlertID, reason)
+		return &SyncResult{Verdict: reason, NotAdmitted: true}, nil
 	}
 
 	log.Printf("[dag] sync investigation: type=%s alert=%s source=%s",

@@ -152,6 +152,11 @@ type ComputeConfig struct {
 // genuinely settable while running stayed a method — see SetToolEnabled,
 // SetClearance and SetDAGEnabled.
 type Capabilities struct {
+	// Admit decides whether a run may start at all — a licence, a maintenance
+	// window, a quota, an operator pause. Nil admits everything. Distinct from
+	// Clearance, which decides what a run may DO once it has started.
+	Admit AdmitFunc
+
 	// Clearance decides how much authority a run has.
 	Clearance ClearanceChecker
 

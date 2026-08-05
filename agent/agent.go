@@ -404,6 +404,32 @@ func (a *Agent) SoulPrompt() string {
  * desc: Non-blocking enqueue. Drops the trigger if the queue is full.
  * param: t - the Trigger to queue.
  */
+// The kernel owns the worker pool, so these are one-line accessors onto it.
+// They are on Agent because a host with a dashboard adjusts concurrency while
+// the process runs, and reaching through Kernel() for that is ceremony.
+
+// InFlight reports whether any run is currently executing.
+func (a *Agent) InFlight() bool { return a.kernel.InFlight() }
+
+// SetConcurrency live-resizes how many runs execute at once.
+func (a *Agent) SetConcurrency(n int) { a.kernel.SetConcurrency(n) }
+
+// Concurrency returns the current limit on concurrent runs.
+func (a *Agent) Concurrency() int { return a.kernel.Concurrency() }
+
+/*
+ * SubmitSync runs a trigger and waits for its result.
+ * desc: Submit queues and returns immediately; this blocks until the run
+ *       finishes, which is what an interactive caller needs — a chat request
+ *       has somebody waiting on the other end.
+ * param: ctx - cancels the wait, not necessarily the run.
+ * param: t - the trigger.
+ * return: the result, or an error.
+ */
+func (a *Agent) SubmitSync(ctx context.Context, t Trigger) (*SyncResult, error) {
+	return a.kernel.SubmitSync(ctx, t)
+}
+
 func (a *Agent) Submit(t Trigger) {
 	select {
 	case a.triggers <- t:

@@ -173,6 +173,7 @@ type ClearanceChecker interface {
  */
 type Agent struct {
 	admitRun     AdmitFunc       // nil = every run is admitted
+	isUnattended UnattendedFunc  // nil = ExecutionMode decides
 	refine       RefineFunc      // nil = preflight's own answer stands
 	remoteExec   RemoteExecutor  // nil = steps naming a machine run locally
 	targetValid  TargetValidator // nil = any non-empty target accepted
@@ -589,7 +590,7 @@ func (a *Agent) relevantTools(ctx context.Context, trigger Trigger) []string {
 	// for. A tool says so itself (tools.InteractiveOnly); this package only
 	// asks whether anyone is there, which the application states by marking the
 	// run autonomous.
-	if trigger.ExecutionMode == "autonomous" {
+	if a.unattended(trigger) {
 		kept := base[:0]
 		for _, name := range base {
 			if tool, ok := a.registry.Get(name); ok && tools.RequiresHuman(tool) {

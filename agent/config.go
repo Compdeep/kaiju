@@ -152,6 +152,11 @@ type ComputeConfig struct {
 // genuinely settable while running stayed a method — see SetToolEnabled,
 // SetClearance and SetDAGEnabled.
 type Capabilities struct {
+	// Unattended reports whether a run has nobody watching it, which decides
+	// whether it may ask a question or use tools that record a person's
+	// judgement. Nil uses Trigger.ExecutionMode.
+	Unattended UnattendedFunc
+
 	// Admit decides whether a run may start at all — a licence, a maintenance
 	// window, a quota, an operator pause. Nil admits everything. Distinct from
 	// Clearance, which decides what a run may DO once it has started.

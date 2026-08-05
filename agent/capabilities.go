@@ -43,6 +43,9 @@ func (a *Agent) applyCapabilities(cfg Config) {
 	if cfg.ValidateTarget != nil {
 		a.targetValid = cfg.ValidateTarget
 	}
+	if cfg.RunTargets != nil {
+		a.targetLister = cfg.RunTargets
+	}
 	if cfg.Environment != nil {
 		a.environment = cfg.Environment
 	}

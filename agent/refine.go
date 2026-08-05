@@ -35,6 +35,10 @@ import "context"
 //     next message continues the thread
 //   - an error — treated as any other preflight failure
 //
+// The trigger is a pointer because refinement may also settle WHERE the run
+// applies — an application that resolves "the database host" to a machine sets
+// Target here, before any step is planned against the wrong one.
+//
 // Returning (nil, "", nil) leaves preflight's own answer standing, so an
 // application that only wants to intervene sometimes returns that most of the
 // time.
@@ -44,7 +48,7 @@ import "context"
 //
 // It runs after preflight and before any planning, so a reply costs one cheap
 // call rather than a plan and a set of tool runs.
-type RefineFunc func(ctx context.Context, pf *PreflightResult, t Trigger) (refined *PreflightResult, reply string, err error)
+type RefineFunc func(ctx context.Context, pf *PreflightResult, t *Trigger) (refined *PreflightResult, reply string, err error)
 
 /*
  * refinePreflight applies the application's refinement, if any.
@@ -52,10 +56,10 @@ type RefineFunc func(ctx context.Context, pf *PreflightResult, t Trigger) (refin
  *       run; the caller returns it as the answer rather than planning.
  * param: ctx - the run's context.
  * param: pf - what preflight concluded.
- * param: t - the trigger.
+ * param: t - the trigger; may be adjusted (Target).
  * return: the result to plan with, and a reply that stops the run when set.
  */
-func (a *Agent) refinePreflight(ctx context.Context, pf *PreflightResult, t Trigger) (*PreflightResult, string) {
+func (a *Agent) refinePreflight(ctx context.Context, pf *PreflightResult, t *Trigger) (*PreflightResult, string) {
 	if a == nil || a.refine == nil || pf == nil {
 		return pf, ""
 	}

@@ -52,7 +52,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	startTime := time.Now()
 
 	// Get relevant tools and skills — same set the DAG planner sees
-	relevant := a.relevantTools(ctx, a.formatTrigger(trigger), trigger.Scope)
+	relevant := a.relevantTools(ctx, trigger)
 	toolDefs := a.registry.ToolDefsForNames(relevant)
 
 	// Build initial messages — no skill guidance injection (same as native planner).

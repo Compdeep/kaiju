@@ -625,7 +625,7 @@ func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
  * return: PlanResult pointer with steps and intent, or error.
  */
 func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *Graph, replanFrame ...string) (*PlanResult, error) {
-	relevant := a.relevantTools(ctx, a.formatTrigger(trigger), trigger.Scope)
+	relevant := a.relevantTools(ctx, trigger)
 	log.Printf("[dag] executive (native) sees %d tools: %v", len(relevant), relevant)
 	if len(a.skillGuidance) > 0 {
 		log.Printf("[dag] executive (native) has %d guidance skills loaded", len(a.skillGuidance))

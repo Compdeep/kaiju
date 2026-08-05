@@ -270,6 +270,36 @@ type Targeted interface {
 	RequiresTarget() bool
 }
 
+// InteractiveOnly is an optional interface a tool implements to say it only
+// makes sense when somebody is there to see the result.
+//
+// Some tools exist to be asked for. Raising a ticket, opening an incident,
+// escalating to a person: each records a human's judgement, and a run with
+// nobody watching has none to record. Offering them to an unattended run
+// invites a model to manufacture the judgement itself.
+//
+// Same shape as Impact and Targeted: the tool author states a property, and
+// compiled code acts on it.
+type InteractiveOnly interface {
+	// RequiresHuman reports whether this tool should be offered only when a
+	// person is present to have asked for it.
+	RequiresHuman() bool
+}
+
+// RequiresHuman reports whether a tool should be withheld from unattended runs.
+//
+// Tools that do not implement InteractiveOnly default to FALSE — usable on any
+// run. That is the opposite default to RequiresTarget, and deliberately so:
+// most work is meant to happen unattended, and defaulting the other way would
+// empty the tool list of every automated run. The failure this guards against
+// is narrow, so the declaration is narrow too.
+func RequiresHuman(t Tool) bool {
+	if v, ok := t.(InteractiveOnly); ok {
+		return v.RequiresHuman()
+	}
+	return false
+}
+
 // RequiresTarget reports whether a tool must be given a target.
 //
 // Tools that do not implement Targeted default to true: most tools act on a

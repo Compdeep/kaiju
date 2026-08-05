@@ -250,6 +250,27 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		}
 	}
 
+	// The application refines what preflight concluded, using facts this package
+	// does not have — or replies with a question when the request cannot be
+	// acted on as written. Before the planner, so a question costs one cheap
+	// call rather than a plan and a set of tool runs.
+	//
+	// A reply travels as a conversational result, the same path a direct answer
+	// takes: the run ends, the question is the answer, and the user's next
+	// message continues the thread with the exchange in History.
+	if graph.Preflight != nil {
+		refined, reply := a.refinePreflight(ctx, graph.Preflight, trigger)
+		if reply != "" {
+			log.Printf("[dag] preflight refinement replied instead of planning: %s", Text.TruncateLog(reply, 200))
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: reply})
+			return nil, &ExecutiveConversationalError{Text: reply}
+		}
+		if refined != graph.Preflight {
+			graph.Preflight = refined
+			graph.ActiveCards = refined.Skills
+		}
+	}
+
 	// ── Phase 1: Planner ──
 	if !budget.TrySpawnNode("", true) {
 		return nil, fmt.Errorf("budget exhausted before planner")

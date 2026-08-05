@@ -28,6 +28,9 @@ func (a *Agent) applyCapabilities(cfg Config) {
 	if cfg.Admit != nil {
 		a.admitRun = cfg.Admit
 	}
+	if cfg.Refine != nil {
+		a.refine = cfg.Refine
+	}
 	if cfg.Clearance != nil {
 		a.clearanceCheck = cfg.Clearance
 	}

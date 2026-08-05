@@ -157,6 +157,11 @@ type Capabilities struct {
 	// Clearance, which decides what a run may DO once it has started.
 	Admit AdmitFunc
 
+	// Refine adjusts what preflight concluded, using facts this package cannot
+	// have — or replies with a question instead of planning, when the request
+	// cannot be acted on as written. Nil leaves preflight's answer standing.
+	Refine RefineFunc
+
 	// Clearance decides how much authority a run has.
 	Clearance ClearanceChecker
 

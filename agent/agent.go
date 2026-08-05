@@ -173,6 +173,7 @@ type ClearanceChecker interface {
  */
 type Agent struct {
 	admitRun    AdmitFunc       // nil = every run is admitted
+	refine      RefineFunc      // nil = preflight's own answer stands
 	remoteExec  RemoteExecutor  // nil = steps naming a machine run locally
 	targetValid TargetValidator // nil = any non-empty target accepted
 

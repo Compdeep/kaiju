@@ -1,6 +1,10 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"log"
+	"time"
+)
 
 // Refining what preflight concluded, and asking when it can't be concluded.
 //
@@ -50,20 +54,44 @@ import "context"
 // call rather than a plan and a set of tool runs.
 type RefineFunc func(ctx context.Context, pf *PreflightResult, t *Trigger) (refined *PreflightResult, reply string, err error)
 
+// refineTimeout bounds a refinement, so a slow or wedged one cannot stall every
+// run. A refinement typically consults something outside this process — an
+// inventory, a directory, a store — and those can hang. Two seconds is long
+// enough for a local lookup and short enough that a stuck one is noticed rather
+// than waited on.
+const refineTimeout = 2 * time.Second
+
 /*
  * refinePreflight applies the application's refinement, if any.
  * desc: Nil, or an unrefined answer, leaves pf as it stands. A reply stops the
  *       run; the caller returns it as the answer rather than planning.
+ *
+ *       Bounded and isolated: the refinement gets a deadline, and a panic in it
+ *       becomes an ordinary failure rather than taking the process down. It is
+ *       host code running inside a run, and a run should survive it being wrong.
  * param: ctx - the run's context.
  * param: pf - what preflight concluded.
  * param: t - the trigger; may be adjusted (Target).
  * return: the result to plan with, and a reply that stops the run when set.
  */
-func (a *Agent) refinePreflight(ctx context.Context, pf *PreflightResult, t *Trigger) (*PreflightResult, string) {
+func (a *Agent) refinePreflight(ctx context.Context, pf *PreflightResult, t *Trigger) (refinedOut *PreflightResult, replyOut string) {
 	if a == nil || a.refine == nil || pf == nil {
 		return pf, ""
 	}
-	refined, reply, err := a.refine(ctx, pf, t)
+
+	// A panic in host code leaves preflight's own answer standing, as any other
+	// failure does. Named returns so the recovered path returns something sane.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[preflight] refinement panicked, keeping preflight's answer: %v", r)
+			refinedOut, replyOut = pf, ""
+		}
+	}()
+
+	rctx, cancel := context.WithTimeout(ctx, refineTimeout)
+	defer cancel()
+
+	refined, reply, err := a.refine(rctx, pf, t)
 	if err != nil {
 		// The application's refinement failed. Its own answer is unavailable, so
 		// preflight's stands — a refinement that cannot run must not stop a run

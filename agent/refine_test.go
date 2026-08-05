@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
 )
@@ -100,5 +101,50 @@ func TestRefineRunsBeforeThePlanner(t *testing.T) {
 	if !strings.Contains(body, "ExecutiveConversationalError{Text: reply}") {
 		t.Error("a reply is not returned as a conversational result, so callers would " +
 			"see a question as a failure")
+	}
+}
+
+// A refinement is host code running inside a run. It gets a deadline and its
+// panics are contained — the plugin engine this replaced did both, and losing
+// them meant a slow store could stall every run and a bad one could take the
+// process down.
+
+func TestRefinePanicKeepsPreflightsAnswer(t *testing.T) {
+	pf := &PreflightResult{Mode: "agent"}
+	a := &Agent{refine: func(context.Context, *PreflightResult, *Trigger) (*PreflightResult, string, error) {
+		panic("the fleet store exploded")
+	}}
+
+	got, reply := a.refinePreflight(context.Background(), pf, &Trigger{})
+	if got != pf {
+		t.Error("a panicking refinement did not leave preflight's answer standing")
+	}
+	if reply != "" {
+		t.Errorf("reply = %q, want none", reply)
+	}
+}
+
+func TestRefineIsGivenADeadline(t *testing.T) {
+	var hadDeadline bool
+	a := &Agent{refine: func(ctx context.Context, pf *PreflightResult, _ *Trigger) (*PreflightResult, string, error) {
+		_, hadDeadline = ctx.Deadline()
+		return nil, "", nil
+	}}
+
+	a.refinePreflight(context.Background(), &PreflightResult{}, &Trigger{})
+	if !hadDeadline {
+		t.Error("the refinement ran with no deadline; a wedged one would stall the run")
+	}
+}
+
+// A refinement that ignores its deadline still cannot hold the run: the context
+// is cancelled and a well-behaved one returns. This pins that the bound exists
+// and is short enough to matter.
+func TestRefineDeadlineIsShort(t *testing.T) {
+	if refineTimeout > 5*time.Second {
+		t.Errorf("refineTimeout = %v, too long to be a bound worth having", refineTimeout)
+	}
+	if refineTimeout <= 0 {
+		t.Error("refineTimeout must be positive or there is no bound at all")
 	}
 }

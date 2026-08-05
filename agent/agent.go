@@ -557,7 +557,8 @@ func (a *Agent) InitEmbeddings(ctx context.Context) error {
  * param: scope - resolved tool access scope (nil for full access).
  * return: ordered slice of tool names visible to the executive.
  */
-func (a *Agent) relevantTools(ctx context.Context, triggerText string, scope *ResolvedScope) []string {
+func (a *Agent) relevantTools(ctx context.Context, trigger Trigger) []string {
+	triggerText, scope := a.formatTrigger(trigger), trigger.Scope
 	var base []string
 	if a.embedStore == nil || a.embedClient == nil {
 		base = a.registry.List()
@@ -582,6 +583,21 @@ func (a *Agent) relevantTools(ctx context.Context, triggerText string, scope *Re
 			}
 		}
 		base = pruned
+	}
+
+	// A run with nobody watching does not get the tools that exist to be asked
+	// for. A tool says so itself (tools.InteractiveOnly); this package only
+	// asks whether anyone is there, which the application states by marking the
+	// run autonomous.
+	if trigger.ExecutionMode == "autonomous" {
+		kept := base[:0]
+		for _, name := range base {
+			if tool, ok := a.registry.Get(name); ok && tools.RequiresHuman(tool) {
+				continue
+			}
+			kept = append(kept, name)
+		}
+		base = kept
 	}
 
 	// Apply scope filtering — tools not in scope are invisible to the executive.

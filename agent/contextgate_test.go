@@ -22,6 +22,10 @@ func newTestContextGate(t *testing.T) (*ContextGate, *Graph, *Trigger, string) {
 	dir := t.TempDir()
 	graph := NewGraph()
 	graph.SessionID = "test-session"
+	// These tests exercise the source loaders, including the coding-only ones
+	// (blueprint, workspace). Mark the graph as a compute run so the gate's
+	// non-compute filter does not strip them here.
+	graph.Preflight = &PreflightResult{ComputeMode: "deep"}
 	trigger := &Trigger{
 		Type:      "chat_query",
 		AlertID:   "test-alert",

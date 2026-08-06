@@ -40,10 +40,10 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 		mode = trigger.DAGMode
 	}
 
-	var nodes, llmCalls, refCount, investigationCount int
+	var nodes, llmCalls, reflections, followUps int
 	if graph != nil {
 		nodes = graph.NodeCount()
-		refCount, investigationCount = graph.ReflectionStats()
+		reflections, followUps = graph.ReflectionStats()
 	}
 	if budget != nil {
 		llmCalls = int(budget.LLMCount())
@@ -68,8 +68,8 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 		DAGMode:         mode,
 		NodesCount:      nodes,
 		LLMCalls:        llmCalls,
-		ReflectionCount: refCount,
-		ReplanCount:     investigationCount, // legacy field name; persisted as `replan_count`.
+		ReflectionCount: reflections,
+		FollowUpCount:   followUps,
 		Verdict:         c.Verdict,
 		Severity:        c.Severity,
 		Category:        c.Category,

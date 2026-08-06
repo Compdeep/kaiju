@@ -172,12 +172,13 @@ type ClearanceChecker interface {
  *       embeddings, skill watching, fleet context, and live DAG streaming.
  */
 type Agent struct {
-	admitRun     AdmitFunc       // nil = every run is admitted
-	isUnattended UnattendedFunc  // nil = ExecutionMode decides
-	refine       RefineFunc      // nil = preflight's own answer stands
-	remoteExec   RemoteExecutor  // nil = steps naming a machine run locally
-	targetValid  TargetValidator // nil = any non-empty target accepted
-	targetLister TargetLister    // nil = a run concerns only its own Target
+	admitRun        AdmitFunc         // nil = every run is admitted
+	isUnattended    UnattendedFunc    // nil = ExecutionMode decides
+	tokenCategoryFn TokenCategoryFunc // nil = the built-in lane split
+	refine          RefineFunc        // nil = preflight's own answer stands
+	remoteExec      RemoteExecutor    // nil = steps naming a machine run locally
+	targetValid     TargetValidator   // nil = any non-empty target accepted
+	targetLister    TargetLister      // nil = a run concerns only its own Target
 
 	cfg      Config
 	llm      *llm.Client // reasoning model (executive, aggregator, classifier)

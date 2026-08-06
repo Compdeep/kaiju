@@ -44,7 +44,7 @@ func (a *Agent) systemPrompt(cards []string) string {
  * return: SyncResult with verdict, or error.
  */
 func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
-	ctx = tagTokens(ctx, trigger.Type)
+	ctx = a.tagTokens(ctx, trigger)
 	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))
 	log.Printf("[react] sync investigation: type=%s alert=%s source=%s",
 		trigger.Type, trigger.AlertID, trigger.Source)

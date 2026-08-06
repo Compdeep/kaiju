@@ -25,8 +25,8 @@ const maxToolResultLen = 4096
  */
 func (a *Agent) systemPrompt(cards []string) string {
 	cardContext := ""
-	if len(cards) > 0 {
-		cardContext = "\n\n" + a.capabilities.ComposeBodies(cards)
+	if g := a.composeGuidance(cards); g != "" {
+		cardContext = "\n\n" + g
 	}
 	rolePrompt := fmt.Sprintf("You are an agent on node %s.\n%s\n\n%s%s%s",
 		a.cfg.NodeID, roleDescription(a.cfg.NodeRole), prompt.React, cardContext, a.fleetSection())

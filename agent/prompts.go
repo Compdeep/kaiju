@@ -70,23 +70,6 @@ func (r CapabilityRegistry) ClassifierManifest() string {
 }
 
 /*
- * ComposeBodies concatenates the bodies of the selected cards.
- * desc: Joins card bodies with double newlines for the selected keys.
- * param: keys - slice of capability card keys to compose.
- * return: concatenated markdown body string.
- */
-func (r CapabilityRegistry) ComposeBodies(keys []string) string {
-	var sb strings.Builder
-	for _, key := range keys {
-		if card, ok := r[key]; ok {
-			sb.WriteString(card.Body)
-			sb.WriteString("\n\n")
-		}
-	}
-	return sb.String()
-}
-
-/*
  * ComposeAggregatorGuidance extracts and concatenates "## Aggregator Guidance"
  * sections from the selected cards.
  * desc: Finds the Aggregator Guidance heading in each selected card's body,

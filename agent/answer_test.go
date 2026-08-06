@@ -197,3 +197,33 @@ func TestNoActiveCardsYieldsNoDoctrine(t *testing.T) {
 		t.Errorf("a nil graph yielded %+v", got)
 	}
 }
+
+// The answer a person reads and the line the run record keeps are not always
+// the same string. An answer may be pages of markdown while the record wants a
+// line that fits a column. Recording the whole answer is not wrong, only
+// unreadable, and nothing fails to report it.
+func TestTheRecordKeepsTheSummaryWhenThereIsOne(t *testing.T) {
+	src, err := os.ReadFile("scheduler.go")
+	if err != nil {
+		t.Fatalf("read scheduler.go: %v", err)
+	}
+	text := string(src)
+	if !regexp.MustCompile(`recordLine = answered\.Summary`).MatchString(text) {
+		t.Error("the run record no longer prefers the answer's summary line")
+	}
+	if !regexp.MustCompile(`Conclusion\{Verdict: recordLine`).MatchString(text) {
+		t.Error("the run record no longer uses the chosen line")
+	}
+}
+
+// With no summary the answer itself is recorded, so an application that does
+// not distinguish the two loses nothing.
+func TestTheRecordFallsBackToTheAnswer(t *testing.T) {
+	src, err := os.ReadFile("scheduler.go")
+	if err != nil {
+		t.Fatalf("read scheduler.go: %v", err)
+	}
+	if !regexp.MustCompile(`if recordLine == "" \{\s*recordLine = verdict`).MatchString(string(src)) {
+		t.Error("an answer with no summary line no longer falls back to the answer itself")
+	}
+}

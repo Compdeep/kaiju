@@ -1984,6 +1984,9 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	var verdict string
 	var actions []ActuatorAction
 	var severity, category string
+	// recordLine is what the run record keeps, which may be shorter than the
+	// answer itself. Empty until an answer says otherwise; the verdict is used.
+	var recordLine string
 	// data is the application's structured result, carried back untouched.
 	var data any
 
@@ -2062,6 +2065,9 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		if ok {
 			verdict, actions = answered.Text, answered.Actions
 			severity, category, data = answered.Severity, answered.Category, answered.Data
+			if recordLine = answered.Summary; recordLine == "" {
+				recordLine = answered.Text
+			}
 		} else {
 			verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggModel, aggCtxResp2)
 			if aggErr != nil {
@@ -2078,7 +2084,10 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		elapsed.Round(time.Millisecond), trigger.AlertID, graph.NodeCount(), budget.LLMCount())
 
 	// Record investigation in event store
-	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: verdict, Severity: severity, Category: category, Status: "completed"})
+	if recordLine == "" {
+		recordLine = verdict
+	}
+	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: recordLine, Severity: severity, Category: category, Status: "completed"})
 
 	// Snapshot the final graph so the caller can persist the trace server-side.
 	// This is the same node list the "done" event broadcasts to the browser.

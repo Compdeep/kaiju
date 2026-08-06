@@ -61,10 +61,8 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	// that came back empty or failed — frame them so absence is explicit and the
 	// aggregator doesn't fabricate to fill the shape of the request. Gated: no
 	// gaps → no edge, no cost.
-	if cov := a.coverageEdge(ctx, graph, userPrompt); cov != "" {
-		userPrompt = cov + "\n\n" + userPrompt
-		rolePrompt = rolePrompt + "\n\n" + prompt.CoverageHook
-	}
+	framed := a.FrameCoverage(ctx, graph, NewStagePrompts(rolePrompt, userPrompt))
+	rolePrompt, userPrompt = framed.Role, framed.User
 
 	messages := BuildMessagesWithHistory(
 		ComposeSystemPrompt(a.soulPrompt, rolePrompt),

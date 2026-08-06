@@ -63,3 +63,31 @@ func (b RawTextBody) Summary() string {
 	}
 	return ""
 }
+
+// RawBacked supplies the two halves of NodeBody that every JSON-backed body
+// answers the same way, so a concrete body only has to write Summary — the one
+// part that genuinely differs between a root-cause report, a fix plan and a
+// compute result.
+//
+// Field walks the raw JSON, which is what a ${node.<id>.<path>} reference has
+// always meant. Evidence returns it unchanged, because the stage that produced
+// it already wrote the text a downstream node should read.
+//
+// Embed it and keep the parsed struct alongside:
+//
+//	type HolmesBody struct {
+//		RawBacked
+//		Out holmesOutput
+//	}
+//	func (b HolmesBody) Summary() string { … }
+//
+// A body that needs different behaviour overrides the method it needs —
+// ReflectionBody does this for Evidence, to fall back to its summary when there
+// is no raw JSON.
+type RawBacked struct{ Raw string }
+
+// Field resolves a dot-path into the raw JSON this body kept.
+func (b RawBacked) Field(path string) (any, bool) { return RawText(b.Raw).Field(path) }
+
+// Evidence returns the raw JSON unchanged.
+func (b RawBacked) Evidence() string { return b.Raw }

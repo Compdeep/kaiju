@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -155,5 +156,48 @@ func TestLaneSelectionFromTrigger(t *testing.T) {
 	want := laneSelection{heavyProvider: "openai", heavyModel: "gpt-4o", lightProvider: "anthropic", lightModel: "claude-haiku"}
 	if got != want {
 		t.Fatalf("trigger→selection mismatch: got %+v want %+v", got, want)
+	}
+}
+
+// The answer lane exists so a pinned answer model writes the final answer while
+// the planner keeps the reasoning model — a thinking model is good at the first
+// job and wrong for the forced tool calls of the second.
+//
+// It was wired into a function nothing called, so a pinned answer model had no
+// effect on any answer. These pin the behaviour and the call site.
+func TestAnswerLanePrefersThePinnedAnswerModel(t *testing.T) {
+	heavy := llm.NewClient("http://heavy", "k", "heavy-model")
+	answer := llm.NewClient("http://answer", "k", "answer-model")
+	a := &Agent{llm: heavy, answerModel: "answer-model", answerProvider: "openai",
+		providerClients: map[string]*llm.Client{"openai": answer}}
+
+	client, model := a.answerLane(context.Background())
+
+	if client != answer || model != "answer-model" {
+		t.Errorf("answerLane chose %v/%q, want the pinned answer model", client, model)
+	}
+}
+
+// With nothing pinned it falls through to the heavy lane, so an installation
+// that never set an answer model sees no change.
+func TestAnswerLaneFallsBackToTheHeavyLane(t *testing.T) {
+	heavy := llm.NewClient("http://heavy", "k", "heavy-model")
+	a := &Agent{llm: heavy}
+
+	client, _ := a.answerLane(context.Background())
+
+	if client != heavy {
+		t.Error("with no answer model pinned, the answer lane must be the heavy lane")
+	}
+}
+
+// The stage that writes the final answer must ask the answer lane for its model.
+// Nothing fails when it asks a different lane — the answer is simply written by
+// the model the user did not choose.
+func TestRunDAGSyncUsesTheAnswerLane(t *testing.T) {
+	body := funcBody(t, readSource(t, "scheduler.go"), "RunDAGSync")
+
+	if !strings.Contains(body, "a.answerLane(dagCtx)") {
+		t.Error("RunDAGSync no longer asks the answer lane; a pinned answer model has no effect")
 	}
 }

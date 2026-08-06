@@ -69,7 +69,7 @@ func (p StagePrompts) withEdge(block, hook string) StagePrompts {
  * the stage is told which parts of the request the evidence backs and which it
  * does not, so it reports the gap instead of inventing a detail to fill it.
  * desc: Exported so a function outside this package can apply it.
- *       runAggregatorWithIntent and fireReflection both call it, but an
+ *       runAggregatorWithClient and fireReflection both call it, but an
  *       application that supplies its own final answer through
  *       Capabilities.Answer writes that answer in its own function, and needs
  *       the same framing — an answer written without it is the one most likely

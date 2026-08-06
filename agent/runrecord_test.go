@@ -60,7 +60,7 @@ func TestRecordRunIsSilentWithNoStore(t *testing.T) {
 // recording leaves no trace, and nothing else fails to say so.
 func TestEveryRunExitRecords(t *testing.T) {
 	src := readSource(t, "scheduler.go")
-	for _, fn := range []string{"runDAG", "RunDAGSync"} {
+	for _, fn := range []string{"RunDAGSync"} {
 		body := funcBody(t, src, fn)
 		// count exits that end the run against recordRun calls
 		if strings.Count(body, "a.recordRun(") < 4 {

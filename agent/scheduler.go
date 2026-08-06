@@ -1846,115 +1846,6 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 }
 
 /*
- * runDAG executes the optimistic DAG investigation pipeline.
- * desc: Runs the full pipeline: setup, plan+schedule, aggregate, execute
- *       actuator actions, and record the investigation in the event store.
- *       Called for async (fire-and-forget) investigations.
- * param: ctx - context for the investigation.
- * param: trigger - the investigation trigger.
- */
-func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
-	// Run admission: the application may have reasons of its own not to start
-	// this — a licence, a window, a quota. Asked before any work or model call.
-	if ok, reason := a.admit(trigger); !ok {
-		log.Printf("[dag] run not admitted (type=%s alert=%s): %s", trigger.Type, trigger.AlertID, reason)
-		return
-	}
-
-	log.Printf("[dag] starting investigation: type=%s alert=%s source=%s",
-		trigger.Type, trigger.AlertID, trigger.Source)
-
-	startTime := time.Now()
-	graph, budget, cleanup := a.setupDAGPipeline(trigger)
-	defer cleanup()
-
-	// No hard wall clock — the kernel's heartbeat module manages soft timeouts.
-	dagCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	pr, err := a.runPlanAndSchedule(dagCtx, trigger, graph, budget)
-	if err != nil {
-		log.Printf("[dag] %v", err)
-		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), Conclusion{Verdict: "plan_or_schedule_failed", Status: "failed"})
-		return
-	}
-	resolvedIntent := pr.Intent
-
-	// ── Phase 3: Aggregator ──
-	var verdict string
-	var actions []ActuatorAction
-	var severity, category string
-	if dagCtx.Err() != nil {
-		log.Printf("[dag] skipping aggregator — context cancelled")
-		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "cancelled_before_aggregator", Status: "timeout"})
-		return
-	}
-	if !budget.TrySpawnNode("", true) {
-		log.Printf("[dag] budget exhausted before aggregator")
-		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "budget_exhausted_before_aggregator", Status: "failed"})
-		return
-	}
-	var aggErr error
-	aggCtxResp, actxErr := graph.Context.Get(dagCtx, ContextRequest{
-		ReturnSources: Sources(
-			NodeReturns("all"),
-			Worklog(30, "all"),
-		),
-		MaxBudget: 12000,
-	})
-	if actxErr != nil {
-		log.Printf("[dag] aggregator context build failed: %v", actxErr)
-		aggCtxResp = &ContextResponse{Sources: map[string]string{}}
-	}
-	// The application may write this run's answer itself — see answer.go. It
-	// runs on this path too, so an application does not get its own answer from
-	// one entry point and the built-in aggregator's from the other. Nothing here
-	// returns to a caller, so an AnswerResult's Data has nowhere to go and is
-	// dropped; RunDAGSync hands it back.
-	answered, ok, aggErr := a.writeAnswer(dagCtx, AnswerRequest{
-		Trigger: trigger, Graph: graph, Evidence: aggCtxResp,
-		Intent: resolvedIntent, History: trigger.History,
-	})
-	if aggErr != nil {
-		log.Printf("[dag] supplied answer failed: %v", aggErr)
-		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "aggregator_failed", Status: "failed"})
-		return
-	}
-	if ok {
-		verdict, actions = answered.Text, answered.Actions
-		severity, category = answered.Severity, answered.Category
-	} else {
-		verdict, actions, aggErr = a.runAggregatorWithIntent(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggCtxResp)
-		if aggErr != nil {
-			log.Printf("[dag] aggregator failed: %v", aggErr)
-			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "aggregator_failed", Status: "failed"})
-			return
-		}
-	}
-
-	log.Printf("[dag] verdict: %s", Text.TruncateLog(verdict, 500))
-
-	// ── Phase 4: Execute actuator actions ──
-	for _, action := range actions {
-		if dagCtx.Err() != nil {
-			break
-		}
-		result, _, execErr := a.executeToolNode(dagCtx, nil, nil, nil, action.Tool, action.Params, trigger.AlertID, resolvedIntent, trigger.Scope)
-		if execErr != nil {
-			log.Printf("[dag] actuator %s failed: %v", action.Tool, execErr)
-		} else {
-			log.Printf("[dag] actuator %s: %s", action.Tool, Text.TruncateLog(result, 500))
-		}
-	}
-
-	elapsed := time.Since(startTime)
-	log.Printf("[dag] investigation complete in %s (alert=%s, nodes=%d, llm=%d)",
-		elapsed.Round(time.Millisecond), trigger.AlertID, graph.NodeCount(), budget.LLMCount())
-
-	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: verdict, Severity: severity, Category: category, Status: "completed"})
-}
-
-/*
  * SyncResult contains the full output from a synchronous DAG investigation.
  * desc: Wraps the synthesized verdict, recommended follow-up actions, and
  *       any capability gaps declared by the planner.
@@ -2008,9 +1899,10 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		return a.RunReActSync(ctx, trigger)
 	}
 
-	// Run admission, as in runDAG. A refusal comes back as a result carrying the
-	// application's own wording rather than an error: the caller asked for work
-	// the application had already decided not to do, which is not a failure.
+	// Run admission before any work or model call. A refusal comes back as a
+	// result carrying the application's own wording rather than an error: the
+	// caller asked for work the application had already decided not to do,
+	// which is not a failure.
 	if ok, reason := a.admit(trigger); !ok {
 		log.Printf("[dag] run not admitted (type=%s alert=%s): %s", trigger.Type, trigger.AlertID, reason)
 		return &SyncResult{Verdict: reason, NotAdmitted: true}, nil
@@ -2127,8 +2019,13 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		// Select LLM lane based on agg_mode, then route to the host-selected
 		// provider within that lane (model_route.go). aggModel is the routed
 		// model id ("" ⇒ the lane client's own default).
-		aggClient, aggModel := a.heavyLane(dagCtx) // default: reasoning model
-		aggLabel := "reasoning"
+		//
+		// The answer lane, not the heavy lane: this call writes the final answer,
+		// which is what a pinned answer model is for. answerLane falls back to
+		// the heavy lane when none is pinned, so an unset answer model behaves
+		// exactly as before.
+		aggClient, aggModel := a.answerLane(dagCtx)
+		aggLabel := "answer"
 		if aggMode == 1 {
 			aggClient, aggModel = a.lightLane(dagCtx) // executor model only when explicitly requested
 			aggLabel = "executor"

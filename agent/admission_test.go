@@ -63,22 +63,22 @@ func TestAdmitSuppliesAReasonWhenTheApplicationDoesNot(t *testing.T) {
 	}
 }
 
-// TestAdmitReachesEveryEntryPoint is the important one. Both runDAG and
-// RunDAGSync must ask before doing anything, and RunDAGSync must report the
-// refusal as a result rather than an error — the caller asked for work the
-// application had already decided not to do, which is not a failure.
+// TestAdmitReachesEveryEntryPoint is the important one. RunDAGSync must ask
+// before doing anything, and must report the refusal as a result rather than an
+// error — the caller asked for work the application had already decided not to
+// do, which is not a failure.
+//
+// It once checked runDAG too. That function had no callers and was deleted, so
+// this scanned a dead path and passed on it.
 func TestAdmitReachesEveryEntryPoint(t *testing.T) {
 	src := readSource(t, "scheduler.go")
 
-	for _, fn := range []string{"runDAG", "RunDAGSync"} {
-		body := funcBody(t, src, fn)
-		if !strings.Contains(body, "a.admit(trigger)") {
-			t.Errorf("%s does not consult run admission — a check on one path and not "+
-				"another looks enforced and is not", fn)
-		}
+	sync := funcBody(t, src, "RunDAGSync")
+	if !strings.Contains(sync, "a.admit(trigger)") {
+		t.Error("RunDAGSync does not consult run admission — work starts that the " +
+			"application had already refused")
 	}
 
-	sync := funcBody(t, src, "RunDAGSync")
 	if !strings.Contains(sync, "NotAdmitted: true") {
 		t.Error("RunDAGSync does not mark a refusal as such; the caller cannot tell a " +
 			"refusal from an answer without reading the text")
@@ -98,7 +98,7 @@ func readSource(t *testing.T, name string) string {
 /*
  * funcBody returns the body of a named method on *Agent.
  * desc: Scoping an assertion to one function is stricter than searching the
- *       whole file: "runDAG consults admission" is the claim, and a mention
+ *       whole file: "RunDAGSync consults admission" is the claim, and a mention
  *       anywhere else in a two-thousand-line file would satisfy a plain search
  *       while the function itself had stopped asking.
  * param: src - the file contents.

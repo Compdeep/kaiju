@@ -97,3 +97,33 @@ func TestRecordRunCarriesTheApplicationsLabels(t *testing.T) {
 		t.Errorf("Verdict = %q", got.Verdict)
 	}
 }
+
+// NodeID is the machine that ran the work. An application usually wants the
+// machine the work was ABOUT — the host an event came from, or the one a command
+// was aimed at — and the rule for choosing between them is its own. It can only
+// apply that rule if the trigger's routing reaches the record.
+//
+// Enbarr filters its investigation list by host. Without these, every row on a
+// queen would carry the queen's id and filtering by any pawn would return
+// nothing.
+func TestRunRecordCarriesTheTriggersRouting(t *testing.T) {
+	st := &recordingStore{}
+	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "queen-1"}}}
+
+	a.recordRun(Trigger{Type: "alert", AlertID: "a-3", Source: "pawn-7", Target: "pawn-9"},
+		time.Now(), nil, nil, gates.Intent(1), Conclusion{Verdict: "v", Status: "completed"})
+
+	if len(st.runs) != 1 {
+		t.Fatalf("wrote %d runs, want 1", len(st.runs))
+	}
+	got := st.runs[0]
+	if got.Source != "pawn-7" {
+		t.Errorf("Source = %q, want the host the trigger came from", got.Source)
+	}
+	if got.Target != "pawn-9" {
+		t.Errorf("Target = %q, want the host it was aimed at", got.Target)
+	}
+	if got.NodeID != "queen-1" {
+		t.Errorf("NodeID = %q; it must stay the machine that ran the work", got.NodeID)
+	}
+}

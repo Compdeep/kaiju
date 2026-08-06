@@ -85,6 +85,14 @@ type AnswerResult struct {
 	// render a readable form here.
 	Text string
 
+	// Summary is the one line the run record keeps. Empty means use Text.
+	//
+	// Separate because the two are not always the same string: an answer a
+	// person reads may be pages of markdown, while the record wants a line
+	// that fits a column and a list. Recording the whole answer is not wrong,
+	// only unreadable, and it is the kind of change nothing fails to report.
+	Summary string
+
 	// Actions are follow-up actions to hand back to the caller. The engine does
 	// not execute them, exactly as with the built-in aggregator's.
 	Actions []ActuatorAction

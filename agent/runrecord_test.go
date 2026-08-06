@@ -22,7 +22,7 @@ func TestRecordRunWritesTheOutcome(t *testing.T) {
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
 
 	a.recordRun(Trigger{Type: "alert", AlertID: "a-1"}, time.Now().Add(-time.Second),
-		nil, nil, gates.Intent(1), "budget_exhausted_before_aggregator", "failed")
+		nil, nil, gates.Intent(1), Conclusion{Verdict: "budget_exhausted_before_aggregator", Status: "failed"})
 
 	if len(st.runs) != 1 {
 		t.Fatalf("wrote %d runs, want 1", len(st.runs))
@@ -44,16 +44,16 @@ func TestRecordRunWritesTheOutcome(t *testing.T) {
 func TestRecordRunToleratesNoGraphOrBudget(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st}
-	a.recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), "plan_or_schedule_failed", "failed")
+	a.recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), Conclusion{Verdict: "plan_or_schedule_failed", Status: "failed"})
 	if len(st.runs) != 1 {
 		t.Fatal("an early failure wrote no record")
 	}
 }
 
 func TestRecordRunIsSilentWithNoStore(t *testing.T) {
-	(&Agent{}).recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), "x", "failed")
+	(&Agent{}).recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), Conclusion{Verdict: "x", Status: "failed"})
 	var nilAgent *Agent
-	nilAgent.recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), "x", "failed")
+	nilAgent.recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), Conclusion{Verdict: "x", Status: "failed"})
 }
 
 // TestEveryRunExitRecords pins the CALL SITES. A run that returns without
@@ -70,5 +70,30 @@ func TestEveryRunExitRecords(t *testing.T) {
 		if strings.Contains(body, "InsertRun(Run{") {
 			t.Errorf("%s still writes a run inline; it should go through recordRun so every exit is consistent", fn)
 		}
+	}
+}
+
+// An application that writes its own answer labels it — a severity, a category —
+// and those labels are the reason its run record is worth reading. They reach
+// the store untouched, or the record says only that something happened.
+func TestRecordRunCarriesTheApplicationsLabels(t *testing.T) {
+	st := &recordingStore{}
+	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
+
+	a.recordRun(Trigger{Type: "alert", AlertID: "a-2"}, time.Now(), nil, nil, gates.Intent(1),
+		Conclusion{Verdict: "credential theft on web-1", Severity: "high", Category: "intrusion", Status: "completed"})
+
+	if len(st.runs) != 1 {
+		t.Fatalf("wrote %d runs, want 1", len(st.runs))
+	}
+	got := st.runs[0]
+	if got.Severity != "high" {
+		t.Errorf("Severity = %q, want the label the answer carried", got.Severity)
+	}
+	if got.Category != "intrusion" {
+		t.Errorf("Category = %q, want the label the answer carried", got.Category)
+	}
+	if got.Verdict != "credential theft on web-1" {
+		t.Errorf("Verdict = %q", got.Verdict)
 	}
 }

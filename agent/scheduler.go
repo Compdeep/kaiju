@@ -1875,7 +1875,7 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 	pr, err := a.runPlanAndSchedule(dagCtx, trigger, graph, budget)
 	if err != nil {
 		log.Printf("[dag] %v", err)
-		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), "plan_or_schedule_failed", "failed")
+		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), Conclusion{Verdict: "plan_or_schedule_failed", Status: "failed"})
 		return
 	}
 	resolvedIntent := pr.Intent
@@ -1883,14 +1883,15 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 	// ── Phase 3: Aggregator ──
 	var verdict string
 	var actions []ActuatorAction
+	var severity, category string
 	if dagCtx.Err() != nil {
 		log.Printf("[dag] skipping aggregator — context cancelled")
-		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "cancelled_before_aggregator", "timeout")
+		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "cancelled_before_aggregator", Status: "timeout"})
 		return
 	}
 	if !budget.TrySpawnNode("", true) {
 		log.Printf("[dag] budget exhausted before aggregator")
-		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "budget_exhausted_before_aggregator", "failed")
+		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "budget_exhausted_before_aggregator", Status: "failed"})
 		return
 	}
 	var aggErr error
@@ -1905,11 +1906,30 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 		log.Printf("[dag] aggregator context build failed: %v", actxErr)
 		aggCtxResp = &ContextResponse{Sources: map[string]string{}}
 	}
-	verdict, actions, aggErr = a.runAggregatorWithIntent(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggCtxResp)
+	// The application may write this run's answer itself — see answer.go. It
+	// runs on this path too, so an application does not get its own answer from
+	// one entry point and the built-in aggregator's from the other. Nothing here
+	// returns to a caller, so an AnswerResult's Data has nowhere to go and is
+	// dropped; RunDAGSync hands it back.
+	answered, ok, aggErr := a.writeAnswer(dagCtx, AnswerRequest{
+		Trigger: trigger, Graph: graph, Evidence: aggCtxResp,
+		Intent: resolvedIntent, History: trigger.History,
+	})
 	if aggErr != nil {
-		log.Printf("[dag] aggregator failed: %v", aggErr)
-		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "aggregator_failed", "failed")
+		log.Printf("[dag] supplied answer failed: %v", aggErr)
+		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "aggregator_failed", Status: "failed"})
 		return
+	}
+	if ok {
+		verdict, actions = answered.Text, answered.Actions
+		severity, category = answered.Severity, answered.Category
+	} else {
+		verdict, actions, aggErr = a.runAggregatorWithIntent(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggCtxResp)
+		if aggErr != nil {
+			log.Printf("[dag] aggregator failed: %v", aggErr)
+			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "aggregator_failed", Status: "failed"})
+			return
+		}
 	}
 
 	log.Printf("[dag] verdict: %s", Text.TruncateLog(verdict, 500))
@@ -1931,7 +1951,7 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 	log.Printf("[dag] investigation complete in %s (alert=%s, nodes=%d, llm=%d)",
 		elapsed.Round(time.Millisecond), trigger.AlertID, graph.NodeCount(), budget.LLMCount())
 
-	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, verdict, "completed")
+	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: verdict, Severity: severity, Category: category, Status: "completed"})
 }
 
 /*
@@ -1940,11 +1960,18 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
  *       any capability gaps declared by the planner.
  */
 type SyncResult struct {
-	Verdict  string           // synthesized response text
-	Actions  []ActuatorAction // recommended follow-up actions (caller decides whether to execute)
-	Gaps     []string         // capability gaps declared by the planner
-	Nodes    int              // total DAG nodes executed
-	LLMCalls int              // total LLM round-trips
+	Verdict string           // synthesized response text
+	Actions []ActuatorAction // recommended follow-up actions (caller decides whether to execute)
+
+	// Data is the structured result from an application-supplied Answer, and
+	// nil for a run the built-in aggregator answered. Opaque: the engine carries
+	// it from AnswerResult.Data to here and never reads it. The caller casts it
+	// back to its own type.
+	Data any
+
+	Gaps     []string // capability gaps declared by the planner
+	Nodes    int      // total DAG nodes executed
+	LLMCalls int      // total LLM round-trips
 	// Trace is the final DAG node snapshot (the same JSON shape the browser
 	// streams and renders), serialized so the caller can persist it against the
 	// assistant message. Server-authoritative: the trace is saved by the process
@@ -2054,7 +2081,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 			}
 			return &SyncResult{Verdict: "I'm not sure how to help with that. Could you be more specific?"}, nil
 		}
-		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), "plan_or_schedule_failed", "failed")
+		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), Conclusion{Verdict: "plan_or_schedule_failed", Status: "failed"})
 		return nil, err
 	}
 	resolvedIntent := pr.Intent
@@ -2063,6 +2090,9 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	aggMode := trigger.AggMode
 	var verdict string
 	var actions []ActuatorAction
+	var severity, category string
+	// data is the application's structured result, carried back untouched.
+	var data any
 
 	// Auto mode: decide who writes the final answer. A sizable/complex query
 	// (preflight said so, or the run structurally fanned out) MUST end with the
@@ -2088,7 +2118,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: verdict})
 	} else {
 		if dagCtx.Err() != nil {
-			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "wall_clock_expired", "timeout")
+			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "wall_clock_expired", Status: "timeout"})
 			return nil, fmt.Errorf("wall clock expired before aggregator")
 		}
 		// Aggregator is exempt from budget — it must always run to give the user a response
@@ -2119,11 +2149,28 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 			log.Printf("[dag] aggregator2 context build failed: %v", actxErr2)
 			aggCtxResp2 = &ContextResponse{Sources: map[string]string{}}
 		}
-		verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggModel, aggCtxResp2)
-		if aggErr != nil {
-			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
-			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "aggregator_failed", "failed")
-			return nil, fmt.Errorf("aggregator failed: %w", aggErr)
+		// The application's own answer, when it supplies one — see answer.go.
+		// The lane chosen above applies to the built-in aggregator; an
+		// application that writes its own answer chooses its own model.
+		answered, ok, ansErr := a.writeAnswer(dagCtx, AnswerRequest{
+			Trigger: trigger, Graph: graph, Evidence: aggCtxResp2,
+			Intent: resolvedIntent, History: trigger.History,
+		})
+		if ansErr != nil {
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: ansErr.Error()}})
+			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "aggregator_failed", Status: "failed"})
+			return nil, fmt.Errorf("supplied answer failed: %w", ansErr)
+		}
+		if ok {
+			verdict, actions = answered.Text, answered.Actions
+			severity, category, data = answered.Severity, answered.Category, answered.Data
+		} else {
+			verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggModel, aggCtxResp2)
+			if aggErr != nil {
+				a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
+				a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "aggregator_failed", Status: "failed"})
+				return nil, fmt.Errorf("aggregator failed: %w", aggErr)
+			}
 		}
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize"}})
 	}
@@ -2133,7 +2180,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		elapsed.Round(time.Millisecond), trigger.AlertID, graph.NodeCount(), budget.LLMCount())
 
 	// Record investigation in event store
-	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, verdict, "completed")
+	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: verdict, Severity: severity, Category: category, Status: "completed"})
 
 	// Snapshot the final graph so the caller can persist the trace server-side.
 	// This is the same node list the "done" event broadcasts to the browser.
@@ -2142,6 +2189,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	return &SyncResult{
 		Verdict:  verdict,
 		Actions:  actions,
+		Data:     data,
 		Gaps:     graph.Gaps,
 		Nodes:    graph.NodeCount(),
 		LLMCalls: int(budget.LLMCount()),

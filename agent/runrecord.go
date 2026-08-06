@@ -53,6 +53,8 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 		NodeID:          a.cfg.NodeID,
 		TriggerType:     trigger.Type,
 		CorrelationID:   trigger.AlertID,
+		Source:          trigger.Source,
+		Target:          trigger.Target,
 		StartedAt:       startTime.Unix(),
 		CompletedAt:     time.Now().Unix(),
 		DurationMs:      time.Since(startTime).Milliseconds(),

@@ -20,8 +20,10 @@ type EventStore interface {
 // Run is one completed execution: what triggered it, how it was planned, what
 // it cost, and what it concluded.
 type Run struct {
-	ID     string
-	NodeID string // the machine that ran it
+	ID string
+	// NodeID is the machine that ran it, not the machine it was about — see
+	// Source and Target below.
+	NodeID string
 
 	// TriggerType is the application's own word for what started this —
 	// a chat message, an event, a schedule. Opaque to the engine.
@@ -29,6 +31,19 @@ type Run struct {
 	// CorrelationID ties this run back to whatever caused it, so an
 	// application can group runs by their originating event.
 	CorrelationID string
+
+	// Source and Target are the trigger's routing, carried through exactly as
+	// it set them and never interpreted here.
+	//
+	// They are here because NodeID answers a different question. NodeID is the
+	// machine that did the work, which is the only machine this package can
+	// name truthfully. An application often wants the machine the work was
+	// ABOUT — the host an event came from, or the one a command was aimed at —
+	// and the rule for choosing between them is the application's. Without
+	// these it cannot apply that rule, because nothing else on this record says
+	// where the trigger came from.
+	Source string
+	Target string
 
 	StartedAt   int64
 	CompletedAt int64

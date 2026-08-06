@@ -376,6 +376,20 @@ func (g *ContextGate) Get(ctx context.Context, req ContextRequest) (*ContextResp
 		req.MaxBudget = defaultMaxBudget
 	}
 
+	// Coding context on a run that writes no code is cost without benefit: the
+	// blueprint and the workspace listings are assembled, truncated against the
+	// budget, and then crowd out evidence that was actually gathered. Dropped
+	// here rather than in every caller's recipe, so a recipe that still lists
+	// them is simply right about what it wants and wrong about this run.
+	if g.graph != nil && !g.graph.HasComputeWork() {
+		rs, d1 := dropCodingSources(req.ReturnSources)
+		qs, d2 := dropCodingSources(req.QuerySources)
+		req.ReturnSources, req.QuerySources = rs, qs
+		if len(d1)+len(d2) > 0 {
+			log.Printf("[ctx] gate: dropped coding source(s) on a non-compute run: %v", append(d1, d2...))
+		}
+	}
+
 	start := time.Now()
 	resp := &ContextResponse{Sources: make(map[string]string)}
 
@@ -1323,4 +1337,34 @@ func compactOutputShape(schema json.RawMessage) string {
 		sb.WriteString(s.Description)
 	}
 	return sb.String()
+}
+
+// codingOnlySources name the context sources that only make sense for a run
+// that writes code — the project blueprint and the workspace introspection.
+var codingOnlySources = map[string]bool{
+	SourceBlueprint:          true,
+	SourceWorkspaceTree:      true,
+	SourceWorkspaceDeep:      true,
+	SourceFunctionMap:        true,
+	SourceExistingBlueprints: true,
+}
+
+/*
+ * dropCodingSources removes the coding-only sources from a recipe.
+ * desc: Returns the remaining specs and the names dropped, so the caller can
+ *       say what it left out rather than silently assembling less than asked.
+ * param: specs - the requested sources.
+ * return: the specs to assemble, and the names removed.
+ */
+func dropCodingSources(specs []SourceSpec) ([]SourceSpec, []string) {
+	out := make([]SourceSpec, 0, len(specs))
+	var dropped []string
+	for _, s := range specs {
+		if codingOnlySources[s.Name] {
+			dropped = append(dropped, s.Name)
+			continue
+		}
+		out = append(out, s)
+	}
+	return out, dropped
 }

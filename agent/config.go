@@ -157,6 +157,10 @@ type Capabilities struct {
 	// judgement. Nil uses Trigger.ExecutionMode.
 	Unattended UnattendedFunc
 
+	// TokenCategory names the usage bucket a run's spend is counted against.
+	// Nil counts interactive callers as chat and everything else as background.
+	TokenCategory TokenCategoryFunc
+
 	// Admit decides whether a run may start at all — a licence, a maintenance
 	// window, a quota, an operator pause. Nil admits everything. Distinct from
 	// Clearance, which decides what a run may DO once it has started.

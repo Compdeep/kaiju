@@ -1972,7 +1972,7 @@ type SyncResult struct {
 func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
 	// Attribute every LLM call in this run to a token-usage category. Principal
 	// (if any) is already on ctx from the API boundary and is preserved.
-	ctx = tagTokens(ctx, trigger.Type)
+	ctx = a.tagTokens(ctx, trigger)
 	// Carry the per-request model selection so every heavy/light lane call in
 	// this run routes to the host-chosen provider (see model_route.go).
 	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))

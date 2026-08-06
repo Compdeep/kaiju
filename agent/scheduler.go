@@ -1875,6 +1875,7 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 	pr, err := a.runPlanAndSchedule(dagCtx, trigger, graph, budget)
 	if err != nil {
 		log.Printf("[dag] %v", err)
+		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), "plan_or_schedule_failed", "failed")
 		return
 	}
 	resolvedIntent := pr.Intent
@@ -1884,10 +1885,12 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 	var actions []ActuatorAction
 	if dagCtx.Err() != nil {
 		log.Printf("[dag] skipping aggregator — context cancelled")
+		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "cancelled_before_aggregator", "timeout")
 		return
 	}
 	if !budget.TrySpawnNode("", true) {
 		log.Printf("[dag] budget exhausted before aggregator")
+		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "budget_exhausted_before_aggregator", "failed")
 		return
 	}
 	var aggErr error
@@ -1905,6 +1908,7 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 	verdict, actions, aggErr = a.runAggregatorWithIntent(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggCtxResp)
 	if aggErr != nil {
 		log.Printf("[dag] aggregator failed: %v", aggErr)
+		a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "aggregator_failed", "failed")
 		return
 	}
 
@@ -1927,31 +1931,7 @@ func (a *Agent) runDAG(ctx context.Context, trigger Trigger) {
 	log.Printf("[dag] investigation complete in %s (alert=%s, nodes=%d, llm=%d)",
 		elapsed.Round(time.Millisecond), trigger.AlertID, graph.NodeCount(), budget.LLMCount())
 
-	// Record investigation in event store
-	if a.eventStore != nil {
-		mode := a.cfg.DAGMode
-		if trigger.DAGMode != "" {
-			mode = trigger.DAGMode
-		}
-		refCount, investigationCount := graph.ReflectionStats()
-		a.eventStore.InsertRun(Run{
-			ID:              trigger.AlertID,
-			NodeID:          a.cfg.NodeID,
-			TriggerType:     trigger.Type,
-			CorrelationID:   trigger.AlertID,
-			StartedAt:       startTime.Unix(),
-			CompletedAt:     time.Now().Unix(),
-			DurationMs:      elapsed.Milliseconds(),
-			Intent:          resolvedIntent.String(),
-			DAGMode:         mode,
-			NodesCount:      graph.NodeCount(),
-			LLMCalls:        int(budget.LLMCount()),
-			ReflectionCount: refCount,
-			ReplanCount:     investigationCount, // legacy field name; persisted as `replan_count` in the audit DB schema. Same semantic as investigation count.
-			Verdict:         verdict,
-			Status:          "completed",
-		})
-	}
+	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, verdict, "completed")
 }
 
 /*
@@ -2074,6 +2054,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 			}
 			return &SyncResult{Verdict: "I'm not sure how to help with that. Could you be more specific?"}, nil
 		}
+		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), "plan_or_schedule_failed", "failed")
 		return nil, err
 	}
 	resolvedIntent := pr.Intent
@@ -2107,6 +2088,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: verdict})
 	} else {
 		if dagCtx.Err() != nil {
+			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "wall_clock_expired", "timeout")
 			return nil, fmt.Errorf("wall clock expired before aggregator")
 		}
 		// Aggregator is exempt from budget — it must always run to give the user a response
@@ -2140,6 +2122,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggModel, aggCtxResp2)
 		if aggErr != nil {
 			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
+			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, "aggregator_failed", "failed")
 			return nil, fmt.Errorf("aggregator failed: %w", aggErr)
 		}
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize"}})
@@ -2150,30 +2133,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		elapsed.Round(time.Millisecond), trigger.AlertID, graph.NodeCount(), budget.LLMCount())
 
 	// Record investigation in event store
-	if a.eventStore != nil {
-		mode := a.cfg.DAGMode
-		if trigger.DAGMode != "" {
-			mode = trigger.DAGMode
-		}
-		refCount, investigationCount := graph.ReflectionStats()
-		a.eventStore.InsertRun(Run{
-			ID:              trigger.AlertID,
-			NodeID:          a.cfg.NodeID,
-			TriggerType:     trigger.Type,
-			CorrelationID:   trigger.AlertID,
-			StartedAt:       startTime.Unix(),
-			CompletedAt:     time.Now().Unix(),
-			DurationMs:      elapsed.Milliseconds(),
-			Intent:          resolvedIntent.String(),
-			DAGMode:         mode,
-			NodesCount:      graph.NodeCount(),
-			LLMCalls:        int(budget.LLMCount()),
-			ReflectionCount: refCount,
-			ReplanCount:     investigationCount, // legacy field name; persisted as `replan_count` in the audit DB schema. Same semantic.
-			Verdict:         verdict,
-			Status:          "completed",
-		})
-	}
+	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, verdict, "completed")
 
 	// Snapshot the final graph so the caller can persist the trace server-side.
 	// This is the same node list the "done" event broadcasts to the browser.

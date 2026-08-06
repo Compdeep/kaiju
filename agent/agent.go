@@ -176,6 +176,7 @@ type Agent struct {
 	isUnattended    UnattendedFunc    // nil = ExecutionMode decides
 	tokenCategoryFn TokenCategoryFunc // nil = the built-in lane split
 	refine          RefineFunc        // nil = preflight's own answer stands
+	answer          AnswerFunc        // nil = the built-in aggregator writes every answer
 	remoteExec      RemoteExecutor    // nil = steps naming a machine run locally
 	targetValid     TargetValidator   // nil = any non-empty target accepted
 	targetLister    TargetLister      // nil = a run concerns only its own Target

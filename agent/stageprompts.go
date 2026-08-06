@@ -68,11 +68,13 @@ func (p StagePrompts) withEdge(block, hook string) StagePrompts {
  * that came back empty or failed, or sources referenced but never retrieved —
  * the stage is told which parts of the request the evidence backs and which it
  * does not, so it reports the gap instead of inventing a detail to fill it.
- * desc: Exported because the stage that writes the answer is not always one of
- *       this package's. An application with its own answering stage — one that
- *       returns a verdict rather than prose, say — needs the same framing, and
- *       an answer written without it is the one most likely to be fabricated,
- *       because it is written on the evidence that failed to arrive.
+ * desc: Exported so a function outside this package can apply it.
+ *       runAggregatorWithIntent and fireReflection both call it, but an
+ *       application that supplies its own final answer through
+ *       Capabilities.Answer writes that answer in its own function, and needs
+ *       the same framing — an answer written without it is the one most likely
+ *       to be fabricated, because it is written on the evidence that failed to
+ *       arrive.
  * param: ctx - cancelled with the run; the edge's own LLM call honours it.
  * param: graph - the run so far, read for empty, failed and unretrieved steps.
  * param: p - the stage's prompts.

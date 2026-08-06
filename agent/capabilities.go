@@ -37,6 +37,9 @@ func (a *Agent) applyCapabilities(cfg Config) {
 	if cfg.Refine != nil {
 		a.refine = cfg.Refine
 	}
+	if cfg.Answer != nil {
+		a.answer = cfg.Answer
+	}
 	if cfg.Clearance != nil {
 		a.clearanceCheck = cfg.Clearance
 	}

@@ -26,11 +26,10 @@ import (
  * param: graph - the run's graph; nil is tolerated for very early failures.
  * param: budget - the run's budget; nil is tolerated likewise.
  * param: intent - the intent it was gated at.
- * param: verdict - the answer, or the reason it has none.
- * param: status - "completed", "failed", "timeout".
+ * param: c - what the run concluded, or the reason it concluded nothing.
  */
 func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, budget *Budget,
-	intent gates.Intent, verdict, status string) {
+	intent gates.Intent, c Conclusion) {
 	if a == nil || a.eventStore == nil {
 		return
 	}
@@ -63,7 +62,25 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 		LLMCalls:        llmCalls,
 		ReflectionCount: refCount,
 		ReplanCount:     investigationCount, // legacy field name; persisted as `replan_count`.
-		Verdict:         verdict,
-		Status:          status,
+		Verdict:         c.Verdict,
+		Severity:        c.Severity,
+		Category:        c.Category,
+		Status:          c.Status,
 	})
+}
+
+// Conclusion is what a run ended with.
+//
+// A struct rather than a pair of strings, because "aggregator_failed", "failed"
+// at a call site says nothing about which is which, and because an application
+// that writes its own answer adds labels of its own — see AnswerResult.
+type Conclusion struct {
+	// Verdict is the answer, or the reason there is none.
+	Verdict string
+	// Severity and Category are the application's labels for the answer, empty
+	// unless it supplied an Answer capability. Passed through untouched.
+	Severity string
+	Category string
+	// Status is "completed", "failed" or "timeout".
+	Status string
 }

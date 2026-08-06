@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
@@ -48,8 +49,13 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 		llmCalls = int(budget.LLMCount())
 	}
 
+	runID := trigger.AlertID
+	if graph != nil && graph.RunID != "" {
+		runID = graph.RunID
+	}
+
 	a.eventStore.InsertRun(Run{
-		ID:              trigger.AlertID,
+		ID:              runID,
 		NodeID:          a.cfg.NodeID,
 		TriggerType:     trigger.Type,
 		CorrelationID:   trigger.AlertID,
@@ -85,4 +91,35 @@ type Conclusion struct {
 	Category string
 	// Status is "completed", "failed" or "timeout".
 	Status string
+}
+
+/*
+ * newRunID makes an identifier for one run.
+ * desc: The correlation id with the moment the run began, so a retry of the
+ *       same cause is a different run and both are recorded. Readable on
+ *       purpose: an operator reading an audit row can see which cause it
+ *       belongs to without a join.
+ * param: correlationID - what caused the run; may be empty.
+ * return: the run identifier.
+ */
+func newRunID(correlationID string) string {
+	if correlationID == "" {
+		return fmt.Sprintf("run-%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%d", correlationID, time.Now().UnixNano())
+}
+
+/*
+ * runIDOf returns the run an action belongs to.
+ * desc: Falls back to the correlation id when there is no graph — a tool call
+ *       made outside a run still records something to group by.
+ * param: graph - the run, or nil.
+ * param: correlationID - the fallback.
+ * return: the run identifier.
+ */
+func runIDOf(graph *Graph, correlationID string) string {
+	if graph != nil && graph.RunID != "" {
+		return graph.RunID
+	}
+	return correlationID
 }

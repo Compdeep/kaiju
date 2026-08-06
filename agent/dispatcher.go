@@ -541,7 +541,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			ActionType: toolName,
 			Params:     paramsJSON,
 			Result:     Text.TruncateLog(result, 500),
-			RunID:      alertID,
+			RunID:      runIDOf(graph, alertID),
 			Intent:     int(intent),
 			Impact:     impact,
 		})

@@ -127,3 +127,69 @@ func TestRunRecordCarriesTheTriggersRouting(t *testing.T) {
 		t.Errorf("NodeID = %q; it must stay the machine that ran the work", got.NodeID)
 	}
 }
+
+// A run's identity and its cause are different things. They were the same
+// value, so two attempts at one cause produced two records with one identity —
+// and an application whose table treats that as a key keeps the first and
+// silently discards the second. Enbarr retries an event it could not gather
+// evidence for, so the discarded record is the successful attempt and the one
+// kept is the failure.
+func TestTwoRunsOfOneCauseGetTwoIdentities(t *testing.T) {
+	st := &recordingStore{}
+	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
+	trigger := Trigger{Type: "alert", AlertID: "a-4"}
+
+	for range 2 {
+		g, _, cleanup := a.setupDAGPipeline(trigger)
+		a.recordRun(trigger, time.Now(), g, nil, gates.Intent(1), Conclusion{Verdict: "v", Status: "completed"})
+		cleanup()
+	}
+
+	if len(st.runs) != 2 {
+		t.Fatalf("wrote %d runs, want 2", len(st.runs))
+	}
+	if st.runs[0].ID == st.runs[1].ID {
+		t.Errorf("both runs have identity %q; the second overwrites or is dropped", st.runs[0].ID)
+	}
+	for i, r := range st.runs {
+		if r.CorrelationID != "a-4" {
+			t.Errorf("run %d lost its cause: CorrelationID = %q", i, r.CorrelationID)
+		}
+		if !strings.HasPrefix(r.ID, "a-4-") {
+			t.Errorf("run %d identity %q does not name its cause; an operator cannot read the row without a join", i, r.ID)
+		}
+	}
+}
+
+// A run recorded with no graph — a failure early enough that none was built —
+// still records, falling back to the cause as its identity.
+func TestARunWithNoGraphStillRecords(t *testing.T) {
+	st := &recordingStore{}
+	a := &Agent{eventStore: st}
+
+	a.recordRun(Trigger{AlertID: "a-5"}, time.Now(), nil, nil, gates.Intent(0),
+		Conclusion{Verdict: "plan_or_schedule_failed", Status: "failed"})
+
+	if len(st.runs) != 1 || st.runs[0].ID != "a-5" {
+		t.Fatalf("runs = %+v, want one identified by its cause", st.runs)
+	}
+}
+
+// An action belongs to the run that took it, not to every attempt at the cause.
+// Without this, a retry's actions are indistinguishable from the first
+// attempt's, which for state-changing calls is the difference between "this ran
+// once" and "this ran twice".
+func TestAnActionNamesTheRunThatTookIt(t *testing.T) {
+	g := NewGraph()
+	g.RunID = "a-6-123"
+
+	if got := runIDOf(g, "a-6"); got != "a-6-123" {
+		t.Errorf("runIDOf = %q, want the run", got)
+	}
+	if got := runIDOf(nil, "a-6"); got != "a-6" {
+		t.Errorf("with no run, runIDOf = %q, want the cause as a fallback", got)
+	}
+	if got := runIDOf(NewGraph(), "a-6"); got != "a-6" {
+		t.Errorf("with an unstamped graph, runIDOf = %q, want the cause", got)
+	}
+}

@@ -52,6 +52,7 @@ import (
  */
 func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
 	graph := NewGraph()
+	graph.RunID = newRunID(trigger.AlertID)
 	budget := NewBudget(
 		a.cfg.MaxNodes,
 		a.cfg.MaxPerSkill,

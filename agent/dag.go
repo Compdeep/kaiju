@@ -252,12 +252,19 @@ type ValidatorDef struct {
 }
 
 type Graph struct {
-	mu          sync.RWMutex
-	nodes       map[string]*Node
-	counter     int
-	observer    chan<- DAGEvent
-	Gaps        []string         // capability gaps declared by the executive (not mutex-protected — set once after planning)
-	SessionID   string           // conversation session for per-session state (blueprints + interfaces.json)
+	mu        sync.RWMutex
+	nodes     map[string]*Node
+	counter   int
+	observer  chan<- DAGEvent
+	Gaps      []string // capability gaps declared by the executive (not mutex-protected — set once after planning)
+	SessionID string   // conversation session for per-session state (blueprints + interfaces.json)
+
+	// RunID identifies this run, and only this run. Distinct from the trigger's
+	// correlation id, which identifies what CAUSED the run and is shared by
+	// every attempt at it: an event that could not be acted on and is tried
+	// again later is one cause and two runs, with two sets of actions and two
+	// outcomes to record.
+	RunID       string
 	ProjectRoot string           // project root path set by the architect (e.g. "project/kaiju_webapp"); empty means legacy "project/"
 	Validators  []ValidatorDef   // architect-declared validation checks, stored for replay after replans
 	Context     *ContextGate     // per-investigation context API; constructed at investigation start

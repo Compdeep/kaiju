@@ -91,24 +91,24 @@ func TestAnAnswerWithNoTextStillCounts(t *testing.T) {
 	}
 }
 
-// TestBothEntryPointsAskForTheAnswer guards the wiring, and it is the test that
+// TestRunDAGSyncAsksForTheAnswer guards the wiring, and it is the test that
 // matters most here. Everything above passes on a scheduler that never calls
 // writeAnswer at all: the application supplies its answer, the built-in
 // aggregator writes prose instead, the run is recorded as completed, and the
 // only sign is the shape of the result.
 //
-// Both entry points must ask. An application whose answer is used by RunDAGSync
-// and ignored by runDAG gets prose for half its runs, and the half depends on
-// which door the caller came through.
+// This asked for two call sites when it was written, the second in runDAG. That
+// function had no callers and has been deleted, so half of what this guarded
+// was a path nothing ran.
 //
 // Matched loosely on whitespace so gofmt realignment is not a false alarm.
-func TestBothEntryPointsAskForTheAnswer(t *testing.T) {
+func TestRunDAGSyncAsksForTheAnswer(t *testing.T) {
 	src, err := os.ReadFile("scheduler.go")
 	if err != nil {
 		t.Fatalf("read scheduler.go: %v", err)
 	}
-	if n := len(regexp.MustCompile(`a\.writeAnswer\(`).FindAll(src, -1)); n != 2 {
-		t.Errorf("scheduler.go asks for the supplied answer %d times, want 2 (runDAG and RunDAGSync)", n)
+	if n := len(regexp.MustCompile(`a\.writeAnswer\(`).FindAll(src, -1)); n != 1 {
+		t.Errorf("scheduler.go asks for the supplied answer %d times, want 1 (RunDAGSync)", n)
 	}
 }
 

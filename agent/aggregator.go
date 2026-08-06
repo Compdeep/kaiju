@@ -12,31 +12,6 @@ import (
 	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
-/*
- * runAggregator makes a single LLM call to synthesize all results into a verdict.
- * desc: Delegates to runAggregatorWithIntent using trigger.Intent() directly.
- *       Only valid when intent is not auto.
- * param: ctx - context for the LLM call.
- * param: trigger - the investigation trigger.
- * param: graph - the completed investigation graph.
- * param: history - conversation history for multi-turn coherence.
- * param: gateCtx - assembled context from ContextGate (node returns + worklog + skill guidance).
- * return: verdict string, actuator actions slice, and error.
- */
-func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph, history []llm.Message, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
-	return a.runAggregatorWithIntent(ctx, trigger, graph, trigger.Intent(), history, gateCtx)
-}
-
-func (a *Agent) runAggregatorWithIntent(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
-	// The aggregator writes the FINAL answer, so it uses the ANSWER lane — kept
-	// separate from the heavy/planner lane so a user's answer model (which may be
-	// a thinking model) drives the answer without being handed to the planner.
-	// An unset answer lane falls back to the heavy lane (model_route.go), so this
-	// is behaviourally identical until an answer model is pinned.
-	client, model := a.answerLane(ctx)
-	return a.runAggregatorWithClient(ctx, trigger, graph, intent, history, client, model, gateCtx)
-}
-
 // runAggregatorWithClient synthesizes the final verdict. model is the routed
 // model id for client; when non-empty it overrides the client's default so a
 // selected provider gets its own model (empty ⇒ client default applies).

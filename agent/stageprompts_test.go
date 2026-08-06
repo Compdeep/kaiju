@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -103,5 +105,34 @@ func TestEachEdgeReframesAgainstTheStagesOwnInput(t *testing.T) {
 	}
 	if strings.Contains(groundingCall, "EDGE OUTPUT") {
 		t.Error("the grounding edge was shown the coverage edge's output as though it were the request")
+	}
+}
+
+// A stage that stops applying an edge still answers — it just answers on
+// evidence that never arrived, with nothing to say so. Nothing else fails, so
+// this pins the call sites. Both stages sit behind an LLM call and cannot be run
+// here. Matched loosely on whitespace so gofmt realignment is not a false alarm.
+func TestEveryAnsweringStageAppliesTheCoverageEdge(t *testing.T) {
+	for _, c := range []struct{ file, stage string }{
+		{"aggregator.go", "the aggregator"},
+		{"reflection.go", "the reflector, which often writes the answer directly"},
+	} {
+		src, err := os.ReadFile(c.file)
+		if err != nil {
+			t.Fatalf("read %s: %v", c.file, err)
+		}
+		if !regexp.MustCompile(`FrameCoverage\(ctx,\s*graph,`).Match(src) {
+			t.Errorf("%s no longer applies the coverage edge", c.stage)
+		}
+	}
+}
+
+func TestTheReflectorAppliesTheGroundingEdge(t *testing.T) {
+	src, err := os.ReadFile("reflection.go")
+	if err != nil {
+		t.Fatalf("read reflection.go: %v", err)
+	}
+	if !regexp.MustCompile(`FrameGrounding\(ctx,\s*graph,`).Match(src) {
+		t.Error("the reflector no longer applies the grounding edge; it can name URLs from memory again")
 	}
 }

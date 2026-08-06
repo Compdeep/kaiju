@@ -15,7 +15,7 @@ import (
 // (via comp.Result); migrating those to read these fields is a later, separate
 // cleanup. Evidence() returning Raw keeps them working unchanged for now.
 type ComputeBody struct {
-	Raw          string   `json:"-"`
+	RawBacked    `json:"-"`
 	Type         string   `json:"type"`
 	ProjectRoot  string   `json:"project_root,omitempty"`
 	FilesCreated []string `json:"files_created,omitempty"`
@@ -29,18 +29,10 @@ type ComputeBody struct {
 // error the descriptor fields stay zero and Raw still carries the text, so
 // Field/Evidence degrade to raw-string behavior.
 func parseComputeBody(raw string) ComputeBody {
-	b := ComputeBody{Raw: raw}
+	b := ComputeBody{RawBacked: RawBacked{Raw: raw}}
 	_ = json.Unmarshal([]byte(raw), &b) // best-effort; Raw is the source of truth
 	return b
 }
-
-// Field resolves ${node.<id>.<path>} against the raw compute JSON, matching the
-// legacy RawText behavior (JSON dot-path if it parses, else miss).
-func (b ComputeBody) Field(path string) (any, bool) { return RawText(b.Raw).Field(path) }
-
-// Evidence returns the raw compute JSON unchanged — the same text every current
-// consumer reads.
-func (b ComputeBody) Evidence() string { return b.Raw }
 
 // Summary renders a short, type-aware line for the frontend trace.
 func (b ComputeBody) Summary() string {

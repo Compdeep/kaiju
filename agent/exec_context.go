@@ -118,3 +118,25 @@ func (a *Agent) lookupGuidanceBody(key string) (string, string) {
 	}
 	return "", ""
 }
+
+/*
+ * composeGuidance concatenates the guidance bodies for a run's selected keys.
+ * desc: Resolves each key the one way keys are resolved — through
+ *       lookupGuidanceBody, which knows about both registries. A stage that
+ *       reaches into one registry itself works until the guidance it needs was
+ *       registered in the other, and then it silently composes nothing: the run
+ *       proceeds with a prompt that is complete apart from the domain knowledge
+ *       it was supposed to bring.
+ * param: keys - the keys selected for this run.
+ * return: the bodies, each followed by a blank line, or "" when none matched.
+ */
+func (a *Agent) composeGuidance(keys []string) string {
+	var sb strings.Builder
+	for _, key := range keys {
+		if body, _ := a.lookupGuidanceBody(key); body != "" {
+			sb.WriteString(body)
+			sb.WriteString("\n\n")
+		}
+	}
+	return sb.String()
+}

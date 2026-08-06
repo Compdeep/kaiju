@@ -59,6 +59,22 @@ type AnswerRequest struct {
 
 	// History is the conversation so far, empty for a run with none.
 	History []llm.Message
+
+	// Prompt is the request and the evidence rendered as the text the built-in
+	// aggregator would have been given. Supplied because assembling it reads
+	// state this package keeps private; an application may ignore it and build
+	// its own from Graph and Evidence.
+	Prompt string
+
+	// Guidance is the doctrine this run selected: one entry per card or skill,
+	// with its key and its whole body.
+	//
+	// Whole, and unextracted on purpose. The built-in aggregator takes the
+	// "## Aggregator Guidance" section and nothing else; an application that
+	// wants a different section, or several, or its own labelling around them,
+	// would have that choice made for it by anything narrower — and the
+	// difference would show up as a quietly reworded prompt, not as a failure.
+	Guidance []CapabilityCard
 }
 
 // AnswerResult is what the application concluded.
@@ -100,6 +116,12 @@ func (a *Agent) writeAnswer(ctx context.Context, req AnswerRequest) (*AnswerResu
 	if a == nil || a.answer == nil {
 		return nil, false, nil
 	}
+	// Derived from what the engine already holds, and only once something is
+	// there to read them: a run with no Answer capability returned above and
+	// pays nothing for either.
+	req.Prompt = a.assembleAggregatorPrompt(req.Trigger, req.Graph, req.Evidence)
+	req.Guidance = a.runGuidance(req.Graph)
+
 	res, err := a.answer(ctx, req)
 	if err != nil {
 		return nil, false, err
@@ -114,4 +136,26 @@ func (a *Agent) writeAnswer(ctx context.Context, req AnswerRequest) (*AnswerResu
 		log.Printf("[dag] the supplied answer has no text; the caller will see an empty verdict")
 	}
 	return res, true, nil
+}
+
+/*
+ * runGuidance collects the doctrine a run selected, key and body together.
+ * desc: Resolves each key the one way keys are resolved, through
+ *       lookupGuidanceBody, so a card and a SKILL.md guidance skill both
+ *       arrive and the caller cannot tell which registry either came from.
+ *       A key nothing registered contributes nothing.
+ * param: graph - the run; nil or no active cards yields nothing.
+ * return: one entry per key that resolved, in the order the run selected them.
+ */
+func (a *Agent) runGuidance(graph *Graph) []CapabilityCard {
+	if a == nil || graph == nil || len(graph.ActiveCards) == 0 {
+		return nil
+	}
+	var out []CapabilityCard
+	for _, key := range graph.ActiveCards {
+		if body, name := a.lookupGuidanceBody(key); body != "" {
+			out = append(out, CapabilityCard{Key: name, Body: body})
+		}
+	}
+	return out
 }

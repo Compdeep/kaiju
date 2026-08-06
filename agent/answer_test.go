@@ -5,7 +5,10 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
+
+	"github.com/Compdeep/kaiju/agent/skillmd"
 )
 
 // An application supplying Answer is asked to write each run's answer.
@@ -122,5 +125,75 @@ func TestTheStructuredResultReachesTheCaller(t *testing.T) {
 	}
 	if !regexp.MustCompile(`Data:\s+data,`).Match(src) {
 		t.Error("SyncResult no longer carries the structured result back to the caller")
+	}
+}
+
+// Assembling the prompt and resolving the run's doctrine both read state this
+// package keeps private, so an application cannot do either for itself. Without
+// them it can see the graph and the evidence but not the text the built-in
+// aggregator would have been given, which is most of what it needs.
+func TestTheAnswerIsHandedThePromptAndTheDoctrine(t *testing.T) {
+	var seen AnswerRequest
+	a := &Agent{
+		capabilities: CapabilityRegistry{"triage": {Key: "triage", Body: "## Core Principles\nsay what you cannot see\n\n## Aggregator Guidance\nrate it honestly"}},
+		answer: func(_ context.Context, req AnswerRequest) (*AnswerResult, error) {
+			seen = req
+			return &AnswerResult{Text: "done"}, nil
+		},
+	}
+	g := NewGraph()
+	g.ActiveCards = []string{"triage"}
+
+	if _, ok, err := a.writeAnswer(context.Background(), AnswerRequest{
+		Trigger: Trigger{Type: "alert", AlertID: "a-1"}, Graph: g,
+		Evidence: &ContextResponse{Sources: map[string]string{"node_returns": "web-1 is unreachable"}},
+	}); !ok || err != nil {
+		t.Fatalf("writeAnswer = %v, %v", ok, err)
+	}
+
+	if seen.Prompt == "" {
+		t.Error("the assembled prompt was not handed over")
+	}
+	if len(seen.Guidance) != 1 || seen.Guidance[0].Key != "triage" {
+		t.Fatalf("the run's doctrine was not handed over: %+v", seen.Guidance)
+	}
+	// Whole body, not one extracted section: an application choosing a different
+	// section, or its own labelling, must still be able to.
+	for _, want := range []string{"## Core Principles", "## Aggregator Guidance", "rate it honestly"} {
+		if !strings.Contains(seen.Guidance[0].Body, want) {
+			t.Errorf("the body was extracted before hand-over; %q is missing", want)
+		}
+	}
+}
+
+// Doctrine registered as a SKILL.md guidance skill arrives the same way a
+// capability card does. An application registering only skills would otherwise
+// be handed nothing, with no sign that anything was missing.
+func TestTheDoctrineComesFromBothRegistries(t *testing.T) {
+	a := &Agent{
+		capabilities:  CapabilityRegistry{"triage": {Key: "triage", Body: "CARD"}},
+		skillGuidance: map[string]*skillmd.SkillMD{"response": guidanceSkill("response", "SKILL")},
+	}
+	g := NewGraph()
+	g.ActiveCards = []string{"triage", "response", "never_registered"}
+
+	got := a.runGuidance(g)
+
+	if len(got) != 2 {
+		t.Fatalf("resolved %d of 2 registered keys: %+v", len(got), got)
+	}
+	if got[0].Body != "CARD" || got[1].Body != "SKILL" {
+		t.Errorf("wrong bodies, or out of the order the run selected: %+v", got)
+	}
+}
+
+// A run that selected nothing hands over nothing, so the application can tell
+// "no doctrine" from "doctrine that happens to be empty".
+func TestNoActiveCardsYieldsNoDoctrine(t *testing.T) {
+	if got := (&Agent{}).runGuidance(NewGraph()); got != nil {
+		t.Errorf("runGuidance = %+v, want nothing", got)
+	}
+	if got := (&Agent{}).runGuidance(nil); got != nil {
+		t.Errorf("a nil graph yielded %+v", got)
 	}
 }

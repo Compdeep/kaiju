@@ -804,22 +804,23 @@ func (g *Graph) NodeCount() int {
 }
 
 /*
- * ReflectionStats counts reflection nodes and how many triggered investigations.
- * desc: An investigation is detected when the reflection node has children
- *       (grafted Holmes + microplanner work). The named return is kept as
- *       `replans` for backward compatibility with the persistent audit DB
- *       column `replan_count`; semantically it counts investigation cycles.
- * return: reflections - total reflection/interjection node count.
- * return: replans - count of those that spawned investigation cycles.
+ * ReflectionStats counts the points a run stopped to reconsider, and how many
+ * of those went on to do more work.
+ * desc: A reflection did more work when it has children — whatever was grafted
+ *       after it. The second return was called `replans`, which is a different
+ *       thing in this package: a replan is one kind of follow-up, and the
+ *       count includes the others.
+ * return: reflections - reflection and interjection nodes.
+ * return: followUps - how many of those grafted further work.
  */
-func (g *Graph) ReflectionStats() (reflections, replans int) {
+func (g *Graph) ReflectionStats() (reflections, followUps int) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	for _, n := range g.nodes {
 		if n.Type == NodeReflection || n.Type == NodeInterjection {
 			reflections++
 			if len(n.Children) > 0 {
-				replans++
+				followUps++
 			}
 		}
 	}

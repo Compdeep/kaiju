@@ -193,3 +193,31 @@ func TestAnActionNamesTheRunThatTookIt(t *testing.T) {
 		t.Errorf("with an unstamped graph, runIDOf = %q, want the cause", got)
 	}
 }
+
+// The two counts on a run record measure different things, and one of them was
+// named after a third. ReflectionCount is how many points the run stopped to
+// reconsider; FollowUpCount is how many of those went on to do more work. It was
+// called ReplanCount, and a replan is a different thing in this package — one
+// kind of follow-up, not all of them.
+func TestTheRunRecordCountsReflectionsAndFollowUps(t *testing.T) {
+	g := NewGraph()
+	// Two reflections, one of which grafted more work.
+	bare := g.AddNode(&Node{Type: NodeReflection, Tag: "reflect-1"})
+	withWork := g.AddNode(&Node{Type: NodeReflection, Tag: "reflect-2"})
+	child := g.AddNode(&Node{Type: NodeTool, Tag: "grafted", ToolName: "read_file"})
+	g.AddChild(withWork, child)
+	_ = bare
+
+	st := &recordingStore{}
+	a := &Agent{eventStore: st}
+	a.recordRun(Trigger{AlertID: "a-7"}, time.Now(), g, nil, gates.Intent(1),
+		Conclusion{Verdict: "v", Status: "completed"})
+
+	got := st.runs[0]
+	if got.ReflectionCount != 2 {
+		t.Errorf("ReflectionCount = %d, want both reflection points", got.ReflectionCount)
+	}
+	if got.FollowUpCount != 1 {
+		t.Errorf("FollowUpCount = %d, want only the one that grafted work", got.FollowUpCount)
+	}
+}

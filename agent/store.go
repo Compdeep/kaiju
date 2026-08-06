@@ -52,10 +52,17 @@ type Run struct {
 	Intent  string // IGX intent the run was gated at
 	DAGMode string
 
-	NodesCount      int
-	LLMCalls        int
+	NodesCount int
+	LLMCalls   int
+	// ReflectionCount is how many points the run stopped to reconsider —
+	// reflection and interjection nodes alike.
 	ReflectionCount int
-	ReplanCount     int
+	// FollowUpCount is how many of those went on to graft further work rather
+	// than concluding. It was called ReplanCount, after the column an
+	// application happened to persist it in, while "replan" already meant
+	// something else here — see ReplanRecords and MaxReplans. An application
+	// may still store it in whatever column it likes.
+	FollowUpCount int
 
 	// Verdict, Severity, Category and Status are the application's
 	// conclusion. The engine passes through whatever the aggregator produced

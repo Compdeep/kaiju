@@ -177,6 +177,11 @@ type Capabilities struct {
 	// nothing for a particular run.
 	Answer AnswerFunc
 
+	// AllowTool refuses a tool call for a reason this package cannot know — a
+	// rule of the application's own, applied after the engine's own gate has
+	// passed the call. Nil allows everything the gate allowed.
+	AllowTool AllowToolFunc
+
 	// Clearance decides how much authority a run has.
 	Clearance ClearanceChecker
 

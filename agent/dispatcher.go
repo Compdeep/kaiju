@@ -465,6 +465,19 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		}
 	}
 
+	// The application's own rules, asked last so it can only narrow what the
+	// gate already allowed, never widen it. A refusal is handed to the model as
+	// the call's result, so it learns why instead of trying again. See
+	// allowtool.go.
+	if allow, reason := a.allowTool(ctx, ToolCallRequest{
+		Trigger: triggerOf(graph),
+		Graph:   graph,
+		Tool:    toolName,
+		Params:  params,
+	}); !allow {
+		return reason, nil, nil
+	}
+
 	// Execute — tools implementing ContextualExecutor get a rich context
 	// built from scheduler-held state; others fall through to plain Execute.
 	// Contextual results are structured pipeline data (e.g. compute plans

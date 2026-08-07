@@ -40,6 +40,9 @@ func (a *Agent) applyCapabilities(cfg Config) {
 	if cfg.Answer != nil {
 		a.answer = cfg.Answer
 	}
+	if cfg.AllowTool != nil {
+		a.allowToolFn = cfg.AllowTool
+	}
 	if cfg.Clearance != nil {
 		a.clearanceCheck = cfg.Clearance
 	}

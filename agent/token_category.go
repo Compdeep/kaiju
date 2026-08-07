@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"log"
 
 	"github.com/Compdeep/kaiju/tokens"
 )
@@ -31,11 +32,26 @@ func (a *Agent) tagTokens(ctx context.Context, t Trigger) context.Context {
  * param: t - the trigger.
  * return: the bucket name.
  */
-func (a *Agent) tokenCategory(t Trigger) string {
+func (a *Agent) tokenCategory(t Trigger) (out string) {
 	if a != nil && a.tokenCategoryFn != nil {
-		if c := a.tokenCategoryFn(t); c != "" {
-			return c
+		// A naming rule that crashed leaves the built-in names, which is what
+		// no rule gives. Nothing is worth failing a run over.
+		panicked := false
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[agent] the usage-naming rule panicked, using the built-in names: %v", r)
+					panicked = true
+				}
+			}()
+			if c := a.tokenCategoryFn(t); c != "" {
+				out = c
+			}
+		}()
+		if !panicked && out != "" {
+			return out
 		}
+		out = ""
 	}
 	switch t.Type {
 	case "chat_query", "api_query":

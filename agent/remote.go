@@ -1,6 +1,10 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"log"
+)
 
 // Remote execution.
 //
@@ -63,10 +67,18 @@ type TargetValidator func(target string) error
  * param: target - the target to check.
  * return: nil when acceptable.
  */
-func (a *Agent) validateTarget(target string) error {
+func (a *Agent) validateTarget(target string) (err error) {
 	if a.targetValid == nil {
 		return nil
 	}
+	// A check that crashed has not approved the target. Reject it: the next step
+	// is a connection to a machine named by a model.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[agent] the target check panicked, rejecting the target: %v", r)
+			err = fmt.Errorf("target %q could not be checked", target)
+		}
+	}()
 	return a.targetValid(target)
 }
 
@@ -103,8 +115,20 @@ type TargetLister func(t Trigger) []string
  * param: t - the trigger.
  * return: the machines, or nil when there are none.
  */
-func (a *Agent) runTargets(t Trigger) []string {
+func (a *Agent) runTargets(t Trigger) (out []string) {
 	if a != nil && a.targetLister != nil {
+		// Reporting only, so a crash costs a display and nothing else. Fall back
+		// to the run's own target, as no lister does.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[agent] the machine lister panicked, reporting the run's own target: %v", r)
+				if t.Target != "" {
+					out = []string{t.Target}
+				} else {
+					out = nil
+				}
+			}
+		}()
 		return a.targetLister(t)
 	}
 	if t.Target != "" {

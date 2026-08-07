@@ -120,7 +120,7 @@ type AnswerResult struct {
  * return: the result and true when the application answered; nil and false when
  *         it declined; an error when it tried and failed.
  */
-func (a *Agent) writeAnswer(ctx context.Context, req AnswerRequest) (*AnswerResult, bool, error) {
+func (a *Agent) writeAnswer(ctx context.Context, req AnswerRequest) (resOut *AnswerResult, okOut bool, errOut error) {
 	if a == nil || a.answer == nil {
 		return nil, false, nil
 	}
@@ -129,6 +129,16 @@ func (a *Agent) writeAnswer(ctx context.Context, req AnswerRequest) (*AnswerResu
 	// pays nothing for either.
 	req.Prompt = a.assembleAggregatorPrompt(req.Trigger, req.Graph, req.Evidence)
 	req.Guidance = a.runGuidance(req.Graph)
+
+	// A panic means the application did not write an answer, so the built-in
+	// aggregator writes it. Failing the run instead would throw away a finished
+	// graph over a fault in the last step.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[dag] the supplied answer panicked, the aggregator will write it: %v", r)
+			resOut, okOut, errOut = nil, false, nil
+		}
+	}()
 
 	res, err := a.answer(ctx, req)
 	if err != nil {

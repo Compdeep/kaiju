@@ -227,3 +227,31 @@ func TestTheRecordFallsBackToTheAnswer(t *testing.T) {
 		t.Error("an answer with no summary line no longer falls back to the answer itself")
 	}
 }
+
+// Guidance is the exported form: a stage written outside this package needs the
+// same doctrine the built-in stages get, and both registries it may live in are
+// private. Without it such a stage runs on the generic prompt alone, which is
+// not an error — the answer is simply written without the domain knowledge it
+// was supposed to have.
+func TestGuidanceIsReachableFromOutside(t *testing.T) {
+	a := &Agent{
+		capabilities:  CapabilityRegistry{"triage": {Key: "triage", Body: "CARD"}},
+		skillGuidance: map[string]*skillmd.SkillMD{"response": guidanceSkill("response", "SKILL")},
+	}
+
+	got := a.Guidance([]string{"response", "triage", "never_registered"})
+
+	if len(got) != 2 {
+		t.Fatalf("resolved %d of 2 registered keys: %+v", len(got), got)
+	}
+	if got[0].Body != "SKILL" || got[1].Body != "CARD" {
+		t.Errorf("wrong bodies, or not in the order asked for: %+v", got)
+	}
+	if len((&Agent{}).Guidance([]string{"triage"})) != 0 {
+		t.Error("an agent with nothing registered returned something")
+	}
+	var nilAgent *Agent
+	if nilAgent.Guidance([]string{"triage"}) != nil {
+		t.Error("a nil agent returned something")
+	}
+}

@@ -156,11 +156,30 @@ func (a *Agent) writeAnswer(ctx context.Context, req AnswerRequest) (*AnswerResu
  * return: one entry per key that resolved, in the order the run selected them.
  */
 func (a *Agent) runGuidance(graph *Graph) []CapabilityCard {
-	if a == nil || graph == nil || len(graph.ActiveCards) == 0 {
+	if graph == nil {
+		return nil
+	}
+	return a.Guidance(graph.ActiveCards)
+}
+
+/*
+ * Guidance collects the doctrine registered under the given keys.
+ * desc: Exported because a stage written outside this package needs the same
+ *       text the built-in stages get, and the two registries it may live in —
+ *       capability cards and SKILL.md guidance skills — are both private. A key
+ *       nothing registered contributes nothing.
+ *
+ *       Whole bodies, unextracted: which section a stage reads is the stage's
+ *       own business, and anything narrower would make that choice for it.
+ * param: keys - the keys to resolve, in the order they should appear.
+ * return: one entry per key that resolved.
+ */
+func (a *Agent) Guidance(keys []string) []CapabilityCard {
+	if a == nil || len(keys) == 0 {
 		return nil
 	}
 	var out []CapabilityCard
-	for _, key := range graph.ActiveCards {
+	for _, key := range keys {
 		if body, name := a.lookupGuidanceBody(key); body != "" {
 			out = append(out, CapabilityCard{Key: name, Body: body})
 		}

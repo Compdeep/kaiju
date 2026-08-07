@@ -1,5 +1,7 @@
 package agent
 
+import "log"
+
 // Whether anyone is watching a run.
 //
 // It changes what the engine will do. A run somebody is waiting on may ask a
@@ -29,8 +31,17 @@ type UnattendedFunc func(t Trigger) bool
  * param: t - the trigger.
  * return: true when nobody is watching.
  */
-func (a *Agent) unattended(t Trigger) bool {
+func (a *Agent) unattended(t Trigger) (out bool) {
 	if a != nil && a.isUnattended != nil {
+		// A rule that crashed has said nothing about who is watching. Fall back
+		// to what the trigger declares, as a missing rule does — treating the
+		// run as watched would hand it tools meant to be asked for.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[agent] the watching rule panicked, reading the trigger instead: %v", r)
+				out = t.ExecutionMode == "autonomous"
+			}
+		}()
 		return a.isUnattended(t)
 	}
 	return t.ExecutionMode == "autonomous"

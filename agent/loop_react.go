@@ -341,10 +341,23 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
  * param: t - the trigger.
  * return: the text to put in front of the planner.
  */
-func (a *Agent) formatTrigger(t Trigger) string {
+func (a *Agent) formatTrigger(t Trigger) (out string) {
 	if a != nil && a.describeTrigger != nil {
-		if s := a.describeTrigger(t); s != "" {
-			return s
+		// Wording that crashed leaves the built-in wording, which is what no
+		// description gives. Every reasoning stage reads this, so an empty
+		// answer would leave them all with nothing.
+		panicked := false
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[dag] the trigger description panicked, using the built-in wording: %v", r)
+					panicked = true
+				}
+			}()
+			out = a.describeTrigger(t)
+		}()
+		if !panicked && out != "" {
+			return out
 		}
 	}
 	return defaultFormatTrigger(t)

@@ -1,5 +1,7 @@
 package agent
 
+import "log"
+
 // Run admission.
 //
 // An application may have reasons of its own for not starting a run that have
@@ -37,11 +39,20 @@ const defaultRefusalReason = "this run was not admitted by the host application"
  * param: t - the trigger about to run.
  * return: whether to proceed, and the reason when not.
  */
-func (a *Agent) admit(t Trigger) (bool, string) {
+func (a *Agent) admit(t Trigger) (ok bool, reason string) {
 	if a == nil || a.admitRun == nil {
 		return true, ""
 	}
-	ok, reason := a.admitRun(t)
+	// A rule that crashed has not refused anything, and refusing on its behalf
+	// would stop work the application never said to stop. Admit, as a missing
+	// rule does.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[agent] the admission rule panicked, admitting the run: %v", r)
+			ok, reason = true, ""
+		}
+	}()
+	ok, reason = a.admitRun(t)
 	if ok {
 		return true, ""
 	}

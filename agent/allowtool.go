@@ -1,6 +1,9 @@
 package agent
 
-import "context"
+import (
+	"context"
+	"log"
+)
 
 // Refusing a tool call for a reason this package cannot know.
 //
@@ -59,11 +62,19 @@ type ToolCallRequest struct {
  * param: req - the call about to run.
  * return: whether to proceed, and the reason to hand the model when not.
  */
-func (a *Agent) allowTool(ctx context.Context, req ToolCallRequest) (bool, string) {
+func (a *Agent) allowTool(ctx context.Context, req ToolCallRequest) (allow bool, reason string) {
 	if a == nil || a.allowToolFn == nil {
 		return true, ""
 	}
-	allow, reason := a.allowToolFn(ctx, req)
+	// A rule that crashed has not said yes. Refuse: the call is about to change
+	// something, and the model is told why rather than left to retry.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[agent] a tool rule panicked, refusing the call: %v", r)
+			allow, reason = false, "The tool "+req.Tool+" is not available for this run."
+		}
+	}()
+	allow, reason = a.allowToolFn(ctx, req)
 	if !allow && reason == "" {
 		// A refusal with nothing to say leaves the model to guess, and it will
 		// guess the same call again. Say something rather than nothing.

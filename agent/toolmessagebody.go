@@ -82,3 +82,17 @@ func (b toolMessageBody) Summary() string {
 	}
 	return s
 }
+
+/*
+ * NewToolBody wraps a tool's envelope as a node body.
+ * desc: Exported because an application supplying Capabilities.Answer needs to
+ *       build a graph to test that answer against, and a graph whose tool nodes
+ *       carry plain strings is not the graph it will be given — the coverage
+ *       edge reads the envelope's status to find gaps, and finds none on a
+ *       string. Without this the difference is invisible: the test passes, the
+ *       prompt is quietly shorter, and the answer is written on evidence with a
+ *       hole in it.
+ * param: msg - what the tool returned.
+ * return: the body to hand to Graph.SetBody.
+ */
+func NewToolBody(msg agenttools.ToolMessage) NodeBody { return toolMessageBody{msg: msg} }

@@ -70,33 +70,43 @@ func (r CapabilityRegistry) ClassifierManifest() string {
 }
 
 /*
- * ComposeAggregatorGuidance extracts and concatenates "## Aggregator Guidance"
- * sections from the selected cards.
- * desc: Finds the Aggregator Guidance heading in each selected card's body,
- *       extracts the section until the next heading or end, and joins them.
- * param: keys - slice of capability card keys to extract guidance from.
- * return: concatenated aggregator guidance string, or empty string if none.
+ * GuidanceSection renders the doctrine a run selected, for one stage.
+ * desc: Resolves the keys through Guidance, so a capability card and a SKILL.md
+ *       guidance skill both arrive, then takes two sections from each body:
+ *       "## Core Principles", which every stage gets, and the heading this
+ *       stage reads. A card supplying neither contributes nothing.
+ *
+ *       Exported because a stage written outside this package needs the same
+ *       text in the same shape, and there should be one renderer rather than
+ *       one per stage.
+ * param: keys - the doctrine the run selected, in the order it should appear.
+ * param: heading - the section this stage reads, such as
+ *        "## Aggregator Guidance".
+ * param: label - what to call it in each entry's title, such as
+ *        "aggregator doctrine".
+ * return: the section to append, or "" when no card supplies either heading.
+ *         Empty rather than a bare title, because a heading with nothing under
+ *         it tells the model doctrine applies when none does.
  */
-func (r CapabilityRegistry) ComposeAggregatorGuidance(keys []string) string {
-	var sb strings.Builder
-	for _, key := range keys {
-		card, ok := r[key]
-		if !ok {
+func (a *Agent) GuidanceSection(keys []string, heading, label string) string {
+	var sections []string
+	for _, card := range a.Guidance(keys) {
+		core := Text.ExtractSection(card.Body, "## Core Principles")
+		section := Text.ExtractSection(card.Body, heading)
+		if core == "" && section == "" {
 			continue
 		}
-		idx := strings.Index(card.Body, "## Aggregator Guidance")
-		if idx < 0 {
-			continue
+		entry := "### " + card.Key + " — " + label + "\n"
+		if core != "" {
+			entry += core + "\n\n"
 		}
-		section := card.Body[idx+len("## Aggregator Guidance"):]
-		// Trim to next ## heading or end
-		if nextH := strings.Index(section[1:], "\n## "); nextH >= 0 {
-			section = section[:nextH+1]
-		}
-		sb.WriteString(strings.TrimSpace(section))
-		sb.WriteString("\n\n")
+		entry += section
+		sections = append(sections, entry)
 	}
-	return sb.String()
+	if len(sections) == 0 {
+		return ""
+	}
+	return "## Skill Guidance (authoritative — apply these principles)\n\n" + strings.Join(sections, "\n\n")
 }
 
 /*

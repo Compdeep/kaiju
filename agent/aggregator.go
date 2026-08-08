@@ -28,7 +28,7 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	}
 	aggGuidance := ""
 	if len(cards) > 0 {
-		aggGuidance = a.capabilities.ComposeAggregatorGuidance(cards)
+		aggGuidance = a.GuidanceSection(cards, "## Aggregator Guidance", "aggregator doctrine")
 	}
 	rolePrompt := fmt.Sprintf(prompt.Aggregator, aggGuidance, a.FormatRule(), intentStr)
 

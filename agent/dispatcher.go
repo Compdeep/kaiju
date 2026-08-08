@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -235,6 +236,20 @@ func substituteTemplates(n *Node, graph *Graph) error {
 	if n.Params == nil {
 		return nil
 	}
+	// A ${step.N…} reference is rewritten to ${node.<id>…} when the plan is
+	// finalised, so one that survives to here was never rewritten — grafted by a
+	// stage that bypassed finalisation, most likely. Say so: the regexes below
+	// match only the node form, so it would otherwise be left in the parameter
+	// as literal text and handed to the tool.
+	for _, ref := range FindRefs(n.Params) {
+		if ref.Kind == "step" {
+			return fmt.Errorf("template %s on %s: a step reference reached fire time, so the rewrite to ${node.<id>…} was missed", ref.Raw, n.ID)
+		}
+	}
+
+	// 3. Resolved once per dependency rather than once per reference: a node
+	// referenced five times was parsed five times.
+	resolved := make(map[string]any, 4)
 	var firstErr error
 	walkParams(n.Params, func(s string) (any, bool) {
 		// Special case: the WHOLE string is a single bare placeholder.
@@ -244,7 +259,7 @@ func substituteTemplates(n *Node, graph *Graph) error {
 		if m := nodeTemplateBareRe.FindStringSubmatch(s); m != nil {
 			depID := m[1]
 			field := m[2]
-			val, err := resolveTemplateField(graph, depID, field, n.ID)
+			val, err := resolveTemplateFieldCached(graph, resolved, depID, field, n.ID)
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -260,7 +275,7 @@ func substituteTemplates(n *Node, graph *Graph) error {
 			m := nodeTemplateRe.FindStringSubmatch(match)
 			depID := m[1]
 			field := m[2]
-			val, err := resolveTemplateField(graph, depID, field, n.ID)
+			val, err := resolveTemplateFieldCached(graph, resolved, depID, field, n.ID)
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -284,6 +299,19 @@ func substituteTemplates(n *Node, graph *Graph) error {
 //
 // owner is included in error messages so the recovery chain can name
 // which step failed.
+func resolveTemplateFieldCached(graph *Graph, cache map[string]any, depID, field, owner string) (any, error) {
+	key := depID + "\x00" + field
+	if v, ok := cache[key]; ok {
+		return v, nil
+	}
+	v, err := resolveTemplateField(graph, depID, field, owner)
+	if err != nil {
+		return nil, err
+	}
+	cache[key] = v
+	return v, nil
+}
+
 func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error) {
 	dep := graph.Get(depID)
 	if dep == nil {
@@ -296,7 +324,11 @@ func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error)
 		log.Printf("[dag] template on %s: injecting from failed dep %s", owner, depID)
 	}
 	if field == "" {
-		return dep.Result, nil
+		// No path: the whole result. Parse it first, so a step receives the
+		// object its predecessor produced rather than the text of one — a tool
+		// given a string where it expected a map fails on the far side, where
+		// the cause is no longer visible.
+		return parseResultForTemplate(dep.Result), nil
 	}
 	// Resolve the dot-path through the node's typed body — the single field
 	// access primitive. RawTextBody (the default for tools today) parses its
@@ -317,6 +349,26 @@ func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error)
 		return dep.Result, nil
 	}
 	return nil, fmt.Errorf("template on %s: field %q absent in dep %s", owner, field, depID)
+}
+
+/*
+ * parseResultForTemplate returns a node's result as a value.
+ * desc: Parsed when it looks like JSON, the raw string otherwise — so a tool
+ *       that returns prose is injected as prose, and one that returns an object
+ *       is injected as an object.
+ * param: s - the node's result.
+ * return: the value to inject.
+ */
+func parseResultForTemplate(s string) any {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || (trimmed[0] != '{' && trimmed[0] != '[') {
+		return s
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return s
+	}
+	return parsed
 }
 
 // nodeTemplateRe matches embedded ${node.<id>(.path)?} placeholders

@@ -7,7 +7,7 @@ description: Teaches the planner how to conduct multi-phase web research using s
 
 Web research has two valid shapes — use whichever fits:
 
-1. **The wired chain (default for control):** step 0 `web_search`, then a step 1+ `web_fetch` for each result URL you want to read, wired with `${step.0.results.0.url}`, `${step.0.results.1.url}`, … and `depends_on:[0]`. This is the normal multi-step plan — plan one fetch per source you need.
+1. **The wired chain (default for control):** a `web_search` step, then a `web_fetch` step for each result URL you want to read, each one taking its URL from that search and declaring the search in `depends_on`. This is the normal multi-step plan — plan one fetch per source you need.
 2. **`web_research` (convenience):** one node that searches AND reads the top results in one step. Good for a quick single angle. It does not replace the wired chain; it bundles it.
 
 Either way: a URL you fetch MUST come from a search result — never invent one, never stop at snippets.
@@ -26,7 +26,7 @@ Good focus values (specific, covers multiple needs):
 Bad focus values (too narrow, causes duplicate fetches):
 - "pricing" (too narrow — combine with features and customers)
 
-`web_search` (URLs only) wired into `web_fetch` (`${step.0.results.0.url}`) is the precise, controllable chain; `web_research` bundles the same two steps into one node. Pick whichever fits — never paste a URL from memory.
+`web_search` (URLs only) feeding `web_fetch` is the precise, controllable chain; `web_research` bundles the same two steps into one node. Pick whichever fits — never paste a URL from memory.
 
 ### What NOT to do
 - Don't use `memory_store` to save intermediate results — evidence is automatic

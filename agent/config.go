@@ -75,7 +75,18 @@ type ModelConfig struct {
 
 	// ChatTools limits which tools the chat lane may use. Empty means all.
 	ChatTools []string
+
+	// Limits reports a model's published token limits, so a call can size its
+	// reply cap against the model rather than against a constant. Nil switches
+	// the mechanism off and every call keeps the cap it already had; the same
+	// happens per model when the lookup returns zeroes, so a model missing from
+	// the application's catalog is safe rather than broken.
+	Limits ModelLimits
 }
+
+// ModelLimits reports what a model can take in and give back, in tokens. Zero
+// for either means the caller does not know, not that the limit is zero.
+type ModelLimits func(model string) (contextTokens, maxOutputTokens int)
 
 // PathConfig is where the agent reads and writes.
 type PathConfig struct {

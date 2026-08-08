@@ -113,12 +113,14 @@ func (a *Agent) coverageEdge(ctx context.Context, graph *Graph, evidence string)
 		out = "## Coverage — what the evidence can and can't back\n\n" + structural
 		if client, model := a.lightLane(ctx); client != nil {
 			user := fmt.Sprintf("REQUEST + EVIDENCE:\n%s\n\nGATHERING GAPS:\n%s", Text.TruncateEvidence(evidence), gb.String())
-			resp, err := client.Complete(ctx, &llm.ChatRequest{
+			covReq := &llm.ChatRequest{
 				Model:       model,
 				Messages:    []llm.Message{{Role: "system", Content: prompt.CoverageGen}, {Role: "user", Content: user}},
 				Temperature: 0.2,
 				MaxTokens:   700,
-			})
+			}
+			a.capReply(resolvedModel(model, client), covReq)
+			resp, err := client.Complete(ctx, covReq)
 			if err == nil && resp != nil && len(resp.Choices) > 0 && strings.TrimSpace(resp.Choices[0].Message.Content) != "" {
 				out = "## Coverage — what the evidence can and can't back\n" + strings.TrimSpace(resp.Choices[0].Message.Content)
 			}

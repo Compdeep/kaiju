@@ -699,7 +699,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		// with "planner called unexpected tool" and there's no retry for it.
 		ToolChoice:  llm.ForceToolChoice("plan"),
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.cfg.MaxTokens,
+		MaxTokens:   a.planMaxTokens(ctx),
 	})
 
 	traceN := LLMTrace{
@@ -741,6 +741,31 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 
 	choice := resp.Choices[0]
 
+	// The reply ran into its cap and stopped mid-JSON. Providers report this
+	// either as finish_reason "length" — where the tool-call branch below is
+	// skipped and the fragment would be returned to the user as if the planner
+	// had chosen to answer in prose — or as "tool_calls" with truncated
+	// arguments, where the parse retry fires and blames the wrong thing. Neither
+	// tells the model what happened, and both retry under the same cap.
+	if choice.FinishReason == "length" {
+		log.Printf("[dag] executive plan cut off at %d tokens — asking for a shorter plan", a.planMaxTokens(ctx))
+		shorter := append(append([]llm.Message{}, messages...), llm.Message{
+			Role: "user",
+			Content: "Your previous plan was cut off before it finished — it ran past the reply limit. " +
+				"Call plan() again with fewer, larger steps, and shorter parameter values.",
+		})
+		retryResp, retryErr := a.completeHeavy(ctx, &llm.ChatRequest{
+			Messages:    shorter,
+			Tools:       []llm.ToolDef{a.executiveToolDef()},
+			ToolChoice:  llm.ForceToolChoice("plan"),
+			Temperature: a.cfg.Temperature,
+			MaxTokens:   a.planMaxTokens(ctx),
+		})
+		if retryErr == nil && len(retryResp.Choices) > 0 {
+			choice = retryResp.Choices[0]
+		}
+	}
+
 	// Check if the model called the plan tool
 	if choice.FinishReason == "tool_calls" && len(choice.Message.ToolCalls) > 0 {
 		tc := choice.Message.ToolCalls[0]
@@ -767,7 +792,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
-				MaxTokens:   a.cfg.MaxTokens,
+				MaxTokens:   a.planMaxTokens(ctx),
 			})
 			if retryErr != nil {
 				return nil, fmt.Errorf("parse plan() arguments (retry failed): %w", err)
@@ -820,7 +845,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
-				MaxTokens:   a.cfg.MaxTokens,
+				MaxTokens:   a.planMaxTokens(ctx),
 			})
 			if replanErr == nil && len(replanResp.Choices) > 0 && len(replanResp.Choices[0].Message.ToolCalls) > 0 {
 				rtc := replanResp.Choices[0].Message.ToolCalls[0]
@@ -892,7 +917,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
-				MaxTokens:   a.cfg.MaxTokens,
+				MaxTokens:   a.planMaxTokens(ctx),
 			})
 			// A failed re-plan call (LLM error, or no usable steps) leaves `steps`
 			// unchanged; the loop re-validates the same plan next pass and burns a

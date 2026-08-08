@@ -173,6 +173,7 @@ func (a *Agent) completeHeavy(ctx context.Context, req *llm.ChatRequest) (*llm.C
 	if model != "" {
 		req.Model = model
 	}
+	a.capReply(resolvedModel(req.Model, c), req)
 	// Vision: when the resolved heavy model accepts images and this turn carries
 	// uploaded images on the ctx, attach them to the latest user message. Images
 	// ride the ctx so they re-attach on every heavy call this turn (kept visible
@@ -190,6 +191,7 @@ func (a *Agent) completeLight(ctx context.Context, req *llm.ChatRequest) (*llm.C
 	if model != "" {
 		req.Model = model
 	}
+	a.capReply(resolvedModel(req.Model, c), req)
 	return c.Complete(ctx, req)
 }
 
@@ -200,7 +202,9 @@ func (a *Agent) completeLight(ctx context.Context, req *llm.ChatRequest) (*llm.C
 func (a *Agent) completeRoute(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, error) {
 	if a.routeModel != "" {
 		req.Model = a.routeModel
-		return a.clientFor(a.routeProvider).Complete(ctx, req)
+		c := a.clientFor(a.routeProvider)
+		a.capReply(resolvedModel(req.Model, c), req)
+		return c.Complete(ctx, req)
 	}
 	return a.completeLight(ctx, req)
 }
@@ -213,12 +217,14 @@ func (a *Agent) completeRoute(ctx context.Context, req *llm.ChatRequest) (*llm.C
 // Complete. Returns the assistant content and the total tokens used.
 func (a *Agent) OneShot(ctx context.Context, provider, model string, messages []llm.Message, temperature float64, maxTokens int) (string, int, error) {
 	client := a.clientFor(provider)
-	resp, err := client.Complete(ctx, &llm.ChatRequest{
+	oneShot := &llm.ChatRequest{
 		Model:       model,
 		Messages:    messages,
 		Temperature: temperature,
 		MaxTokens:   maxTokens,
-	})
+	}
+	a.capReply(resolvedModel(model, client), oneShot)
+	resp, err := client.Complete(ctx, oneShot)
 	if err != nil {
 		return "", 0, err
 	}

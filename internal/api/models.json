@@ -47,6 +47,12 @@
     { "id": "mistralai/mistral-small-3.2-24b-instruct", "name": "Mistral Small 3.2 24B", "family": "mistral", "params": "24B", "context": "256K", "provider": "openrouter", "thinking": false, "tools": true, "tool_call_ok": true, "verified": false, "vision": false, "chat": false, "roles": ["planner","executor","router"] },
 
     { "id": "sao10k/l3.3-euryale-70b",     "name": "Euryale L3.3 70B", "family": "roleplay", "params": "70B", "context": "131K", "provider": "openrouter", "thinking": false, "tools": false, "tool_call_ok": false, "verified": false, "vision": false, "chat": true, "roles": ["chat"] },
-    { "id": "thedrummer/cydonia-24b-v4.1", "name": "Cydonia 24B",      "family": "roleplay", "params": "24B", "context": "131K", "provider": "openrouter", "thinking": false, "tools": false, "tool_call_ok": false, "verified": false, "vision": false, "chat": true, "roles": ["chat"] }
+    { "id": "thedrummer/cydonia-24b-v4.1", "name": "Cydonia 24B",      "family": "roleplay", "params": "24B", "context": "131K", "provider": "openrouter", "thinking": false, "tools": false, "tool_call_ok": false, "verified": false, "vision": false, "chat": true, "roles": ["chat"] },
+
+    { "id": "DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP", "name": "Fable-Fusion 27B (Heretic)", "family": "unrestricted", "params": "27B", "provider": "selfhosted", "thinking": false, "tools": false, "tool_call_ok": false, "verified": false, "vision": false, "chat": true, "roles": ["chat"] },
+    { "id": "DavidAU/Qwen3.6-27B-Heretic2-Uncensored-Finetune-Thinking",          "name": "Heretic2 27B (thinking)",  "family": "unrestricted", "params": "27B", "provider": "selfhosted", "thinking": true,  "tools": false, "tool_call_ok": false, "verified": false, "vision": false, "chat": true, "roles": ["chat"] },
+    { "id": "prithivMLmods/Gliese-Qwen3.5-9B-Abliterated-Caption",                "name": "Gliese 9B (abliterated)",  "family": "unrestricted", "params": "9B",  "provider": "selfhosted", "thinking": false, "tools": false, "tool_call_ok": false, "verified": false, "vision": false, "chat": true, "roles": ["chat"] },
+    { "id": "King3Djbl/mythos-9b-unhinged",                                       "name": "Mythos 9B (unhinged)",     "family": "unrestricted", "params": "9B",  "provider": "selfhosted", "thinking": false, "tools": false, "tool_call_ok": false, "verified": false, "vision": false, "chat": true, "roles": ["chat"] },
+    { "id": "huihui-ai/Huihui-ThinkingCap-Qwen3.6-27B-abliterated",               "name": "ThinkingCap 27B (abliterated)", "family": "unrestricted", "params": "27B", "provider": "selfhosted", "thinking": true, "tools": false, "tool_call_ok": false, "verified": false, "vision": false, "chat": true, "roles": ["chat"] }
   ]
 }

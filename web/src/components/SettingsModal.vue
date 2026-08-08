@@ -185,6 +185,7 @@
                     <option value="anthropic">Anthropic</option>
                     <option value="openrouter">OpenRouter</option>
                     <option value="ollama">Ollama</option>
+                    <option value="selfhosted">Unrestricted (self-hosted)</option>
                   </select>
                 </div>
                 <div class="form-group">

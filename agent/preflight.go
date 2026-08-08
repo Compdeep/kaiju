@@ -86,6 +86,9 @@ func mentionsLiveInventory(query string) bool {
  * any classifier error.
  */
 func (a *Agent) routeQuery(ctx context.Context, alertID, query string, history []llm.Message) string {
+	if a.classifyStub != nil {
+		return a.classifyStub(query, history).Mode
+	}
 	// Deterministic override — decided in code, NOT by the classifier. A question
 	// about the live plugin/tool inventory ("do you have plugins?", "what tools do
 	// you have") must run the agent so it calls plugin_list: the real answer is in
@@ -192,6 +195,9 @@ func routeContext(history []llm.Message) []llm.Message {
  * investigate path. Any missing/malformed field falls back to a safe default.
  */
 func (a *Agent) classifyInvestigate(ctx context.Context, alertID, query string, history []llm.Message) *PreflightResult {
+	if a.classifyStub != nil {
+		return a.classifyStub(query, history)
+	}
 	manifest := a.buildSkillManifest()
 	log.Printf("[dag] preflight: manifest has %d skill cards", len(a.skillGuidance))
 	// Build dynamic intent list from the registry: enum for schema + descriptions.

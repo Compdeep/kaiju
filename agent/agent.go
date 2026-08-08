@@ -177,10 +177,20 @@ type Agent struct {
 	tokenCategoryFn TokenCategoryFunc // nil = the built-in lane split
 	refine          RefineFunc        // nil = preflight's own answer stands
 	answer          AnswerFunc        // nil = the built-in aggregator writes every answer
-	allowToolFn     AllowToolFunc     // nil = every call the gate allowed proceeds
-	remoteExec      RemoteExecutor    // nil = steps naming a machine run locally
-	targetValid     TargetValidator   // nil = any non-empty target accepted
-	targetLister    TargetLister      // nil = a run concerns only its own Target
+
+	// classifyStub stands in for the two classification calls, so a test can
+	// drive the pipeline around them — the routing, the autonomous override, the
+	// short-circuit, the refinement — without a model.
+	//
+	// Unexported and set only by tests. It is not a way for an application to
+	// replace classification: nothing has needed that, and an extension point
+	// with no user is one more thing to keep working. The pipeline had no tests
+	// at all before this existed.
+	classifyStub func(query string, history []llm.Message) *PreflightResult
+	allowToolFn  AllowToolFunc   // nil = every call the gate allowed proceeds
+	remoteExec   RemoteExecutor  // nil = steps naming a machine run locally
+	targetValid  TargetValidator // nil = any non-empty target accepted
+	targetLister TargetLister    // nil = a run concerns only its own Target
 
 	cfg      Config
 	llm      *llm.Client // reasoning model (executive, aggregator, classifier)

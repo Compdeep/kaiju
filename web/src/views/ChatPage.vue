@@ -3,7 +3,7 @@
     <!-- Col 1: Session sidebar -->
     <div class="sidebar" :style="{ width: sidebarW + 'px' }" :class="{ collapsed: sidebarCollapsed }">
       <router-link to="/chat" class="col-header sidebar-header">
-        <svg viewBox="0 11 100 100" width="26" height="26" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" class="kaiju-logo" :class="{ dark: settings.theme === 'dark' }">
+        <svg viewBox="0 11 100 100" width="38" height="38" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" class="kaiju-logo" :class="{ dark: settings.theme === 'dark' }">
           <g class="k-body">
             <g transform="translate(50,44) rotate(180)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
             <g transform="translate(29,57) rotate(90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
@@ -14,7 +14,6 @@
           <line x1="42" y1="52" x2="42" y2="60" class="k-eye" stroke-width="3"/>
           <line x1="58" y1="52" x2="58" y2="60" class="k-eye" stroke-width="3"/>
         </svg>
-        <span v-if="!sidebarCollapsed" class="wordmark">KAIJU</span>
       </router-link>
       <template v-if="!sidebarCollapsed">
         <button class="sidebar-new" @click="chat.createSession()">
@@ -589,16 +588,12 @@ watch(() => sessions.sessionId, (newId) => {
 /* Base .col-header (height / border / layout) is in global.css so all three
    columns line up. Per-column tweaks live here. */
 
-/* Sidebar header: logo + wordmark */
+/* Sidebar header: logo only */
 .sidebar-header {
   gap: 8px; justify-content: flex-start;
   text-decoration: none; cursor: pointer;
 }
 .sidebar.collapsed .sidebar-header { justify-content: center; padding: 0; }
-.wordmark {
-  font-family: var(--display); font-size: 15px; font-weight: 600;
-  letter-spacing: 0.14em; color: var(--text);
-}
 /* Logo colours — mirror the old AppHeader brand (cyan light / indigo+pink dark) */
 .kaiju-logo { transition: filter 0.2s ease, transform 0.2s ease; flex-shrink: 0; }
 .kaiju-logo .k-body { stroke: #4FC3F7; }

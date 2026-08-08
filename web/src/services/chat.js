@@ -315,7 +315,7 @@ export async function send(text) {
       session_id: sendingSid,
       intent: s.intent,
       // The chat toggle picks the lane. ON ⇒ chat_mode ⇒ the chat lane: a direct
-      // reply from the chat model (e.g. a roleplay tune). OFF ⇒ the agent — but we
+      // reply from the chat model (e.g. an unrestricted tune). OFF ⇒ the agent — but we
       // do NOT force a plan on every message. We pass the execution-mode toggle
       // (default "interactive"), which lets preflight classify each query: chatter
       // gets a quick conversational reply, a real task gets the planner + tools +

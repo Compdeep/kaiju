@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -400,10 +401,25 @@ func resetWorklog(workspace, sessionID string) {
  *         - Errors/failures: 500 chars (need full context for debugging)
  *         - OK/resolved: 200 chars (just confirmation)
  */
+// rotating is held while one run is renaming the service logs. A second run
+// starting at the same moment skips rather than waits: the point of the rotation
+// is that the log files are fresh, and the first run is already making them so.
+// Both doing it renames the same files twice, and the second set of renames
+// either fails or moves a file the first one just moved.
+var rotating atomic.Bool
+
 // rotateServiceLogs rotates all service log files at the start of an investigation.
 // Old logs go to .prev so they're available for reference but don't pollute
 // the current run's diagnosis. Called once per investigation, not per service start.
+//
+// Several runs start at once on a busy node, so this returns immediately when
+// another run is already rotating — see `rotating` above.
 func rotateServiceLogs(workspace string) {
+	if !rotating.CompareAndSwap(false, true) {
+		return
+	}
+	defer rotating.Store(false)
+
 	logsDir := filepath.Join(workspace, ".services")
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {

@@ -14,30 +14,22 @@ func guidanceSkill(name, body string) *skillmd.SkillMD {
 	return skillmd.NewSkillMD(&skillmd.Frontmatter{Name: name, Description: "d"}, body, "", "", time.Time{}, nil)
 }
 
-// Guidance reaches a run through two registries: capability cards, and SKILL.md
-// guidance skills an application registers. Every stage that needs a key's body
-// resolves it through lookupGuidanceBody, which knows about both.
-//
-// The ReAct loop read the card registry directly. A run whose guidance came from
-// a skill got a system prompt that was complete apart from the domain knowledge
-// it was supposed to bring, and nothing said so — which is what an application
-// with only skills, and no cards, would have got for every run.
-func TestReActComposesGuidanceFromBothRegistries(t *testing.T) {
-	skill := guidanceSkill("incident_response", "SKILL BODY")
-	a := &Agent{
-		capabilities:  CapabilityRegistry{"system_operations": {Key: "system_operations", Body: "CARD BODY"}},
-		skillGuidance: map[string]*skillmd.SkillMD{"incident_response": skill},
-	}
+// Guidance reaches a run through one store, and every stage resolves a key
+// through lookupGuidanceBody. The ReAct loop read the store directly and got a
+// system prompt that was complete apart from the domain knowledge it was
+// supposed to bring, with nothing to say so.
+func TestReActComposesTheRunsGuidance(t *testing.T) {
+	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{
+		"system_operations": guidanceSkill("system_operations", "OPS BODY"),
+		"incident_response": guidanceSkill("incident_response", "RESPONSE BODY"),
+	}}
 
 	got := a.composeGuidance([]string{"system_operations", "incident_response"})
 
-	if !strings.Contains(got, "CARD BODY") {
-		t.Error("a capability card's guidance is missing")
+	if !strings.Contains(got, "OPS BODY") || !strings.Contains(got, "RESPONSE BODY") {
+		t.Errorf("guidance is missing from the composition:\n%s", got)
 	}
-	if !strings.Contains(got, "SKILL BODY") {
-		t.Error("a guidance skill's body is missing; an application with only skills composes nothing")
-	}
-	if strings.Index(got, "CARD BODY") > strings.Index(got, "SKILL BODY") {
+	if strings.Index(got, "OPS BODY") > strings.Index(got, "RESPONSE BODY") {
 		t.Error("bodies should follow the order the keys were selected in")
 	}
 }
@@ -46,7 +38,7 @@ func TestReActComposesGuidanceFromBothRegistries(t *testing.T) {
 // run with no guidance at all composes an empty string — so the caller can tell
 // "no guidance" from "guidance that happens to be empty".
 func TestComposeGuidanceIgnoresUnknownKeys(t *testing.T) {
-	a := &Agent{capabilities: CapabilityRegistry{"known": {Key: "known", Body: "BODY"}}}
+	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"known": guidanceSkill("known", "BODY")}}
 
 	if got := a.composeGuidance([]string{"missing"}); got != "" {
 		t.Errorf("an unknown key composed %q", got)

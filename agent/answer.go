@@ -74,7 +74,7 @@ type AnswerRequest struct {
 	// wants a different section, or several, or its own labelling around them,
 	// would have that choice made for it by anything narrower — and the
 	// difference would show up as a quietly reworded prompt, not as a failure.
-	Guidance []CapabilityCard
+	Guidance []SkillCard
 }
 
 // AnswerResult is what the application concluded.
@@ -159,13 +159,13 @@ func (a *Agent) writeAnswer(ctx context.Context, req AnswerRequest) (resOut *Ans
 /*
  * runGuidance collects the doctrine a run selected, key and body together.
  * desc: Resolves each key the one way keys are resolved, through
- *       lookupGuidanceBody, so a card and a SKILL.md guidance skill both
+ *       lookupGuidanceBody, so a card and a SKILL.md skill cards both
  *       arrive and the caller cannot tell which registry either came from.
  *       A key nothing registered contributes nothing.
  * param: graph - the run; nil or no active cards yields nothing.
  * return: one entry per key that resolved, in the order the run selected them.
  */
-func (a *Agent) runGuidance(graph *Graph) []CapabilityCard {
+func (a *Agent) runGuidance(graph *Graph) []SkillCard {
 	if graph == nil {
 		return nil
 	}
@@ -176,7 +176,7 @@ func (a *Agent) runGuidance(graph *Graph) []CapabilityCard {
  * Guidance collects the doctrine registered under the given keys.
  * desc: Exported because a stage written outside this package needs the same
  *       text the built-in stages get, and the two registries it may live in —
- *       capability cards and SKILL.md guidance skills — are both private. A key
+ *       skill cards — are both private. A key
  *       nothing registered contributes nothing.
  *
  *       Whole bodies, unextracted: which section a stage reads is the stage's
@@ -184,14 +184,14 @@ func (a *Agent) runGuidance(graph *Graph) []CapabilityCard {
  * param: keys - the keys to resolve, in the order they should appear.
  * return: one entry per key that resolved.
  */
-func (a *Agent) Guidance(keys []string) []CapabilityCard {
+func (a *Agent) Guidance(keys []string) []SkillCard {
 	if a == nil || len(keys) == 0 {
 		return nil
 	}
-	var out []CapabilityCard
+	var out []SkillCard
 	for _, key := range keys {
 		if body, name := a.lookupGuidanceBody(key); body != "" {
-			out = append(out, CapabilityCard{Key: name, Body: body})
+			out = append(out, SkillCard{Key: name, Body: body})
 		}
 	}
 	return out

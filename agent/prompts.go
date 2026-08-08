@@ -2,12 +2,13 @@ package agent
 
 import (
 	"embed"
-	"fmt"
+	"github.com/Compdeep/kaiju/agent/skillmd"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Compdeep/kaiju/agent/prompt"
 )
@@ -19,60 +20,28 @@ import (
 // prompt package (internal/agent/prompt/prompts.md). Only the capability
 // cards remain embedded here.
 //
-//go:embed prompts/capabilities
-var capabilitiesFS embed.FS
+//go:embed all:prompts/skills
+var builtinSkillsFS embed.FS
 
-// ─── Capability Cards ────────────────────────────────────────────────────────
+// ─── Skill Cards ────────────────────────────────────────────────────────
 
 /*
- * CapabilityCard is a composable prompt snippet selected by the classifier
+ * SkillCard is a composable prompt snippet selected by the classifier
  * based on the user's query.
  * desc: Cards are ADDITIVE — no identity statements. Contains a key for
  *       lookup, a one-line description for the classifier, and full
  *       markdown guidance body.
  */
-type CapabilityCard struct {
+type SkillCard struct {
 	Key         string // e.g. "system_operations"
 	Description string // one-line, shown to classifier
 	Body        string // full markdown guidance
 }
 
 /*
- * CapabilityRegistry maps card keys to their loaded content.
- * desc: Type alias for a map of capability card key to CapabilityCard.
- */
-type CapabilityRegistry map[string]CapabilityCard
-
-/*
- * AllKeys returns all registered card keys.
- * desc: Extracts all keys from the registry map.
- * return: slice of capability card key strings.
- */
-func (r CapabilityRegistry) AllKeys() []string {
-	keys := make([]string, 0, len(r))
-	for k := range r {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
-/*
- * ClassifierManifest builds a compact key:description list for the classifier prompt.
- * desc: Formats each card as "- key: description" for LLM consumption.
- * return: formatted manifest string.
- */
-func (r CapabilityRegistry) ClassifierManifest() string {
-	var sb strings.Builder
-	for _, card := range r {
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", card.Key, card.Description))
-	}
-	return sb.String()
-}
-
-/*
  * GuidanceSection renders the doctrine a run selected, for one stage.
- * desc: Resolves the keys through Guidance, so a capability card and a SKILL.md
- *       guidance skill both arrive, then takes two sections from each body:
+ * desc: Resolves the keys through Guidance, so a skill card and a SKILL.md
+ *       skill cards both arrive, then takes two sections from each body:
  *       "## Core Principles", which every stage gets, and the heading this
  *       stage reads. A card supplying neither contributes nothing.
  *
@@ -103,7 +72,7 @@ func (a *Agent) GuidanceSection(keys []string, heading, label string) string {
  * param: label - what to call it in each entry's title.
  * return: the section to append, or "" when no card supplies either heading.
  */
-func ComposeGuidance(cards []CapabilityCard, heading, label string) string {
+func ComposeGuidance(cards []SkillCard, heading, label string) string {
 	var sections []string
 	for _, card := range cards {
 		core := Text.ExtractSection(card.Body, "## Core Principles")
@@ -125,105 +94,37 @@ func ComposeGuidance(cards []CapabilityCard, heading, label string) string {
 }
 
 /*
- * loadCapabilities loads all capability cards from embedded FS, then
- * overrides with any found in the data directory.
- * desc: First reads cards compiled into the binary, then overlays any
- *       user-provided cards from the data directory's capabilities folder.
- * param: dataDir - the data directory path.
- * return: populated CapabilityRegistry.
+ * loadBuiltinSkills parses the skill cards compiled into the binary.
+ * desc: These are the baseline: an installation with no data directory and no
+ *       SKILL.md files of its own still has guidance for the ordinary kinds of
+ *       request. Anything loaded from disk afterwards overrides one of the same
+ *       name.
+ * return: the cards, by key.
  */
-func loadCapabilities(dataDir string) CapabilityRegistry {
-	reg := make(CapabilityRegistry)
-
-	// Load embedded cards
-	entries, err := fs.ReadDir(capabilitiesFS, "prompts/capabilities")
+func loadBuiltinSkills() map[string]*skillmd.SkillMD {
+	out := make(map[string]*skillmd.SkillMD)
+	entries, err := fs.ReadDir(builtinSkillsFS, "prompts/skills")
 	if err != nil {
-		log.Printf("[agent] no embedded capability cards: %v", err)
-		return reg
+		log.Printf("[agent] no built-in skill cards: %v", err)
+		return out
 	}
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+		if !entry.IsDir() {
 			continue
 		}
-		data, err := capabilitiesFS.ReadFile("prompts/capabilities/" + entry.Name())
+		path := "prompts/skills/" + entry.Name() + "/SKILL.md"
+		data, err := builtinSkillsFS.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		card, err := parseCapabilityCard(string(data))
+		fm, body, err := skillmd.Parse(data)
 		if err != nil {
-			log.Printf("[agent] skip capability %s: %v", entry.Name(), err)
+			log.Printf("[agent] skip built-in skill card %s: %v", path, err)
 			continue
 		}
-		reg[card.Key] = card
+		out[fm.Name] = skillmd.NewSkillMD(fm, body, "", path, time.Time{}, nil)
 	}
-
-	// Override with data directory cards
-	capDir := filepath.Join(dataDir, "capabilities")
-	dirEntries, err := os.ReadDir(capDir)
-	if err == nil {
-		for _, entry := range dirEntries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-				continue
-			}
-			data, err := os.ReadFile(filepath.Join(capDir, entry.Name()))
-			if err != nil {
-				continue
-			}
-			card, err := parseCapabilityCard(string(data))
-			if err != nil {
-				log.Printf("[agent] skip capability override %s: %v", entry.Name(), err)
-				continue
-			}
-			reg[card.Key] = card
-			log.Printf("[agent] capability override: %s (from %s)", card.Key, capDir)
-		}
-	}
-
-	if len(reg) > 0 {
-		log.Printf("[agent] loaded %d capability cards", len(reg))
-	}
-
-	return reg
-}
-
-/*
- * parseCapabilityCard extracts frontmatter (key, description) and body from a markdown card.
- * desc: Expects YAML-style frontmatter delimited by "---" lines, containing
- *       at minimum a "key:" field. The body is everything after the closing delimiter.
- * param: raw - the raw markdown card content.
- * return: parsed CapabilityCard, or error if frontmatter is missing/invalid.
- */
-func parseCapabilityCard(raw string) (CapabilityCard, error) {
-	raw = strings.TrimSpace(raw)
-	if !strings.HasPrefix(raw, "---") {
-		return CapabilityCard{}, fmt.Errorf("missing frontmatter delimiter")
-	}
-
-	// Find closing ---
-	rest := raw[3:]
-	closeIdx := strings.Index(rest, "\n---")
-	if closeIdx < 0 {
-		return CapabilityCard{}, fmt.Errorf("missing closing frontmatter delimiter")
-	}
-
-	frontmatter := rest[:closeIdx]
-	body := strings.TrimSpace(rest[closeIdx+4:])
-
-	var key, desc string
-	for _, line := range strings.Split(frontmatter, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "key:") {
-			key = strings.TrimSpace(strings.TrimPrefix(line, "key:"))
-		} else if strings.HasPrefix(line, "description:") {
-			desc = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
-		}
-	}
-
-	if key == "" {
-		return CapabilityCard{}, fmt.Errorf("missing key in frontmatter")
-	}
-
-	return CapabilityCard{Key: key, Description: desc, Body: body}, nil
+	return out
 }
 
 /*

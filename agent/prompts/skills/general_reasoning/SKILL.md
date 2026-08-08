@@ -1,5 +1,5 @@
 ---
-key: general_reasoning
+name: general_reasoning
 description: General analysis, conversation, questions that do not map to a specific domain
 ---
 

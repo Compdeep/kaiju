@@ -135,7 +135,7 @@ func TestTheStructuredResultReachesTheCaller(t *testing.T) {
 func TestTheAnswerIsHandedThePromptAndTheDoctrine(t *testing.T) {
 	var seen AnswerRequest
 	a := &Agent{
-		capabilities: CapabilityRegistry{"triage": {Key: "triage", Body: "## Core Principles\nsay what you cannot see\n\n## Aggregator Guidance\nrate it honestly"}},
+		skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", "## Core Principles\nsay what you cannot see\n\n## Aggregator Guidance\nrate it honestly")},
 		answer: func(_ context.Context, req AnswerRequest) (*AnswerResult, error) {
 			seen = req
 			return &AnswerResult{Text: "done"}, nil
@@ -166,13 +166,12 @@ func TestTheAnswerIsHandedThePromptAndTheDoctrine(t *testing.T) {
 	}
 }
 
-// Doctrine registered as a SKILL.md guidance skill arrives the same way a
-// capability card does. An application registering only skills would otherwise
+// Doctrine registered as a SKILL.md skill cards arrives the same way a
+// skill card does. An application registering only skills would otherwise
 // be handed nothing, with no sign that anything was missing.
 func TestTheDoctrineComesFromBothRegistries(t *testing.T) {
 	a := &Agent{
-		capabilities:  CapabilityRegistry{"triage": {Key: "triage", Body: "CARD"}},
-		skillGuidance: map[string]*skillmd.SkillMD{"response": guidanceSkill("response", "SKILL")},
+		skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", "CARD"), "response": guidanceSkill("response", "SKILL")},
 	}
 	g := NewGraph()
 	g.ActiveCards = []string{"triage", "response", "never_registered"}
@@ -235,8 +234,7 @@ func TestTheRecordFallsBackToTheAnswer(t *testing.T) {
 // was supposed to have.
 func TestGuidanceIsReachableFromOutside(t *testing.T) {
 	a := &Agent{
-		capabilities:  CapabilityRegistry{"triage": {Key: "triage", Body: "CARD"}},
-		skillGuidance: map[string]*skillmd.SkillMD{"response": guidanceSkill("response", "SKILL")},
+		skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", "CARD"), "response": guidanceSkill("response", "SKILL")},
 	}
 
 	got := a.Guidance([]string{"response", "triage", "never_registered"})

@@ -223,7 +223,7 @@ type executiveOutput struct {
 /*
  * executiveSystemPrompt returns the system prompt for the initial planner LLM call.
  * desc: Builds the complete planner system prompt including role description,
- *       planning guidance from capability cards and skills, tool definitions
+ *       planning guidance from skill card and skills, tool definitions
  *       with parameter and output schemas, IGX section, budget limits, and
  *       expanded planner rules. Only the provided tool names are included.
  * param: relevant - slice of tool names visible to the planner.
@@ -260,16 +260,20 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	// not substitute file_list/file_read.
 	var guidance []string
 	plannerHeadings := []string{"## Planning Guidance", "## RULES"}
-	activeSet := make(map[string]bool, len(cards))
-	for _, k := range cards {
-		activeSet[k] = true
+	// The keys this run selected, or every key when it selected none — the
+	// planner has always fallen back to all of them rather than to nothing.
+	//
+	// Resolved through lookupGuidanceBody, so a skill card counts as well
+	// as a SKILL.md. This loop read one of the two stores, which meant every
+	// "## Planning Guidance" section in a skill card was written for a
+	// planner that never saw it. Iterating the keys rather than a map also
+	// fixes the order, which varied between runs.
+	keys := cards
+	if len(keys) == 0 {
+		keys = a.guidanceKeys()
 	}
-	gated := len(activeSet) > 0
-	for name, gs := range a.skillGuidance {
-		if gated && !activeSet[name] {
-			continue
-		}
-		body := gs.Body()
+	for _, key := range keys {
+		body, name := a.lookupGuidanceBody(key)
 		if body == "" {
 			continue
 		}
@@ -628,7 +632,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	relevant := a.relevantTools(ctx, trigger)
 	log.Printf("[dag] executive (native) sees %d tools: %v", len(relevant), relevant)
 	if len(a.skillGuidance) > 0 {
-		log.Printf("[dag] executive (native) has %d guidance skills loaded", len(a.skillGuidance))
+		log.Printf("[dag] executive (native) has %d skill cards loaded", len(a.skillGuidance))
 	}
 
 	dagMode := a.cfg.DAGMode

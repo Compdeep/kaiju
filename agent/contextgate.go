@@ -81,6 +81,15 @@ type ContextRequest struct {
 	QuerySources  []SourceSpec // sources the curator reads to build the summary
 	ReturnSources []SourceSpec // sources returned verbatim, ordered by priority (first = most important)
 	MaxBudget     int          // total char budget. 0 = use default (32000).
+
+	// OmitCurrentTime leaves out the "Current time:" line the gate otherwise
+	// puts at the top of the first source.
+	//
+	// That line is there so a model reading gathered data can tell how old it
+	// is. A request whose sources hold no timestamps has nothing to compare
+	// against, and a caller that already made one gate call would otherwise
+	// carry the line twice.
+	OmitCurrentTime bool
 }
 
 // SourceSpec selects one source by name with optional parameters. The Params
@@ -417,11 +426,13 @@ func (g *ContextGate) Get(ctx context.Context, req ContextRequest) (*ContextResp
 
 	// Inject "Current time:" into the first non-empty source so every LLM
 	// that receives gate context knows "now" for timestamp comparison.
-	tsLine := "Current time: " + time.Now().UTC().Format(llmTimeFormat) + "\n\n"
-	for _, spec := range req.ReturnSources {
-		if v := resp.Sources[spec.Name]; v != "" {
-			resp.Sources[spec.Name] = tsLine + v
-			break
+	if !req.OmitCurrentTime {
+		tsLine := "Current time: " + time.Now().UTC().Format(llmTimeFormat) + "\n\n"
+		for _, spec := range req.ReturnSources {
+			if v := resp.Sources[spec.Name]; v != "" {
+				resp.Sources[spec.Name] = tsLine + v
+				break
+			}
 		}
 	}
 
@@ -713,6 +724,24 @@ func History(turns int) SourceSpec {
 // to topics like "Coder", "Architect", "Debug", "Aggregator", "Planning".
 func SkillGuidance(topics []string) SourceSpec {
 	return SourceSpec{Name: SourceSkillGuidance, Params: map[string]any{"topics": topics}}
+}
+
+/*
+ * LabelledGuidance asks for one section, laid out the way the stages that write
+ * an answer expect it: an authoritative preamble, each entry titled with its key
+ * and the label, and "## Core Principles" included alongside the section.
+ * desc: The plain SkillGuidance layout is terser and omits the principles. Both
+ *       exist because both are in use and the wording of a prompt is not
+ *       something to change while moving where it comes from.
+ * param: heading - the section to take, such as "## Aggregator Guidance".
+ * param: label - what to call it in each entry's title.
+ * return: the source to ask the gate for.
+ */
+func LabelledGuidance(heading, label string) SourceSpec {
+	return SourceSpec{Name: SourceSkillGuidance, Params: map[string]any{
+		"topics": []string{heading},
+		"label":  label,
+	}}
 }
 
 // WorkspaceDeep returns a spec for the deep workspace scan: file tree plus
@@ -1186,6 +1215,17 @@ func (s *skillGuidanceSource) Load(g *Graph, t *Trigger, a *Agent, params map[st
 	if a == nil || g == nil || len(g.ActiveCards) == 0 {
 		return "", nil
 	}
+	// A label asks for the answer-writing layout, which ComposeGuidance owns —
+	// so there is one place that decides what a guidance block looks like.
+	if label, _ := params["label"].(string); label != "" {
+		topics := paramStringSlice(params, "topics")
+		heading := ""
+		if len(topics) > 0 {
+			heading = topics[0]
+		}
+		return ComposeGuidance(a.Guidance(g.ActiveCards), heading, label), nil
+	}
+
 	topics := paramStringSlice(params, "topics")
 	if len(topics) == 0 {
 		// Default: just Debug Guidance (the most useful for runtime)

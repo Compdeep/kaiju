@@ -18,7 +18,7 @@ const maxToolResultLen = 4096
 /*
  * systemPrompt returns the base system prompt for the ReAct loop.
  * desc: Composes the soul prompt with role description, ReAct role prompt,
- *       capability card context, and fleet section. Active skill cards are
+ *       skill card context, and fleet section. Active skill cards are
  *       passed in per-run (the caller owns them), not read off the Agent.
  * param: cards - active skill card keys for this run (may be nil).
  * return: the fully composed system prompt string.

@@ -21,14 +21,21 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	userPrompt := a.assembleAggregatorPrompt(trigger, graph, gateCtx)
 
 	intentStr := intent.String()
-	// Per-investigation cards live on the graph.
-	var cards []string
-	if graph != nil {
-		cards = graph.ActiveCards
-	}
+	// The doctrine this run selected, asked for the way every other stage asks
+	// for it — through the gate, which resolves it, lays it out and holds it to
+	// a character budget. A separate request from the evidence above, so
+	// guidance and evidence do not compete for one budget.
 	aggGuidance := ""
-	if len(cards) > 0 {
-		aggGuidance = a.GuidanceSection(cards, "## Aggregator Guidance", "aggregator doctrine")
+	if graph != nil && len(graph.ActiveCards) > 0 {
+		if gr, err := graph.Context.Get(ctx, ContextRequest{
+			ReturnSources:   Sources(LabelledGuidance("## Aggregator Guidance", "aggregator doctrine")),
+			MaxBudget:       6000,
+			OmitCurrentTime: true, // doctrine has no timestamps, and the evidence request above carries the line
+		}); err == nil {
+			aggGuidance = gr.Sources[SourceSkillGuidance]
+		} else {
+			log.Printf("[dag] aggregator guidance unavailable: %v", err)
+		}
 	}
 	rolePrompt := fmt.Sprintf(prompt.Aggregator, aggGuidance, a.FormatRule(), intentStr)
 

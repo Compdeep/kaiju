@@ -128,7 +128,7 @@ type RoutingConfig struct {
 	EmbedTopK         int
 	EmbedThreshold    float64
 	AlwaysInclude     []string
-	ClassifierEnabled bool // enable per-query capability card classification (extra LLM call)
+	ClassifierEnabled bool // enable per-query skill card classification (extra LLM call)
 
 	CustomSystemPrompt string
 	BootMDPath         string

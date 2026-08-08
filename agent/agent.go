@@ -226,8 +226,7 @@ type Agent struct {
 	// own kinds of work for the planner. Nil falls back to the built-in
 	// rendering, so this is additive for every existing caller.
 	describeTrigger func(Trigger) string
-	capabilities    CapabilityRegistry // composable prompt cards
-	intentRegistry  *IntentRegistry    // DB-backed intent registry; loaded at startup
+	intentRegistry  *IntentRegistry // DB-backed intent registry; loaded at startup
 	// Per-investigation state (active skill cards, preflight result) lives on the
 	// Graph (Graph.ActiveCards / Graph.Preflight), not on the Agent — concurrent
 	// investigations each carry their own Graph, so nothing here is shared or raced.
@@ -246,7 +245,7 @@ type Agent struct {
 /*
  * New creates an Agent with the given configuration.
  * desc: Initializes all subsystems: LLM client, tool registry, IGX gate,
- *       memory, prompts, and capability cards. Returns the configured agent.
+ *       memory, prompts, and skill card. Returns the configured agent.
  * param: cfg - agent configuration.
  * return: pointer to the new Agent, or error.
  */
@@ -295,7 +294,7 @@ func New(cfg Config) (*Agent, error) {
 
 	// Load externalized prompts
 	soul := loadSoulPrompt(cfg.DataDir)
-	caps := loadCapabilities(cfg.DataDir)
+	builtinSkills := loadBuiltinSkills()
 
 	// Executor defaults to same client if not configured separately
 	executorClient := client
@@ -336,9 +335,8 @@ func New(cfg Config) (*Agent, error) {
 		memory:            mem,
 		triggers:          make(chan Trigger, 16),
 		dagSubs:           make(map[int]chan DAGEvent),
-		skillGuidance:     make(map[string]*skillmd.SkillMD),
+		skillGuidance:     builtinSkills,
 		soulPrompt:        soul,
-		capabilities:      caps,
 		intentRegistry:    NewIntentRegistry(),
 	}
 

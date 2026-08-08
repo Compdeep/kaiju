@@ -1,5 +1,5 @@
 ---
-key: self_awareness
+name: self_awareness
 description: Questions about agent capabilities, available tools, system features, and how to use the agent
 ---
 

@@ -1,5 +1,5 @@
 ---
-key: system_operations
+name: system_operations
 description: Process management, command execution, system administration tasks
 ---
 

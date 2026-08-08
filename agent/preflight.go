@@ -193,7 +193,7 @@ func routeContext(history []llm.Message) []llm.Message {
  */
 func (a *Agent) classifyInvestigate(ctx context.Context, alertID, query string, history []llm.Message) *PreflightResult {
 	manifest := a.buildSkillManifest()
-	log.Printf("[dag] preflight: manifest has %d capabilities + %d guidance skills", len(a.capabilities), len(a.skillGuidance))
+	log.Printf("[dag] preflight: manifest has %d skill cards", len(a.skillGuidance))
 	// Build dynamic intent list from the registry: enum for schema + descriptions.
 	intentNames := a.intentRegistry.AllowedNames(-1)
 	intentEnum := `"` + strings.Join(intentNames, `" | "`) + `"`
@@ -272,26 +272,21 @@ func (a *Agent) classifyInvestigate(ctx context.Context, alertID, query string, 
 
 /*
  * buildSkillManifest builds the "key: description" listing shown to the
- * preflight LLM so it can pick relevant skills. Unions capability cards
+ * preflight LLM so it can pick relevant skills. Unions skill card
  * and guidance-only SkillMD entries.
  * return: formatted manifest string, or a placeholder if neither registry
  *         has content.
  */
 func (a *Agent) buildSkillManifest() string {
-	if len(a.capabilities) == 0 && len(a.skillGuidance) == 0 {
+	if len(a.skillGuidance) == 0 {
 		return "(no skills available)"
 	}
+	// Sorted, so the list the model chooses from reads the same way twice.
 	var sb strings.Builder
-	seen := make(map[string]bool)
-	for _, card := range a.capabilities {
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", card.Key, card.Description))
-		seen[card.Key] = true
-	}
-	for name, s := range a.skillGuidance {
-		if seen[name] {
-			continue
+	for _, key := range a.guidanceKeys() {
+		if s, ok := a.skillGuidance[key]; ok {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", key, s.Description()))
 		}
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", name, s.Description()))
 	}
 	return sb.String()
 }
@@ -322,9 +317,7 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 		if seen[key] {
 			continue // duplicate — the model listed it twice
 		}
-		_, isCap := a.capabilities[key]
-		_, isGuide := a.skillGuidance[key]
-		if !isCap && !isGuide {
+		if _, ok := a.skillGuidance[key]; !ok {
 			log.Printf("[dag] preflight: unknown skill %q, dropping", key)
 			continue
 		}

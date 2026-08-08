@@ -1,5 +1,5 @@
 ---
-key: data_retrieval
+name: data_retrieval
 description: Telemetry queries, log analysis, system state retrieval, and data gathering
 ---
 

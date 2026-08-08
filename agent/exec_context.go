@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/gates"
@@ -47,7 +48,7 @@ type ContextualExecutor interface {
  * resolveSkillCards pulls ## Architect Guidance and ## Coder Guidance
  * sections from every classifier-active card/skill that has them.
  * desc: Iterates the given card keys and looks each up in both the capability
- *       card registry and the guidance skill registry. Extracts any
+ *       card registry and the skill cards registry. Extracts any
  *       "## Architect Guidance" and "## Coder Guidance" sections, prefixes
  *       each with "### <name>" so multiple sources compose cleanly, and
  *       returns both the concatenated text (for prompt injection) and the
@@ -103,16 +104,13 @@ func (a *Agent) resolveComputeSkillCards(cards []string) (map[string]string, []s
 
 /*
  * lookupGuidanceBody resolves a classifier key against both the capability
- * card registry and the guidance skill registry.
+ * card registry and the skill cards registry.
  * desc: Returns the markdown body and display name for the key. Capability
  *       cards take precedence if both exist.
  * param: key - the classifier-returned key.
  * return: body markdown and display name, or empty strings if not found.
  */
 func (a *Agent) lookupGuidanceBody(key string) (string, string) {
-	if card, ok := a.capabilities[key]; ok {
-		return card.Body, card.Key
-	}
 	if s, ok := a.skillGuidance[key]; ok {
 		return s.Body(), s.Name()
 	}
@@ -139,4 +137,22 @@ func (a *Agent) composeGuidance(keys []string) string {
 		}
 	}
 	return sb.String()
+}
+
+/*
+ * guidanceKeys returns every key that resolves to guidance, from either store.
+ * desc: Sorted, so a prompt built from all of them reads the same way twice.
+ *       Used when a run selected nothing and every piece of guidance applies.
+ * return: the keys.
+ */
+func (a *Agent) guidanceKeys() []string {
+	if a == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(a.skillGuidance))
+	for k := range a.skillGuidance {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

@@ -148,7 +148,7 @@ type Node struct {
 	OperatorMessage string
 	Source          string       // tool source: "builtin", "skillmd", "custom"
 	Actions         []NodeAction // side-effects from tool execution
-	Skills          []string     // guidance skill names whose sections shaped this node's prompts (compute only)
+	Skills          []string     // skill cards names whose sections shaped this node's prompts (compute only)
 	StartedAt       time.Time
 	EndedAt         time.Time
 	TokensIn        int // prompt tokens consumed by this node's LLM call
@@ -230,7 +230,7 @@ type NodeInfo struct {
 	ErrType    string       `json:"err_type,omitempty"`    // "gate", "clearance", "timeout", "exec"
 	Source     string       `json:"source,omitempty"`      // "builtin", "skillmd", "custom"
 	Actions    []NodeAction `json:"actions,omitempty"`     // side-effects: panel_show, notify, etc.
-	Skills     []string     `json:"skills,omitempty"`      // guidance skills whose sections shaped this node's prompts
+	Skills     []string     `json:"skills,omitempty"`      // skill cards whose sections shaped this node's prompts
 	TokensIn   int          `json:"tokens_in,omitempty"`   // prompt tokens
 	TokensOut  int          `json:"tokens_out,omitempty"`  // completion tokens
 	StartedAt  string       `json:"started_at,omitempty"`  // "Apr 13 11:30:05"

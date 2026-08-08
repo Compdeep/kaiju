@@ -89,11 +89,11 @@ func (r CapabilityRegistry) ClassifierManifest() string {
  *         it tells the model doctrine applies when none does.
  */
 func (a *Agent) GuidanceSection(keys []string, heading, label string) string {
-	return BuildGuidance(a.Guidance(keys), heading, label)
+	return ComposeGuidance(a.Guidance(keys), heading, label)
 }
 
 /*
- * BuildGuidance renders doctrine already resolved into cards.
+ * ComposeGuidance renders doctrine already resolved into cards.
  * desc: The assembling half of GuidanceSection, separate because a stage handed
  *       its cards — an answer written by the application, which receives them on
  *       AnswerRequest.Guidance — should render those rather than look them up a
@@ -103,7 +103,7 @@ func (a *Agent) GuidanceSection(keys []string, heading, label string) string {
  * param: label - what to call it in each entry's title.
  * return: the section to append, or "" when no card supplies either heading.
  */
-func BuildGuidance(cards []CapabilityCard, heading, label string) string {
+func ComposeGuidance(cards []CapabilityCard, heading, label string) string {
 	var sections []string
 	for _, card := range cards {
 		core := Text.ExtractSection(card.Body, "## Core Principles")

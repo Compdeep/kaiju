@@ -185,14 +185,18 @@
                     <option value="anthropic">Anthropic</option>
                     <option value="openrouter">OpenRouter</option>
                     <option value="ollama">Ollama</option>
-                    <option value="selfhosted">Unrestricted (self-hosted)</option>
                   </select>
                 </div>
                 <div class="form-group">
                   <label>model</label>
-                  <select v-model="cfg.chat.model" @change="patchConfig">
+                  <select v-model="cfg.chat.model" @change="onChatModelChange">
                     <option value="">same as reasoning</option>
-                    <option v-for="m in chatModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
+                    <optgroup v-if="unrestrictedModels.length" label="Chat / Unrestricted">
+                      <option v-for="m in unrestrictedModels" :key="'u-' + m.id" :value="m.id">{{ modelLabel(m) }}</option>
+                    </optgroup>
+                    <optgroup :label="(chatProvider || 'openrouter') + ' models'">
+                      <option v-for="m in chatModels" :key="m.id" :value="m.id">{{ modelLabel(m) }}</option>
+                    </optgroup>
                   </select>
                 </div>
               </div>
@@ -377,7 +381,7 @@ function onVisionProviderChange() {
 const chatModels = computed(() => {
   const p = chatProvider.value || cfg.value.llm.provider
   return allModels.value
-    .filter(m => m.provider === p)
+    .filter(m => m.provider === p && m.family !== 'unrestricted')
     .sort((a, b) => (b.chat ? 1 : 0) - (a.chat ? 1 : 0))
 })
 
@@ -388,6 +392,30 @@ const chatModels = computed(() => {
 function onChatProviderChange() {
   cfg.value.chat.provider = chatProvider.value
   cfg.value.chat.model = chatProvider.value && chatModels.value.length ? chatModels.value[0].id : ''
+  patchConfig()
+}
+
+/**
+ * desc: Every WORKING (available) unrestricted chat model, across all providers —
+ * surfaced as one group in the Direct (chat) lane picker so switching to Direct puts
+ * them a click away with no provider-hunting. Biggest first.
+ * @returns {Array<Object>}
+ */
+const unrestrictedModels = computed(() =>
+  allModels.value
+    .filter(m => m.family === 'unrestricted' && m.available !== false)
+    .sort((a, b) => (parseInt(b.params) || 0) - (parseInt(a.params) || 0))
+)
+
+/**
+ * desc: Pick a chat-lane model AND set its provider from the model itself, so a
+ * chat model chosen from the grouped list routes to the right provider.
+ * @returns {void}
+ */
+function onChatModelChange() {
+  const m = allModels.value.find(x => x.id === cfg.value.chat.model)
+  chatProvider.value = m ? m.provider : ''
+  cfg.value.chat.provider = m ? m.provider : ''
   patchConfig()
 }
 

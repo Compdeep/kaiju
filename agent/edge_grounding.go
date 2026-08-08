@@ -194,12 +194,14 @@ func (a *Agent) groundingEdge(ctx context.Context, graph *Graph, request string)
 	}
 	user := fmt.Sprintf("REQUEST:\n%s\n\nUNFETCHED GROUNDED URLS (found by a search, not yet read):\n%s\n\nALL GROUNDED URLS:\n%s\n\nGATHERING GAPS:\n%s",
 		Text.TruncateEvidence(request), unfetchedList, groundedList, gapb.String())
-	resp, err := client.Complete(ctx, &llm.ChatRequest{
+	grdReq := &llm.ChatRequest{
 		Model:       model,
 		Messages:    []llm.Message{{Role: "system", Content: prompt.GroundingGen}, {Role: "user", Content: user}},
 		Temperature: 0.2,
 		MaxTokens:   600,
-	})
+	}
+	a.capReply(resolvedModel(model, client), grdReq)
+	resp, err := client.Complete(ctx, grdReq)
 	if err != nil || resp == nil || len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
 		return "## Grounding — read what you already found\n\n" + structural // fail open
 	}

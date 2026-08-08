@@ -692,7 +692,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	coderSystem := buildComputeCoderPrompt(coderGuidance)
 
 	startedCode := time.Now()
-	resp, err := client.Complete(ctx, &llm.ChatRequest{
+	coderReq := &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: coderSystem},
 			{Role: "user", Content: userPrompt},
@@ -701,7 +701,9 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		ToolChoice:  "required",
 		Temperature: 0.2,
 		MaxTokens:   16384,
-	})
+	}
+	a.capReply(resolvedModel(coderReq.Model, client), coderReq)
+	resp, err := client.Complete(ctx, coderReq)
 
 	traceCode := LLMTrace{
 		AlertID:  graphAlertID(graph),

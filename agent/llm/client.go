@@ -216,6 +216,16 @@ func NewClientWithProvider(provider, endpoint, apiKey, model string) *Client {
 	}
 }
 
+// Model reports the model this client sends to when a request names none.
+// Complete fills req.Model from it, so a caller that needs to know the model
+// before the call — to size the reply against it, for instance — has to ask.
+func (c *Client) Model() string {
+	if c == nil {
+		return ""
+	}
+	return c.model
+}
+
 // chatURL returns the chat completions endpoint, handling providers that
 // already include /v1 in their base URL (like OpenRouter).
 func (c *Client) chatURL() string {

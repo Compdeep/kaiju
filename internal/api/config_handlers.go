@@ -281,6 +281,12 @@ type modelInfo struct {
 	Version  string `json:"version,omitempty"` // e.g. "2507", "3.3"
 	Provider string `json:"provider"`
 	Context  string `json:"context,omitempty"`
+	// ContextTokens and MaxOutputTokens are the same limits the provider
+	// publishes, in tokens, for arithmetic — Context above is a label for the
+	// picker and cannot be computed with. Zero means the catalog does not know,
+	// and a caller must keep whatever cap it would otherwise have used.
+	ContextTokens   int `json:"context_tokens,omitempty"`
+	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
 	// Thinking marks a reasoning model that emits hidden reasoning tokens before
 	// its output. Fine for open-ended generation (answer/chat), but it starves on
 	// small forced tool calls — see ToolCallOK.
@@ -356,4 +362,22 @@ func loadModels() []modelInfo {
 		return nil
 	}
 	return cat.Models
+}
+
+/*
+ * ModelLimits reports what a model can take in and give back, in tokens.
+ * desc: Reads the two numeric fields of the catalog entry. Both are zero when
+ *       the id is not in the catalog, or when the catalog carries no numbers
+ *       for it — the caller then keeps the cap it would otherwise have used.
+ *       Suitable as agent.Config.ModelLimits.
+ * param: id - the model id as configured for a lane, e.g. "openai/gpt-4.1".
+ * return: the context window and the largest reply the provider will produce.
+ */
+func ModelLimits(id string) (contextTokens, maxOutputTokens int) {
+	for _, m := range allModels {
+		if m.ID == id {
+			return m.ContextTokens, m.MaxOutputTokens
+		}
+	}
+	return 0, 0
 }

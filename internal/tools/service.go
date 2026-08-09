@@ -370,7 +370,7 @@ func (s *Service) start(params map[string]any) (agenttools.ToolMessage, error) {
 	name, _ := params["name"].(string)
 	command, _ := params["command"].(string)
 	workdir, _ := params["workdir"].(string)
-	port, _ := params["port"].(float64) // JSON numbers are float64
+	port, _ := agenttools.ParamNum(params, "port")
 	autoRestart, _ := params["auto_restart"].(bool)
 	if name == "" {
 		return agenttools.ToolMessage{}, fmt.Errorf("start: name is required")
@@ -615,7 +615,7 @@ func (s *Service) logs(params map[string]any) (agenttools.ToolMessage, error) {
 		return agenttools.ToolMessage{}, fmt.Errorf("logs: name is required")
 	}
 	linesNum := 50
-	if v, ok := params["lines"].(float64); ok {
+	if v, ok := agenttools.ParamNum(params, "lines"); ok {
 		linesNum = int(v)
 	}
 	if v, ok := params["lines"].(int); ok {

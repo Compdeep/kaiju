@@ -117,7 +117,7 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (tools
 	}
 
 	maxLines := 500
-	if ml, ok := params["max_lines"].(float64); ok && ml > 0 {
+	if ml, ok := tools.ParamNum(params, "max_lines"); ok && ml > 0 {
 		maxLines = int(ml)
 	}
 

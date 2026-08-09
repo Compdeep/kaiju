@@ -115,7 +115,7 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (ag
 	}
 
 	maxResults := 5
-	if mr, ok := params["max_results"].(float64); ok && mr > 0 {
+	if mr, ok := agenttools.ParamNum(params, "max_results"); ok && mr > 0 {
 		maxResults = int(mr)
 		if maxResults > 10 {
 			maxResults = 10
@@ -125,7 +125,7 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (ag
 	// recency_days: an optional "recent results only" filter the planner can set
 	// for time-sensitive research. Mapped to each provider's coarse date bucket.
 	dateFilter := ""
-	if rd, ok := params["recency_days"].(float64); ok {
+	if rd, ok := agenttools.ParamNum(params, "recency_days"); ok {
 		dateFilter = daysToBucket(int(rd))
 	}
 

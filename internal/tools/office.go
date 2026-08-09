@@ -80,7 +80,7 @@ func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (
 		return agenttools.ToolMessage{}, err
 	}
 	maxChars := officeMaxChars
-	if v, ok := params["max_chars"].(float64); ok && int(v) > 0 {
+	if v, ok := agenttools.ParamNum(params, "max_chars"); ok && int(v) > 0 {
 		maxChars = int(v)
 	}
 

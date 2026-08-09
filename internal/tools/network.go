@@ -103,7 +103,7 @@ func (n *NetInfo) ExecuteTyped(ctx context.Context, params map[string]any) (agen
 	case "connectivity":
 		host, _ := params["host"].(string)
 		port := 443
-		if p, ok := params["port"].(float64); ok && p > 0 {
+		if p, ok := agenttools.ParamNum(params, "port"); ok && p > 0 {
 			port = int(p)
 		}
 		return netConnectivity(ctx, host, port)

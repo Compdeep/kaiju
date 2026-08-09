@@ -79,7 +79,7 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 		return agenttools.ToolMessage{}, fmt.Errorf("web_research: query is required")
 	}
 	maxSources := 4
-	if v, ok := params["max_sources"].(float64); ok && int(v) > 0 {
+	if v, ok := agenttools.ParamNum(params, "max_sources"); ok && int(v) > 0 {
 		maxSources = int(v)
 	}
 	if maxSources > 6 {
@@ -89,7 +89,7 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 
 	// 1) Search — ask for a few more URLs than we'll read, as backups.
 	searchParams := map[string]any{"query": query, "max_results": float64(maxSources + 3)}
-	if rd, ok := params["recency_days"].(float64); ok {
+	if rd, ok := agenttools.ParamNum(params, "recency_days"); ok {
 		searchParams["recency_days"] = rd
 	}
 	sOut, err := w.search.Execute(ctx, searchParams)

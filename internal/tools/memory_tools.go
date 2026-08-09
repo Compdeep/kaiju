@@ -100,7 +100,7 @@ func (m *MemoryStore) ExecuteTyped(_ context.Context, params map[string]any) (to
 	}
 
 	var ttl time.Duration
-	if ts, ok := params["ttl_sec"].(float64); ok && ts > 0 {
+	if ts, ok := tools.ParamNum(params, "ttl_sec"); ok && ts > 0 {
 		ttl = time.Duration(ts) * time.Second
 	}
 

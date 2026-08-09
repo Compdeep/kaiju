@@ -91,7 +91,7 @@ func (p *ProcessList) Execute(ctx context.Context, params map[string]any) (strin
 func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	filter, _ := params["filter"].(string)
 	limit := 30
-	if l, ok := params["limit"].(float64); ok && l > 0 {
+	if l, ok := agenttools.ParamNum(params, "limit"); ok && l > 0 {
 		limit = int(l)
 	}
 
@@ -213,7 +213,7 @@ func (p *ProcessKill) Execute(ctx context.Context, params map[string]any) (strin
 }
 
 func (p *ProcessKill) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
-	pidFloat, ok := params["pid"].(float64)
+	pidFloat, ok := agenttools.ParamNum(params, "pid")
 	if !ok {
 		return agenttools.ToolMessage{}, fmt.Errorf("process_kill: pid is required")
 	}

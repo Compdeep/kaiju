@@ -194,7 +194,7 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (tools.T
 	}
 
 	timeout := b.timeout
-	if ts, ok := params["timeout_sec"].(float64); ok {
+	if ts, ok := tools.ParamNum(params, "timeout_sec"); ok {
 		if ts == 0 {
 			timeout = 30 * time.Minute // 0 = long-running (downloads, builds)
 		} else if ts > 0 {

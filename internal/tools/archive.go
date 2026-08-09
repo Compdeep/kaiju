@@ -90,11 +90,16 @@ func (a *Archive) Parameters() json.RawMessage {
  * param: params - must contain "action" and "archive_path"; optionally "files", "dest", "format"
  * return: operation result string, or error for unknown actions or missing parameters
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (a *Archive) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(a.ExecuteTyped(ctx, params))
+}
+
+func (a *Archive) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	action, _ := params["action"].(string)
 	archivePath, _ := params["archive_path"].(string)
 	if archivePath == "" {
-		return "", fmt.Errorf("archive: archive_path is required")
+		return agenttools.ToolMessage{}, fmt.Errorf("archive: archive_path is required")
 	}
 
 	format, _ := params["format"].(string)
@@ -124,11 +129,11 @@ func (a *Archive) Execute(ctx context.Context, params map[string]any) (string, e
 			}
 		}
 		if len(files) == 0 {
-			return "", fmt.Errorf("archive: files list is required for create")
+			return agenttools.ToolMessage{}, fmt.Errorf("archive: files list is required for create")
 		}
 		return archiveCreate(archivePath, files, format)
 	default:
-		return "", fmt.Errorf("archive: unknown action %q", action)
+		return agenttools.ToolMessage{}, fmt.Errorf("archive: unknown action %q", action)
 	}
 }
 
@@ -139,29 +144,29 @@ func (a *Archive) Execute(ctx context.Context, params map[string]any) (string, e
  * param: format - archive format ("zip" or "tar.gz")
  * return: formatted entry list with count header, or error on read failure
  */
-func archiveList(path, format string) (string, error) {
+func archiveList(path, format string) (agenttools.ToolMessage, error) {
 	switch format {
 	case "zip":
 		r, err := zip.OpenReader(path)
 		if err != nil {
-			return "", fmt.Errorf("archive: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer r.Close()
 		var lines []string
 		for _, f := range r.File {
 			lines = append(lines, fmt.Sprintf("%10d  %s  %s", f.UncompressedSize64, f.Modified.Format("2006-01-02 15:04"), f.Name))
 		}
-		return agenttools.ToolText(fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n"))).JSON(), nil
+		return agenttools.ToolText(fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n"))), nil
 
 	case "tar.gz":
 		f, err := os.Open(path)
 		if err != nil {
-			return "", fmt.Errorf("archive: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer f.Close()
 		gz, err := gzip.NewReader(f)
 		if err != nil {
-			return "", fmt.Errorf("archive: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer gz.Close()
 		tr := tar.NewReader(gz)
@@ -172,14 +177,14 @@ func archiveList(path, format string) (string, error) {
 				break
 			}
 			if err != nil {
-				return "", fmt.Errorf("archive: %w", err)
+				return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 			}
 			lines = append(lines, fmt.Sprintf("%10d  %s  %s", hdr.Size, hdr.ModTime.Format("2006-01-02 15:04"), hdr.Name))
 		}
-		return agenttools.ToolText(fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n"))).JSON(), nil
+		return agenttools.ToolText(fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n"))), nil
 
 	default:
-		return "", fmt.Errorf("archive: unsupported format %q", format)
+		return agenttools.ToolMessage{}, fmt.Errorf("archive: unsupported format %q", format)
 	}
 }
 
@@ -191,16 +196,16 @@ func archiveList(path, format string) (string, error) {
  * param: format - archive format ("zip" or "tar.gz")
  * return: confirmation message with extracted file count, or error on failure
  */
-func archiveExtract(archivePath, dest, format string) (string, error) {
+func archiveExtract(archivePath, dest, format string) (agenttools.ToolMessage, error) {
 	if err := os.MkdirAll(dest, 0755); err != nil {
-		return "", fmt.Errorf("archive: mkdir: %w", err)
+		return agenttools.ToolMessage{}, fmt.Errorf("archive: mkdir: %w", err)
 	}
 
 	switch format {
 	case "zip":
 		r, err := zip.OpenReader(archivePath)
 		if err != nil {
-			return "", fmt.Errorf("archive: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer r.Close()
 		count := 0
@@ -229,17 +234,17 @@ func archiveExtract(archivePath, dest, format string) (string, error) {
 			rc.Close()
 			count++
 		}
-		return agenttools.ToolText(fmt.Sprintf("extracted %d files to %s", count, dest)).JSON(), nil
+		return agenttools.ToolText(fmt.Sprintf("extracted %d files to %s", count, dest)), nil
 
 	case "tar.gz":
 		f, err := os.Open(archivePath)
 		if err != nil {
-			return "", fmt.Errorf("archive: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer f.Close()
 		gz, err := gzip.NewReader(f)
 		if err != nil {
-			return "", fmt.Errorf("archive: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer gz.Close()
 		tr := tar.NewReader(gz)
@@ -250,7 +255,7 @@ func archiveExtract(archivePath, dest, format string) (string, error) {
 				break
 			}
 			if err != nil {
-				return "", fmt.Errorf("archive: %w", err)
+				return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 			}
 			target := filepath.Join(dest, hdr.Name)
 			if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dest)) {
@@ -270,10 +275,10 @@ func archiveExtract(archivePath, dest, format string) (string, error) {
 				count++
 			}
 		}
-		return agenttools.ToolText(fmt.Sprintf("extracted %d files to %s", count, dest)).JSON(), nil
+		return agenttools.ToolText(fmt.Sprintf("extracted %d files to %s", count, dest)), nil
 
 	default:
-		return "", fmt.Errorf("archive: unsupported format %q", format)
+		return agenttools.ToolMessage{}, fmt.Errorf("archive: unsupported format %q", format)
 	}
 }
 
@@ -285,12 +290,12 @@ func archiveExtract(archivePath, dest, format string) (string, error) {
  * param: format - archive format ("zip" or "tar.gz")
  * return: confirmation message with archive path and file count, or error on failure
  */
-func archiveCreate(archivePath string, files []string, format string) (string, error) {
+func archiveCreate(archivePath string, files []string, format string) (agenttools.ToolMessage, error) {
 	switch format {
 	case "zip":
 		out, err := os.Create(archivePath)
 		if err != nil {
-			return "", fmt.Errorf("archive: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer out.Close()
 		zw := zip.NewWriter(out)
@@ -315,15 +320,15 @@ func archiveCreate(archivePath string, files []string, format string) (string, e
 				return nil
 			})
 			if err != nil {
-				return "", fmt.Errorf("archive: %w", err)
+				return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 			}
 		}
-		return agenttools.ToolText(fmt.Sprintf("created %s with %d files", archivePath, count)).JSON(), nil
+		return agenttools.ToolText(fmt.Sprintf("created %s with %d files", archivePath, count)), nil
 
 	case "tar.gz":
 		out, err := os.Create(archivePath)
 		if err != nil {
-			return "", fmt.Errorf("archive: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer out.Close()
 		gz := gzip.NewWriter(out)
@@ -354,13 +359,13 @@ func archiveCreate(archivePath string, files []string, format string) (string, e
 				return nil
 			})
 			if err != nil {
-				return "", fmt.Errorf("archive: %w", err)
+				return agenttools.ToolMessage{}, fmt.Errorf("archive: %w", err)
 			}
 		}
-		return agenttools.ToolText(fmt.Sprintf("created %s with %d files", archivePath, count)).JSON(), nil
+		return agenttools.ToolText(fmt.Sprintf("created %s with %d files", archivePath, count)), nil
 
 	default:
-		return "", fmt.Errorf("archive: unsupported format %q", format)
+		return agenttools.ToolMessage{}, fmt.Errorf("archive: unsupported format %q", format)
 	}
 }
 

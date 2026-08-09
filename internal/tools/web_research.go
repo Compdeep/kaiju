@@ -67,11 +67,16 @@ type researchSource struct {
 	Note    string `json:"note,omitempty"`
 }
 
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (w *WebResearch) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(w.ExecuteTyped(ctx, params))
+}
+
+func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	query, _ := params["query"].(string)
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return "", fmt.Errorf("web_research: query is required")
+		return agenttools.ToolMessage{}, fmt.Errorf("web_research: query is required")
 	}
 	maxSources := 4
 	if v, ok := params["max_sources"].(float64); ok && int(v) > 0 {
@@ -89,17 +94,17 @@ func (w *WebResearch) Execute(ctx context.Context, params map[string]any) (strin
 	}
 	sOut, err := w.search.Execute(ctx, searchParams)
 	if err != nil {
-		return "", fmt.Errorf("web_research: search: %w", err)
+		return agenttools.ToolMessage{}, fmt.Errorf("web_research: search: %w", err)
 	}
 	sMsg, ok := agenttools.ParseToolMessage(sOut)
 	if !ok || sMsg.Status != agenttools.StatusOK {
-		return agenttools.ToolEmpty("research", "the search returned no reachable results for this query — try a different, broader query").JSON(), nil
+		return agenttools.ToolEmpty("research", "the search returned no reachable results for this query — try a different, broader query"), nil
 	}
 	var sd struct {
 		Results []searchResult `json:"results"`
 	}
 	if json.Unmarshal(sMsg.Data, &sd) != nil || len(sd.Results) == 0 {
-		return agenttools.ToolEmpty("research", "the search returned no results — try a different query").JSON(), nil
+		return agenttools.ToolEmpty("research", "the search returned no results — try a different query"), nil
 	}
 
 	// Drop excluded domains (e.g. aggregators the caller doesn't want) before we
@@ -113,7 +118,7 @@ func (w *WebResearch) Execute(ctx context.Context, params map[string]any) (strin
 		}
 		sd.Results = kept
 		if len(sd.Results) == 0 {
-			return agenttools.ToolEmpty("research", "every result was an excluded domain — broaden the query or relax exclude_domains").JSON(), nil
+			return agenttools.ToolEmpty("research", "every result was an excluded domain — broaden the query or relax exclude_domains"), nil
 		}
 	}
 
@@ -195,14 +200,14 @@ func (w *WebResearch) Execute(ctx context.Context, params map[string]any) (strin
 			Status: agenttools.StatusEmpty,
 			Detail: fmt.Sprintf("found %d URLs but none could be read (all blocked, 404, or empty) — try a different query", n),
 			Data:   dataBytes,
-		}.JSON(), nil
+		}, nil
 	}
 	return agenttools.ToolMessage{
 		Type:    "research",
 		Status:  agenttools.StatusOK,
 		Content: strings.TrimRight(b.String(), "\n"),
 		Data:    dataBytes,
-	}.JSON(), nil
+	}, nil
 }
 
 // toStringSlice coerces a JSON array param (decoded as []any) into a lowercased,

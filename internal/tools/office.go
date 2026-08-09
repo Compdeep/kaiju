@@ -65,14 +65,19 @@ func (t *OfficeExtract) Parameters() json.RawMessage {
 // Impact is observe-only: it opens a file read-only and returns its text.
 func (t *OfficeExtract) Impact(map[string]any) int { return agenttools.ImpactObserve }
 
-func (t *OfficeExtract) Execute(_ context.Context, params map[string]any) (string, error) {
+// Execute satisfies the Tool interface for callers outside the DAG.
+func (t *OfficeExtract) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(t.ExecuteTyped(ctx, params))
+}
+
+func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	raw, _ := params["path"].(string)
 	if strings.TrimSpace(raw) == "" {
-		return "", fmt.Errorf("office_extract: 'path' is required")
+		return agenttools.ToolMessage{}, fmt.Errorf("office_extract: 'path' is required")
 	}
 	path, err := t.resolve(raw)
 	if err != nil {
-		return "", err
+		return agenttools.ToolMessage{}, err
 	}
 	maxChars := officeMaxChars
 	if v, ok := params["max_chars"].(float64); ok && int(v) > 0 {
@@ -81,26 +86,30 @@ func (t *OfficeExtract) Execute(_ context.Context, params map[string]any) (strin
 
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext == ".doc" || ext == ".ppt" || ext == ".xls" {
-		return "", fmt.Errorf("office_extract: %q is the legacy binary format, which isn't supported — save it as .docx/.pptx/.xlsx and try again", filepath.Base(path))
+		return agenttools.ToolMessage{}, fmt.Errorf("office_extract: %q is the legacy binary format, which isn't supported — save it as .docx/.pptx/.xlsx and try again", filepath.Base(path))
 	}
 
 	zr, err := zip.OpenReader(path)
 	if err != nil {
-		return "", fmt.Errorf("office_extract: open %s: %w", filepath.Base(path), err)
+		return agenttools.ToolMessage{}, fmt.Errorf("office_extract: open %s: %w", filepath.Base(path), err)
 	}
 	defer zr.Close()
 
 	kind, out, err := extractOOXML(&zr.Reader, ext, maxChars)
 	if err != nil {
-		return "", fmt.Errorf("office_extract: %s: %w", filepath.Base(path), err)
+		return agenttools.ToolMessage{}, fmt.Errorf("office_extract: %s: %w", filepath.Base(path), err)
 	}
+	// The document opened and held no text — a scanned page, an empty deck. It
+	// used to say so in a sentence the model had to read and believe; now the
+	// coverage statement carries it.
 	if strings.TrimSpace(out) == "" {
-		return fmt.Sprintf("(office_extract opened %s but found no extractable text.)", filepath.Base(path)), nil
+		return agenttools.ToolEmpty("text", "opened "+filepath.Base(path)+" but found no extractable text"), nil
 	}
 	if len(out) > maxChars {
 		out = out[:maxChars] + "\n…[truncated]"
 	}
-	return fmt.Sprintf("%s: %s\n\n%s", kind, filepath.Base(path), out), nil
+	return agenttools.ToolOK("text", fmt.Sprintf("%s: %s\n\n%s", kind, filepath.Base(path), out),
+		map[string]any{"kind": kind, "file": filepath.Base(path)}), nil
 }
 
 // extractOOXML dispatches to the right family. When ext is empty/unknown it

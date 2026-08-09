@@ -87,11 +87,16 @@ func (m *MemoryStore) Parameters() json.RawMessage {
  * param: params - must contain "key" and "value"; optionally "ttl_sec" and "tags"
  * return: confirmation message with key and byte count, or error if key is empty
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (m *MemoryStore) Execute(_ context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(m.ExecuteTyped(nil, params))
+}
+
+func (m *MemoryStore) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
 	key, _ := params["key"].(string)
 	value, _ := params["value"].(string)
 	if key == "" {
-		return "", fmt.Errorf("memory_store: key is required")
+		return tools.ToolMessage{}, fmt.Errorf("memory_store: key is required")
 	}
 
 	var ttl time.Duration
@@ -109,7 +114,7 @@ func (m *MemoryStore) Execute(_ context.Context, params map[string]any) (string,
 	}
 
 	m.mem.Set(key, value, ttl, tags)
-	return tools.ToolText(fmt.Sprintf("stored key=%q (%d bytes)", key, len(value))).JSON(), nil
+	return tools.ToolText(fmt.Sprintf("stored key=%q (%d bytes)", key, len(value))), nil
 }
 
 var _ tools.Tool = (*MemoryStore)(nil)
@@ -188,16 +193,21 @@ func (m *MemoryRecall) Parameters() json.RawMessage {
  * param: params - must contain "key"
  * return: stored value string, "key not found" message, or error if key is empty
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (m *MemoryRecall) Execute(_ context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(m.ExecuteTyped(nil, params))
+}
+
+func (m *MemoryRecall) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
 	key, _ := params["key"].(string)
 	if key == "" {
-		return "", fmt.Errorf("memory_recall: key is required")
+		return tools.ToolMessage{}, fmt.Errorf("memory_recall: key is required")
 	}
 	val, ok := m.mem.Get(key)
 	if !ok {
-		return tools.ToolEmpty("kv", fmt.Sprintf("key=%q not found", key)).JSON(), nil
+		return tools.ToolEmpty("kv", fmt.Sprintf("key=%q not found", key)), nil
 	}
-	return tools.ToolOK("kv", val, nil).JSON(), nil
+	return tools.ToolOK("kv", val, nil), nil
 }
 
 var _ tools.Tool = (*MemoryRecall)(nil)
@@ -276,14 +286,19 @@ func (m *MemorySearch) Parameters() json.RawMessage {
  * param: params - must contain "tag"
  * return: JSON array of matching entries, "no entries" message, or error if tag is empty
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (m *MemorySearch) Execute(_ context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(m.ExecuteTyped(nil, params))
+}
+
+func (m *MemorySearch) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
 	tag, _ := params["tag"].(string)
 	if tag == "" {
-		return "", fmt.Errorf("memory_search: tag is required")
+		return tools.ToolMessage{}, fmt.Errorf("memory_search: tag is required")
 	}
 	results := m.mem.Search([]string{tag})
 	if len(results) == 0 {
-		return tools.ToolEmpty("search", fmt.Sprintf("no entries with tag=%q", tag)).JSON(), nil
+		return tools.ToolEmpty("search", fmt.Sprintf("no entries with tag=%q", tag)), nil
 	}
 	// Format results as key=value pairs
 	type entry struct {
@@ -294,7 +309,7 @@ func (m *MemorySearch) Execute(_ context.Context, params map[string]any) (string
 	for i, r := range results {
 		out[i] = entry{Key: r.Key, Value: r.Value}
 	}
-	return tools.ToolOK("search", "", out).JSON(), nil
+	return tools.ToolOK("search", "", out), nil
 }
 
 var _ tools.Tool = (*MemorySearch)(nil)

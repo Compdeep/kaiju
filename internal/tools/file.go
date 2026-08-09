@@ -207,47 +207,52 @@ func (f *FileWrite) Parameters() json.RawMessage {
  * param: params - must contain "path" and "content"; optionally "append" for append mode
  * return: confirmation message with byte count written, or error on failure
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (f *FileWrite) Execute(_ context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(f.ExecuteTyped(nil, params))
+}
+
+func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
 	path, _ := params["path"].(string)
 	content, _ := params["content"].(string)
 	if path == "" {
-		return "", fmt.Errorf("file_write: path is required")
+		return tools.ToolMessage{}, fmt.Errorf("file_write: path is required")
 	}
 	// Reject unresolved placeholder content — substitution failed or wasn't wired
 	if strings.HasPrefix(content, "${") || strings.HasPrefix(content, "{{") {
-		return "", fmt.Errorf("file_write: content is an unresolved placeholder %q — wire ${step.N.field} from an upstream step or use compute instead", content)
+		return tools.ToolMessage{}, fmt.Errorf("file_write: content is an unresolved placeholder %q — wire ${step.N.field} from an upstream step or use compute instead", content)
 	}
 	// Gate writes to the workspace-relative allowed zones. This blocks the
 	// agent from editing its own source tree (cmd/, internal/, etc.) when
 	// the CLI runs with workspace = cwd inside the Kaiju repo.
 	safePath, safeErr := workspace.SafeJoin(f.workspace, path)
 	if safeErr != nil {
-		return "", fmt.Errorf("file_write: %w", safeErr)
+		return tools.ToolMessage{}, fmt.Errorf("file_write: %w", safeErr)
 	}
 	path = safePath
 
 	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return "", fmt.Errorf("file_write: create dir: %w", err)
+		return tools.ToolMessage{}, fmt.Errorf("file_write: create dir: %w", err)
 	}
 
 	appendMode, _ := params["append"].(bool)
 	if appendMode {
 		f2, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			return "", fmt.Errorf("file_write: %w", err)
+			return tools.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 		}
 		defer f2.Close()
 		if _, err := f2.WriteString(content); err != nil {
-			return "", fmt.Errorf("file_write: %w", err)
+			return tools.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 		}
-		return tools.ToolText(fmt.Sprintf("appended %d bytes to %s", len(content), path)).JSON(), nil
+		return tools.ToolText(fmt.Sprintf("appended %d bytes to %s", len(content), path)), nil
 	}
 
 	if err := agent.OverwriteFile(path, content); err != nil {
-		return "", fmt.Errorf("file_write: %w", err)
+		return tools.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 	}
-	return tools.ToolText(fmt.Sprintf("wrote %d bytes to %s", len(content), path)).JSON(), nil
+	return tools.ToolText(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
 }
 
 /*
@@ -351,7 +356,12 @@ func (f *FileList) OutputSchema() json.RawMessage {
  * param: params - optionally contains "path" (defaults to ".")
  * return: JSON string with directory entries, or error if the directory cannot be read
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (f *FileList) Execute(_ context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(f.ExecuteTyped(nil, params))
+}
+
+func (f *FileList) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
 	path, _ := params["path"].(string)
 	path = strings.TrimSpace(path)
 	if (path == "" || path == "." || path == "./") && f.workspace != "" {
@@ -366,7 +376,7 @@ func (f *FileList) Execute(_ context.Context, params map[string]any) (string, er
 
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return "", fmt.Errorf("file_list: %w", err)
+		return tools.ToolMessage{}, fmt.Errorf("file_list: %w", err)
 	}
 
 	type entry struct {
@@ -388,7 +398,7 @@ func (f *FileList) Execute(_ context.Context, params map[string]any) (string, er
 		result = append(result, entry{Name: e.Name(), Type: typ, Size: size})
 	}
 
-	return tools.ToolOK("listing", "", map[string]any{"entries": result}).JSON(), nil
+	return tools.ToolOK("listing", "", map[string]any{"entries": result}), nil
 }
 
 var _ tools.Tool = (*FileList)(nil)

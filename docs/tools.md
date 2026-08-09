@@ -24,6 +24,28 @@ type Tool interface {
 }
 ```
 
+### Impact with no parameters is the tool's worst case
+
+`Impact` is asked two questions. With parameters it means "what tier is THIS
+call", and that is what the gate uses. With `nil` it means "what tier is this
+tool", which is what an application asks when deciding whether to offer it at
+all — and a tool that grades itself by reading its parameters will find none,
+match nothing, and answer with its cheapest tier unless it is written not to.
+
+That is the unsafe direction. A shell with no command in it is not a read-only
+tool; it is a shell nobody has typed into yet. So a graded tool returns its
+worst case when it has nothing to grade:
+
+```go
+func (b *Bash) Impact(params map[string]any) int {
+    cmd, _ := params["command"].(string)
+    if cmd == "" {
+        return tools.ImpactControl   // the abstract question, answered honestly
+    }
+    ...
+}
+```
+
 ### Impact is per-invocation
 
 `Impact` is evaluated against the **actual params of the call**, not the tool in

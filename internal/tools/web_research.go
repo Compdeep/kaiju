@@ -191,14 +191,14 @@ func (w *WebResearch) Execute(ctx context.Context, params map[string]any) (strin
 	dataBytes, _ := json.Marshal(map[string]any{"query": query, "sources": sources})
 	if read == 0 {
 		return agenttools.ToolMessage{
-			Kind:   "research",
+			Type:   "research",
 			Status: agenttools.StatusEmpty,
 			Detail: fmt.Sprintf("found %d URLs but none could be read (all blocked, 404, or empty) — try a different query", n),
 			Data:   dataBytes,
 		}.JSON(), nil
 	}
 	return agenttools.ToolMessage{
-		Kind:    "research",
+		Type:    "research",
 		Status:  agenttools.StatusOK,
 		Content: strings.TrimRight(b.String(), "\n"),
 		Data:    dataBytes,

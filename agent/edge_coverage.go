@@ -40,12 +40,12 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 		env := tb.Envelope()
 		switch env.Status {
 		case agenttools.StatusEmpty, agenttools.StatusError:
-			gaps = append(gaps, toolGap{Tag: n.Tag, Kind: env.Kind, Detail: env.Detail})
+			gaps = append(gaps, toolGap{Tag: n.Tag, Kind: env.Type, Detail: env.Detail})
 		case agenttools.StatusUnclassified:
 			// The tool ran and returned something; it did not say whether that
 			// something was a finding. Stating it is honest — the alternative is
 			// silence, which reads to every consumer as "this one was fine".
-			gaps = append(gaps, toolGap{Tag: n.Tag, Kind: env.Kind,
+			gaps = append(gaps, toolGap{Tag: n.Tag, Kind: env.Type,
 				Detail: "the tool did not report whether it found anything; read its output directly"})
 		}
 	}

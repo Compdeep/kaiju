@@ -964,7 +964,7 @@ func containsAnyCI(s string, needles ...string) bool {
 func extractFailureDetail(n *Node) string {
 	// Typed bash: read exit status and streams off the command body directly.
 	if tb, ok := n.Body.(toolMessageBody); ok {
-		if env := tb.Envelope(); env.Kind == "command" {
+		if env := tb.Envelope(); env.Type == "command" {
 			var d struct {
 				ExitCode int    `json:"exit_code"`
 				Stdout   string `json:"stdout"`

@@ -322,7 +322,7 @@ func marshalFetchResult(r fetchResult) (agenttools.ToolMessage, error) {
 	// structurally-fine-but-no-usable-content (Note set, Content empty) → empty;
 	// otherwise ok. The full fetchResult rides in Data so ${node.X.title/.status/
 	// .format} keep resolving; the page text becomes the evidence Content.
-	msg := agenttools.ToolMessage{Kind: "page", Data: data}
+	msg := agenttools.ToolMessage{Type: "page", Data: data}
 	switch {
 	case strings.HasPrefix(r.Status, "HTTP 4") || strings.HasPrefix(r.Status, "HTTP 5"):
 		msg.Status = agenttools.StatusError

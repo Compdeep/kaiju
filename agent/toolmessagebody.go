@@ -75,14 +75,14 @@ func (b toolMessageBody) Evidence() string {
 		return b.msg.Content
 	case agenttools.StatusEmpty:
 		if b.msg.Detail != "" {
-			return "(no " + b.msg.Kind + ": " + b.msg.Detail + ")"
+			return "(no " + b.msg.Type + ": " + b.msg.Detail + ")"
 		}
-		return "(no " + b.msg.Kind + ")"
+		return "(no " + b.msg.Type + ")"
 	case agenttools.StatusError:
 		if b.msg.Detail != "" {
-			return "(" + b.msg.Kind + " failed: " + b.msg.Detail + ")"
+			return "(" + b.msg.Type + " failed: " + b.msg.Detail + ")"
 		}
-		return "(" + b.msg.Kind + " failed)"
+		return "(" + b.msg.Type + " failed)"
 	}
 	if b.msg.Content != "" {
 		return b.msg.Content
@@ -106,7 +106,7 @@ func (b toolMessageBody) Summary() string {
 		}
 		return ""
 	}
-	s := b.msg.Kind + " " + string(b.msg.Status)
+	s := b.msg.Type + " " + string(b.msg.Status)
 	if b.msg.Detail != "" {
 		s += ": " + Text.TruncateLog(b.msg.Detail, 120)
 	}

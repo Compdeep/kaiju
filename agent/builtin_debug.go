@@ -19,7 +19,7 @@ const debugToolName = "debug"
  *       microplanner fix → validators). It mirrors `compute`: a thin tool
  *       interface over a DAG sub-structure the scheduler grafts.
  *
- *       The tool itself does almost nothing — ExecuteWithContext echoes the
+ *       The tool itself does almost nothing — ExecuteTyped echoes the
  *       problem statement into a {type:"debug"} envelope. The real work is
  *       grafted by the scheduler when the debug node completes: it snapshots
  *       the currently-failed nodes and spawns the first Holmes iteration
@@ -35,9 +35,9 @@ type DebugTool struct {
 	agent *Agent
 }
 
-// Compile-time interface assertions. debug implements ContextualExecutor so its
-// envelope is never truncated (the scheduler must parse the {type:"debug"}
-// marker to trigger the graft) — same reason compute does.
+// Compile-time interface assertions. debug returns a ToolMessage, so its
+// envelope is never truncated — the scheduler must parse the {type:"debug"}
+// marker to trigger the graft, same reason compute does.
 var _ tools.Tool = (*DebugTool)(nil)
 var _ tools.TypedExecutor = (*DebugTool)(nil)
 
@@ -84,17 +84,13 @@ var debugOutputSchema = json.RawMessage(`{
 
 func (d *DebugTool) OutputSchema() json.RawMessage { return debugOutputSchema }
 
-/*
- * Execute is a defensive stub — debug is always dispatched via
- * ExecuteWithContext (it implements ContextualExecutor). Present only to
- * satisfy the Tool interface for registry compatibility.
- */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (d *DebugTool) Execute(ctx context.Context, params map[string]any) (string, error) {
 	return tools.StringResult(d.ExecuteTyped(ctx, params))
 }
 
 /*
- * ExecuteWithContext echoes the problem into a {type:"debug"} envelope. The
+ * ExecuteTyped echoes the problem into a {type:"debug"} envelope. The
  * scheduler's tool-completion handler detects this marker and grafts the Holmes
  * investigation parented to this node.
  * param: params - resolved tool params; `problem` is the investigation brief.

@@ -433,9 +433,8 @@ func dotPrefix(s string) string {
  * desc: Performs scope check, rate limit check, IGX triad check (impact <=
  *       min(intent, clearance, scope_cap)), optional external clearance check,
  *       then executes the tool. Audits all attempts and records side-effects
- *       in the event store. Tools implementing ContextualExecutor are invoked
- *       via ExecuteWithContext with a populated ExecuteContext; others fall
- *       through to plain Execute.
+ *       in the event store. Every tool is called the same way; the run state a
+ *       tool like compute needs travels on the ctx.
  * param: ctx - context for execution.
  * param: n - the node being executed (may be nil for actuator path).
  * param: graph - the investigation graph (may be nil for actuator path).
@@ -530,10 +529,9 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		return reason, nil, nil
 	}
 
-	// Execute — tools implementing ContextualExecutor get a rich context
-	// built from scheduler-held state; others fall through to plain Execute.
-	// Contextual results are structured pipeline data (e.g. compute plans
-	// with follow_up graft instructions) and must not be truncated.
+	// Execute. A tool that returns a ToolMessage takes the typed path; anything
+	// else returns a string. A structured envelope is pipeline data — a compute
+	// plan carries follow_up graft instructions — and must not be truncated.
 	var result string
 	var body NodeBody
 	var err error

@@ -19,15 +19,13 @@ import (
 // they need the graph, the budget and the clients.
 //
 // Those were once the same question, because the only way to receive the run's
-// state was to implement ContextualExecutor, whose method returns a string. A
-// tool could have the state or return a typed message, never both, and the
+// state was to implement an interface whose method returned a string. A tool
+// could have the state or return a typed message, never both, and the
 // dispatcher's if/else silently chose the typed branch and left the state
 // unbuilt.
 //
 // So the state travels on the ctx instead, the way interjections and vision
-// images already do. Every tool now declares one method and fetches what it
-// needs; ContextualExecutor remains only until its three implementations are
-// converted, and is no longer how the state is delivered.
+// images already do. Every tool declares one method and fetches what it needs.
 
 type execContextKey struct{}
 
@@ -65,9 +63,9 @@ func ExecContextFrom(ctx context.Context) *ExecuteContext {
  * plain (ctx, params) can provide.
  * desc: Tools like compute run a sub-pipeline (architect + parallel coders)
  *       that needs access to the live graph, budget, LLM clients, workspace,
- *       and intent. The standard Tool interface passes only (ctx, params);
- *       ContextualExecutor extends it for these tools. The dispatcher builds
- *       this struct at execution time from scheduler-held state.
+ *       and intent. The standard Tool interface passes only (ctx, params), so
+ *       the dispatcher builds this struct from scheduler-held state and puts it
+ *       on the ctx, where ExecContextFrom reaches it.
  */
 type ExecuteContext struct {
 	Ctx        context.Context

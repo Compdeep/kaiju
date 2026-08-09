@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // When a focused summary misses (the model returns the no-content sentinel) but
@@ -40,11 +41,16 @@ func TestFormatSummary_FocusMissFallsBackToGeneral(t *testing.T) {
 	if calls < 2 {
 		t.Fatalf("expected a general-summary retry after the focus miss, got %d LLM call(s)", calls)
 	}
-	if !strings.Contains(out, "enterprise AI adoption trends") {
-		t.Fatalf("focus-miss on a content-bearing page should return the general summary, got: %s", out)
+	// The general summary is the page's evidence, so it belongs in Content —
+	// asserting on the field rather than on the serialised envelope.
+	if !strings.Contains(out.Content, "enterprise AI adoption trends") {
+		t.Fatalf("focus-miss on a content-bearing page should return the general summary, got: %+v", out)
 	}
-	if strings.Contains(out, "did not contain the requested information") {
-		t.Fatalf("content-bearing page was discarded instead of general-summarized: %s", out)
+	if out.Status != agenttools.StatusOK {
+		t.Fatalf("a content-bearing page is not empty, got status %q", out.Status)
+	}
+	if strings.Contains(out.Detail, "did not contain the requested information") {
+		t.Fatalf("content-bearing page was discarded instead of general-summarized: %+v", out)
 	}
 }
 
@@ -59,7 +65,12 @@ func TestFormatSummary_GeneralAlsoEmptyStillReportsNoContent(t *testing.T) {
 	wf := NewWebFetchWithLLM(llm.NewClient(srv.URL, "k", "test"))
 	body := []byte("<html><body><article><p>" + strings.Repeat("Generic filler text with no facts here. ", 15) + "</p></article></body></html>")
 	out, _ := wf.formatSummary(context.Background(), "HTTP 200 OK", "https://x.example/empty", body, "revenue")
-	if !strings.Contains(out, "did not contain the requested information") {
-		t.Fatalf("both passes empty → should report no content, got: %s", out)
+	// Nothing found is an outcome, not content: it rides in Detail with the
+	// empty status, which is what the coverage statement reads.
+	if out.Status != agenttools.StatusEmpty {
+		t.Fatalf("both passes empty → status should be empty, got %q", out.Status)
+	}
+	if !strings.Contains(out.Detail, "did not contain the requested information") {
+		t.Fatalf("both passes empty → should say so in Detail, got: %+v", out)
 	}
 }

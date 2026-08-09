@@ -46,7 +46,6 @@ func TestRawBackedCanBeOverridden(t *testing.T) {
 // The bodies that embed it must still satisfy NodeBody — the compiler is the
 // check, so this is a compile-time assertion with a name.
 func TestEmbeddingBodiesStillSatisfyNodeBody(t *testing.T) {
-	var _ NodeBody = ComputeBody{}
 	var _ NodeBody = HolmesBody{}
 	var _ NodeBody = MicroPlannerBody{}
 	var _ NodeBody = ObserverBody{}

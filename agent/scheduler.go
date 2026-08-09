@@ -1267,8 +1267,6 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// Tool/compute node resolved successfully
 				if comp.Body != nil {
 					graph.SetBody(comp.NodeID, comp.Body)
-				} else if node.Type == NodeCompute {
-					graph.SetBody(comp.NodeID, parseComputeBody(comp.Result))
 				} else if msg, ok := tools.ParseToolMessage(comp.Result); ok {
 					graph.SetBody(comp.NodeID, toolMessageBody{msg: msg})
 				} else if node.Type == NodeTool {
@@ -1347,10 +1345,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					if parent != nil && parent.Type == NodeCompute && parent.Result != "" {
 						stdout := extractBashStdout(comp.Result)
 						if stdout != "" {
-							merged, err := mergeJSONField(parent.Result, "output", stdout)
+							// The output goes inside compute's own JSON, not
+							// beside the envelope's keys, so ${node.X.output}
+							// resolves where every other compute field is.
+							merged, err := mergeJSONField(computePayload(parent.Result), "output", stdout)
 							if err == nil {
-								parent.Result = merged
-								parent.Body = parseComputeBody(merged) // keep typed body in sync with the spliced Result
+								parent.Result = withComputePayload(parent.Result, merged)
+								parent.Body = NewToolBody(computeMessage("compute", merged)) // keep the body in step with the spliced payload
 								log.Printf("[dag] exposed %d bytes of exec stdout on compute parent %s as .output", len(stdout), parent.ID)
 							}
 						}
@@ -1493,7 +1494,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							Expect string `json:"expect"`
 						} `json:"validation,omitempty"`
 					}
-					unmarshalErr := json.Unmarshal([]byte(comp.Result), &cr)
+					unmarshalErr := json.Unmarshal([]byte(computePayload(comp.Result)), &cr)
 					log.Printf("[dag] compute plan post-parse: err=%v type=%q followup_bytes=%d services=%d validation=%d",
 						unmarshalErr, cr.Type, len(cr.FollowUp), len(cr.Services), len(cr.Validation))
 					if unmarshalErr == nil && cr.Type == "blueprint" && len(cr.FollowUp) > 0 {
@@ -1804,7 +1805,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							Validation string `json:"validation,omitempty"`
 							Type       string `json:"type,omitempty"`
 						}
-						if json.Unmarshal([]byte(comp.Result), &res) == nil && res.Type == "result" && res.Execute != "" {
+						if json.Unmarshal([]byte(computePayload(comp.Result)), &res) == nil && res.Type == "result" && res.Execute != "" {
 							grafted := a.graftComputeExecution(graph, node, comp.NodeID, res.Execute, res.Validation, budget)
 							if len(grafted) > 0 {
 								rewriteDependentsMultiExcluding(graph, comp.NodeID, grafted)

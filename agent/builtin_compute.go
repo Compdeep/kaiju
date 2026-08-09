@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/Compdeep/kaiju/agent/tools"
 )
@@ -24,7 +23,7 @@ type ComputeTool struct {
 
 // Compile-time interface assertions.
 var _ tools.Tool = (*ComputeTool)(nil)
-var _ ContextualExecutor = (*ComputeTool)(nil)
+var _ tools.TypedExecutor = (*ComputeTool)(nil)
 
 /*
  * NewComputeTool constructs a ComputeTool bound to an Agent.
@@ -97,18 +96,29 @@ func (c *ComputeTool) OutputSchema() json.RawMessage { return computeOutputSchem
  *       this path is unreachable in normal use. It exists only to satisfy
  *       the Tool interface for registry compatibility.
  */
-func (c *ComputeTool) Execute(_ context.Context, _ map[string]any) (string, error) {
-	return "", fmt.Errorf("compute requires graph context; invoke via dispatcher")
+func (c *ComputeTool) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(c.ExecuteTyped(ctx, params))
 }
 
 /*
- * ExecuteWithContext is the real entry point for compute.
- * desc: Delegates to the agent's runCompute method which runs the
- *       architect/coder pipeline.
- * param: ec - the execute context with graph/budget/LLM references.
+ * ExecuteTyped is the real entry point for compute.
+ * desc: Runs the architect/coder pipeline and reports what came of it. The run
+ *       state compute needs — graph, budget, LLM clients — rides on the ctx,
+ *       which the dispatcher puts there before it chooses how to call a tool.
+ *       Without it nothing can run, and that is a failure rather than an empty
+ *       result: no code was written because none was attempted.
+ * param: ctx - carries the ExecuteContext.
  * param: params - the resolved tool parameters.
- * return: the compute result JSON and any error.
+ * return: the envelope carrying compute's plan or result JSON as its payload.
  */
-func (c *ComputeTool) ExecuteWithContext(ec *ExecuteContext, params map[string]any) (string, error) {
-	return c.agent.runCompute(ec, params)
+func (c *ComputeTool) ExecuteTyped(ctx context.Context, params map[string]any) (tools.ToolMessage, error) {
+	ec := ExecContextFrom(ctx)
+	if ec == nil {
+		return tools.ToolFail("compute", "compute was called without the run state it needs — no graph, budget or model", nil), nil
+	}
+	raw, err := c.agent.runCompute(ec, params)
+	if err != nil {
+		return tools.ToolMessage{}, err
+	}
+	return computeMessage("compute", raw), nil
 }

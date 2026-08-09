@@ -146,15 +146,13 @@ type schemaRef struct {
 // The schema describes the ENVELOPE, so the walk starts at its data property —
 // the payload is what a value is read from.
 func referencePaths(schema json.RawMessage) []schemaRef {
-	var root map[string]any
-	if json.Unmarshal(schema, &root) != nil {
+	payload := agenttools.PayloadSchema(schema)
+	if payload == nil {
 		return nil
 	}
-	props, _ := root["properties"].(map[string]any)
-	data, _ := props["data"].(map[string]any)
-	if data == nil {
-		// A schema written for the payload alone rather than the envelope.
-		data = root
+	var data map[string]any
+	if json.Unmarshal(payload, &data) != nil {
+		return nil
 	}
 	var out []schemaRef
 	walkSchemaForReferences(data, nil, &out)

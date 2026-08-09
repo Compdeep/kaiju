@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -20,13 +21,12 @@ func TestDebugTool_Envelope(t *testing.T) {
 		t.Fatalf("Impact = %d, want ImpactAffect (%d) — debug fixes edit files", d.Impact(nil), tools.ImpactAffect)
 	}
 
-	out, err := d.ExecuteWithContext(nil, map[string]any{"problem": "boom at x.go:3"})
+	msg, err := d.ExecuteTyped(context.Background(), map[string]any{"problem": "boom at x.go:3"})
 	if err != nil {
-		t.Fatalf("ExecuteWithContext errored: %v", err)
+		t.Fatalf("ExecuteTyped errored: %v", err)
 	}
-	msg, ok := tools.ParseToolMessage(out)
-	if !ok || msg.Type != "debug" {
-		t.Fatalf("debug output is not a debug envelope: %s", out)
+	if msg.Type != "debug" {
+		t.Fatalf("debug output is not a debug envelope: %+v", msg)
 	}
 	var env struct {
 		Problem string `json:"problem"`

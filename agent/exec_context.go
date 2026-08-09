@@ -88,17 +88,6 @@ type ExecuteContext struct {
 }
 
 /*
- * ContextualExecutor is an optional interface for tools that need rich
- * runtime context beyond (ctx, params).
- * desc: Tools implementing this are invoked via ExecuteWithContext by the
- *       dispatcher; tools not implementing it fall through to the normal
- *       Execute path. Currently only ComputeTool implements this.
- */
-type ContextualExecutor interface {
-	ExecuteWithContext(ec *ExecuteContext, params map[string]any) (string, error)
-}
-
-/*
  * resolveSkillCards pulls ## Architect Guidance and ## Coder Guidance
  * sections from every classifier-active card/skill that has them.
  * desc: Iterates the given card keys and looks each up in both the capability

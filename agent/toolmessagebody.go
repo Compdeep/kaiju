@@ -104,11 +104,33 @@ func (b toolMessageBody) Evidence() string {
 		}
 		return "(no " + b.msg.Type + ")"
 	case agenttools.StatusError:
+		line := "(" + b.msg.Type + " failed)"
 		if b.msg.Detail != "" {
-			return "(" + b.msg.Type + " failed: " + b.msg.Detail + ")"
+			line = "(" + b.msg.Type + " failed: " + b.msg.Detail + ")"
 		}
-		return "(" + b.msg.Type + " failed)"
+		// What the tool did produce, after the line saying it failed. A command
+		// that ran and exited non-zero usually printed the only thing that says
+		// why — "Permission denied" — and a tool that keeps it in the payload so
+		// it survives for templates and the frontend was still not showing it to
+		// the model, which read the exit status alone.
+		if out := b.failureOutput(); out != "" {
+			return line + "\n" + out
+		}
+		return line
 	}
+	if b.msg.Content != "" {
+		return b.msg.Content
+	}
+	if len(b.msg.Data) > 0 {
+		return string(b.msg.Data)
+	}
+	return ""
+}
+
+// failureOutput is whatever a failed tool produced: its rendered text, or its
+// payload when it carries no text. Empty when it produced neither, which is the
+// case for a tool that could not start.
+func (b toolMessageBody) failureOutput() string {
 	if b.msg.Content != "" {
 		return b.msg.Content
 	}

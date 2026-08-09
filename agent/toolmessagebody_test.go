@@ -96,6 +96,25 @@ func TestToolMessageBody_FieldFallsBackToContent(t *testing.T) {
 	}
 }
 
+// A command that ran and exited non-zero usually printed the only thing that
+// says why. Keeping it in the payload made it survive for templates and the
+// frontend, and the model still read the exit status alone.
+func TestToolMessageBody_EvidenceKeepsWhatAFailedToolProduced(t *testing.T) {
+	b := tmBody(agenttools.ToolFail("command", "exit status 1",
+		map[string]any{"output": "cat: /root/x: Permission denied"}))
+	got := b.Evidence()
+	if !strings.Contains(got, "command failed: exit status 1") {
+		t.Errorf("Evidence should still say what failed, got %q", got)
+	}
+	if !strings.Contains(got, "Permission denied") {
+		t.Errorf("Evidence dropped the output that says why:\n%s", got)
+	}
+	// A tool that could not start produces neither, and gets the line alone.
+	if got := tmBody(agenttools.ToolFail("page", "HTTP 404", nil)).Evidence(); got != "(page failed: HTTP 404)" {
+		t.Errorf("a failure with no output = %q, want the line alone", got)
+	}
+}
+
 func TestToolMessageBody_Evidence(t *testing.T) {
 	if got := tmBody(agenttools.ToolOK("page", "the page", nil)).Evidence(); got != "the page" {
 		t.Fatalf("ok Evidence = %q", got)

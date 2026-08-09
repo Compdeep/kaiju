@@ -11,6 +11,55 @@ import (
 	"github.com/Compdeep/kaiju/agent/llm"
 )
 
+// Reaching the run's state from a tool.
+//
+// Two things about a tool are independent: what it returns, and what it needs
+// to do its work. Most tools need nothing beyond their arguments. A few —
+// compute, edit_file — run their own model calls and add nodes to the graph, so
+// they need the graph, the budget and the clients.
+//
+// Those were once the same question, because the only way to receive the run's
+// state was to implement ContextualExecutor, whose method returns a string. A
+// tool could have the state or return a typed message, never both, and the
+// dispatcher's if/else silently chose the typed branch and left the state
+// unbuilt.
+//
+// So the state travels on the ctx instead, the way interjections and vision
+// images already do. Every tool now declares one method and fetches what it
+// needs; ContextualExecutor remains only until its three implementations are
+// converted, and is no longer how the state is delivered.
+
+type execContextKey struct{}
+
+/*
+ * WithExecContext returns ctx carrying the run state a tool may ask for.
+ * desc: Set by the dispatcher before every tool call, so a tool that needs the
+ *       graph can reach it whichever execution path it is on.
+ * param: ctx - the call's context.
+ * param: ec - the state, built once per tool call.
+ * return: a ctx carrying it.
+ */
+func WithExecContext(ctx context.Context, ec *ExecuteContext) context.Context {
+	if ec == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, execContextKey{}, ec)
+}
+
+/*
+ * ExecContextFrom returns the run state a tool was called with.
+ * desc: Nil when there is none — a tool invoked outside a DAG run, from the
+ *       ReAct loop or a direct call. A tool that needs the graph must say so
+ *       rather than dereference: absence means "not part of a run", not
+ *       "something went wrong".
+ * param: ctx - the ctx passed to Execute or ExecuteTyped.
+ * return: the state, or nil.
+ */
+func ExecContextFrom(ctx context.Context) *ExecuteContext {
+	ec, _ := ctx.Value(execContextKey{}).(*ExecuteContext)
+	return ec
+}
+
 /*
  * ExecuteContext carries runtime references to tools that need more than
  * plain (ctx, params) can provide.
@@ -31,6 +80,11 @@ type ExecuteContext struct {
 	AlertID    string
 	Intent     gates.Intent
 	SkillCards map[string]string // phase 2: resolved architect/coder guidance
+
+	// cardNames is which cards actually contributed guidance, recorded on the
+	// node by the tools that consume it. Unexported: it is bookkeeping for the
+	// trace, not something a tool should read.
+	cardNames []string
 }
 
 /*

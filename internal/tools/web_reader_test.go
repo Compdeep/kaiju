@@ -65,11 +65,11 @@ func TestFormatMarkdown_PluginIsPrimaryReader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "Rendered by the reader plugin") {
-		t.Fatalf("enabled reader plugin must be the primary reader, got: %s", out)
+	if !strings.Contains(out.Content, "Rendered by the reader plugin") {
+		t.Fatalf("enabled reader plugin must be the primary reader, got: %+v", out)
 	}
-	if strings.Contains(out, "Static boilerplate") {
-		t.Fatalf("built-in readability leaked despite an enabled plugin: %s", out)
+	if strings.Contains(out.Content, "Static boilerplate") {
+		t.Fatalf("built-in readability leaked despite an enabled plugin: %+v", out)
 	}
 }
 

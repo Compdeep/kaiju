@@ -146,10 +146,17 @@ func setBrowserHeaders(req *http.Request, referer string) {
  * param: params - must contain "url"; optionally "format", "focus", "method", "body", "headers"
  * return: extracted content string with HTTP status, or error on invalid URL or request failure
  */
+// Execute satisfies the Tool interface for callers outside the DAG. The
+// dispatcher prefers ExecuteTyped and keeps the envelope, so the page text is
+// never spliced to fit a character cap and ${node.X.title} still resolves.
 func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(w.ExecuteTyped(ctx, params))
+}
+
+func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	rawURL, _ := params["url"].(string)
 	if rawURL == "" {
-		return "", fmt.Errorf("web_fetch: url is required")
+		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: url is required")
 	}
 
 	format, _ := params["format"].(string)
@@ -159,7 +166,7 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 
 	// Validate URL
 	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
-		return "", fmt.Errorf("web_fetch: invalid URL %q (must start with http:// or https://)", rawURL)
+		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: invalid URL %q (must start with http:// or https://)", rawURL)
 	}
 
 	method, _ := params["method"].(string)
@@ -175,7 +182,7 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, bodyReader)
 	if err != nil {
-		return "", fmt.Errorf("web_fetch: %w", err)
+		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: %w", err)
 	}
 	// Present a coherent desktop-Chrome fingerprint. These headers must stay
 	// internally consistent (UA ↔ sec-ch-ua ↔ platform) — anti-bot filters flag
@@ -194,7 +201,7 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 
 	resp, err := w.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("web_fetch: %w", err)
+		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -209,7 +216,7 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 	}
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, readCap))
 	if err != nil {
-		return "", fmt.Errorf("web_fetch: read body: %w", err)
+		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: read body: %w", err)
 	}
 
 	status := fmt.Sprintf("HTTP %d %s", resp.StatusCode, resp.Status)
@@ -217,7 +224,7 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 	// Build the result, then stamp the fetched URL onto it (withURL) at a single
 	// exit — so every outcome, especially a 404 or an empty page, records WHICH url
 	// produced it. A bare "HTTP 404" with no url is un-debuggable in the trace.
-	var out string
+	var out agenttools.ToolMessage
 
 	// Binary decode (PDF etc.) — only for non-error responses; computed once.
 	var decoded string
@@ -269,13 +276,9 @@ func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, 
 // withURL stamps the fetched URL onto a fetch-result envelope: into Data always,
 // and into Detail on any non-ok outcome — so the trace shows exactly WHICH url
 // produced a 404 or an empty page instead of an anonymous error.
-func withURL(rawURL, out string, err error) (string, error) {
+func withURL(rawURL string, m agenttools.ToolMessage, err error) (agenttools.ToolMessage, error) {
 	if err != nil || rawURL == "" {
-		return out, err
-	}
-	m, ok := agenttools.ParseToolMessage(out)
-	if !ok {
-		return out, err
+		return m, err
 	}
 	obj := map[string]any{}
 	if len(m.Data) > 0 {
@@ -292,7 +295,7 @@ func withURL(rawURL, out string, err error) (string, error) {
 			m.Detail = m.Detail + " — " + rawURL
 		}
 	}
-	return m.JSON(), nil
+	return m, nil
 }
 
 // fetchResult is the structured JSON return shape of web_fetch. Declared here
@@ -310,10 +313,10 @@ type fetchResult struct {
 	Note string `json:"note,omitempty"`
 }
 
-func marshalFetchResult(r fetchResult) (string, error) {
+func marshalFetchResult(r fetchResult) (agenttools.ToolMessage, error) {
 	data, err := json.Marshal(r)
 	if err != nil {
-		return "", err
+		return agenttools.ToolMessage{}, err
 	}
 	// Map the fetch outcome onto the uniform tool envelope: HTTP >= 400 → error;
 	// structurally-fine-but-no-usable-content (Note set, Content empty) → empty;
@@ -331,7 +334,7 @@ func marshalFetchResult(r fetchResult) (string, error) {
 		msg.Status = agenttools.StatusOK
 		msg.Content = r.Content
 	}
-	return msg.JSON(), nil
+	return msg, nil
 }
 
 /*
@@ -341,7 +344,7 @@ func marshalFetchResult(r fetchResult) (string, error) {
  * param: body - raw response body bytes
  * return: JSON {status, content} with body truncated to 8KB
  */
-func (w *WebFetch) formatRaw(status string, body []byte) (string, error) {
+func (w *WebFetch) formatRaw(status string, body []byte) (agenttools.ToolMessage, error) {
 	s := string(body)
 	if len(s) > 8192 {
 		s = s[:8192] + "\n... (truncated)"
@@ -374,7 +377,7 @@ func primaryContent(ctx context.Context, rawURL string) (string, bool) {
  * param: body - raw HTML body bytes
  * return: status line with title/author and extracted article text (truncated to 12KB)
  */
-func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, body []byte) (string, error) {
+func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, body []byte) (agenttools.ToolMessage, error) {
 	// An enabled reader plugin is the primary reader.
 	if txt, ok := primaryContent(ctx, rawURL); ok {
 		if len(txt) > 12000 {
@@ -422,7 +425,7 @@ func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, bo
  * param: body - raw HTML body bytes
  * return: status line followed by plain text content (truncated to 8KB)
  */
-func (w *WebFetch) formatText(_ context.Context, status, rawURL string, body []byte) (string, error) {
+func (w *WebFetch) formatText(_ context.Context, status, rawURL string, body []byte) (agenttools.ToolMessage, error) {
 	text := stripHTML(string(body))
 	if len(text) > 8192 {
 		text = text[:8192] + "\n... (truncated)"
@@ -440,7 +443,7 @@ func (w *WebFetch) formatText(_ context.Context, status, rawURL string, body []b
  * param: focus - optional focus topic for the LLM summary prompt
  * return: status line with title and LLM-generated summary, or fallback content on failure
  */
-func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, body []byte, focus string) (string, error) {
+func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, body []byte, focus string) (agenttools.ToolMessage, error) {
 	if w.executor == nil {
 		// No LLM available, fall back to markdown
 		return w.formatMarkdown(ctx, status, rawURL, body)

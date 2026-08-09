@@ -11,7 +11,7 @@ emit, and the full catalogue of what ships built in.
 
 ## The Tool interface
 
-`agent/tools/skill.go`. Four methods, implemented by every compiled
+`agent/toolapi/skill.go`. Four methods, implemented by every compiled
 built-in and every SKILL.md wrapper:
 
 ```go
@@ -49,7 +49,7 @@ builtins), so tool authors hardcode them. The gate passes an invocation when
 
 ## The Registry
 
-`agent/tools/registry.go`. One thread-safe, in-process map keyed by tool
+`agent/toolapi/registry.go`. One thread-safe, in-process map keyed by tool
 name. Each entry carries the tool plus two pieces of metadata:
 
 - **source** — where it came from: `"builtin"`, `"skillmd:<path>"` (a SKILL.md
@@ -65,7 +65,7 @@ OpenAI function-calling defs for the LLM.
 
 ## The ToolMessage envelope
 
-`agent/tools/toolmessage.go`. Every tool result is a uniform envelope so
+`agent/toolapi/toolmessage.go`. Every tool result is a uniform envelope so
 an edge can frame presence / absence / failure the same way regardless of which
 tool ran. The envelope adds only the framing signals; the tool's own payload
 lives verbatim in `Data`.
@@ -211,10 +211,10 @@ for how those seams feed `web_fetch`.
 
 | file | responsibility |
 |---|---|
-| `agent/tools/skill.go` | `Tool` interface, impact tiers, optional interfaces |
-| `agent/tools/registry.go` | the in-process registry (source + enabled) |
-| `agent/tools/toolmessage.go` | the `ToolMessage` envelope + constructors |
-| `agent/tools/decoders.go` | `web_fetch` binary-decoder + reader-fallback seams |
+| `agent/toolapi/skill.go` | `Tool` interface, impact tiers, optional interfaces |
+| `agent/toolapi/registry.go` | the in-process registry (source + enabled) |
+| `agent/toolapi/toolmessage.go` | the `ToolMessage` envelope + constructors |
+| `agent/toolapi/decoders.go` | `web_fetch` binary-decoder + reader-fallback seams |
 | `tools/*.go` | the built-in tool implementations |
 | `internal/agent/builtin_compute.go` / `builtin_edit_file.go` / `builtin_debug.go` / `builtin_vision.go` | the agent-bound tools |
 | `cmd/kaiju/main.go` (~L389–510) | registration + config gates |

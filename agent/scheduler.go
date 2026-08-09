@@ -1271,6 +1271,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					graph.SetBody(comp.NodeID, parseComputeBody(comp.Result))
 				} else if msg, ok := tools.ParseToolMessage(comp.Result); ok {
 					graph.SetBody(comp.NodeID, toolMessageBody{msg: msg})
+				} else if node.Type == NodeTool {
+					// A tool that declared no outcome — prose, its own JSON shape,
+					// a plugin. It used to arrive as a bare string, which every
+					// consumer had to recognise by the body's Go type, and most
+					// read as "nothing to report here". Saying so costs nothing
+					// and stops absence being mistaken for success.
+					graph.SetBody(comp.NodeID, toolMessageBody{msg: tools.ToolUnclassified(comp.Result)})
 				} else {
 					graph.SetResult(comp.NodeID, comp.Result)
 				}

@@ -31,6 +31,21 @@ func (b toolMessageBody) Field(path string) (any, bool) {
 	// the payload, so a leading "data" is always the wrapper, never a real field —
 	// tolerating only the dotted form left ${node.X.data} failing at runtime even
 	// though plan-time validation accepts it.
+	// An unclassified body has no payload — its whole result is the text the
+	// producer returned. Resolve from the top of that text, which is what
+	// RawTextBody did for the same output before it carried an envelope, so a
+	// reference like ${node.X.count} into a tool's own JSON keeps working.
+	if b.msg.Status == agenttools.StatusUnclassified {
+		if path == "" {
+			return b.msg.Content, true
+		}
+		v, err := extractJSONFieldAny(b.msg.Content, path)
+		if err != nil {
+			return nil, false
+		}
+		return v, true
+	}
+
 	p := strings.TrimPrefix(path, "data.")
 	if path == "data" {
 		p = ""
@@ -54,6 +69,10 @@ func (b toolMessageBody) Field(path string) (any, bool) {
 // for pure-data tools.
 func (b toolMessageBody) Evidence() string {
 	switch b.msg.Status {
+	case agenttools.StatusUnclassified:
+		// The producer's text, unchanged. Adding a note here would put a frame
+		// around every prose tool's output for the model to read past.
+		return b.msg.Content
 	case agenttools.StatusEmpty:
 		if b.msg.Detail != "" {
 			return "(no " + b.msg.Kind + ": " + b.msg.Detail + ")"
@@ -76,6 +95,17 @@ func (b toolMessageBody) Evidence() string {
 
 // Summary renders a short trace line for the frontend.
 func (b toolMessageBody) Summary() string {
+	// An unclassified body has nothing to summarise but its text, and "text
+	// unclassified" tells a reader less than the first line does. This is what
+	// the trace showed for the same output before it carried an envelope.
+	if b.msg.Status == agenttools.StatusUnclassified {
+		for _, line := range strings.Split(b.msg.Content, "\n") {
+			if t := strings.TrimSpace(line); t != "" {
+				return Text.TruncateLog(t, 120)
+			}
+		}
+		return ""
+	}
 	s := b.msg.Kind + " " + string(b.msg.Status)
 	if b.msg.Detail != "" {
 		s += ": " + Text.TruncateLog(b.msg.Detail, 120)

@@ -35,11 +35,18 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 	for _, n := range graph.ResolvedByType(NodeTool) {
 		tb, ok := n.Body.(toolMessageBody)
 		if !ok {
-			continue // not yet on the protocol — no structural signal to read
+			continue // not a tool result — nothing structural to read
 		}
 		env := tb.Envelope()
-		if env.Status == agenttools.StatusEmpty || env.Status == agenttools.StatusError {
+		switch env.Status {
+		case agenttools.StatusEmpty, agenttools.StatusError:
 			gaps = append(gaps, toolGap{Tag: n.Tag, Kind: env.Kind, Detail: env.Detail})
+		case agenttools.StatusUnclassified:
+			// The tool ran and returned something; it did not say whether that
+			// something was a finding. Stating it is honest — the alternative is
+			// silence, which reads to every consumer as "this one was fine".
+			gaps = append(gaps, toolGap{Tag: n.Tag, Kind: env.Kind,
+				Detail: "the tool did not report whether it found anything; read its output directly"})
 		}
 	}
 	for _, n := range graph.FailedNodes() {
@@ -72,7 +79,18 @@ func (a *Agent) hasUsableEvidence(graph *Graph) bool {
 		return false
 	}
 	for _, n := range graph.ResolvedByType(NodeTool) {
-		if tb, ok := n.Body.(toolMessageBody); ok && tb.Envelope().Status == agenttools.StatusOK {
+		tb, ok := n.Body.(toolMessageBody)
+		if !ok {
+			continue
+		}
+		switch tb.Envelope().Status {
+		case agenttools.StatusOK, agenttools.StatusUnclassified:
+			// Unclassified counts. The tool ran and returned something readable;
+			// all that is missing is its own word on whether that counts as a
+			// finding. Excluding it would tell decideAutoAggMode there is nothing
+			// to aggregate on a run whose evidence came entirely from tools that
+			// do not declare an outcome — which, until the tools are migrated, is
+			// most of them.
 			return true
 		}
 	}

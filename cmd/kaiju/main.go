@@ -15,6 +15,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
+	kaijutools "github.com/Compdeep/kaiju/agent/tools/core"
 	"github.com/Compdeep/kaiju/agent/uploads"
 	"github.com/Compdeep/kaiju/docs"
 	"github.com/Compdeep/kaiju/internal/api"
@@ -29,7 +30,6 @@ import (
 	"github.com/Compdeep/kaiju/internal/memory"
 	"github.com/Compdeep/kaiju/internal/plugins"
 	"github.com/Compdeep/kaiju/internal/skillhub"
-	kaijutools "github.com/Compdeep/kaiju/internal/tools"
 	"github.com/Compdeep/kaiju/internal/workspace"
 )
 

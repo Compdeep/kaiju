@@ -54,6 +54,39 @@ func TestToolMessageBody_FieldBareData(t *testing.T) {
 	}
 }
 
+// EnvelopeSchema tells the planner a result has content, detail, status and
+// type, so a plan may reference them. Before these resolved, ${node.X.content}
+// passed plan-time validation and then failed at fire time, and a tool whose
+// readable half is Content with counts in Data had no working path to its text.
+func TestToolMessageBody_FieldEnvelopeNames(t *testing.T) {
+	b := tmBody(agenttools.ToolOK("listing", "two rows", map[string]any{"count": 2}))
+	if v, ok := b.Field("content"); !ok || v != "two rows" {
+		t.Fatalf("Field(content) = %v,%v want the rendered text", v, ok)
+	}
+	if v, ok := b.Field("status"); !ok || v != "ok" {
+		t.Fatalf("Field(status) = %v,%v want ok", v, ok)
+	}
+	if v, ok := b.Field("type"); !ok || v != "listing" {
+		t.Fatalf("Field(type) = %v,%v want listing", v, ok)
+	}
+	e := tmBody(agenttools.ToolEmpty("listing", "no incident matches status open"))
+	if v, ok := e.Field("detail"); !ok || v != "no incident matches status open" {
+		t.Fatalf("Field(detail) = %v,%v want the reason", v, ok)
+	}
+	// Where both have the name the payload wins, in either form: web_fetch's
+	// payload carries the HTTP status and ${node.X.status} has always meant it.
+	c := tmBody(agenttools.ToolOK("page", "rendered", map[string]any{"content": "raw", "status": "200 OK"}))
+	if v, ok := c.Field("content"); !ok || v != "raw" {
+		t.Fatalf("Field(content) = %v,%v want the payload's own key", v, ok)
+	}
+	if v, ok := c.Field("data.content"); !ok || v != "raw" {
+		t.Fatalf("Field(data.content) = %v,%v want the payload's own key", v, ok)
+	}
+	if v, ok := c.Field("status"); !ok || v != "200 OK" {
+		t.Fatalf("Field(status) = %v,%v want the payload's HTTP status", v, ok)
+	}
+}
+
 // A text tool carries its whole result in Content with no Data; field access
 // must still reach into it when it happens to be JSON (a JSON file, a JSON kv).
 func TestToolMessageBody_FieldFallsBackToContent(t *testing.T) {

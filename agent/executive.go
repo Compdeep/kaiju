@@ -63,6 +63,12 @@ func compileToolIndex(registry *tools.Registry, names []string) string {
 			if shape := compactOutputShape(outSchema); shape != "" {
 				sb.WriteString("  → returns: " + shape + "\n")
 			}
+			// Wiring the tool itself declared. Generated rather than written
+			// into a description, so it cannot drift from what the edges read
+			// afterwards to check whether the wiring happened.
+			for _, hint := range chainHints(outSchema) {
+				sb.WriteString("  → chain: " + hint + "\n")
+			}
 		}
 	}
 	return sb.String()

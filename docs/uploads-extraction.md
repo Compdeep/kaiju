@@ -8,7 +8,7 @@ This doc covers all four.
 
 ## office_extract — built-in OOXML reader
 
-`internal/tools/office.go`. The `office_extract` tool reads Office Open XML —
+`agent/tools/core/office.go`. The `office_extract` tool reads Office Open XML —
 Word (`.docx`), PowerPoint (`.pptx`), Excel (`.xlsx`) — into plain text.
 
 **Why it's a built-in, not a plugin.** OOXML files are just a ZIP of XML parts, so
@@ -98,7 +98,7 @@ visible to the vision model across follow-up questions.
 
 ## web_fetch extraction seams
 
-`internal/tools/web.go` + `internal/agent/tools/decoders.go`. Core `web_fetch`
+`agent/tools/core/web.go` + `agent/tools/decoders.go`. Core `web_fetch`
 does a plain HTTP GET plus readability. Two seams let it read *more* without
 pulling heavy dependencies into the default binary; with no plugin compiled in,
 every lookup is a miss and `web_fetch` behaves exactly as it always has.
@@ -156,9 +156,9 @@ saying so; the coverage edge reads that and does not invent content. See
 
 | file | responsibility |
 |---|---|
-| `internal/tools/office.go` | `office_extract` tool + OOXML extractors + `RegisterOfficeDecoders` |
+| `agent/tools/core/office.go` | `office_extract` tool + OOXML extractors + `RegisterOfficeDecoders` |
 | `internal/plugins/pdf/pdf.go` | the `pdf_extract` tool + `application/pdf` decoder (build-tag plugin) |
 | `internal/agent/uploads/processor.go` | the synchronous upload pipeline + limits |
 | `internal/agent/uploads/extract.go` | metadata extractors (text/CSV/JSON/JSONL) + LLM summary |
-| `internal/tools/web.go` | `web_fetch`: read-cap raise, `decodePageBinary`, `primaryContent` |
-| `internal/agent/tools/decoders.go` | the two `web_fetch` seams (binary decoder + reader fallback) |
+| `agent/tools/core/web.go` | `web_fetch`: read-cap raise, `decodePageBinary`, `primaryContent` |
+| `agent/tools/decoders.go` | the two `web_fetch` seams (binary decoder + reader fallback) |

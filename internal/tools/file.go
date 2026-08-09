@@ -87,10 +87,15 @@ func (f *FileRead) Parameters() json.RawMessage {
  * param: params - must contain "path"; optionally "max_lines"
  * return: file content as a string (possibly truncated), or error if file cannot be read
  */
-func (f *FileRead) Execute(_ context.Context, params map[string]any) (string, error) {
+// Execute satisfies the Tool interface for callers outside the DAG.
+func (f *FileRead) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(f.ExecuteTyped(ctx, params))
+}
+
+func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
 	path, _ := params["path"].(string)
 	if path == "" {
-		return "", fmt.Errorf("file_read: path is required")
+		return tools.ToolMessage{}, fmt.Errorf("file_read: path is required")
 	}
 	// Resolve relative paths against workspace
 	if !filepath.IsAbs(path) && f.workspace != "" {
@@ -100,7 +105,15 @@ func (f *FileRead) Execute(_ context.Context, params map[string]any) (string, er
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("file_read: %w", err)
+		return tools.ToolMessage{}, fmt.Errorf("file_read: %w", err)
+	}
+
+	// An empty file is a finding, not a blank result. Reported as empty so the
+	// coverage statement can say the file had nothing in it, rather than the
+	// model inferring content from a silent gap. Distinct from a missing file,
+	// which fails the read above and fails the node.
+	if len(data) == 0 {
+		return tools.ToolEmpty("text", "the file is empty: "+path), nil
 	}
 
 	maxLines := 500
@@ -114,7 +127,7 @@ func (f *FileRead) Execute(_ context.Context, params map[string]any) (string, er
 		lines = append(lines, fmt.Sprintf("... (truncated at %d lines)", maxLines))
 	}
 
-	return tools.ToolText(strings.Join(lines, "\n")).JSON(), nil
+	return tools.ToolText(strings.Join(lines, "\n")), nil
 }
 
 var _ tools.Tool = (*FileRead)(nil)

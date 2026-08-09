@@ -78,6 +78,32 @@ func TestFileRead_EmitsTextEnvelope(t *testing.T) {
 	}
 }
 
+// An empty file is a finding. It used to come back as ok with nothing in it,
+// which reads to every consumer as a successful read and tells the coverage
+// statement nothing.
+func TestFileRead_EmptyFileIsReportedAsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "nothing.txt"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := NewFileRead(dir).Execute(nil, map[string]any{"path": "nothing.txt"})
+	m := mustEnvelope(t, out, err)
+	if m.Status != agenttools.StatusEmpty {
+		t.Fatalf("status = %q, want empty", m.Status)
+	}
+	if !strings.Contains(m.Detail, "nothing.txt") {
+		t.Fatalf("detail should name the file, got %q", m.Detail)
+	}
+}
+
+// A missing file is a different outcome: the read fails and the node fails, so
+// it must not be quietly reported as an empty file.
+func TestFileRead_MissingFileStillErrors(t *testing.T) {
+	if _, err := NewFileRead(t.TempDir()).Execute(nil, map[string]any{"path": "absent.txt"}); err == nil {
+		t.Fatal("a missing file must return an error, not an empty envelope")
+	}
+}
+
 func TestFileList_EmitsListingEnvelope(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0o644)

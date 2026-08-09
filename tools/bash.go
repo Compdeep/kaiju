@@ -299,6 +299,15 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		}), nil
 	}
 
+	// A command that succeeded and printed nothing: grep with no match, find
+	// with no file, ls of an empty directory. It is the commonest way a shell
+	// says "not there", and reporting it as a result leaves the next step to
+	// infer the absence from an empty string — which reads the same as a
+	// command whose output was lost.
+	if strings.TrimSpace(output) == "" {
+		return toolapi.ToolEmpty("command", fmt.Sprintf("%q exited 0 and printed nothing", command)), nil
+	}
+
 	return toolapi.ToolOK("command", output, bashData{
 		ExitCode: 0,
 		Stdout:   headTailTruncate(stdout.String(), 4000, 4000),

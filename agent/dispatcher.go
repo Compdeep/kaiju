@@ -242,7 +242,7 @@ func substituteTemplates(n *Node, graph *Graph) error {
 	// match only the node form, so it would otherwise be left in the parameter
 	// as literal text and handed to the tool.
 	for _, ref := range FindRefs(n.Params) {
-		if ref.Kind == "step" {
+		if ref.Type == "step" {
 			return fmt.Errorf("template %s on %s: a step reference reached fire time, so the rewrite to ${node.<id>…} was missed", ref.Raw, n.ID)
 		}
 	}

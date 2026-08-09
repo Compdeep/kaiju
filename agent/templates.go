@@ -23,9 +23,9 @@ import (
 // TemplateRef describes a single ${step.N…} or ${node.<id>…} reference
 // found inside a plan step's params tree.
 type TemplateRef struct {
-	Kind   string   // "step" or "node"
-	Index  int      // when Kind == "step"
-	NodeID string   // when Kind == "node"
+	Type   string   // "step" or "node"
+	Index  int      // when Type == "step"
+	NodeID string   // when Type == "node"
 	Path   []string // dot-path tokens after the leading index/id; may be empty
 	Raw    string   // original "${...}" text including the braces
 }
@@ -33,7 +33,7 @@ type TemplateRef struct {
 // Key returns a stable identity for the reference's base (without the path),
 // useful for collecting unique upstream dependencies.
 func (r TemplateRef) Key() string {
-	if r.Kind == "node" {
+	if r.Type == "node" {
 		return "node:" + r.NodeID
 	}
 	return "step:" + strconv.Itoa(r.Index)
@@ -86,7 +86,7 @@ func parseRef(raw, kind, body string) *TemplateRef {
 	if len(parts) == 0 || parts[0] == "" {
 		return nil
 	}
-	ref := &TemplateRef{Kind: kind, Raw: raw}
+	ref := &TemplateRef{Type: kind, Raw: raw}
 	switch kind {
 	case "step":
 		idx, err := strconv.Atoi(parts[0])
@@ -314,7 +314,7 @@ func AutoDeriveTemplateDeps(steps []PlanStep) error {
 	for i := range steps {
 		refs := FindRefs(steps[i].Params)
 		for _, ref := range refs {
-			if ref.Kind != "step" {
+			if ref.Type != "step" {
 				continue
 			}
 			if ref.Index < 0 || ref.Index >= len(steps) {

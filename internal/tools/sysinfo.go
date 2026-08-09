@@ -81,7 +81,12 @@ func (s *Sysinfo) OutputSchema() json.RawMessage {
  * param: _ - unused parameters
  * return: JSON string with system information fields
  */
-func (s *Sysinfo) Execute(_ context.Context, _ map[string]any) (string, error) {
+// Execute satisfies the Tool interface for callers outside the DAG.
+func (s *Sysinfo) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(s.ExecuteTyped(ctx, params))
+}
+
+func (s *Sysinfo) ExecuteTyped(_ context.Context, _ map[string]any) (tools.ToolMessage, error) {
 	hostname, _ := os.Hostname()
 	cwd := s.workspace
 	if cwd == "" {
@@ -97,12 +102,17 @@ func (s *Sysinfo) Execute(_ context.Context, _ map[string]any) (string, error) {
 		"time":      time.Now().UTC().Format(time.RFC3339),
 		"cpus":      runtime.NumCPU(),
 	}
-	return tools.ToolOK("sysinfo", "", info).JSON(), nil
+	// No empty case: the machine always has a hostname, an architecture and a
+	// clock. Content is left empty on purpose — the payload IS the readable
+	// form, and Evidence() falls back to it, so filling both would carry the
+	// same JSON twice.
+	return tools.ToolOK("sysinfo", "", info), nil
 }
 
 // Verify interface compliance at compile time.
 var _ tools.Tool = (*Sysinfo)(nil)
 var _ tools.Outputter = (*Sysinfo)(nil)
+var _ tools.TypedExecutor = (*Sysinfo)(nil)
 
 func init() {
 	// Ensure sysinfo is always available as a reference tool.

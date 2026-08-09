@@ -101,10 +101,17 @@ func (w *WebSearch) OutputSchema() json.RawMessage {
  * param: params - must contain "query"; optionally "max_results" (default 5, max 10)
  * return: JSON string with query and results array, or error
  */
+// Execute satisfies the Tool interface for callers outside the DAG. The
+// dispatcher prefers ExecuteTyped, which keeps the envelope the grounding edge
+// reads to tell searched URLs from fetched ones.
 func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(w.ExecuteTyped(ctx, params))
+}
+
+func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	query, _ := params["query"].(string)
 	if query == "" {
-		return "", fmt.Errorf("web_search: query is required")
+		return agenttools.ToolMessage{}, fmt.Errorf("web_search: query is required")
 	}
 
 	maxResults := 5
@@ -129,7 +136,7 @@ func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string,
 		select {
 		case <-time.After(wait):
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return agenttools.ToolMessage{}, ctx.Err()
 		}
 		w.mu.Lock()
 	}
@@ -152,7 +159,7 @@ func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string,
 	}
 
 	if err != nil {
-		return "", fmt.Errorf("web_search: %w", err)
+		return agenttools.ToolMessage{}, fmt.Errorf("web_search: %w", err)
 	}
 
 	// Ground the results before they reach the planner: HEAD-validate each URL,
@@ -170,9 +177,11 @@ func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string,
 	// "results": null and the model hallucinates URLs to fill it. Always return
 	// an explicit [] plus a note so "no results" reads as "no results".
 	if len(results) == 0 {
-		return agenttools.ToolEmpty("search", "no reachable results for this query — try a different query or report that nothing was found").JSON(), nil
+		return agenttools.ToolEmpty("search", "no reachable results for this query — try a different query or report that nothing was found"), nil
 	}
-	return agenttools.ToolOK("search", "", map[string]any{"query": query, "results": results}).JSON(), nil
+	// Content stays empty: the results are structured and the model reads them
+	// from the payload, which Evidence() falls back to.
+	return agenttools.ToolOK("search", "", map[string]any{"query": query, "results": results}), nil
 }
 
 // daysToBucket maps a recency_days count to the coarse date bucket the search

@@ -130,3 +130,77 @@ func TestFileRead_ContentIsNotReportedAsAGap(t *testing.T) {
 		t.Fatalf("a file that had content is not a gap, got:\n%s", framed.User)
 	}
 }
+
+// web_search's envelope is what the grounding edge reads to tell a URL a real
+// search returned from one the model recalled. It matches on kind "search",
+// status ok, and a results list in the payload, so the migration has to preserve
+// all three.
+//
+// The edge only speaks when something else in the run came back empty — with
+// nothing missing there is no reason to press the model about where a URL came
+// from. So the run here has a search that worked and a read that found nothing,
+// which is when it matters.
+func TestWebSearch_ResultsReachTheGroundingEdge(t *testing.T) {
+	results := []map[string]string{
+		{"title": "First", "url": "https://example.test/one", "snippet": "a"},
+		{"title": "Second", "url": "https://example.test/two", "snippet": "b"},
+	}
+	g := agent.NewGraph()
+	found := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "search", ToolName: "web_search"})
+	g.SetBody(found, agent.NewToolBody(
+		agenttools.ToolOK("search", "", map[string]any{"query": "q", "results": results})))
+
+	missing := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "readconf", ToolName: "file_read"})
+	g.SetBody(missing, agent.NewToolBody(agenttools.ToolEmpty("text", "the file is empty: app.conf")))
+
+	a := &agent.Agent{}
+	framed := a.FrameGrounding(context.Background(), g, agent.NewStagePrompts("role", "user"))
+	for _, want := range []string{"https://example.test/one", "https://example.test/two"} {
+		if !strings.Contains(framed.User, want) {
+			t.Errorf("the grounding edge should list %s as searched but unread, got:\n%s", want, framed.User)
+		}
+	}
+}
+
+// A search that found nothing is both a coverage gap and the case the grounding
+// edge exists for: there is no real URL yet, so the next move is to search
+// again rather than to name one from memory.
+func TestWebSearch_NoResultsIsAGapAndBlocksCitation(t *testing.T) {
+	g := agent.NewGraph()
+	id := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "search", ToolName: "web_search"})
+	g.SetBody(id, agent.NewToolBody(agenttools.ToolEmpty("search", "no reachable results for this query")))
+
+	a := &agent.Agent{}
+	covered := a.FrameCoverage(context.Background(), g, agent.NewStagePrompts("role", "user"))
+	if !strings.Contains(covered.User, "no reachable results") {
+		t.Errorf("an empty search should be a coverage gap, got:\n%s", covered.User)
+	}
+	grounded := a.FrameGrounding(context.Background(), g, agent.NewStagePrompts("role", "user"))
+	if !strings.Contains(grounded.User, "No URL has come from a real search") {
+		t.Errorf("with no grounded URL the edge should say so, got:\n%s", grounded.User)
+	}
+}
+
+// sysinfo always succeeds and carries its whole result in the payload, so the
+// fields have to stay addressable and it must never look like a gap.
+func TestSysinfo_FieldsResolveAndItIsNotAGap(t *testing.T) {
+	g, msg := typedResult(t, tools.NewSysinfo("/tmp/ws"), map[string]any{})
+
+	if msg.Status != agenttools.StatusOK || msg.Content != "" {
+		t.Fatalf("envelope = status %q content %q — the payload is the readable form here", msg.Status, msg.Content)
+	}
+	body := agent.NewToolBody(msg)
+	for _, field := range []string{"hostname", "os", "arch", "cpus"} {
+		if v, ok := body.Field(field); !ok || v == nil {
+			t.Errorf("${step.N.%s} = (%v, %v), want a value", field, v, ok)
+		}
+	}
+	if v, ok := body.Field("cwd"); !ok || v != "/tmp/ws" {
+		t.Errorf("${step.N.cwd} = (%v, %v), want the workspace", v, ok)
+	}
+
+	a := &agent.Agent{}
+	if framed := a.FrameCoverage(context.Background(), g, agent.NewStagePrompts("role", "user")); framed.User != "user" {
+		t.Errorf("sysinfo always succeeds and is never a gap, got:\n%s", framed.User)
+	}
+}

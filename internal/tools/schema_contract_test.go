@@ -210,3 +210,77 @@ func TestEveryToolWithASchemaIsInTheInventory(t *testing.T) {
 		t.Errorf("these declare an output schema and are not in schemaFixtures, so nothing checks them: %v", missing)
 	}
 }
+
+// A field declared in a schema must appear somewhere in the file that declares
+// it.
+//
+// A schema that lies is worse than none: the planner writes a reference to a
+// field the tool never sets, and the step fails at fire time on a path that
+// looked validated. This catches the case that matters most — a field invented
+// while writing the schema, which no run will ever produce.
+//
+// "content" is exempt: it is the envelope's, not the payload's, and never
+// appears as a key in the tool's own source.
+func TestNoSchemaDeclaresAFieldThatAppearsNowhere(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]string{}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources[f] = string(b)
+	}
+
+	re := regexp.MustCompile(`func \(\w+ \*(\w+)\) OutputSchema\(\)`)
+	fileOf := map[string]string{}
+	for f, src := range sources {
+		for _, m := range re.FindAllStringSubmatch(src, -1) {
+			fileOf[m[1]] = f
+		}
+	}
+
+	for name, tool := range schemaFixtures() {
+		schema := agenttools.GetOutputSchema(tool)
+		if schema == nil {
+			continue
+		}
+		typ := reflect.TypeOf(tool)
+		for typ.Kind() == reflect.Ptr {
+			typ = typ.Elem()
+		}
+		src, known := sources[fileOf[typ.Name()]]
+		if !known {
+			t.Errorf("%s declares a schema in a file this test cannot find", name)
+			continue
+		}
+
+		payload := agenttools.PayloadSchema(schema)
+		if payload == nil {
+			continue
+		}
+		var declared struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(payload, &declared); err != nil {
+			t.Errorf("%s: payload schema is not an object: %v", name, err)
+			continue
+		}
+		for field := range declared.Properties {
+			if field == "content" {
+				continue
+			}
+			if !strings.Contains(src, `"`+field+`"`) {
+				t.Errorf("%s declares %q and nothing in %s ever sets it — "+
+					"a planner told about this field would reference something no run produces",
+					name, field, fileOf[typ.Name()])
+			}
+		}
+	}
+}

@@ -98,7 +98,7 @@ visible to the vision model across follow-up questions.
 
 ## web_fetch extraction seams
 
-`tools/web.go` + `agent/tools/decoders.go`. Core `web_fetch`
+`tools/web.go` + `agent/toolapi/decoders.go`. Core `web_fetch`
 does a plain HTTP GET plus readability. Two seams let it read *more* without
 pulling heavy dependencies into the default binary; with no plugin compiled in,
 every lookup is a miss and `web_fetch` behaves exactly as it always has.
@@ -161,4 +161,4 @@ saying so; the coverage edge reads that and does not invent content. See
 | `internal/agent/uploads/processor.go` | the synchronous upload pipeline + limits |
 | `internal/agent/uploads/extract.go` | metadata extractors (text/CSV/JSON/JSONL) + LLM summary |
 | `tools/web.go` | `web_fetch`: read-cap raise, `decodePageBinary`, `primaryContent` |
-| `agent/tools/decoders.go` | the two `web_fetch` seams (binary decoder + reader fallback) |
+| `agent/toolapi/decoders.go` | the two `web_fetch` seams (binary decoder + reader fallback) |

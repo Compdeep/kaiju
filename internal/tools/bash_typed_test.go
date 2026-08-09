@@ -17,8 +17,8 @@ func TestBash_TypedEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("echo errored: %v", err)
 	}
-	if ok.Kind != "command" || ok.Status != agenttools.StatusOK {
-		t.Fatalf("echo → kind %q status %q", ok.Kind, ok.Status)
+	if ok.Type != "command" || ok.Status != agenttools.StatusOK {
+		t.Fatalf("echo → kind %q status %q", ok.Type, ok.Status)
 	}
 	var d struct {
 		ExitCode int    `json:"exit_code"`

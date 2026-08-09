@@ -25,7 +25,7 @@ func TestEnvelopeSchema(t *testing.T) {
 
 func TestToolMessage_Constructors(t *testing.T) {
 	ok := ToolOK("page", "hello", map[string]any{"x": 1})
-	if ok.Kind != "page" || ok.Status != StatusOK || ok.Content != "hello" {
+	if ok.Type != "page" || ok.Status != StatusOK || ok.Content != "hello" {
 		t.Fatalf("ToolOK fields wrong: %+v", ok)
 	}
 	if len(ok.Data) == 0 {
@@ -40,7 +40,7 @@ func TestToolMessage_Constructors(t *testing.T) {
 		t.Fatalf("ToolFail wrong: %+v", fail)
 	}
 	txt := ToolText("just prose")
-	if txt.Kind != "text" || txt.Status != StatusOK || txt.Content != "just prose" || txt.Data != nil {
+	if txt.Type != "text" || txt.Status != StatusOK || txt.Content != "just prose" || txt.Data != nil {
 		t.Fatalf("ToolText wrong: %+v", txt)
 	}
 }
@@ -51,7 +51,7 @@ func TestToolMessage_JSONRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("round-trip: ParseToolMessage failed on %s", orig.JSON())
 	}
-	if got.Kind != orig.Kind || got.Status != orig.Status {
+	if got.Type != orig.Type || got.Status != orig.Status {
 		t.Fatalf("round-trip mismatch: %+v vs %+v", got, orig)
 	}
 	var d struct {
@@ -130,5 +130,30 @@ func TestServiceEnvelope_GraftReadsStatusFromData(t *testing.T) {
 	}
 	if svc.Status != "started" || svc.Name != "api" || svc.Port != 4000 {
 		t.Fatalf("graft read wrong service data: %+v", svc)
+	}
+}
+
+// The field was "kind" before it was renamed to "type". A remote plugin host is
+// third-party code built against whichever name it saw, so reading accepts both
+// and writing always uses the new one.
+func TestParseToolMessage_AcceptsTheOldFieldName(t *testing.T) {
+	m, ok := ParseToolMessage(`{"kind":"page","status":"ok","content":"hello"}`)
+	if !ok {
+		t.Fatal("an envelope using the old field name must still be recognised")
+	}
+	if m.Type != "page" || m.Content != "hello" {
+		t.Fatalf("got %+v", m)
+	}
+	// Writing it back uses the new name only.
+	if got := m.JSON(); !strings.Contains(got, `"type":"page"`) || strings.Contains(got, `"kind"`) {
+		t.Fatalf("output should carry only the new name, got %s", got)
+	}
+}
+
+// The new name wins when a producer somehow sends both.
+func TestParseToolMessage_NewNameWins(t *testing.T) {
+	m, ok := ParseToolMessage(`{"type":"listing","kind":"page","status":"ok"}`)
+	if !ok || m.Type != "listing" {
+		t.Fatalf("got (%+v, %v), want listing", m, ok)
 	}
 }

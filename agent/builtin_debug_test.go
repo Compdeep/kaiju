@@ -25,7 +25,7 @@ func TestDebugTool_Envelope(t *testing.T) {
 		t.Fatalf("ExecuteWithContext errored: %v", err)
 	}
 	msg, ok := tools.ParseToolMessage(out)
-	if !ok || msg.Kind != "debug" {
+	if !ok || msg.Type != "debug" {
 		t.Fatalf("debug output is not a debug envelope: %s", out)
 	}
 	var env struct {

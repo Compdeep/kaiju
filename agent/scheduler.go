@@ -2121,7 +2121,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 func bashError(comp nodeCompletion) (error, bool) {
 	if tb, ok := comp.Body.(toolMessageBody); ok {
 		env := tb.Envelope()
-		if env.Kind == "command" && env.Status == tools.StatusError {
+		if env.Type == "command" && env.Status == tools.StatusError {
 			return fmt.Errorf("bash failed: %s", Text.TruncateLog(env.Detail, 300)), true
 		}
 		return nil, false
@@ -2135,7 +2135,7 @@ func bashError(comp nodeCompletion) (error, bool) {
 func debugProblem(comp nodeCompletion) (string, bool) {
 	if tb, ok := comp.Body.(toolMessageBody); ok {
 		env := tb.Envelope()
-		if env.Kind != "debug" {
+		if env.Type != "debug" {
 			return "", false
 		}
 		var d struct {

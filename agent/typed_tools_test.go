@@ -55,8 +55,8 @@ func TestWebFetch_LargePageArrivesWhole(t *testing.T) {
 
 	g, msg := typedResult(t, tools.NewWebFetch(), map[string]any{"url": srv.URL, "format": "text"})
 
-	if msg.Kind != "page" || msg.Status != agenttools.StatusOK {
-		t.Fatalf("envelope = kind %q status %q", msg.Kind, msg.Status)
+	if msg.Type != "page" || msg.Status != agenttools.StatusOK {
+		t.Fatalf("envelope = kind %q status %q", msg.Type, msg.Status)
 	}
 	// The evidence a model reads is the page, not the envelope around it.
 	evidence := g.ResolvedResultsSoFar()

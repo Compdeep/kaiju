@@ -18,7 +18,8 @@ import (
 
 // toolGap is a gathering step that produced nothing usable.
 type toolGap struct {
-	Tag    string
+	Tag    string // the planner's label for the step, when it set one
+	Tool   string // the tool that ran, which is always known
 	Type   string
 	Detail string
 }
@@ -40,7 +41,7 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 		env := tb.Envelope()
 		switch env.Status {
 		case agenttools.StatusEmpty, agenttools.StatusError:
-			gaps = append(gaps, toolGap{Tag: n.Tag, Type: env.Type, Detail: env.Detail})
+			gaps = append(gaps, toolGap{Tag: n.Tag, Tool: n.ToolName, Type: env.Type, Detail: env.Detail})
 		case agenttools.StatusUnclassified:
 			// The tool ran and returned something; it did not say whether that
 			// something was a finding. Stating it is honest — the alternative is
@@ -54,7 +55,7 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 		if n.Error != nil {
 			detail = n.Error.Error()
 		}
-		gaps = append(gaps, toolGap{Tag: n.Tag, Type: n.ToolName, Detail: detail})
+		gaps = append(gaps, toolGap{Tag: n.Tag, Tool: n.ToolName, Detail: detail})
 	}
 	return gaps
 }
@@ -120,7 +121,13 @@ func (a *Agent) coverageEdge(ctx context.Context, graph *Graph, evidence string)
 	if len(gaps) > 0 {
 		var gb strings.Builder
 		for _, g := range gaps {
+			// The planner's label when there is one, otherwise the tool that
+			// ran. Falling back to the type printed the same word twice —
+			// "text (text)" — which says nothing about which step it was.
 			label := g.Tag
+			if label == "" {
+				label = g.Tool
+			}
 			if label == "" {
 				label = g.Type
 			}

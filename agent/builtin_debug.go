@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/Compdeep/kaiju/agent/tools"
 )
@@ -40,7 +39,7 @@ type DebugTool struct {
 // envelope is never truncated (the scheduler must parse the {type:"debug"}
 // marker to trigger the graft) — same reason compute does.
 var _ tools.Tool = (*DebugTool)(nil)
-var _ ContextualExecutor = (*DebugTool)(nil)
+var _ tools.TypedExecutor = (*DebugTool)(nil)
 
 // NewDebugTool constructs a DebugTool bound to an Agent.
 func NewDebugTool(a *Agent) *DebugTool { return &DebugTool{agent: a} }
@@ -90,24 +89,18 @@ func (d *DebugTool) OutputSchema() json.RawMessage { return debugOutputSchema }
  * ExecuteWithContext (it implements ContextualExecutor). Present only to
  * satisfy the Tool interface for registry compatibility.
  */
-func (d *DebugTool) Execute(_ context.Context, _ map[string]any) (string, error) {
-	return "", fmt.Errorf("debug requires graph context; invoke via dispatcher")
+func (d *DebugTool) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(d.ExecuteTyped(ctx, params))
 }
 
 /*
  * ExecuteWithContext echoes the problem into a {type:"debug"} envelope. The
  * scheduler's tool-completion handler detects this marker and grafts the Holmes
  * investigation parented to this node.
- * param: ec - the execute context (unused beyond satisfying the interface).
  * param: params - resolved tool params; `problem` is the investigation brief.
  * return: the debug envelope JSON.
  */
 func (d *DebugTool) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
 	problem, _ := params["problem"].(string)
 	return tools.ToolOK("debug", "", map[string]string{"problem": problem}), nil
-}
-
-func (d *DebugTool) ExecuteWithContext(_ *ExecuteContext, params map[string]any) (string, error) {
-	msg, _ := d.ExecuteTyped(context.Background(), params)
-	return msg.JSON(), nil
 }

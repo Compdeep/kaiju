@@ -570,22 +570,19 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 
 	if tx, ok := skill.(tools.TypedExecutor); ok {
 		// Typed path: the tool returns a ToolMessage directly — no JSON round-trip.
+		// The node records which cards contributed guidance, so a trace shows
+		// what this run was coding against. Only the tools that consume the
+		// cards claim them — every tool has an ExecuteContext, and marking them
+		// all would say a file_read was guided by the coder doctrine.
+		if ec != nil && len(ec.cardNames) > 0 && (toolName == "compute" || toolName == "edit_file") {
+			n.Skills = ec.cardNames
+		}
 		var msg tools.ToolMessage
 		if msg, err = tx.ExecuteTyped(ctx, params); err == nil {
 			body = toolMessageBody{msg: msg}
 			result = msg.JSON()
 			isContextual = true // structured envelope — exempt from truncation
 		}
-	} else if cx, ok := skill.(ContextualExecutor); ok && ec != nil {
-		isContextual = true
-		// The node records which cards contributed guidance, so a trace shows
-		// what this run was coding against. Only the tools that consume the
-		// cards claim them — every tool now has an ExecuteContext, and marking
-		// them all would say a file_read was guided by the coder doctrine.
-		if len(ec.cardNames) > 0 {
-			n.Skills = ec.cardNames
-		}
-		result, err = cx.ExecuteWithContext(ec, params)
 	} else {
 		result, err = skill.Execute(ctx, params)
 	}

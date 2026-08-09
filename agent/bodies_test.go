@@ -1,6 +1,7 @@
 package agent
 
 import (
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 	"strings"
 	"testing"
 )
@@ -16,19 +17,47 @@ func TestReflectionBody(t *testing.T) {
 	}
 }
 
-func TestComputeBody(t *testing.T) {
-	bp := parseComputeBody(`{"type":"blueprint","project_root":"/p"}`)
-	if bp.Type != "blueprint" || bp.Summary() != "blueprint: /p" {
-		t.Fatalf("blueprint summary = %q", bp.Summary())
+// compute's outcome is read off the JSON it already returns — no second model
+// call, no guess. A run that changed nothing is empty, because the coverage
+// edge exists to tell an answering stage which steps produced nothing.
+func TestComputeMessage(t *testing.T) {
+	bp := computeMessage("compute", `{"type":"blueprint","project_root":"/p"}`)
+	if bp.Status != agenttools.StatusOK || bp.Detail != "blueprint: /p" {
+		t.Fatalf("blueprint = %q %q", bp.Status, bp.Detail)
 	}
-	if v, ok := bp.Field("project_root"); !ok || v != "/p" {
-		t.Fatalf("ComputeBody.Field(project_root) = %v,%v", v, ok)
+	if v, ok := NewToolBody(bp).Field("project_root"); !ok || v != "/p" {
+		t.Fatalf("Field(project_root) = %v,%v — the plan has to stay addressable", v, ok)
 	}
-	if res := parseComputeBody(`{"type":"result","files_created":["a.py","b.py"]}`).Summary(); res != "created 2 file(s): a.py" {
-		t.Fatalf("result summary = %q", res)
+	if res := computeMessage("compute", `{"type":"result","files_created":["a.py","b.py"]}`); res.Detail != "created 2 file(s): a.py" {
+		t.Fatalf("result detail = %q", res.Detail)
 	}
-	if noop := parseComputeBody(`{"type":"result","no_changes":true,"reason":"nothing to do"}`).Summary(); !strings.Contains(noop, "no changes") || !strings.Contains(noop, "nothing to do") {
-		t.Fatalf("noop summary = %q", noop)
+	noop := computeMessage("compute", `{"type":"result","no_changes":true,"reason":"nothing to do"}`)
+	if noop.Status != agenttools.StatusEmpty || !strings.Contains(noop.Detail, "nothing to do") {
+		t.Fatalf("a run that changed nothing = %q %q, want empty carrying the reason", noop.Status, noop.Detail)
+	}
+	// Output that is not JSON still reaches the run rather than being called a
+	// failure the tool never reported.
+	if raw := computeMessage("compute", "the model wrote prose"); raw.Status != agenttools.StatusUnclassified {
+		t.Fatalf("non-JSON = %q, want unclassified", raw.Status)
+	}
+}
+
+// The plan goes in the payload and three grafts read it back out, so the two
+// halves of that have to agree.
+func TestComputePayloadRoundTrip(t *testing.T) {
+	raw := `{"type":"blueprint","project_root":"/p"}`
+	env := computeMessage("compute", raw).JSON()
+	if got := computePayload(env); got != raw {
+		t.Fatalf("computePayload = %q, want the plan back", got)
+	}
+	updated := `{"type":"blueprint","output":"ran"}`
+	back := withComputePayload(env, updated)
+	if got := computePayload(back); got != updated {
+		t.Fatalf("after withComputePayload = %q, want the new plan", got)
+	}
+	// A bare result — a producer that built no envelope — passes through.
+	if got := computePayload(raw); got != raw {
+		t.Fatalf("a bare result should pass through, got %q", got)
 	}
 }
 

@@ -65,7 +65,7 @@ type EditFileTool struct {
 
 // Compile-time interface assertions.
 var _ tools.Tool = (*EditFileTool)(nil)
-var _ ContextualExecutor = (*EditFileTool)(nil)
+var _ tools.TypedExecutor = (*EditFileTool)(nil)
 
 // NewEditFileTool constructs an EditFileTool bound to an Agent. The agent
 // reference gives ExecuteWithContext access to the LLM clients, workspace,
@@ -130,12 +130,9 @@ var editFileOutputSchema = json.RawMessage(`{
 
 func (e *EditFileTool) OutputSchema() json.RawMessage { return editFileOutputSchema }
 
-// Execute is a defensive stub. edit_file requires graph context, LLM
-// clients, and the workspace that plain (ctx, params) cannot carry. The
-// dispatcher always prefers ExecuteWithContext when the tool implements
-// ContextualExecutor, so this path is unreachable in normal use.
-func (e *EditFileTool) Execute(_ context.Context, _ map[string]any) (string, error) {
-	return "", fmt.Errorf("edit_file requires graph context; invoke via dispatcher")
+// Execute satisfies the Tool interface for callers outside the DAG.
+func (e *EditFileTool) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(e.ExecuteTyped(ctx, params))
 }
 
 // ExecuteWithContext validates the required params and delegates to the
@@ -156,17 +153,21 @@ func (e *EditFileTool) Execute(_ context.Context, _ map[string]any) (string, err
 // intentionally NOT supported here — edit_file's contract is
 // file-modification-only. If the Coder chooses to emit an execute field
 // anyway, runCompute ignores it because edit_file never passed one in.
-func (e *EditFileTool) ExecuteWithContext(ec *ExecuteContext, params map[string]any) (string, error) {
+func (e *EditFileTool) ExecuteTyped(ctx context.Context, params map[string]any) (tools.ToolMessage, error) {
+	ec := ExecContextFrom(ctx)
+	if ec == nil {
+		return tools.ToolFail("compute", "edit_file was called without the run state it needs — no graph, budget or model", nil), nil
+	}
 	taskFiles, err := extractTaskFiles(params)
 	if err != nil {
-		return "", err
+		return tools.ToolMessage{}, err
 	}
 	if len(taskFiles) == 0 {
-		return "", fmt.Errorf("edit_file requires at least one entry in task_files (got empty list)")
+		return tools.ToolMessage{}, fmt.Errorf("edit_file requires at least one entry in task_files (got empty list)")
 	}
 	goal, _ := params["goal"].(string)
 	if goal == "" {
-		return "", fmt.Errorf("edit_file requires a non-empty goal")
+		return tools.ToolMessage{}, fmt.Errorf("edit_file requires a non-empty goal")
 	}
 
 	computeParams := map[string]any{
@@ -183,7 +184,11 @@ func (e *EditFileTool) ExecuteWithContext(ec *ExecuteContext, params map[string]
 		}
 	}
 
-	return e.agent.runCompute(ec, computeParams)
+	raw, err := e.agent.runCompute(ec, computeParams)
+	if err != nil {
+		return tools.ToolMessage{}, err
+	}
+	return computeMessage("compute", raw), nil
 }
 
 // extractTaskFiles normalises the task_files param into []string,

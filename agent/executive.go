@@ -1721,6 +1721,13 @@ func envelopeData(schemaJSON json.RawMessage) json.RawMessage {
  * return: true if the field path exists in the schema.
  */
 func fieldExistsInSchema(schemaJSON json.RawMessage, fieldPath string) bool {
+	// A reference names a field of the tool's payload, so it is checked against
+	// the payload's schema. Checking the envelope's instead warned that every
+	// correct reference was to a field the tool does not have.
+	schemaJSON = tools.PayloadSchema(schemaJSON)
+	if schemaJSON == nil {
+		return false
+	}
 	var schema map[string]any
 	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
 		return false

@@ -100,12 +100,17 @@ func (m ToolMessage) JSON() string {
 // schema can't drift from the actual output. dataSchema is the JSON Schema for
 // the tool-specific `data` payload (pass "" when the tool carries only text in
 // `content`).
+//
+// The wrapper is marked "x-envelope" so a reader can find the tool's own schema
+// underneath it. Anything describing a tool to a model wants that inner schema
+// and not this one: the envelope is plumbing, and a planner shown five generic
+// keys learns nothing about what the tool returns. See PayloadSchema.
 func EnvelopeSchema(dataSchema string) json.RawMessage {
 	data := ""
 	if dataSchema != "" {
 		data = `,"data":` + dataSchema
 	}
-	return json.RawMessage(`{"type":"object","description":"Uniform tool envelope. status is ok|empty|error; the tool-specific payload is in data; content is the rendered text.","properties":{"type":{"type":"string"},"status":{"type":"string","enum":["ok","empty","error"]},"content":{"type":"string"},"detail":{"type":"string"}` + data + `}}`)
+	return json.RawMessage(`{"type":"object","x-envelope":true,"description":"Uniform tool envelope. status is ok|empty|error; the tool-specific payload is in data; content is the rendered text.","properties":{"type":{"type":"string"},"status":{"type":"string","enum":["ok","empty","error"]},"content":{"type":"string"},"detail":{"type":"string"}` + data + `}}`)
 }
 
 // ParseToolMessage reconstructs an envelope from a tool-result string. ok is
@@ -136,4 +141,52 @@ func ParseToolMessage(raw string) (ToolMessage, bool) {
 		return m, true
 	}
 	return ToolMessage{}, false
+}
+
+// PayloadSchema returns the tool's own output schema: the payload under an
+// envelope wrapper, or the schema as given when it is not wrapped.
+//
+// Three readers describe a tool's output — the planner's tool index, the
+// plan-time check on ${step.N.field} references, and the chain hints — and each
+// wants the tool's fields, never the envelope's. Only one of them used to
+// descend, so the other two told a planner that every tool returns the same
+// five keys.
+//
+// nil means the tool declares no payload at all: it carries text in content and
+// there is nothing to describe.
+func PayloadSchema(schema json.RawMessage) json.RawMessage {
+	var root map[string]json.RawMessage
+	if json.Unmarshal(schema, &root) != nil {
+		return schema
+	}
+	var wrapped bool
+	if raw, ok := root["x-envelope"]; ok {
+		_ = json.Unmarshal(raw, &wrapped)
+	}
+
+	var props map[string]json.RawMessage
+	if raw, ok := root["properties"]; ok {
+		_ = json.Unmarshal(raw, &props)
+	}
+	data, hasData := props["data"]
+
+	// The mark is the answer where it is present. Where it is not — a schema
+	// written by hand around the same shape — a top-level "data" object is the
+	// same wrapper by another route, which is the rule referencePaths already
+	// used before this function existed.
+	if wrapped {
+		if !hasData {
+			return nil
+		}
+		return json.RawMessage(data)
+	}
+	if hasData {
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(data, &obj) == nil {
+			if _, isObject := obj["properties"]; isObject {
+				return json.RawMessage(data)
+			}
+		}
+	}
+	return schema
 }

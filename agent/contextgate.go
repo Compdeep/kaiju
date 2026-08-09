@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 	"log"
 	"os"
 	"path/filepath"
@@ -1342,6 +1343,13 @@ func (s *toolIndexSource) Load(g *Graph, t *Trigger, a *Agent, params map[string
 // top-level schema description when it's short and load-bearing (e.g.
 // web_fetch's "CONSUMES URLs — does NOT produce URLs" warning).
 func compactOutputShape(schema json.RawMessage) string {
+	// The tool's own fields, never the envelope's. A planner shown
+	// {content, data, detail, status, type} learns nothing about what this tool
+	// returns and cannot write a reference into it.
+	schema = agenttools.PayloadSchema(schema)
+	if schema == nil {
+		return ""
+	}
 	var s struct {
 		Description string `json:"description"`
 		Properties  map[string]struct {

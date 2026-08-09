@@ -3,19 +3,26 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/Compdeep/kaiju/agent/tools"
 )
 
-// ComputeBody is the typed output of a compute node — the discriminated
-// envelope the compute tool emits, tagged by Type ("blueprint" for deep/plan
-// mode, "result" for shallow code/edit mode). Raw holds the original JSON so
-// Field (template access) and Evidence (downstream text) match pre-refactor
-// behavior exactly; the parsed descriptor fields drive a useful trace Summary.
+// Turning a compute run into an envelope.
 //
-// The scheduler's blueprint/exec grafts still re-parse the raw JSON string
-// (via comp.Result); migrating those to read these fields is a later, separate
-// cleanup. Evidence() returning Raw keeps them working unchanged for now.
-type ComputeBody struct {
-	RawBacked    `json:"-"`
+// compute and edit_file return JSON describing what they did: a blueprint for
+// a deep run, a result for a shallow one, or a statement that nothing needed
+// changing. That JSON is the payload, and the outcome is read off it here.
+//
+// It is read rather than asked for. A run that changed no files already says
+// so in `no_changes` and says why in `reason`, so deriving the status costs
+// nothing — there is no second model call and no guess. This is also why the
+// payload stays exactly as the tool wrote it: three grafts in the scheduler
+// read the plan out of it, and re-shaping it here would break them silently.
+
+// computeDescriptor is the part of a compute result that says what happened.
+// Everything else in the JSON — the follow-up graft instructions, the services,
+// the validation steps — is the scheduler's business and is left untouched.
+type computeDescriptor struct {
 	Type         string   `json:"type"`
 	ProjectRoot  string   `json:"project_root,omitempty"`
 	FilesCreated []string `json:"files_created,omitempty"`
@@ -24,36 +31,75 @@ type ComputeBody struct {
 	Reason       string   `json:"reason,omitempty"`
 }
 
-// parseComputeBody parses a compute tool's JSON envelope into a typed body,
-// keeping the raw JSON for faithful rendering and template access. On a parse
-// error the descriptor fields stay zero and Raw still carries the text, so
-// Field/Evidence degrade to raw-string behavior.
-func parseComputeBody(raw string) ComputeBody {
-	b := ComputeBody{RawBacked: RawBacked{Raw: raw}}
-	_ = json.Unmarshal([]byte(raw), &b) // best-effort; Raw is the source of truth
-	return b
+// computeMessage wraps a compute run's JSON in the envelope, with the outcome
+// read off the JSON itself.
+//
+// A run that changed nothing is empty, not ok: the coverage edge exists to tell
+// an answering stage which steps produced nothing, and "no code was written"
+// is exactly that. Its `reason` becomes the detail, which is the sentence the
+// stage is shown.
+func computeMessage(kind, raw string) tools.ToolMessage {
+	var d computeDescriptor
+	if err := json.Unmarshal([]byte(raw), &d); err != nil {
+		// Not JSON. The tool still produced something and the run should see
+		// it, so it goes through unclassified rather than being called a
+		// failure the tool never reported.
+		return tools.ToolUnclassified(raw)
+	}
+
+	if d.NoChanges {
+		reason := d.Reason
+		if reason == "" {
+			reason = "the run made no changes"
+		}
+		return tools.ToolEmpty(kind, reason)
+	}
+
+	msg := tools.ToolOK(kind, "", nil)
+	msg.Data = json.RawMessage(raw)
+	msg.Detail = computeSummary(d)
+	return msg
 }
 
-// Summary renders a short, type-aware line for the frontend trace.
-func (b ComputeBody) Summary() string {
+// computeSummary is the line a trace shows for a compute node. It was
+// ComputeBody.Summary before compute carried an envelope, and it says the same
+// things.
+func computeSummary(d computeDescriptor) string {
 	switch {
-	case b.NoChanges:
-		if b.Reason != "" {
-			return "no changes: " + Text.TruncateLog(b.Reason, 140)
-		}
-		return "no changes"
-	case b.Type == "blueprint":
-		if b.ProjectRoot != "" {
-			return "blueprint: " + b.ProjectRoot
+	case d.Type == "blueprint":
+		if d.ProjectRoot != "" {
+			return "blueprint: " + d.ProjectRoot
 		}
 		return "blueprint"
-	case len(b.FilesCreated) > 0:
-		return fmt.Sprintf("created %d file(s): %s", len(b.FilesCreated), b.FilesCreated[0])
-	case len(b.FilesEdited) > 0:
-		return fmt.Sprintf("edited %d file(s): %s", len(b.FilesEdited), b.FilesEdited[0])
-	case b.Type != "":
-		return b.Type
-	default:
-		return RawText(b.Raw).Summary()
+	case len(d.FilesCreated) > 0:
+		return fmt.Sprintf("created %d file(s): %s", len(d.FilesCreated), d.FilesCreated[0])
+	case len(d.FilesEdited) > 0:
+		return fmt.Sprintf("edited %d file(s): %s", len(d.FilesEdited), d.FilesEdited[0])
+	case d.Type != "":
+		return d.Type
 	}
+	return ""
+}
+
+// computePayload returns a compute node's own JSON out of the envelope around
+// it. Three grafts in the scheduler read the plan, the execute field and the
+// services out of a compute result; they go through here so they all read the
+// same place and a result that is not an envelope still works.
+func computePayload(result string) string {
+	if msg, ok := tools.ParseToolMessage(result); ok && len(msg.Data) > 0 {
+		return string(msg.Data)
+	}
+	return result
+}
+
+// withComputePayload puts an updated plan back where computePayload found it,
+// leaving the envelope around it intact. Used when an exec node's stdout is
+// spliced onto its compute parent.
+func withComputePayload(result, payload string) string {
+	msg, ok := tools.ParseToolMessage(result)
+	if !ok {
+		return payload
+	}
+	msg.Data = json.RawMessage(payload)
+	return msg.JSON()
 }

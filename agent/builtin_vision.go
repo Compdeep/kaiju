@@ -50,10 +50,28 @@ func (t *VisionTool) Parameters() json.RawMessage { return visionToolParamSchema
 // Impact is observe-only: it reads an image file and asks a model about it.
 func (t *VisionTool) Impact(map[string]any) int { return tools.ImpactObserve }
 
+// OutputSchema declares the description as the content, and the image it came
+// from, so a later step can act on the same file.
+func (t *VisionTool) OutputSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"content": {"type": "string", "description": "What the vision model saw in the image"},
+			"path":    {"type": "string", "description": "The image that was read"},
+			"model":   {"type": "string", "description": "The vision model that described it"}
+		}
+	}`)
+}
+
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (t *VisionTool) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(t.ExecuteTyped(ctx, params))
+}
+
+func (t *VisionTool) ExecuteTyped(ctx context.Context, params map[string]any) (tools.ToolMessage, error) {
 	raw, _ := params["path"].(string)
 	if strings.TrimSpace(raw) == "" {
-		return "", fmt.Errorf("image_read: 'path' is required")
+		return tools.ToolMessage{}, fmt.Errorf("image_read: 'path' is required")
 	}
 	ask, _ := params["prompt"].(string)
 	if strings.TrimSpace(ask) == "" {
@@ -62,16 +80,16 @@ func (t *VisionTool) Execute(ctx context.Context, params map[string]any) (string
 
 	provider, model := t.agent.VisionModel()
 	if model == "" {
-		return "", fmt.Errorf("image_read: no vision model is configured on this instance")
+		return tools.ToolMessage{}, fmt.Errorf("image_read: no vision model is configured on this instance")
 	}
 
 	path, err := t.resolve(raw)
 	if err != nil {
-		return "", err
+		return tools.ToolMessage{}, err
 	}
 	uri, err := imageDataURI(path)
 	if err != nil {
-		return "", err
+		return tools.ToolMessage{}, err
 	}
 
 	visionSystem := ComposeSystemPrompt(t.agent.SoulPrompt(), prompt.Vision)
@@ -80,12 +98,14 @@ func (t *VisionTool) Execute(ctx context.Context, params map[string]any) (string
 
 	content, _, err := t.agent.OneShot(ctx, provider, model, msgs, 0.3, 1024)
 	if err != nil {
-		return "", fmt.Errorf("image_read: vision model: %w", err)
+		return tools.ToolMessage{}, fmt.Errorf("image_read: vision model: %w", err)
 	}
+	// A model that described nothing described nothing. This used to be a
+	// sentence in parentheses, which reads to the next step as a description.
 	if strings.TrimSpace(content) == "" {
-		return "(vision model returned no description)", nil
+		return tools.ToolEmpty("page", "the vision model returned no description of "+raw), nil
 	}
-	return content, nil
+	return tools.ToolOK("page", content, map[string]any{"path": raw, "model": model}), nil
 }
 
 // resolve keeps file access inside the workspace sandbox, mirroring file_read:

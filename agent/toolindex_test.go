@@ -61,3 +61,30 @@ func TestAReferenceToARealFieldValidates(t *testing.T) {
 // The sweep over every tool lives in internal/tools, which is the only package
 // that can see them: agent cannot import it without a cycle. See
 // schema_contract_test.go there.
+
+// The builtins that live in this package rather than internal/tools, so the
+// sweep there cannot see them. Same property: a tool must say what it returns,
+// and must not describe itself as the envelope it comes in.
+func TestTheAgentBuiltinsDeclareWhatTheyReturn(t *testing.T) {
+	for _, tool := range []agenttools.Tool{
+		&ComputeTool{}, &EditFileTool{}, &DebugTool{}, &VisionTool{},
+	} {
+		t.Run(tool.Name(), func(t *testing.T) {
+			schema := agenttools.GetOutputSchema(tool)
+			if schema == nil {
+				t.Fatal("declares no output schema — a planner can call it and never chain it")
+			}
+			if !json.Valid(schema) {
+				t.Fatalf("output schema is not valid JSON:\n%s", schema)
+			}
+			if shape := compactOutputShape(schema); strings.Contains(shape, "Uniform tool envelope") {
+				t.Errorf("describes itself to the planner as the envelope: %s", shape)
+			} else if shape == "" {
+				t.Error("renders as nothing in the planner's tool index")
+			}
+			if _, ok := tool.(agenttools.TypedExecutor); !ok {
+				t.Error("does not return a ToolMessage, so its outcome never reaches the coverage statement")
+			}
+		})
+	}
+}

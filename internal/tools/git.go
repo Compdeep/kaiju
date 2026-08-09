@@ -98,7 +98,12 @@ func (g *Git) Parameters() json.RawMessage {
  * param: params - must contain "action"; optionally "args" and "path"
  * return: git command output string, or error for unknown actions or missing required args
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (g *Git) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(g.ExecuteTyped(ctx, params))
+}
+
+func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	action, _ := params["action"].(string)
 	args, _ := params["args"].(string)
 	path, _ := params["path"].(string)
@@ -124,19 +129,19 @@ func (g *Git) Execute(ctx context.Context, params map[string]any) (string, error
 		gitArgs = append([]string{"add"}, strings.Fields(args)...)
 	case "commit":
 		if args == "" {
-			return "", fmt.Errorf("git: commit message required in args")
+			return agenttools.ToolMessage{}, fmt.Errorf("git: commit message required in args")
 		}
 		gitArgs = []string{"commit", "-m", args}
 	case "branch_list":
 		gitArgs = []string{"branch", "-a"}
 	case "branch_create":
 		if args == "" {
-			return "", fmt.Errorf("git: branch name required in args")
+			return agenttools.ToolMessage{}, fmt.Errorf("git: branch name required in args")
 		}
 		gitArgs = []string{"branch", args}
 	case "checkout":
 		if args == "" {
-			return "", fmt.Errorf("git: branch/ref required in args")
+			return agenttools.ToolMessage{}, fmt.Errorf("git: branch/ref required in args")
 		}
 		gitArgs = append([]string{"checkout"}, strings.Fields(args)...)
 	case "push":
@@ -169,11 +174,11 @@ func (g *Git) Execute(ctx context.Context, params map[string]any) (string, error
 		gitArgs = append([]string{"reset"}, strings.Fields(args)...)
 	case "merge":
 		if args == "" {
-			return "", fmt.Errorf("git: branch name required in args")
+			return agenttools.ToolMessage{}, fmt.Errorf("git: branch name required in args")
 		}
 		gitArgs = append([]string{"merge"}, strings.Fields(args)...)
 	default:
-		return "", fmt.Errorf("git: unknown action %q", action)
+		return agenttools.ToolMessage{}, fmt.Errorf("git: unknown action %q", action)
 	}
 
 	cmd := exec.CommandContext(ctx, "git", gitArgs...)
@@ -199,10 +204,19 @@ func (g *Git) Execute(ctx context.Context, params map[string]any) (string, error
 		output = output[:8192] + "\n... (truncated)"
 	}
 
+	// A git that exited non-zero is a failure, said so rather than returned as
+	// prose with the exit code appended — the coverage statement reads the
+	// status, and "[exit: 1]" inside a string is not something it can read.
 	if err != nil {
-		return fmt.Sprintf("%s\n[exit: %v]", output, err), nil
+		return agenttools.ToolFail("command", fmt.Sprintf("git %s: %v", action, err),
+			map[string]any{"output": output, "action": action}), nil
 	}
-	return agenttools.ToolText(output).JSON(), nil
+	// git status on a clean tree, git log with no matches: the command worked
+	// and there is nothing to report. That is a finding, not a blank success.
+	if strings.TrimSpace(output) == "" {
+		return agenttools.ToolEmpty("command", "git "+action+" produced no output"), nil
+	}
+	return agenttools.ToolOK("command", output, map[string]any{"action": action}), nil
 }
 
 var _ agenttools.Tool = (*Git)(nil)

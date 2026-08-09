@@ -3,6 +3,7 @@ package tools
 import (
 	"archive/zip"
 	"context"
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,14 +33,20 @@ func writeZip(t *testing.T, path string, parts map[string]string) {
 	}
 }
 
+// runExtract returns the readable text the model would see, not the envelope
+// around it — the tests are about what was extracted from the document.
 func runExtract(t *testing.T, dir, file string) string {
 	t.Helper()
-	tool := NewOfficeExtract(dir)
-	out, err := tool.Execute(context.Background(), map[string]any{"path": file})
+	return runExtractMsg(t, dir, file).Content
+}
+
+func runExtractMsg(t *testing.T, dir, file string) agenttools.ToolMessage {
+	t.Helper()
+	msg, err := NewOfficeExtract(dir).ExecuteTyped(context.Background(), map[string]any{"path": file})
 	if err != nil {
 		t.Fatalf("%s: %v", file, err)
 	}
-	return out
+	return msg
 }
 
 func TestOfficeExtract_Docx(t *testing.T) {
@@ -116,5 +123,21 @@ func TestOfficeExtract_LegacyRejected(t *testing.T) {
 	_, err := tool.Execute(context.Background(), map[string]any{"path": "old.ppt"})
 	if err == nil || !strings.Contains(err.Error(), "legacy binary") {
 		t.Fatalf("expected legacy-binary rejection, got: %v", err)
+	}
+}
+
+// A document that opens and holds no text is a finding, not a blank success.
+// It used to say so in a sentence the model had to read and believe.
+func TestOfficeExtract_NoTextIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	writeZip(t, filepath.Join(dir, "blank.docx"), map[string]string{
+		"word/document.xml": `<?xml version="1.0"?><w:document xmlns:w="x"><w:body></w:body></w:document>`,
+	})
+	msg := runExtractMsg(t, dir, "blank.docx")
+	if msg.Status != agenttools.StatusEmpty {
+		t.Fatalf("status = %q, want empty", msg.Status)
+	}
+	if !strings.Contains(msg.Detail, "blank.docx") {
+		t.Fatalf("detail should name the file, got %q", msg.Detail)
 	}
 }

@@ -93,13 +93,18 @@ func (p *PanelPush) OutputSchema() json.RawMessage {
  * param: params - must contain "plugin" and "content"; optionally "title" and "mime"
  * return: confirmation message with byte count and plugin name, or error if required params missing
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (p *PanelPush) Execute(_ context.Context, params map[string]any) (string, error) {
+	return tools.StringResult(p.ExecuteTyped(nil, params))
+}
+
+func (p *PanelPush) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
 	plugin, _ := params["plugin"].(string)
 	content, _ := params["content"].(string)
 	if plugin == "" || content == "" {
-		return "", fmt.Errorf("panel_push: plugin and content are required")
+		return tools.ToolMessage{}, fmt.Errorf("panel_push: plugin and content are required")
 	}
-	return tools.ToolText(fmt.Sprintf("pushed %d bytes to %s panel", len(content), plugin)).JSON(), nil
+	return tools.ToolText(fmt.Sprintf("pushed %d bytes to %s panel", len(content), plugin)), nil
 }
 
 /*

@@ -85,7 +85,12 @@ func (e *EnvList) Parameters() json.RawMessage {
  * param: params - optionally contains "filter" and "show_sensitive"
  * return: newline-separated environment variables, or "no matching environment variables" if none match
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (e *EnvList) Execute(_ context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(e.ExecuteTyped(nil, params))
+}
+
+func (e *EnvList) ExecuteTyped(_ context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	filter, _ := params["filter"].(string)
 	showSensitive, _ := params["show_sensitive"].(bool)
 
@@ -112,9 +117,9 @@ func (e *EnvList) Execute(_ context.Context, params map[string]any) (string, err
 	}
 
 	if len(result) == 0 {
-		return agenttools.ToolEmpty("env", "no matching environment variables").JSON(), nil
+		return agenttools.ToolEmpty("env", "no matching environment variables"), nil
 	}
-	return agenttools.ToolText(strings.Join(result, "\n")).JSON(), nil
+	return agenttools.ToolText(strings.Join(result, "\n")), nil
 }
 
 /*
@@ -206,7 +211,12 @@ func (d *DiskUsage) Parameters() json.RawMessage {
  * param: params - optionally contains "path"
  * return: disk usage report string, or error on command failure
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (d *DiskUsage) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(d.ExecuteTyped(ctx, params))
+}
+
+func (d *DiskUsage) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	path, _ := params["path"].(string)
 
 	if path == "" || path == "/" {
@@ -222,7 +232,7 @@ func (d *DiskUsage) Execute(ctx context.Context, params map[string]any) (string,
  * param: ctx - context for cancellation and timeout
  * return: formatted disk usage report, or error on command failure
  */
-func diskUsageAll(ctx context.Context) (string, error) {
+func diskUsageAll(ctx context.Context) (agenttools.ToolMessage, error) {
 	var result strings.Builder
 
 	// Part 1: filesystem overview (instant)
@@ -249,7 +259,7 @@ func diskUsageAll(ctx context.Context) (string, error) {
 		}
 	}
 
-	return agenttools.ToolText(result.String()).JSON(), nil
+	return agenttools.ToolText(result.String()), nil
 }
 
 /*
@@ -259,7 +269,7 @@ func diskUsageAll(ctx context.Context) (string, error) {
  * param: path - directory path to analyze
  * return: formatted disk usage for the path (truncated to 4KB), or error on failure/timeout
  */
-func diskUsagePath(ctx context.Context, path string) (string, error) {
+func diskUsagePath(ctx context.Context, path string) (agenttools.ToolMessage, error) {
 	// Use --max-depth=1 to avoid traversing entire trees, with a 15s timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -278,18 +288,18 @@ func diskUsagePath(ctx context.Context, path string) (string, error) {
 		if timeoutCtx.Err() == context.DeadlineExceeded {
 			// Return partial output if we got some before timeout
 			if len(out) > 0 {
-				return agenttools.ToolText(strings.TrimSpace(string(out)) + "\n(truncated — scan timed out)").JSON(), nil
+				return agenttools.ToolText(strings.TrimSpace(string(out)) + "\n(truncated — scan timed out)"), nil
 			}
-			return "", fmt.Errorf("disk_usage: scan timed out after 15s")
+			return agenttools.ToolMessage{}, fmt.Errorf("disk_usage: scan timed out after 15s")
 		}
-		return "", fmt.Errorf("disk_usage: %w", err)
+		return agenttools.ToolMessage{}, fmt.Errorf("disk_usage: %w", err)
 	}
 
 	output := strings.TrimSpace(string(out))
 	if len(output) > 4096 {
 		output = output[:4096] + "\n... (truncated)"
 	}
-	return agenttools.ToolText(output).JSON(), nil
+	return agenttools.ToolText(output), nil
 }
 
 var _ agenttools.Tool = (*DiskUsage)(nil)
@@ -370,7 +380,12 @@ func (c *Clipboard) Parameters() json.RawMessage {
  * param: params - must contain "action"; "content" required for write
  * return: clipboard content (for read) or confirmation message (for write), or error on failure
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (c *Clipboard) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(c.ExecuteTyped(ctx, params))
+}
+
+func (c *Clipboard) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	action, _ := params["action"].(string)
 
 	switch action {
@@ -380,7 +395,7 @@ func (c *Clipboard) Execute(ctx context.Context, params map[string]any) (string,
 		content, _ := params["content"].(string)
 		return clipboardWrite(ctx, content)
 	default:
-		return "", fmt.Errorf("clipboard: action must be 'read' or 'write'")
+		return agenttools.ToolMessage{}, fmt.Errorf("clipboard: action must be 'read' or 'write'")
 	}
 }
 
@@ -390,7 +405,7 @@ func (c *Clipboard) Execute(ctx context.Context, params map[string]any) (string,
  * param: ctx - context for cancellation
  * return: clipboard content string (truncated to 8KB), or error if clipboard tools are unavailable
  */
-func clipboardRead(ctx context.Context) (string, error) {
+func clipboardRead(ctx context.Context) (agenttools.ToolMessage, error) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -409,10 +424,10 @@ func clipboardRead(ctx context.Context) (string, error) {
 			cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--output")
 			out, err = cmd.Output()
 			if err != nil {
-				return "", fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
+				return agenttools.ToolMessage{}, fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
 			}
 		} else {
-			return "", fmt.Errorf("clipboard: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("clipboard: %w", err)
 		}
 	}
 
@@ -420,7 +435,7 @@ func clipboardRead(ctx context.Context) (string, error) {
 	if len(content) > 8192 {
 		content = content[:8192] + "\n... (truncated)"
 	}
-	return agenttools.ToolOK("clipboard", content, nil).JSON(), nil
+	return agenttools.ToolOK("clipboard", content, nil), nil
 }
 
 /*
@@ -430,9 +445,9 @@ func clipboardRead(ctx context.Context) (string, error) {
  * param: content - text content to write to the clipboard
  * return: confirmation message with byte count, or error if content is empty or clipboard tools are unavailable
  */
-func clipboardWrite(ctx context.Context, content string) (string, error) {
+func clipboardWrite(ctx context.Context, content string) (agenttools.ToolMessage, error) {
 	if content == "" {
-		return "", fmt.Errorf("clipboard: content is required for write")
+		return agenttools.ToolMessage{}, fmt.Errorf("clipboard: content is required for write")
 	}
 
 	var cmd *exec.Cmd
@@ -451,14 +466,14 @@ func clipboardWrite(ctx context.Context, content string) (string, error) {
 			cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--input")
 			cmd.Stdin = strings.NewReader(content)
 			if err := cmd.Run(); err != nil {
-				return "", fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
+				return agenttools.ToolMessage{}, fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
 			}
 		} else {
-			return "", fmt.Errorf("clipboard: %w", err)
+			return agenttools.ToolMessage{}, fmt.Errorf("clipboard: %w", err)
 		}
 	}
 
-	return agenttools.ToolText(fmt.Sprintf("wrote %d bytes to clipboard", len(content))).JSON(), nil
+	return agenttools.ToolText(fmt.Sprintf("wrote %d bytes to clipboard", len(content))), nil
 }
 
 var _ agenttools.Tool = (*Clipboard)(nil)

@@ -83,7 +83,12 @@ func (p *ProcessList) Parameters() json.RawMessage {
  * param: params - optionally contains "filter" and "limit"
  * return: formatted process list table as a string, or error on command failure
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (p *ProcessList) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(p.ExecuteTyped(ctx, params))
+}
+
+func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	filter, _ := params["filter"].(string)
 	limit := 30
 	if l, ok := params["limit"].(float64); ok && l > 0 {
@@ -102,7 +107,7 @@ func (p *ProcessList) Execute(ctx context.Context, params map[string]any) (strin
 
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("process_list: %w", err)
+		return agenttools.ToolMessage{}, fmt.Errorf("process_list: %w", err)
 	}
 
 	lines := strings.Split(string(out), "\n")
@@ -125,7 +130,7 @@ func (p *ProcessList) Execute(ctx context.Context, params map[string]any) (strin
 		}
 	}
 
-	return agenttools.ToolText(strings.Join(result, "\n")).JSON(), nil
+	return agenttools.ToolText(strings.Join(result, "\n")), nil
 }
 
 var _ agenttools.Tool = (*ProcessList)(nil)
@@ -202,14 +207,19 @@ func (p *ProcessKill) Parameters() json.RawMessage {
  * param: params - must contain "pid"; optionally "force" for SIGKILL/forced termination
  * return: confirmation message with PID and force status, or error if PID is missing
  */
+// Execute satisfies the Tool interface for callers outside the DAG.
 func (p *ProcessKill) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return agenttools.StringResult(p.ExecuteTyped(ctx, params))
+}
+
+func (p *ProcessKill) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
 	pidFloat, ok := params["pid"].(float64)
 	if !ok {
-		return "", fmt.Errorf("process_kill: pid is required")
+		return agenttools.ToolMessage{}, fmt.Errorf("process_kill: pid is required")
 	}
 	pid := int(pidFloat)
 	if pid <= 1 {
-		return "", fmt.Errorf("process_kill: refusing to kill pid %d (unsafe — use process_list to find the correct PID first)", pid)
+		return agenttools.ToolMessage{}, fmt.Errorf("process_kill: refusing to kill pid %d (unsafe — use process_list to find the correct PID first)", pid)
 	}
 	force, _ := params["force"].(bool)
 
@@ -231,9 +241,9 @@ func (p *ProcessKill) Execute(ctx context.Context, params map[string]any) (strin
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return agenttools.ToolFail("command", fmt.Sprintf("kill failed: %v — %s", err, strings.TrimSpace(string(out))), nil).JSON(), nil
+		return agenttools.ToolFail("command", fmt.Sprintf("kill failed: %v — %s", err, strings.TrimSpace(string(out))), nil), nil
 	}
-	return agenttools.ToolText(fmt.Sprintf("killed pid %d (force=%v)\n%s", pid, force, strings.TrimSpace(string(out)))).JSON(), nil
+	return agenttools.ToolText(fmt.Sprintf("killed pid %d (force=%v)\n%s", pid, force, strings.TrimSpace(string(out)))), nil
 }
 
 var _ agenttools.Tool = (*ProcessKill)(nil)

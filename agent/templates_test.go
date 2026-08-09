@@ -13,7 +13,7 @@ import (
 // how the dispatcher would feed parsed JSON results into the resolver.
 func fakeLookup(byStep map[int]any, byNode map[string]any) TemplateLookup {
 	return func(ref TemplateRef) (any, bool) {
-		if ref.Kind == "node" {
+		if ref.Type == "node" {
 			v, ok := byNode[ref.NodeID]
 			return v, ok
 		}
@@ -36,7 +36,7 @@ func TestFindRefs_StringLeaf(t *testing.T) {
 		t.Fatalf("expected 1 ref, got %d", len(refs))
 	}
 	r := refs[0]
-	if r.Kind != "step" || r.Index != 0 {
+	if r.Type != "step" || r.Index != 0 {
 		t.Errorf("kind/index mismatch: %+v", r)
 	}
 	if !reflect.DeepEqual(r.Path, []string{"results", "0", "url"}) {
@@ -46,7 +46,7 @@ func TestFindRefs_StringLeaf(t *testing.T) {
 
 func TestFindRefs_NodeKind(t *testing.T) {
 	refs := FindRefs(map[string]any{"x": "${node.12D3KooWShkP.field}"})
-	if len(refs) != 1 || refs[0].Kind != "node" {
+	if len(refs) != 1 || refs[0].Type != "node" {
 		t.Fatalf("expected one node ref, got %+v", refs)
 	}
 	if refs[0].NodeID != "12D3KooWShkP" {
@@ -287,11 +287,11 @@ func TestResolvePath_TypeMismatch(t *testing.T) {
 // ─── TemplateRef.Key ─────────────────────────────────────────────────────────
 
 func TestTemplateRefKey(t *testing.T) {
-	step := TemplateRef{Kind: "step", Index: 7}
+	step := TemplateRef{Type: "step", Index: 7}
 	if got := step.Key(); got != "step:7" {
 		t.Errorf("step key: got %q want %q", got, "step:7")
 	}
-	node := TemplateRef{Kind: "node", NodeID: "abc"}
+	node := TemplateRef{Type: "node", NodeID: "abc"}
 	if got := node.Key(); got != "node:abc" {
 		t.Errorf("node key: got %q want %q", got, "node:abc")
 	}

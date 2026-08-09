@@ -73,7 +73,8 @@ func (f *FileRead) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "Path to the file to read"},
-			"max_lines": {"type": "integer", "description": "Maximum lines to read (default: 500)"}
+			"max_lines": {"type": "integer", "description": "Read the FIRST N lines (default: 500)"},
+			"tail_lines": {"type": "integer", "description": "Read the LAST N lines instead — for a log, where the interesting part is at the bottom"}
 		},
 		"required": ["path"],
 		"additionalProperties": false
@@ -84,7 +85,7 @@ func (f *FileRead) Parameters() json.RawMessage {
  * Execute reads the file at the given path and returns its content.
  * desc: Reads the file, splits into lines, and truncates at max_lines (default 500).
  * param: _ - unused context
- * param: params - must contain "path"; optionally "max_lines"
+ * param: params - must contain "path"; optionally "max_lines" or "tail_lines"
  * return: file content as a string (possibly truncated), or error if file cannot be read
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
@@ -116,12 +117,26 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 		return toolapi.ToolEmpty("text", "the file is empty: "+path), nil
 	}
 
+	lines := strings.Split(string(data), "\n")
+
+	// The end of the file, when that is what was asked for. Reading the last N
+	// lines of a log is a different question from reading the first N, and
+	// max_lines cannot express it — the interesting part of a log is at the
+	// bottom, and truncating from the top throws it away.
+	if tl, ok := toolapi.ParamNum(params, "tail_lines"); ok && tl > 0 {
+		tailLines := int(tl)
+		if len(lines) > tailLines {
+			lines = lines[len(lines)-tailLines:]
+			lines = append([]string{fmt.Sprintf("... (showing the last %d lines)", tailLines)}, lines...)
+		}
+		return toolapi.ToolText(strings.Join(lines, "\n")), nil
+	}
+
 	maxLines := 500
 	if ml, ok := toolapi.ParamNum(params, "max_lines"); ok && ml > 0 {
 		maxLines = int(ml)
 	}
 
-	lines := strings.Split(string(data), "\n")
 	if len(lines) > maxLines {
 		lines = lines[:maxLines]
 		lines = append(lines, fmt.Sprintf("... (truncated at %d lines)", maxLines))

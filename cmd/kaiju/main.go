@@ -15,7 +15,6 @@ import (
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/tools"
 	"github.com/Compdeep/kaiju/agent/uploads"
 	"github.com/Compdeep/kaiju/docs"
 	"github.com/Compdeep/kaiju/internal/api"
@@ -31,6 +30,7 @@ import (
 	"github.com/Compdeep/kaiju/internal/plugins"
 	"github.com/Compdeep/kaiju/internal/skillhub"
 	"github.com/Compdeep/kaiju/internal/workspace"
+	"github.com/Compdeep/kaiju/tools"
 )
 
 var version = "dev"

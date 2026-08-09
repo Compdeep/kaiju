@@ -94,10 +94,17 @@ func (a *Agent) collectReferences(graph *Graph) []reference {
 
 /*
  * unresolvedReferences returns the handles no later step acted on.
- * desc: A handle counts as followed when its value appears in any node's
- *       parameters — the run passed it to something. Read from the graph rather
- *       than from a second annotation, so a tool declares what it produces and
- *       nothing has to declare what consumes it.
+ * desc: A handle counts as followed when the tool its producer named was called
+ *       with that value. Matching the tool matters: the first version matched
+ *       the value against every parameter in the run, which is safe for a URL
+ *       and wrong for a short identifier — a peer id of "self" or an alert id of
+ *       "1" collides with an unrelated parameter and is reported as followed
+ *       when nothing followed it.
+ *
+ *       A handle whose producer named no tool cannot be checked, so it is
+ *       reported as outstanding. Over-reporting is the safe direction for a
+ *       guard against claiming something was retrieved, and it gives a tool
+ *       author a reason to name the resolver rather than only marking the field.
  * param: graph - the run so far.
  * return: the unfollowed handles, in the order they were surfaced.
  */
@@ -106,10 +113,10 @@ func (a *Agent) unresolvedReferences(graph *Graph) []reference {
 	if len(refs) == 0 {
 		return nil
 	}
-	used := valuesPassedAsParams(graph)
+	byTool := valuesPassedToEachTool(graph)
 	var out []reference
 	for _, r := range refs {
-		if !used[r.Value] {
+		if r.Tool == "" || !byTool[r.Tool][r.Value] {
 			out = append(out, r)
 		}
 	}
@@ -214,20 +221,32 @@ func descend(v any, path []string) []string {
 	return descend(obj[path[0]], path[1:])
 }
 
-// valuesPassedAsParams returns every string a node was called with, at any
-// depth. A handle among them was acted on, whatever acted on it.
+// valuesPassedToEachTool returns, per tool name, every string that tool was
+// called with at any depth. Keyed by tool so a handle is only counted as
+// followed by the tool its producer named, not by whatever else in the run
+// happened to be passed the same short string.
+//
+// The value may sit anywhere in the parameters rather than only in the declared
+// one: the producer names a parameter so a follow-up can be PLANNED, and a plan
+// that put the handle somewhere else in the same tool's call still followed it.
 //
 // Every node counts, not only the resolved ones: a step that was planned to
 // follow a handle and then failed still means the run did not overlook it, and
 // its failure is already reported by the coverage edge.
-func valuesPassedAsParams(graph *Graph) map[string]bool {
-	used := map[string]bool{}
+func valuesPassedToEachTool(graph *Graph) map[string]map[string]bool {
+	byTool := map[string]map[string]bool{}
 	graph.mu.RLock()
 	defer graph.mu.RUnlock()
 	for _, n := range graph.nodes {
-		collectParamStrings(n.Params, used)
+		if n.ToolName == "" {
+			continue
+		}
+		if byTool[n.ToolName] == nil {
+			byTool[n.ToolName] = map[string]bool{}
+		}
+		collectParamStrings(n.Params, byTool[n.ToolName])
 	}
-	return used
+	return byTool
 }
 
 func collectParamStrings(v any, into map[string]bool) {

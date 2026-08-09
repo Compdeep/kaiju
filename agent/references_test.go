@@ -211,3 +211,57 @@ func TestReferences_FollowedInsideANestedParam(t *testing.T) {
 type errFailedForTest struct{}
 
 func (errFailedForTest) Error() string { return "failed" }
+
+// ── the short-identifier collision ───────────────────────────────────────────
+
+// A handle whose value is short and common — "self" as a peer id — must not be
+// counted as followed because some unrelated step happened to be called with
+// the same string. The first version matched the value against every parameter
+// in the run and got this wrong.
+func TestReferences_ShortHandleIsNotFollowedByAnUnrelatedStep(t *testing.T) {
+	a := refAgent("fleet_view", agenttools.EnvelopeSchema(
+		`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`))
+	g := NewGraph()
+	producedNode(g, "fleet_view", map[string]any{"peers": []map[string]any{{"id": "self"}, {"id": "peer-2"}}})
+
+	// An unrelated step that happens to target "self". Nothing inspected the
+	// host the listing surfaced.
+	g.AddNode(&Node{Type: NodeTool, Tag: "logs", ToolName: "get_system_logs",
+		Params: map[string]any{"target": "self"}})
+
+	unresolved := a.unresolvedReferences(g)
+	if len(unresolved) != 2 {
+		t.Fatalf("got %+v, want both peers outstanding — get_system_logs is not what follows a peer id", unresolved)
+	}
+}
+
+// The same handle, followed by the tool its producer actually named.
+func TestReferences_ShortHandleIsFollowedByTheDeclaredTool(t *testing.T) {
+	a := refAgent("fleet_view", agenttools.EnvelopeSchema(
+		`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`))
+	g := NewGraph()
+	producedNode(g, "fleet_view", map[string]any{"peers": []map[string]any{{"id": "self"}, {"id": "peer-2"}}})
+	g.AddNode(&Node{Type: NodeTool, Tag: "look", ToolName: "inspect_host",
+		Params: map[string]any{"target": "self"}})
+
+	unresolved := a.unresolvedReferences(g)
+	if len(unresolved) != 1 || unresolved[0].Value != "peer-2" {
+		t.Fatalf("got %+v, want only peer-2 outstanding", unresolved)
+	}
+}
+
+// A handle marked without naming a resolver cannot be checked, so it stays
+// outstanding rather than being assumed followed. Over-reporting is the safe
+// direction for a guard against claiming something was retrieved.
+func TestReferences_UndeclaredResolverStaysOutstanding(t *testing.T) {
+	b := refAgent("lister", agenttools.EnvelopeSchema(
+		`{"type":"object","properties":{"id":{"type":"string","x-reference":""}}}`))
+	g := NewGraph()
+	producedNode(g, "lister", map[string]any{"id": "x"})
+	// Something was called with the same value, by a tool nobody named.
+	g.AddNode(&Node{Type: NodeTool, Tag: "other", ToolName: "whatever", Params: map[string]any{"v": "x"}})
+
+	if unresolved := b.unresolvedReferences(g); len(unresolved) != 1 {
+		t.Fatalf("got %+v, want it still outstanding — nothing declared what follows it", unresolved)
+	}
+}

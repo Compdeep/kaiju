@@ -1,4 +1,4 @@
-package tools
+package core
 
 // office_extract reads Office Open XML documents — Word (.docx), PowerPoint
 // (.pptx), and Excel (.xlsx) — into plain text. These formats are all just a ZIP

@@ -384,6 +384,10 @@ func (g *ContextGate) Get(ctx context.Context, req ContextRequest) (*ContextResp
 	if req.MaxBudget <= 0 {
 		req.MaxBudget = defaultMaxBudget
 	}
+	// Callers name a budget that expresses how much this stage needs relative to
+	// the others. What it can't express is the model, so the scale comes from
+	// there. Unchanged when the window is unknown. See contextbudget.go.
+	req.MaxBudget = g.agent.scaleBudget(req.MaxBudget)
 
 	// Coding context on a run that writes no code is cost without benefit: the
 	// blueprint and the workspace listings are assembled, truncated against the

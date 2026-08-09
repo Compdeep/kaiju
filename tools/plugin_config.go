@@ -1,4 +1,4 @@
-package core
+package tools
 
 // PluginConfig is what the plugin tools need from the application's
 // configuration.

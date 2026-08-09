@@ -4,7 +4,7 @@ Kaiju has two things that look similar but serve different purposes, and they're
 
 ## Tools vs skills
 
-- **Tools** — Go code that implements the `Tool` interface. Has an `Execute()` method that actually does work. Lives in `agent/tools/core/` or `internal/agent/` depending on whether it needs contextual execution. Examples: `bash`, `file_read`, `file_write`, `web_search`, `compute`, `service`.
+- **Tools** — Go code that implements the `Tool` interface. Has an `Execute()` method that actually does work. Lives in `tools/` or `internal/agent/` depending on whether it needs contextual execution. Examples: `bash`, `file_read`, `file_write`, `web_search`, `compute`, `service`.
 - **Skills** — markdown files that provide planning guidance via prompt injection. Never execute. Their body gets read and pasted into LLM prompts at specific points.
 
 Both can show up in the same lists (the registry, the UI trace rows), which caused confusion historically. In current code they're cleanly separated: tools live in `a.registry`, guidance-only skills live in `a.skillGuidance`.

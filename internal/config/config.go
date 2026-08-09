@@ -454,3 +454,27 @@ func expandPath(p string) string {
 	}
 	return filepath.Join(home, p[1:])
 }
+
+// The plugin tools take a narrow interface rather than this whole type, so an
+// application embedding the engine can supply its own configuration. These six
+// methods are kaiju's implementation of it — see agent/tools/core.PluginConfig.
+
+// PluginNames are the plugins currently marked active.
+func (c *Config) PluginNames() []string { return c.Plugins }
+
+// SetPluginNames records a change and persists it to the config file.
+func (c *Config) SetPluginNames(names []string) error { return c.SetPluginsPersisted(names) }
+
+// PluginHost is the base URL of the out-of-process plugin host, empty when
+// there is none.
+func (c *Config) PluginHost() string { return c.RemotePluginHost }
+
+// SetPluginHost records the host a plugin was found at and persists it.
+func (c *Config) SetPluginHost(url string) error { return c.SetRemotePluginHostPersisted(url) }
+
+// PluginHostStart is the command that launches the plugin host, empty for the
+// default.
+func (c *Config) PluginHostStart() string { return c.RemotePluginStart }
+
+// PluginWorkspace is where a plugin host runs and writes.
+func (c *Config) PluginWorkspace() string { return c.Agent.Workspace }

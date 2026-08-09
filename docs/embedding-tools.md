@@ -17,21 +17,28 @@ import (
 
 reg := ag.Registry()
 
-// 1. The engine's core set, under the names the engine expects.
-core.Register(reg, core.Deps{
+// 1. The engine's core set, minus any name you intend to take yourself.
+names, err := core.Register(reg, core.Deps{
     Workspace: cfg.Workspace,
     Memory:    ag.Memory(),
     Executor:  ag.ExecutorClient(),
+    Exclude:   []string{"process_kill"},
 })
 
-// 2. Your own tools, and your replacements for any of the core set.
-reg.Register(mytools.NewCheckAlerts(store))          // a name of your own
-reg.Replace(mytools.NewProcessKill(store), "myapp")  // one of theirs, your behaviour
+// 2. Your own tools, including the one under the name you excluded.
+reg.Register(mytools.NewCheckAlerts(store))   // a name of your own
+reg.Register(mytools.NewProcessKill(store))   // one of theirs, your behaviour
 ```
 
-The order matters and only in one direction: `Register` replaces what is already
-under a name, so calling it after your own registrations would overwrite them.
-Core first, then yours.
+**A name is registered once and never reassigned.** `Register` fails on a name
+already taken, in either direction, so there is no order of calls that silently
+produces a set nobody intended. Taking one of the engine's names means excluding
+it from the core set — which puts the substitution in the call that made it,
+where a reader and a diff can both see it.
+
+The registry does have `Replace`, which takes a name regardless. It exists for
+runtime activation — a plugin registering a tool into a running agent — and is
+not the way to override at startup.
 
 ## Why you must register the core set
 
@@ -58,7 +65,11 @@ type Deps struct {
     Memory    *agent.Memory // nil omits memory_store, memory_recall, memory_search
     Executor  *llm.Client   // nil omits web_research; web_fetch still registers
     Search    core.SearchConfig
-    Exclude   []string      // names to leave out
+
+    Plugins               core.PluginConfig // nil omits plugin_enable, plugin_option
+    AllowPluginActivation bool              // may a run turn a plugin on?
+
+    Exclude []string // names to leave out, so you can take one yourself
 }
 ```
 
@@ -71,26 +82,25 @@ it will report back that your system cannot do something it simply was not given
 `Register` returns the names it registered, so log them if you want a record of
 what your planner is being shown.
 
-## Replacing a core tool
+## Taking one of the engine's names
 
-The registry is a map from name to tool:
+Exclude it, then register your own:
 
 ```go
-func (r *Registry) Register(t Tool) error         // fails if the name is taken
-func (r *Registry) Replace(t Tool, source string) // takes the name regardless
-func (r *Registry) GetSource(name string) string  // which registration won
+core.Register(reg, core.Deps{Exclude: []string{"process_kill"}})
+reg.Register(mytools.NewProcessKill(store))
 ```
 
-`Replace` is the override. Your implementation keeps the engine's name, so:
+Your implementation keeps the engine's name, so:
 
 - the planner is shown one tool for the job, not two that overlap
 - every graft that spawns that name resolves to your version
 - the engine needs to know nothing about the substitution
-- `GetSource` says which one is running, so a trace can tell
+- `GetSource(name)` says which registration holds it, so a trace can tell
 
-The `source` string is yours to choose. The core set registers as `"core"`.
+The core set registers as `"core"`.
 
-## When to replace, and when to send it here instead
+## When to override, and when to send it here instead
 
 The question is who the behaviour is for.
 
@@ -98,11 +108,11 @@ The question is who the behaviour is for.
 `file_read` that can return the last N lines of a file rather than only the
 first is not specific to anyone — that belongs here, and everyone gets it.
 
-**Replace** when the behaviour is your product's. An endpoint-security product
+**Override** when the behaviour is your product's. An endpoint-security product
 whose `process_kill` requires a justification and links the kill to the alert
 that caused it is not describing a gap in Kaiju; it is describing its own audit
 trail. Pushing that into the engine would put one product's compliance model in
-everyone's way. Keep the name, replace the tool.
+everyone's way. Exclude the name and register your own under it.
 
 The line is not about size. It is about whether the next person embedding this
 engine would be glad of it or puzzled by it.
@@ -122,10 +132,29 @@ of your own. Two things to get right, both covered in `docs/tools.md`:
   set is worse, because the reference passes plan-time validation and fails at
   fire time.
 
-## What is not in the core set
+## Plugins
 
-`plugin_list`, `plugin_enable` and `plugin_option` manage Kaiju's own plugin
-host and need its configuration type. They are the application's to register.
+The plugin tools are part of the core set. `plugin_list` arrives whenever a
+plugin is compiled in. `plugin_enable` and `plugin_option` need somewhere to
+record a change and your permission to make one:
+
+```go
+core.Register(reg, core.Deps{
+    Plugins:               myPluginConfig,  // implements core.PluginConfig
+    AllowPluginActivation: true,
+})
+```
+
+`core.PluginConfig` is six methods — which plugins are on, where a remote host
+is, how to start it, where the workspace is, and how to persist the first two.
+It is an interface so you do not have to adopt kaiju's configuration file to
+use its plugins; kaiju's own `*config.Config` implements it.
+
+`AllowPluginActivation` is policy, not capability. An agent that may install its
+own extensions mid-run is a different proposition from one that may not, so it
+is off unless asked for.
+
+## What is not in the core set
 
 `compute`, `edit_file`, `debug` and `image_read` are builtins of the `agent`
 package rather than tools of this one, because they need the running graph, the
@@ -134,12 +163,12 @@ application uses to decide they are wanted:
 
 ```go
 if cfg.CodingEnabled {
-    reg.Replace(agent.NewComputeTool(ag), "builtin")
-    reg.Replace(agent.NewEditFileTool(ag), "builtin")
-    reg.Replace(agent.NewDebugTool(ag), "builtin")
+    reg.Register(agent.NewComputeTool(ag))
+    reg.Register(agent.NewEditFileTool(ag))
+    reg.Register(agent.NewDebugTool(ag))
 }
 if cfg.VisionModel != "" {
-    reg.Replace(agent.NewVisionTool(ag), "builtin")
+    reg.Register(agent.NewVisionTool(ag))
 }
 ```
 

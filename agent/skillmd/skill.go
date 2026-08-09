@@ -7,13 +7,13 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/Compdeep/kaiju/agent/tools" // for Registry type
+	"github.com/Compdeep/kaiju/agent/toolapi" // for Registry type
 )
 
 var placeholderRe = regexp.MustCompile(`\{\{(\w+)\}\}`)
 
 // SkillMD represents a SKILL.md-based skill that provides planning guidance.
-// It only implements tools.Tool (and thus goes into the registry) when
+// It only implements toolapi.Tool (and thus goes into the registry) when
 // CommandDispatch is set — in that case it forwards execution to the target tool.
 // Skills without CommandDispatch provide planning guidance only and should NOT
 // be registered in the tool registry.
@@ -24,11 +24,11 @@ type SkillMD struct {
 	baseDir  string
 	filePath string
 	modTime  time.Time
-	registry *tools.Registry
+	registry *toolapi.Registry
 }
 
 // NewSkillMD creates a SkillMD from parsed frontmatter and body.
-func NewSkillMD(fm *Frontmatter, body, baseDir, filePath string, modTime time.Time, reg *tools.Registry) *SkillMD {
+func NewSkillMD(fm *Frontmatter, body, baseDir, filePath string, modTime time.Time, reg *toolapi.Registry) *SkillMD {
 	s := &SkillMD{
 		fm:       *fm,
 		body:     body,
@@ -49,10 +49,10 @@ func (s *SkillMD) Parameters() json.RawMessage { return s.params }
 // Body returns the raw markdown body for section extraction (e.g. Planning Guidance).
 func (s *SkillMD) Body() string { return s.body }
 
-// Source implements tools.ToolMeta.
+// Source implements toolapi.ToolMeta.
 func (s *SkillMD) Source() string { return "skillmd" }
 
-// IsUserInvocable implements tools.ToolMeta.
+// IsUserInvocable implements toolapi.ToolMeta.
 func (s *SkillMD) IsUserInvocable() bool {
 	if s.fm.UserInvocable == nil {
 		return true // default

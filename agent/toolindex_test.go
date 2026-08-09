@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // What a planner is told a tool returns.
@@ -24,7 +24,7 @@ const indexFields = `{"type":"object","properties":{"query":{"type":"string","de
 
 // Declaring the same fields either way must reach the planner identically.
 func TestToolIndexShowsTheToolNotTheEnvelope(t *testing.T) {
-	wrapped := compactOutputShape(agenttools.EnvelopeSchema(indexFields))
+	wrapped := compactOutputShape(toolapi.EnvelopeSchema(indexFields))
 	flat := compactOutputShape(json.RawMessage(indexFields))
 
 	if wrapped != flat {
@@ -46,7 +46,7 @@ func TestToolIndexShowsTheToolNotTheEnvelope(t *testing.T) {
 // must pass plan-time validation. It used to warn on every correct one.
 func TestAReferenceToARealFieldValidates(t *testing.T) {
 	for _, schema := range []json.RawMessage{
-		agenttools.EnvelopeSchema(indexFields),
+		toolapi.EnvelopeSchema(indexFields),
 		json.RawMessage(indexFields),
 	} {
 		if !fieldExistsInSchema(schema, "results.0.url") && !fieldExistsInSchema(schema, "results") {
@@ -66,11 +66,11 @@ func TestAReferenceToARealFieldValidates(t *testing.T) {
 // sweep there cannot see them. Same property: a tool must say what it returns,
 // and must not describe itself as the envelope it comes in.
 func TestTheAgentBuiltinsDeclareWhatTheyReturn(t *testing.T) {
-	for _, tool := range []agenttools.Tool{
+	for _, tool := range []toolapi.Tool{
 		&ComputeTool{}, &EditFileTool{}, &DebugTool{}, &VisionTool{},
 	} {
 		t.Run(tool.Name(), func(t *testing.T) {
-			schema := agenttools.GetOutputSchema(tool)
+			schema := toolapi.GetOutputSchema(tool)
 			if schema == nil {
 				t.Fatal("declares no output schema — a planner can call it and never chain it")
 			}
@@ -82,7 +82,7 @@ func TestTheAgentBuiltinsDeclareWhatTheyReturn(t *testing.T) {
 			} else if shape == "" {
 				t.Error("renders as nothing in the planner's tool index")
 			}
-			if _, ok := tool.(agenttools.TypedExecutor); !ok {
+			if _, ok := tool.(toolapi.TypedExecutor); !ok {
 				t.Error("does not return a ToolMessage, so its outcome never reaches the coverage statement")
 			}
 		})

@@ -13,7 +13,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
 	"github.com/Compdeep/kaiju/agent/skillmd"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/db"
 )
 
@@ -214,7 +214,7 @@ type Agent struct {
 	// model is fine here (unlike the planner/executor/router tool-call lanes).
 	answerProvider    string
 	answerModel       string
-	registry          *tools.Registry
+	registry          *toolapi.Registry
 	gate              *gates.Gate
 	clearanceCheck    ClearanceChecker // external authorization (nil = no check)
 	clearance         *localClearance  // IGX node clearance
@@ -273,7 +273,7 @@ func New(cfg Config) (*Agent, error) {
 
 	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel)
 
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 
 	// IGX clearance: use configured value. Before the intent registry is
 	// loaded we have no concept of a "default working rank", so we start at
@@ -384,9 +384,9 @@ func (a *Agent) Intents() *IntentRegistry { return a.intentRegistry }
 /*
  * Registry returns the skill registry for external registration.
  * desc: Exposes the tool registry so callers can register additional skills.
- * return: pointer to the tools.Registry.
+ * return: pointer to the toolapi.Registry.
  */
-func (a *Agent) Registry() *tools.Registry {
+func (a *Agent) Registry() *toolapi.Registry {
 	return a.registry
 }
 
@@ -598,13 +598,13 @@ func (a *Agent) relevantTools(ctx context.Context, trigger Trigger) []string {
 	}
 
 	// A run with nobody watching does not get the tools that exist to be asked
-	// for. A tool says so itself (tools.InteractiveOnly); this package only
+	// for. A tool says so itself (toolapi.InteractiveOnly); this package only
 	// asks whether anyone is there, which the application states by marking the
 	// run autonomous.
 	if a.unattended(trigger) {
 		kept := base[:0]
 		for _, name := range base {
-			if tool, ok := a.registry.Get(name); ok && tools.RequiresHuman(tool) {
+			if tool, ok := a.registry.Get(name); ok && toolapi.RequiresHuman(tool) {
 				continue
 			}
 			kept = append(kept, name)
@@ -899,7 +899,7 @@ func (a *Agent) InitSkills(ctx context.Context, extraDirs []string, pollSec int)
  * desc: Delegates to the registry's ListInfo method.
  * return: slice of ToolInfo structs for all registered tools.
  */
-func (a *Agent) ToolsInfo() []tools.ToolInfo {
+func (a *Agent) ToolsInfo() []toolapi.ToolInfo {
 	return a.registry.ListInfo()
 }
 

@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -62,7 +62,7 @@ func NewEmbeddingStore(topK int, threshold float64, alwaysInclude []string) *Emb
  * param: registry - tool registry to read tool descriptions from.
  * return: error if the embedding call fails.
  */
-func (es *EmbeddingStore) Load(ctx context.Context, client *llm.Client, registry *tools.Registry) error {
+func (es *EmbeddingStore) Load(ctx context.Context, client *llm.Client, registry *toolapi.Registry) error {
 	names := registry.List()
 	if len(names) == 0 {
 		return nil
@@ -113,7 +113,7 @@ type toolScore struct {
  * param: registry - tool registry for fallback listing.
  * return: ordered slice of tool names, or error.
  */
-func (es *EmbeddingStore) RankTools(ctx context.Context, client *llm.Client, query string, registry *tools.Registry) ([]string, error) {
+func (es *EmbeddingStore) RankTools(ctx context.Context, client *llm.Client, query string, registry *toolapi.Registry) ([]string, error) {
 	if len(es.vectors) == 0 {
 		return registry.List(), nil
 	}

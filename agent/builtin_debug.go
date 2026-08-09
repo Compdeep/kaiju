@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // debugToolName is the registered name of the debug super-tool. It is pruned
@@ -38,8 +38,8 @@ type DebugTool struct {
 // Compile-time interface assertions. debug returns a ToolMessage, so its
 // envelope is never truncated — the scheduler must parse the {type:"debug"}
 // marker to trigger the graft, same reason compute does.
-var _ tools.Tool = (*DebugTool)(nil)
-var _ tools.TypedExecutor = (*DebugTool)(nil)
+var _ toolapi.Tool = (*DebugTool)(nil)
+var _ toolapi.TypedExecutor = (*DebugTool)(nil)
 
 // NewDebugTool constructs a DebugTool bound to an Agent.
 func NewDebugTool(a *Agent) *DebugTool { return &DebugTool{agent: a} }
@@ -60,7 +60,7 @@ func (d *DebugTool) Description() string {
 func (d *DebugTool) Impact(params map[string]any) int {
 	// Write-capable: the microplanner fix edits files. IGX gates it like
 	// compute so lanes below the required clearance can't invoke it.
-	return tools.ImpactAffect
+	return toolapi.ImpactAffect
 }
 
 var debugParamSchema = json.RawMessage(`{
@@ -86,7 +86,7 @@ func (d *DebugTool) OutputSchema() json.RawMessage { return debugOutputSchema }
 
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (d *DebugTool) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(d.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(d.ExecuteTyped(ctx, params))
 }
 
 /*
@@ -96,7 +96,7 @@ func (d *DebugTool) Execute(ctx context.Context, params map[string]any) (string,
  * param: params - resolved tool params; `problem` is the investigation brief.
  * return: the debug envelope JSON.
  */
-func (d *DebugTool) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (d *DebugTool) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	problem, _ := params["problem"].(string)
-	return tools.ToolOK("debug", "", map[string]string{"problem": problem}), nil
+	return toolapi.ToolOK("debug", "", map[string]string{"problem": problem}), nil
 }

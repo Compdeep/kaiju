@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 func TestBash_TypedEnvelope(t *testing.T) {
@@ -17,7 +17,7 @@ func TestBash_TypedEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("echo errored: %v", err)
 	}
-	if ok.Type != "command" || ok.Status != agenttools.StatusOK {
+	if ok.Type != "command" || ok.Status != toolapi.StatusOK {
 		t.Fatalf("echo → kind %q status %q", ok.Type, ok.Status)
 	}
 	var d struct {
@@ -35,7 +35,7 @@ func TestBash_TypedEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nonzero exit should be a nil Go error, got: %v", err)
 	}
-	if bad.Status != agenttools.StatusError {
+	if bad.Status != toolapi.StatusError {
 		t.Fatalf("exit 3 → status %q want error", bad.Status)
 	}
 	var d2 struct {

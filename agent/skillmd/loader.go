@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // DefaultDirs returns the standard skill search directories in precedence order.
@@ -27,7 +27,7 @@ func DefaultDirs(dataDir, workspace string) []string {
 
 // LoadDir loads all SKILL.md files from a single directory.
 // Layout: dir/<skill-name>/SKILL.md (each skill in its own subdirectory)
-func LoadDir(dir string, reg *tools.Registry) ([]*SkillMD, error) {
+func LoadDir(dir string, reg *toolapi.Registry) ([]*SkillMD, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -71,7 +71,7 @@ func LoadDir(dir string, reg *tools.Registry) ([]*SkillMD, error) {
 
 // LoadFromDirs loads from multiple directories in precedence order.
 // Later directories override earlier ones (same name = last wins).
-func LoadFromDirs(dirs []string, reg *tools.Registry) ([]*SkillMD, error) {
+func LoadFromDirs(dirs []string, reg *toolapi.Registry) ([]*SkillMD, error) {
 	byName := make(map[string]*SkillMD)
 	var order []string
 

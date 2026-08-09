@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -54,7 +54,7 @@ func (s *Sysinfo) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (s *Sysinfo) Impact(map[string]any) int { return tools.ImpactObserve }
+func (s *Sysinfo) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * Parameters returns the JSON schema for the tool's input parameters.
@@ -71,7 +71,7 @@ func (s *Sysinfo) Parameters() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (s *Sysinfo) OutputSchema() json.RawMessage {
-	return tools.EnvelopeSchema(`{"type":"object","description":"System information. Chain individual fields into downstream steps via ${step.N.<field>} placeholders.","properties":{"hostname":{"type":"string","description":"machine hostname"},"os":{"type":"string","description":"operating system name (e.g. linux, darwin, windows)"},"arch":{"type":"string","description":"CPU architecture"},"cwd":{"type":"string","description":"current working directory path"},"time":{"type":"string","description":"current time"},"cpus":{"type":"integer","description":"number of CPU cores"}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"System information. Chain individual fields into downstream steps via ${step.N.<field>} placeholders.","properties":{"hostname":{"type":"string","description":"machine hostname"},"os":{"type":"string","description":"operating system name (e.g. linux, darwin, windows)"},"arch":{"type":"string","description":"CPU architecture"},"cwd":{"type":"string","description":"current working directory path"},"time":{"type":"string","description":"current time"},"cpus":{"type":"integer","description":"number of CPU cores"}}}`)
 }
 
 /*
@@ -83,10 +83,10 @@ func (s *Sysinfo) OutputSchema() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (s *Sysinfo) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(s.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(s.ExecuteTyped(ctx, params))
 }
 
-func (s *Sysinfo) ExecuteTyped(_ context.Context, _ map[string]any) (tools.ToolMessage, error) {
+func (s *Sysinfo) ExecuteTyped(_ context.Context, _ map[string]any) (toolapi.ToolMessage, error) {
 	hostname, _ := os.Hostname()
 	cwd := s.workspace
 	if cwd == "" {
@@ -106,13 +106,13 @@ func (s *Sysinfo) ExecuteTyped(_ context.Context, _ map[string]any) (tools.ToolM
 	// clock. Content is left empty on purpose — the payload IS the readable
 	// form, and Evidence() falls back to it, so filling both would carry the
 	// same JSON twice.
-	return tools.ToolOK("sysinfo", "", info), nil
+	return toolapi.ToolOK("sysinfo", "", info), nil
 }
 
 // Verify interface compliance at compile time.
-var _ tools.Tool = (*Sysinfo)(nil)
-var _ tools.Outputter = (*Sysinfo)(nil)
-var _ tools.TypedExecutor = (*Sysinfo)(nil)
+var _ toolapi.Tool = (*Sysinfo)(nil)
+var _ toolapi.Outputter = (*Sysinfo)(nil)
+var _ toolapi.TypedExecutor = (*Sysinfo)(nil)
 
 func init() {
 	// Ensure sysinfo is always available as a reference tool.

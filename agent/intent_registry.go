@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/db"
 )
 
@@ -139,7 +139,7 @@ func (r *IntentRegistry) ListAllowed(maxRank int) []db.Intent {
  * param: params - invocation params (passed to tool.Impact).
  * return: the effective rank for gate comparison.
  */
-func (r *IntentRegistry) ResolveToolIntent(toolName string, tool agenttools.Tool, params map[string]any) int {
+func (r *IntentRegistry) ResolveToolIntent(toolName string, tool toolapi.Tool, params map[string]any) int {
 	if tool == nil {
 		return 0
 	}

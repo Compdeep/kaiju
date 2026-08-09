@@ -111,10 +111,10 @@ func (a *IntentAPI) handleDeleteIntent(w http.ResponseWriter, r *http.Request) {
  *       and the default Go intent for reference in the UI.
  */
 type ToolIntentEntry struct {
-	ToolName        string `json:"tool_name"`
-	IntentName      string `json:"intent_name"` // empty if no DB override
-	DefaultIntent   string `json:"default_intent"` // resolved from Go Impact()
-	HasOverride     bool   `json:"has_override"`
+	ToolName      string `json:"tool_name"`
+	IntentName    string `json:"intent_name"`    // empty if no DB override
+	DefaultIntent string `json:"default_intent"` // resolved from Go Impact()
+	HasOverride   bool   `json:"has_override"`
 }
 
 func (a *IntentAPI) handleListToolIntents(w http.ResponseWriter, _ *http.Request) {

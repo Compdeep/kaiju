@@ -3,7 +3,7 @@ package agent
 import (
 	"strings"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // toolMessageBody adapts a tool's ToolMessage envelope to the NodeBody
@@ -15,12 +15,12 @@ import (
 // edge-facing framing signals, read via Envelope(), not Field — so a payload
 // field named "status" never collides with the envelope's status.
 type toolMessageBody struct {
-	msg agenttools.ToolMessage
+	msg toolapi.ToolMessage
 }
 
 // Envelope exposes the framing signals (Status/Detail/Kind/Content) to edges
 // and other typed consumers.
-func (b toolMessageBody) Envelope() agenttools.ToolMessage { return b.msg }
+func (b toolMessageBody) Envelope() toolapi.ToolMessage { return b.msg }
 
 // Field resolves a dot-path into the tool's payload (Data), matching the
 // pre-envelope behavior. An optional leading "data." is tolerated so both
@@ -37,7 +37,7 @@ func (b toolMessageBody) Field(path string) (any, bool) {
 	// producer returned. Resolve from the top of that text, which is what
 	// RawTextBody did for the same output before it carried an envelope, so a
 	// reference like ${node.X.count} into a tool's own JSON keeps working.
-	if b.msg.Status == agenttools.StatusUnclassified {
+	if b.msg.Status == toolapi.StatusUnclassified {
 		if path == "" {
 			return b.msg.Content, true
 		}
@@ -94,16 +94,16 @@ func (b toolMessageBody) envelopeField(path string) (any, bool) {
 // for pure-data tools.
 func (b toolMessageBody) Evidence() string {
 	switch b.msg.Status {
-	case agenttools.StatusUnclassified:
+	case toolapi.StatusUnclassified:
 		// The producer's text, unchanged. Adding a note here would put a frame
 		// around every prose tool's output for the model to read past.
 		return b.msg.Content
-	case agenttools.StatusEmpty:
+	case toolapi.StatusEmpty:
 		if b.msg.Detail != "" {
 			return "(no " + b.msg.Type + ": " + b.msg.Detail + ")"
 		}
 		return "(no " + b.msg.Type + ")"
-	case agenttools.StatusError:
+	case toolapi.StatusError:
 		line := "(" + b.msg.Type + " failed)"
 		if b.msg.Detail != "" {
 			line = "(" + b.msg.Type + " failed: " + b.msg.Detail + ")"
@@ -145,7 +145,7 @@ func (b toolMessageBody) Summary() string {
 	// An unclassified body has nothing to summarise but its text, and "text
 	// unclassified" tells a reader less than the first line does. This is what
 	// the trace showed for the same output before it carried an envelope.
-	if b.msg.Status == agenttools.StatusUnclassified {
+	if b.msg.Status == toolapi.StatusUnclassified {
 		for _, line := range strings.Split(b.msg.Content, "\n") {
 			if t := strings.TrimSpace(line); t != "" {
 				return Text.TruncateLog(t, 120)
@@ -172,4 +172,4 @@ func (b toolMessageBody) Summary() string {
  * param: msg - what the tool returned.
  * return: the body to hand to Graph.SetBody.
  */
-func NewToolBody(msg agenttools.ToolMessage) NodeBody { return toolMessageBody{msg: msg} }
+func NewToolBody(msg toolapi.ToolMessage) NodeBody { return toolMessageBody{msg: msg} }

@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // TestUnknownToolNames covers the pre-execution existence check that decides
 // whether to re-plan: only step tools absent from the registry are returned,
 // distinct, in order, with "gap" pseudo-steps and blanks ignored.
 func TestUnknownToolNames(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	reg.Replace(&fakeTool{name: "web_search", params: json.RawMessage(`{}`)}, "builtin")
 	reg.Replace(&fakeTool{name: "web_fetch", params: json.RawMessage(`{}`)}, "builtin")
 	a := &Agent{registry: reg}

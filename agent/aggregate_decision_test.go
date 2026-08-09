@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // decideAutoAggMode is the answer-writer choice. The behavioral change this guards:
@@ -42,9 +42,9 @@ func TestUsableEvidenceAndFanout(t *testing.T) {
 	// A run with only empty/failed fetches has no usable evidence.
 	g1 := NewGraph()
 	e := g1.AddNode(&Node{Type: NodeTool, Tag: "s", ToolName: "web_search"})
-	g1.SetBody(e, toolMessageBody{msg: agenttools.ToolEmpty("search", "no results")})
+	g1.SetBody(e, toolMessageBody{msg: toolapi.ToolEmpty("search", "no results")})
 	f := g1.AddNode(&Node{Type: NodeTool, Tag: "f", ToolName: "web_fetch"})
-	g1.SetBody(f, toolMessageBody{msg: agenttools.ToolFail("page", "HTTP 404", nil)})
+	g1.SetBody(f, toolMessageBody{msg: toolapi.ToolFail("page", "HTTP 404", nil)})
 	if a.hasUsableEvidence(g1) {
 		t.Error("empty+failed only → hasUsableEvidence should be false")
 	}
@@ -54,7 +54,7 @@ func TestUsableEvidenceAndFanout(t *testing.T) {
 
 	// One ok result flips usable to true.
 	ok := g1.AddNode(&Node{Type: NodeTool, Tag: "ok", ToolName: "web_fetch"})
-	g1.SetBody(ok, toolMessageBody{msg: agenttools.ToolOK("page", "real content", nil)})
+	g1.SetBody(ok, toolMessageBody{msg: toolapi.ToolOK("page", "real content", nil)})
 	if !a.hasUsableEvidence(g1) {
 		t.Error("an ok result → hasUsableEvidence should be true")
 	}

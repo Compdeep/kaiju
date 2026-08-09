@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // ─── EnvList ────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ func (e *EnvList) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (e *EnvList) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (e *EnvList) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -59,7 +59,7 @@ func (e *EnvList) Impact(map[string]any) int { return agenttools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (e *EnvList) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -87,10 +87,10 @@ func (e *EnvList) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (e *EnvList) Execute(_ context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(e.ExecuteTyped(nil, params))
+	return toolapi.StringResult(e.ExecuteTyped(nil, params))
 }
 
-func (e *EnvList) ExecuteTyped(_ context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (e *EnvList) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	filter, _ := params["filter"].(string)
 	showSensitive, _ := params["show_sensitive"].(bool)
 
@@ -117,9 +117,9 @@ func (e *EnvList) ExecuteTyped(_ context.Context, params map[string]any) (agentt
 	}
 
 	if len(result) == 0 {
-		return agenttools.ToolEmpty("env", "no matching environment variables"), nil
+		return toolapi.ToolEmpty("env", "no matching environment variables"), nil
 	}
-	return agenttools.ToolText(strings.Join(result, "\n")), nil
+	return toolapi.ToolText(strings.Join(result, "\n")), nil
 }
 
 /*
@@ -139,7 +139,7 @@ func isSensitiveKey(key string) bool {
 	return false
 }
 
-var _ agenttools.Tool = (*EnvList)(nil)
+var _ toolapi.Tool = (*EnvList)(nil)
 
 // ─── DiskUsage ──────────────────────────────────────────────────────────────
 
@@ -178,7 +178,7 @@ func (d *DiskUsage) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (d *DiskUsage) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (d *DiskUsage) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -186,7 +186,7 @@ func (d *DiskUsage) Impact(map[string]any) int { return agenttools.ImpactObserve
  * return: JSON schema as raw bytes
  */
 func (d *DiskUsage) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -213,10 +213,10 @@ func (d *DiskUsage) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (d *DiskUsage) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(d.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(d.ExecuteTyped(ctx, params))
 }
 
-func (d *DiskUsage) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (d *DiskUsage) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	path, _ := params["path"].(string)
 
 	if path == "" || path == "/" {
@@ -232,7 +232,7 @@ func (d *DiskUsage) ExecuteTyped(ctx context.Context, params map[string]any) (ag
  * param: ctx - context for cancellation and timeout
  * return: formatted disk usage report, or error on command failure
  */
-func diskUsageAll(ctx context.Context) (agenttools.ToolMessage, error) {
+func diskUsageAll(ctx context.Context) (toolapi.ToolMessage, error) {
 	var result strings.Builder
 
 	// Part 1: filesystem overview (instant)
@@ -259,7 +259,7 @@ func diskUsageAll(ctx context.Context) (agenttools.ToolMessage, error) {
 		}
 	}
 
-	return agenttools.ToolText(result.String()), nil
+	return toolapi.ToolText(result.String()), nil
 }
 
 /*
@@ -269,7 +269,7 @@ func diskUsageAll(ctx context.Context) (agenttools.ToolMessage, error) {
  * param: path - directory path to analyze
  * return: formatted disk usage for the path (truncated to 4KB), or error on failure/timeout
  */
-func diskUsagePath(ctx context.Context, path string) (agenttools.ToolMessage, error) {
+func diskUsagePath(ctx context.Context, path string) (toolapi.ToolMessage, error) {
 	// Use --max-depth=1 to avoid traversing entire trees, with a 15s timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -288,21 +288,21 @@ func diskUsagePath(ctx context.Context, path string) (agenttools.ToolMessage, er
 		if timeoutCtx.Err() == context.DeadlineExceeded {
 			// Return partial output if we got some before timeout
 			if len(out) > 0 {
-				return agenttools.ToolText(strings.TrimSpace(string(out)) + "\n(truncated — scan timed out)"), nil
+				return toolapi.ToolText(strings.TrimSpace(string(out)) + "\n(truncated — scan timed out)"), nil
 			}
-			return agenttools.ToolMessage{}, fmt.Errorf("disk_usage: scan timed out after 15s")
+			return toolapi.ToolMessage{}, fmt.Errorf("disk_usage: scan timed out after 15s")
 		}
-		return agenttools.ToolMessage{}, fmt.Errorf("disk_usage: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("disk_usage: %w", err)
 	}
 
 	output := strings.TrimSpace(string(out))
 	if len(output) > 4096 {
 		output = output[:4096] + "\n... (truncated)"
 	}
-	return agenttools.ToolText(output), nil
+	return toolapi.ToolText(output), nil
 }
 
-var _ agenttools.Tool = (*DiskUsage)(nil)
+var _ toolapi.Tool = (*DiskUsage)(nil)
 
 // ─── Clipboard ──────────────────────────────────────────────────────────────
 
@@ -339,7 +339,7 @@ func (c *Clipboard) Description() string { return "Read from or write to the sys
  * return: JSON schema as raw bytes
  */
 func (c *Clipboard) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -351,9 +351,9 @@ func (c *Clipboard) OutputSchema() json.RawMessage {
 func (c *Clipboard) Impact(params map[string]any) int {
 	action, _ := params["action"].(string)
 	if action == "write" {
-		return agenttools.ImpactAffect
+		return toolapi.ImpactAffect
 	}
-	return agenttools.ImpactObserve
+	return toolapi.ImpactObserve
 }
 
 /*
@@ -382,10 +382,10 @@ func (c *Clipboard) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (c *Clipboard) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(c.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(c.ExecuteTyped(ctx, params))
 }
 
-func (c *Clipboard) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (c *Clipboard) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	action, _ := params["action"].(string)
 
 	switch action {
@@ -395,7 +395,7 @@ func (c *Clipboard) ExecuteTyped(ctx context.Context, params map[string]any) (ag
 		content, _ := params["content"].(string)
 		return clipboardWrite(ctx, content)
 	default:
-		return agenttools.ToolMessage{}, fmt.Errorf("clipboard: action must be 'read' or 'write'")
+		return toolapi.ToolMessage{}, fmt.Errorf("clipboard: action must be 'read' or 'write'")
 	}
 }
 
@@ -405,7 +405,7 @@ func (c *Clipboard) ExecuteTyped(ctx context.Context, params map[string]any) (ag
  * param: ctx - context for cancellation
  * return: clipboard content string (truncated to 8KB), or error if clipboard tools are unavailable
  */
-func clipboardRead(ctx context.Context) (agenttools.ToolMessage, error) {
+func clipboardRead(ctx context.Context) (toolapi.ToolMessage, error) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -424,10 +424,10 @@ func clipboardRead(ctx context.Context) (agenttools.ToolMessage, error) {
 			cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--output")
 			out, err = cmd.Output()
 			if err != nil {
-				return agenttools.ToolMessage{}, fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
+				return toolapi.ToolMessage{}, fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
 			}
 		} else {
-			return agenttools.ToolMessage{}, fmt.Errorf("clipboard: %w", err)
+			return toolapi.ToolMessage{}, fmt.Errorf("clipboard: %w", err)
 		}
 	}
 
@@ -435,7 +435,7 @@ func clipboardRead(ctx context.Context) (agenttools.ToolMessage, error) {
 	if len(content) > 8192 {
 		content = content[:8192] + "\n... (truncated)"
 	}
-	return agenttools.ToolOK("clipboard", content, nil), nil
+	return toolapi.ToolOK("clipboard", content, nil), nil
 }
 
 /*
@@ -445,9 +445,9 @@ func clipboardRead(ctx context.Context) (agenttools.ToolMessage, error) {
  * param: content - text content to write to the clipboard
  * return: confirmation message with byte count, or error if content is empty or clipboard tools are unavailable
  */
-func clipboardWrite(ctx context.Context, content string) (agenttools.ToolMessage, error) {
+func clipboardWrite(ctx context.Context, content string) (toolapi.ToolMessage, error) {
 	if content == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("clipboard: content is required for write")
+		return toolapi.ToolMessage{}, fmt.Errorf("clipboard: content is required for write")
 	}
 
 	var cmd *exec.Cmd
@@ -466,14 +466,14 @@ func clipboardWrite(ctx context.Context, content string) (agenttools.ToolMessage
 			cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--input")
 			cmd.Stdin = strings.NewReader(content)
 			if err := cmd.Run(); err != nil {
-				return agenttools.ToolMessage{}, fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
+				return toolapi.ToolMessage{}, fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
 			}
 		} else {
-			return agenttools.ToolMessage{}, fmt.Errorf("clipboard: %w", err)
+			return toolapi.ToolMessage{}, fmt.Errorf("clipboard: %w", err)
 		}
 	}
 
-	return agenttools.ToolText(fmt.Sprintf("wrote %d bytes to clipboard", len(content))), nil
+	return toolapi.ToolText(fmt.Sprintf("wrote %d bytes to clipboard", len(content))), nil
 }
 
-var _ agenttools.Tool = (*Clipboard)(nil)
+var _ toolapi.Tool = (*Clipboard)(nil)

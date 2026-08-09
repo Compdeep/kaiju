@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // refAgent registers one tool under the given name with the given output
 // schema. A nil schema is a tool that declares nothing about its output.
 func refAgent(name string, schema json.RawMessage) *Agent {
-	reg := agenttools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	reg.Replace(&fakeTool{name: name, params: json.RawMessage(`{}`), output: schema}, "builtin")
 	return &Agent{registry: reg}
 }
@@ -18,7 +18,7 @@ func refAgent(name string, schema json.RawMessage) *Agent {
 // producedNode adds a resolved tool node carrying the given payload.
 func producedNode(g *Graph, tool string, payload map[string]any) string {
 	id := g.AddNode(&Node{Type: NodeTool, Tag: tool, ToolName: tool})
-	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("k", "", payload)})
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolOK("k", "", payload)})
 	return id
 }
 
@@ -28,7 +28,7 @@ func listSchema(annotation string) json.RawMessage {
 	if annotation != "" {
 		marked = `"url":{"type":"string","x-reference":"` + annotation + `"}`
 	}
-	return agenttools.EnvelopeSchema(`{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{` +
+	return toolapi.EnvelopeSchema(`{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{` +
 		marked + `,"title":{"type":"string"}}}}}}`)
 }
 
@@ -124,7 +124,7 @@ func TestReferences_AnnotationWithoutParamStillMarks(t *testing.T) {
 // An empty annotation is still a marking — the field is a handle, nobody said
 // what reads it.
 func TestReferences_EmptyAnnotationStillMarks(t *testing.T) {
-	a := refAgent("lister", agenttools.EnvelopeSchema(`{"type":"object","properties":{"id":{"type":"string","x-reference":""}}}`))
+	a := refAgent("lister", toolapi.EnvelopeSchema(`{"type":"object","properties":{"id":{"type":"string","x-reference":""}}}`))
 	g := NewGraph()
 	producedNode(g, "lister", map[string]any{"id": "alert-7"})
 
@@ -157,7 +157,7 @@ func TestReferences_AnnotatedFieldMissingFromPayload(t *testing.T) {
 
 // A marked field that is not inside an array — an id at the top of a payload.
 func TestReferences_TopLevelFieldIsFound(t *testing.T) {
-	a := refAgent("opener", agenttools.EnvelopeSchema(`{"type":"object","properties":{"incident_id":{"type":"string","x-reference":"investigate.id"}}}`))
+	a := refAgent("opener", toolapi.EnvelopeSchema(`{"type":"object","properties":{"incident_id":{"type":"string","x-reference":"investigate.id"}}}`))
 	g := NewGraph()
 	producedNode(g, "opener", map[string]any{"incident_id": "inc-42"})
 
@@ -219,7 +219,7 @@ func (errFailedForTest) Error() string { return "failed" }
 // the same string. The first version matched the value against every parameter
 // in the run and got this wrong.
 func TestReferences_ShortHandleIsNotFollowedByAnUnrelatedStep(t *testing.T) {
-	a := refAgent("fleet_view", agenttools.EnvelopeSchema(
+	a := refAgent("fleet_view", toolapi.EnvelopeSchema(
 		`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`))
 	g := NewGraph()
 	producedNode(g, "fleet_view", map[string]any{"peers": []map[string]any{{"id": "self"}, {"id": "peer-2"}}})
@@ -237,7 +237,7 @@ func TestReferences_ShortHandleIsNotFollowedByAnUnrelatedStep(t *testing.T) {
 
 // The same handle, followed by the tool its producer actually named.
 func TestReferences_ShortHandleIsFollowedByTheDeclaredTool(t *testing.T) {
-	a := refAgent("fleet_view", agenttools.EnvelopeSchema(
+	a := refAgent("fleet_view", toolapi.EnvelopeSchema(
 		`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`))
 	g := NewGraph()
 	producedNode(g, "fleet_view", map[string]any{"peers": []map[string]any{{"id": "self"}, {"id": "peer-2"}}})
@@ -254,7 +254,7 @@ func TestReferences_ShortHandleIsFollowedByTheDeclaredTool(t *testing.T) {
 // outstanding rather than being assumed followed. Over-reporting is the safe
 // direction for a guard against claiming something was retrieved.
 func TestReferences_UndeclaredResolverStaysOutstanding(t *testing.T) {
-	b := refAgent("lister", agenttools.EnvelopeSchema(
+	b := refAgent("lister", toolapi.EnvelopeSchema(
 		`{"type":"object","properties":{"id":{"type":"string","x-reference":""}}}`))
 	g := NewGraph()
 	producedNode(g, "lister", map[string]any{"id": "x"})
@@ -282,7 +282,7 @@ func TestChainHints_GeneratedFromTheDeclaration(t *testing.T) {
 // Nothing in the engine is web-shaped: the same code run against a fleet tool
 // produces the fleet sentence.
 func TestChainHints_CarryNoVocabularyOfTheirOwn(t *testing.T) {
-	schema := agenttools.EnvelopeSchema(`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`)
+	schema := toolapi.EnvelopeSchema(`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`)
 	got := chainHints(schema)
 	if len(got) != 1 || got[0] != "${step.N.peers.0.id} into inspect_host(target)" {
 		t.Fatalf("got %q", got)
@@ -297,7 +297,7 @@ func TestChainHints_SilentWhenNothingIsDeclared(t *testing.T) {
 		t.Errorf("no schema: got %q", got)
 	}
 	// Marked, but nothing said what follows it — there is no wiring to suggest.
-	if got := chainHints(agenttools.EnvelopeSchema(`{"type":"object","properties":{"id":{"type":"string","x-reference":""}}}`)); len(got) != 0 {
+	if got := chainHints(toolapi.EnvelopeSchema(`{"type":"object","properties":{"id":{"type":"string","x-reference":""}}}`)); len(got) != 0 {
 		t.Errorf("no resolver named: got %q", got)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // A reference with no path hands the next step the value, not the text of it.
@@ -71,7 +71,7 @@ func TestAStepReferenceAtFireTimeIsAnError(t *testing.T) {
 func TestOneDependencyIsResolvedOnce(t *testing.T) {
 	g := NewGraph()
 	dep := g.AddNode(&Node{Type: NodeTool, Tag: "search", ToolName: "web_search"})
-	g.SetBody(dep, NewToolBody(agenttools.ToolOK("search", "", map[string]any{"count": 3})))
+	g.SetBody(dep, NewToolBody(toolapi.ToolOK("search", "", map[string]any{"count": 3})))
 
 	n := &Node{ID: "n2", Params: map[string]any{
 		"a": "${node." + dep + ".count}",
@@ -96,7 +96,7 @@ func TestOneDependencyIsResolvedOnce(t *testing.T) {
 func TestTheTypedBodyStillAnswersTheFieldAccess(t *testing.T) {
 	g := NewGraph()
 	dep := g.AddNode(&Node{Type: NodeTool, Tag: "search", ToolName: "web_search"})
-	g.SetBody(dep, NewToolBody(agenttools.ToolOK("search", "", map[string]any{"url": "https://example.test"})))
+	g.SetBody(dep, NewToolBody(toolapi.ToolOK("search", "", map[string]any{"url": "https://example.test"})))
 
 	n := &Node{ID: "n2", Params: map[string]any{"u": "${node." + dep + ".url}"}}
 	if err := substituteTemplates(n, g); err != nil {

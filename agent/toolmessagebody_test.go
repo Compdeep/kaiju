@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-func tmBody(m agenttools.ToolMessage) toolMessageBody { return toolMessageBody{msg: m} }
+func tmBody(m toolapi.ToolMessage) toolMessageBody { return toolMessageBody{msg: m} }
 
 func TestToolMessageBody_FieldFromData(t *testing.T) {
-	b := tmBody(agenttools.ToolOK("page", "text", map[string]any{"title": "T", "n": 3}))
+	b := tmBody(toolapi.ToolOK("page", "text", map[string]any{"title": "T", "n": 3}))
 	if v, ok := b.Field("title"); !ok || v != "T" {
 		t.Fatalf("Field(title) = %v,%v want T,true", v, ok)
 	}
@@ -32,7 +32,7 @@ func TestToolMessageBody_FieldFromData(t *testing.T) {
 // form ("data.title") was already tolerated; the bare form was the gap.
 // Plan-time validation already accepts ${step.N.data}, so runtime was the outlier.
 func TestToolMessageBody_FieldBareData(t *testing.T) {
-	b := tmBody(agenttools.ToolOK("sysinfo", "", map[string]any{"os": "linux", "cpus": 8}))
+	b := tmBody(toolapi.ToolOK("sysinfo", "", map[string]any{"os": "linux", "cpus": 8}))
 	v, ok := b.Field("data")
 	if !ok {
 		t.Fatalf(`Field("data") should resolve to the whole payload, got ok=false`)
@@ -59,7 +59,7 @@ func TestToolMessageBody_FieldBareData(t *testing.T) {
 // passed plan-time validation and then failed at fire time, and a tool whose
 // readable half is Content with counts in Data had no working path to its text.
 func TestToolMessageBody_FieldEnvelopeNames(t *testing.T) {
-	b := tmBody(agenttools.ToolOK("listing", "two rows", map[string]any{"count": 2}))
+	b := tmBody(toolapi.ToolOK("listing", "two rows", map[string]any{"count": 2}))
 	if v, ok := b.Field("content"); !ok || v != "two rows" {
 		t.Fatalf("Field(content) = %v,%v want the rendered text", v, ok)
 	}
@@ -69,13 +69,13 @@ func TestToolMessageBody_FieldEnvelopeNames(t *testing.T) {
 	if v, ok := b.Field("type"); !ok || v != "listing" {
 		t.Fatalf("Field(type) = %v,%v want listing", v, ok)
 	}
-	e := tmBody(agenttools.ToolEmpty("listing", "no incident matches status open"))
+	e := tmBody(toolapi.ToolEmpty("listing", "no incident matches status open"))
 	if v, ok := e.Field("detail"); !ok || v != "no incident matches status open" {
 		t.Fatalf("Field(detail) = %v,%v want the reason", v, ok)
 	}
 	// Where both have the name the payload wins, in either form: web_fetch's
 	// payload carries the HTTP status and ${node.X.status} has always meant it.
-	c := tmBody(agenttools.ToolOK("page", "rendered", map[string]any{"content": "raw", "status": "200 OK"}))
+	c := tmBody(toolapi.ToolOK("page", "rendered", map[string]any{"content": "raw", "status": "200 OK"}))
 	if v, ok := c.Field("content"); !ok || v != "raw" {
 		t.Fatalf("Field(content) = %v,%v want the payload's own key", v, ok)
 	}
@@ -90,7 +90,7 @@ func TestToolMessageBody_FieldEnvelopeNames(t *testing.T) {
 // A text tool carries its whole result in Content with no Data; field access
 // must still reach into it when it happens to be JSON (a JSON file, a JSON kv).
 func TestToolMessageBody_FieldFallsBackToContent(t *testing.T) {
-	b := tmBody(agenttools.ToolOK("kv", `{"port":8080}`, nil))
+	b := tmBody(toolapi.ToolOK("kv", `{"port":8080}`, nil))
 	if v, ok := b.Field("port"); !ok || v != float64(8080) {
 		t.Fatalf("Field(port) via content fallback = %v,%v want 8080,true", v, ok)
 	}
@@ -100,7 +100,7 @@ func TestToolMessageBody_FieldFallsBackToContent(t *testing.T) {
 // says why. Keeping it in the payload made it survive for templates and the
 // frontend, and the model still read the exit status alone.
 func TestToolMessageBody_EvidenceKeepsWhatAFailedToolProduced(t *testing.T) {
-	b := tmBody(agenttools.ToolFail("command", "exit status 1",
+	b := tmBody(toolapi.ToolFail("command", "exit status 1",
 		map[string]any{"output": "cat: /root/x: Permission denied"}))
 	got := b.Evidence()
 	if !strings.Contains(got, "command failed: exit status 1") {
@@ -110,32 +110,32 @@ func TestToolMessageBody_EvidenceKeepsWhatAFailedToolProduced(t *testing.T) {
 		t.Errorf("Evidence dropped the output that says why:\n%s", got)
 	}
 	// A tool that could not start produces neither, and gets the line alone.
-	if got := tmBody(agenttools.ToolFail("page", "HTTP 404", nil)).Evidence(); got != "(page failed: HTTP 404)" {
+	if got := tmBody(toolapi.ToolFail("page", "HTTP 404", nil)).Evidence(); got != "(page failed: HTTP 404)" {
 		t.Errorf("a failure with no output = %q, want the line alone", got)
 	}
 }
 
 func TestToolMessageBody_Evidence(t *testing.T) {
-	if got := tmBody(agenttools.ToolOK("page", "the page", nil)).Evidence(); got != "the page" {
+	if got := tmBody(toolapi.ToolOK("page", "the page", nil)).Evidence(); got != "the page" {
 		t.Fatalf("ok Evidence = %q", got)
 	}
-	if got := tmBody(agenttools.ToolEmpty("search", "no results")).Evidence(); got != "(no search: no results)" {
+	if got := tmBody(toolapi.ToolEmpty("search", "no results")).Evidence(); got != "(no search: no results)" {
 		t.Fatalf("empty Evidence = %q want explicit absence line", got)
 	}
-	if got := tmBody(agenttools.ToolFail("page", "HTTP 404", nil)).Evidence(); got != "(page failed: HTTP 404)" {
+	if got := tmBody(toolapi.ToolFail("page", "HTTP 404", nil)).Evidence(); got != "(page failed: HTTP 404)" {
 		t.Fatalf("error Evidence = %q want explicit failure line", got)
 	}
 	// ok + no content → render the data payload rather than empty
-	if got := tmBody(agenttools.ToolOK("sysinfo", "", map[string]any{"os": "linux"})).Evidence(); !strings.Contains(got, "linux") {
+	if got := tmBody(toolapi.ToolOK("sysinfo", "", map[string]any{"os": "linux"})).Evidence(); !strings.Contains(got, "linux") {
 		t.Fatalf("ok+no-content Evidence should render data, got %q", got)
 	}
 }
 
 func TestToolMessageBody_Summary(t *testing.T) {
-	if got := tmBody(agenttools.ToolEmpty("search", "no results")).Summary(); !strings.HasPrefix(got, "search empty") || !strings.Contains(got, "no results") {
+	if got := tmBody(toolapi.ToolEmpty("search", "no results")).Summary(); !strings.HasPrefix(got, "search empty") || !strings.Contains(got, "no results") {
 		t.Fatalf("empty Summary = %q", got)
 	}
-	if got := tmBody(agenttools.ToolOK("page", "x", nil)).Summary(); got != "page ok" {
+	if got := tmBody(toolapi.ToolOK("page", "x", nil)).Summary(); got != "page ok" {
 		t.Fatalf("ok Summary = %q want 'page ok'", got)
 	}
 }

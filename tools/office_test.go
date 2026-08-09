@@ -3,7 +3,7 @@ package tools
 import (
 	"archive/zip"
 	"context"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +40,7 @@ func runExtract(t *testing.T, dir, file string) string {
 	return runExtractMsg(t, dir, file).Content
 }
 
-func runExtractMsg(t *testing.T, dir, file string) agenttools.ToolMessage {
+func runExtractMsg(t *testing.T, dir, file string) toolapi.ToolMessage {
 	t.Helper()
 	msg, err := NewOfficeExtract(dir).ExecuteTyped(context.Background(), map[string]any{"path": file})
 	if err != nil {
@@ -134,7 +134,7 @@ func TestOfficeExtract_NoTextIsEmpty(t *testing.T) {
 		"word/document.xml": `<?xml version="1.0"?><w:document xmlns:w="x"><w:body></w:body></w:document>`,
 	})
 	msg := runExtractMsg(t, dir, "blank.docx")
-	if msg.Status != agenttools.StatusEmpty {
+	if msg.Status != toolapi.StatusEmpty {
 		t.Fatalf("status = %q, want empty", msg.Status)
 	}
 	if !strings.Contains(msg.Detail, "blank.docx") {

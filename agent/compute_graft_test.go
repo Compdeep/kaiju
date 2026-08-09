@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // The blueprint graft, which is the part of the compute change that could fail
@@ -150,7 +150,7 @@ func TestExecStdoutLandsInsideThePlan(t *testing.T) {
 	updated := withComputePayload(parent, merged)
 
 	// The reference a downstream step writes.
-	msg, ok := agenttools.ParseToolMessage(updated)
+	msg, ok := toolapi.ParseToolMessage(updated)
 	if !ok {
 		t.Fatalf("the spliced result is no longer an envelope:\n%s", updated)
 	}
@@ -177,7 +177,7 @@ func TestComputeReceivesTheRunStateFromTheContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no run state should be reported, not errored: %v", err)
 	}
-	if msg.Status != agenttools.StatusError {
+	if msg.Status != toolapi.StatusError {
 		t.Fatalf("status = %q, want error — nothing ran", msg.Status)
 	}
 
@@ -197,7 +197,7 @@ func TestComputeReceivesTheRunStateFromTheContext(t *testing.T) {
 	}
 	text := string(src)
 	put := strings.Index(text, "ctx = WithExecContext(ctx, ec)")
-	branch := strings.Index(text, "if tx, ok := skill.(tools.TypedExecutor); ok {")
+	branch := strings.Index(text, "if tx, ok := skill.(toolapi.TypedExecutor); ok {")
 	if put < 0 || branch < 0 {
 		t.Fatal("the dispatcher no longer puts the run state on the ctx before choosing a path")
 	}

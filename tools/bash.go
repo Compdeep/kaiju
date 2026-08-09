@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -122,20 +122,20 @@ func (b *Bash) Impact(params map[string]any) int {
 		cmd, _ = params["script"].(string)
 	}
 	if cmd == "" {
-		return tools.ImpactObserve
+		return toolapi.ImpactObserve
 	}
 	if destructivePattern.MatchString(cmd) {
 		// Destructive commands targeting only workspace paths are safe —
 		// the workspace is the agent's sandbox. Downgrade to ImpactAffect.
 		if b.workDir != "" && b.isWorkspaceOnly(cmd) {
-			return tools.ImpactAffect
+			return toolapi.ImpactAffect
 		}
-		return tools.ImpactControl
+		return toolapi.ImpactControl
 	}
 	if writePattern.MatchString(cmd) {
-		return tools.ImpactAffect
+		return toolapi.ImpactAffect
 	}
-	return tools.ImpactObserve
+	return toolapi.ImpactObserve
 }
 
 // isWorkspaceOnly checks if all paths in a destructive command are relative
@@ -180,7 +180,7 @@ func (b *Bash) isWorkspaceOnly(cmd string) bool {
  * param: params - must contain "command" (or "cmd" alias); optionally "timeout_sec"
  * return: combined stdout/stderr output (truncated to 8KB), or error on timeout/failure
  */
-func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	command, _ := params["command"].(string)
 	// Accept common aliases — LLMs frequently hallucinate param names
 	if command == "" {
@@ -190,11 +190,11 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (tools.T
 		command, _ = params["script"].(string)
 	}
 	if command == "" {
-		return tools.ToolMessage{}, fmt.Errorf("bash: command is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("bash: command is required")
 	}
 
 	timeout := b.timeout
-	if ts, ok := tools.ParamNum(params, "timeout_sec"); ok {
+	if ts, ok := toolapi.ParamNum(params, "timeout_sec"); ok {
 		if ts == 0 {
 			timeout = 30 * time.Minute // 0 = long-running (downloads, builds)
 		} else if ts > 0 {
@@ -270,7 +270,7 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (tools.T
 
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return tools.ToolMessage{}, fmt.Errorf("bash: command timed out after %s", timeout)
+			return toolapi.ToolMessage{}, fmt.Errorf("bash: command timed out after %s", timeout)
 		}
 		// Return structured error as result (nil error so node resolves).
 		// The scheduler detects execute node failures from the result content.
@@ -286,7 +286,7 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (tools.T
 		// start, so we keep both ends.
 		stdoutStr := headTailTruncate(stdout.String(), 200, 600)
 		stderrStr := headTailTruncate(stderr.String(), 200, 600)
-		return tools.ToolFail("command", fmt.Sprintf("exit %d: %s", exitCode, err.Error()), bashData{
+		return toolapi.ToolFail("command", fmt.Sprintf("exit %d: %s", exitCode, err.Error()), bashData{
 			ExitCode: exitCode,
 			Stdout:   stdoutStr,
 			Stderr:   stderrStr,
@@ -294,7 +294,7 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (tools.T
 		}), nil
 	}
 
-	return tools.ToolOK("command", output, bashData{
+	return toolapi.ToolOK("command", output, bashData{
 		ExitCode: 0,
 		Stdout:   headTailTruncate(stdout.String(), 4000, 4000),
 		Stderr:   headTailTruncate(stderr.String(), 4000, 4000),
@@ -305,7 +305,7 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (tools.T
 // Execute satisfies the Tool interface for non-DAG callers; the dispatcher
 // prefers ExecuteTyped (no round-trip) and reads the typed body directly.
 func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(b.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(b.ExecuteTyped(ctx, params))
 }
 
 // bashData is the structured payload of a command node: exit status and the
@@ -318,7 +318,7 @@ type bashData struct {
 	Command  string `json:"command"`
 }
 
-var _ tools.Tool = (*Bash)(nil)
+var _ toolapi.Tool = (*Bash)(nil)
 
 // headTailTruncate keeps the first `head` bytes and last `tail` bytes of s,
 // inserting a "... [N bytes elided] ..." separator if truncation happened.

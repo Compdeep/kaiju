@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // Some tools exist to be asked for — raising a ticket, opening an incident,
@@ -30,7 +30,7 @@ func (*humanTool) RequiresHuman() bool { return true }
 
 func agentWithTools(t *testing.T) *Agent {
 	t.Helper()
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	if err := reg.Register(&plainTool{name: "get_alerts"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestInteractiveToolsAreWithheldFromUnattendedRuns(t *testing.T) {
 // RequiresTarget, and deliberately so: most work happens unattended, and
 // defaulting the other way would empty the tool list of every automated run.
 func TestUndeclaredToolsAreUsableUnattended(t *testing.T) {
-	if tools.RequiresHuman(&plainTool{name: "x"}) {
+	if toolapi.RequiresHuman(&plainTool{name: "x"}) {
 		t.Error("an undeclared tool was treated as human-only")
 	}
 }

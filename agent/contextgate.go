@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"log"
 	"os"
 	"path/filepath"
@@ -1346,7 +1346,7 @@ func compactOutputShape(schema json.RawMessage) string {
 	// The tool's own fields, never the envelope's. A planner shown
 	// {content, data, detail, status, type} learns nothing about what this tool
 	// returns and cannot write a reference into it.
-	schema = agenttools.PayloadSchema(schema)
+	schema = toolapi.PayloadSchema(schema)
 	if schema == nil {
 		return ""
 	}

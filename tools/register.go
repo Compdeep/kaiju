@@ -6,7 +6,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/plugins"
 )
 
@@ -125,7 +125,7 @@ type Deps struct {
 // its planner will be shown. On an error nothing further is registered, and the
 // names returned are the ones that were: registration stops at the collision
 // rather than half-applying quietly.
-func Register(reg *tools.Registry, d Deps) ([]string, error) {
+func Register(reg *toolapi.Registry, d Deps) ([]string, error) {
 	skip := map[string]bool{}
 	for _, name := range d.Exclude {
 		skip[name] = true
@@ -137,7 +137,7 @@ func Register(reg *tools.Registry, d Deps) ([]string, error) {
 
 	var registered []string
 	var failed error
-	put := func(t tools.Tool) {
+	put := func(t toolapi.Tool) {
 		if failed != nil {
 			return
 		}

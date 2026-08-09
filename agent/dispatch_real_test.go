@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // Running the dispatcher, rather than a copy of what it does.
@@ -24,19 +24,19 @@ type spyTool struct {
 
 func (s *spyTool) Name() string              { return "spy" }
 func (s *spyTool) Description() string       { return "records what it was given" }
-func (s *spyTool) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (s *spyTool) Impact(map[string]any) int { return toolapi.ImpactObserve }
 func (s *spyTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{}}`)
 }
 func (s *spyTool) Execute(ctx context.Context, p map[string]any) (string, error) {
-	return agenttools.StringResult(s.ExecuteTyped(ctx, p))
+	return toolapi.StringResult(s.ExecuteTyped(ctx, p))
 }
-func (s *spyTool) ExecuteTyped(ctx context.Context, _ map[string]any) (agenttools.ToolMessage, error) {
+func (s *spyTool) ExecuteTyped(ctx context.Context, _ map[string]any) (toolapi.ToolMessage, error) {
 	if ec := ExecContextFrom(ctx); ec != nil {
 		s.sawRunState = true
 		s.sawWorkspace = ec.Workspace
 	}
-	return agenttools.ToolOK("spy", "ran", map[string]any{"ok": true}), nil
+	return toolapi.ToolOK("spy", "ran", map[string]any{"ok": true}), nil
 }
 
 // A typed tool is called with the run state on its ctx, and its envelope comes
@@ -45,7 +45,7 @@ func TestTheDispatcherGivesATypedToolTheRunState(t *testing.T) {
 	reg, gate, _ := newTestStack(t)
 
 	spy := &spyTool{}
-	registry := agenttools.NewRegistry()
+	registry := toolapi.NewRegistry()
 	if err := registry.Register(spy); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -74,10 +74,10 @@ func TestTheDispatcherGivesATypedToolTheRunState(t *testing.T) {
 	if !ok {
 		t.Fatalf("body is %T, want the tool's envelope", body)
 	}
-	if tb.Envelope().Status != agenttools.StatusOK || tb.Envelope().Type != "spy" {
+	if tb.Envelope().Status != toolapi.StatusOK || tb.Envelope().Type != "spy" {
 		t.Errorf("envelope = %+v, want the tool's own", tb.Envelope())
 	}
-	if msg, ok := agenttools.ParseToolMessage(result); !ok || msg.Content != "ran" {
+	if msg, ok := toolapi.ParseToolMessage(result); !ok || msg.Content != "ran" {
 		t.Errorf("result = %q, want the envelope's JSON", result)
 	}
 }

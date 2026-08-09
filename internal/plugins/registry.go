@@ -17,7 +17,7 @@ import (
 	"sort"
 	"sync"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // Deps are the shared services a Host is built from. Extend this as plugins need
@@ -41,7 +41,7 @@ type Host interface {
 	// Workspace is the sandbox root file-touching tools resolve paths under.
 	Workspace() string
 	// AddTool contributes a tool the agent's planner can call by name.
-	AddTool(agenttools.Tool)
+	AddTool(toolapi.Tool)
 	// RegisterBinaryDecoder teaches core web_fetch to turn a typed body (e.g.
 	// "application/pdf") into text — invoked by the tool, not the planner.
 	RegisterBinaryDecoder(mime string, fn func([]byte) (string, error))
@@ -169,7 +169,7 @@ func RemoteByName(name string) (RemoteInfo, bool) {
 // names actually switched on, and any requested-but-not-compiled-in names so the
 // caller can warn the operator (they asked for a plugin this binary wasn't built
 // with). Seams register as a side effect through each plugin's Host.
-func Activate(want []string, d Deps) (active []agenttools.Tool, on, missing []string) {
+func Activate(want []string, d Deps) (active []toolapi.Tool, on, missing []string) {
 	mu.Lock()
 	defer mu.Unlock()
 	seen := map[string]bool{}
@@ -196,16 +196,16 @@ func Activate(want []string, d Deps) (active []agenttools.Tool, on, missing []st
 // a plugin adds and delegates seam registration to the core agent/tools package.
 type activation struct {
 	deps  Deps
-	tools []agenttools.Tool
+	tools []toolapi.Tool
 }
 
-func (a *activation) Workspace() string         { return a.deps.Workspace }
-func (a *activation) AddTool(t agenttools.Tool) { a.tools = append(a.tools, t) }
+func (a *activation) Workspace() string      { return a.deps.Workspace }
+func (a *activation) AddTool(t toolapi.Tool) { a.tools = append(a.tools, t) }
 
 func (a *activation) RegisterBinaryDecoder(mime string, fn func([]byte) (string, error)) {
-	agenttools.RegisterBinaryDecoder(mime, fn)
+	toolapi.RegisterBinaryDecoder(mime, fn)
 }
 
 func (a *activation) RegisterReaderFallback(fn func(ctx context.Context, rawURL string) (string, error)) {
-	agenttools.RegisterReaderFallback(fn)
+	toolapi.RegisterReaderFallback(fn)
 }

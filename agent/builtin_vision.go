@@ -11,7 +11,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // VisionTool lets the planner hand an image to the configured vision model
@@ -48,7 +48,7 @@ var visionToolParamSchema = json.RawMessage(`{
 func (t *VisionTool) Parameters() json.RawMessage { return visionToolParamSchema }
 
 // Impact is observe-only: it reads an image file and asks a model about it.
-func (t *VisionTool) Impact(map[string]any) int { return tools.ImpactObserve }
+func (t *VisionTool) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 // OutputSchema declares the description as the content, and the image it came
 // from, so a later step can act on the same file.
@@ -65,13 +65,13 @@ func (t *VisionTool) OutputSchema() json.RawMessage {
 
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (t *VisionTool) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(t.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(t.ExecuteTyped(ctx, params))
 }
 
-func (t *VisionTool) ExecuteTyped(ctx context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (t *VisionTool) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	raw, _ := params["path"].(string)
 	if strings.TrimSpace(raw) == "" {
-		return tools.ToolMessage{}, fmt.Errorf("image_read: 'path' is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("image_read: 'path' is required")
 	}
 	ask, _ := params["prompt"].(string)
 	if strings.TrimSpace(ask) == "" {
@@ -80,16 +80,16 @@ func (t *VisionTool) ExecuteTyped(ctx context.Context, params map[string]any) (t
 
 	provider, model := t.agent.VisionModel()
 	if model == "" {
-		return tools.ToolMessage{}, fmt.Errorf("image_read: no vision model is configured on this instance")
+		return toolapi.ToolMessage{}, fmt.Errorf("image_read: no vision model is configured on this instance")
 	}
 
 	path, err := t.resolve(raw)
 	if err != nil {
-		return tools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	uri, err := imageDataURI(path)
 	if err != nil {
-		return tools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 
 	visionSystem := ComposeSystemPrompt(t.agent.SoulPrompt(), prompt.Vision)
@@ -98,14 +98,14 @@ func (t *VisionTool) ExecuteTyped(ctx context.Context, params map[string]any) (t
 
 	content, _, err := t.agent.OneShot(ctx, provider, model, msgs, 0.3, 1024)
 	if err != nil {
-		return tools.ToolMessage{}, fmt.Errorf("image_read: vision model: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("image_read: vision model: %w", err)
 	}
 	// A model that described nothing described nothing. This used to be a
 	// sentence in parentheses, which reads to the next step as a description.
 	if strings.TrimSpace(content) == "" {
-		return tools.ToolEmpty("page", "the vision model returned no description of "+raw), nil
+		return toolapi.ToolEmpty("page", "the vision model returned no description of "+raw), nil
 	}
-	return tools.ToolOK("page", content, map[string]any{"path": raw, "model": model}), nil
+	return toolapi.ToolOK("page", content, map[string]any{"path": raw, "model": model}), nil
 }
 
 // resolve keeps file access inside the workspace sandbox, mirroring file_read:

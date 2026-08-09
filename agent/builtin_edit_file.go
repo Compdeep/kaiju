@@ -48,7 +48,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // EditFileTool is the registered tool entry for edit_file.
@@ -61,8 +61,8 @@ type EditFileTool struct {
 }
 
 // Compile-time interface assertions.
-var _ tools.Tool = (*EditFileTool)(nil)
-var _ tools.TypedExecutor = (*EditFileTool)(nil)
+var _ toolapi.Tool = (*EditFileTool)(nil)
+var _ toolapi.TypedExecutor = (*EditFileTool)(nil)
 
 // NewEditFileTool constructs an EditFileTool bound to an Agent. The agent
 // reference gives ExecuteTyped access to the LLM clients, workspace,
@@ -83,7 +83,7 @@ func (e *EditFileTool) Description() string {
 // Impact reports a file-affecting side effect (ImpactAffect). edit_file
 // always writes to disk when it runs.
 func (e *EditFileTool) Impact(params map[string]any) int {
-	return tools.ImpactAffect
+	return toolapi.ImpactAffect
 }
 
 // editFileParamSchema is the wire schema shown to the Executive. task_files
@@ -129,7 +129,7 @@ func (e *EditFileTool) OutputSchema() json.RawMessage { return editFileOutputSch
 
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (e *EditFileTool) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(e.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(e.ExecuteTyped(ctx, params))
 }
 
 // ExecuteTyped validates the required params and delegates to the
@@ -150,21 +150,21 @@ func (e *EditFileTool) Execute(ctx context.Context, params map[string]any) (stri
 // intentionally NOT supported here — edit_file's contract is
 // file-modification-only. If the Coder chooses to emit an execute field
 // anyway, runCompute ignores it because edit_file never passed one in.
-func (e *EditFileTool) ExecuteTyped(ctx context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (e *EditFileTool) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	ec := ExecContextFrom(ctx)
 	if ec == nil {
-		return tools.ToolFail("compute", "edit_file was called without the run state it needs — no graph, budget or model", nil), nil
+		return toolapi.ToolFail("compute", "edit_file was called without the run state it needs — no graph, budget or model", nil), nil
 	}
 	taskFiles, err := extractTaskFiles(params)
 	if err != nil {
-		return tools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	if len(taskFiles) == 0 {
-		return tools.ToolMessage{}, fmt.Errorf("edit_file requires at least one entry in task_files (got empty list)")
+		return toolapi.ToolMessage{}, fmt.Errorf("edit_file requires at least one entry in task_files (got empty list)")
 	}
 	goal, _ := params["goal"].(string)
 	if goal == "" {
-		return tools.ToolMessage{}, fmt.Errorf("edit_file requires a non-empty goal")
+		return toolapi.ToolMessage{}, fmt.Errorf("edit_file requires a non-empty goal")
 	}
 
 	computeParams := map[string]any{
@@ -183,7 +183,7 @@ func (e *EditFileTool) ExecuteTyped(ctx context.Context, params map[string]any) 
 
 	raw, err := e.agent.runCompute(ec, computeParams)
 	if err != nil {
-		return tools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	return computeMessage("compute", raw), nil
 }

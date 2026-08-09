@@ -8,20 +8,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // Watcher polls skill directories for changes and hot-reloads SKILL.md files.
 type Watcher struct {
 	dirs     []string
-	registry *tools.Registry
+	registry *toolapi.Registry
 	managed  map[string]*SkillMD // name -> currently loaded skill (only skills we loaded)
 	interval time.Duration
 	mu       sync.Mutex
 }
 
 // NewWatcher creates a skill file watcher.
-func NewWatcher(dirs []string, reg *tools.Registry, interval time.Duration) *Watcher {
+func NewWatcher(dirs []string, reg *toolapi.Registry, interval time.Duration) *Watcher {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}

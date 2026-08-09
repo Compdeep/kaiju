@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // The preflight pipeline had no tests. These come from Enbarr's copy of the
@@ -54,7 +54,7 @@ func drivePreflight(t *testing.T, a *Agent, trigger Trigger) (*Graph, string, *T
 	a.llm = llm.NewClient(srv.URL, "k", "test")
 	a.executor = a.llm
 	if a.registry == nil {
-		a.registry = tools.NewRegistry()
+		a.registry = toolapi.NewRegistry()
 	}
 	if a.intentRegistry == nil {
 		a.intentRegistry = NewIntentRegistry()
@@ -167,7 +167,7 @@ func TestPipelineDoesNothingWhenTheClassifierIsOff(t *testing.T) {
 	t.Cleanup(srv.Close)
 	a.llm = llm.NewClient(srv.URL, "k", "test")
 	a.executor = a.llm
-	a.registry = tools.NewRegistry()
+	a.registry = toolapi.NewRegistry()
 	a.intentRegistry = NewIntentRegistry()
 	a.cfg.ClassifierEnabled = false
 

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -43,7 +43,7 @@ func (p *PanelPush) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (p *PanelPush) Impact(map[string]any) int { return tools.ImpactObserve }
+func (p *PanelPush) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * Parameters returns the JSON schema for the tool's input parameters.
@@ -83,7 +83,7 @@ func (p *PanelPush) Parameters() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (p *PanelPush) OutputSchema() json.RawMessage {
-	return tools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -95,16 +95,16 @@ func (p *PanelPush) OutputSchema() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (p *PanelPush) Execute(_ context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(p.ExecuteTyped(nil, params))
+	return toolapi.StringResult(p.ExecuteTyped(nil, params))
 }
 
-func (p *PanelPush) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (p *PanelPush) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	plugin, _ := params["plugin"].(string)
 	content, _ := params["content"].(string)
 	if plugin == "" || content == "" {
-		return tools.ToolMessage{}, fmt.Errorf("panel_push: plugin and content are required")
+		return toolapi.ToolMessage{}, fmt.Errorf("panel_push: plugin and content are required")
 	}
-	return tools.ToolText(fmt.Sprintf("pushed %d bytes to %s panel", len(content), plugin)), nil
+	return toolapi.ToolText(fmt.Sprintf("pushed %d bytes to %s panel", len(content), plugin)), nil
 }
 
 /*
@@ -114,7 +114,7 @@ func (p *PanelPush) ExecuteTyped(_ context.Context, params map[string]any) (tool
  * param: result - the execution result string (unused)
  * return: DisplayHint with plugin/title/content/mime, or nil if required params are missing
  */
-func (p *PanelPush) DisplayHint(params map[string]any, result string) *tools.DisplayHint {
+func (p *PanelPush) DisplayHint(params map[string]any, result string) *toolapi.DisplayHint {
 	plugin, _ := params["plugin"].(string)
 	content, _ := params["content"].(string)
 	title, _ := params["title"].(string)
@@ -125,7 +125,7 @@ func (p *PanelPush) DisplayHint(params map[string]any, result string) *tools.Dis
 	if title == "" {
 		title = plugin
 	}
-	return &tools.DisplayHint{
+	return &toolapi.DisplayHint{
 		Plugin:  plugin,
 		Title:   title,
 		Content: content,
@@ -133,6 +133,6 @@ func (p *PanelPush) DisplayHint(params map[string]any, result string) *tools.Dis
 	}
 }
 
-var _ tools.Tool = (*PanelPush)(nil)
-var _ tools.Outputter = (*PanelPush)(nil)
-var _ tools.Displayer = (*PanelPush)(nil)
+var _ toolapi.Tool = (*PanelPush)(nil)
+var _ toolapi.Outputter = (*PanelPush)(nil)
+var _ toolapi.Displayer = (*PanelPush)(nil)

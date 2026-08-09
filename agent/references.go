@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // Finding what a run referenced and never resolved, without knowing the domain.
@@ -74,7 +74,7 @@ func (a *Agent) collectReferences(graph *Graph) []reference {
 		if !ok {
 			continue
 		}
-		schema := agenttools.GetOutputSchema(skill)
+		schema := toolapi.GetOutputSchema(skill)
 		if schema == nil {
 			continue
 		}
@@ -146,7 +146,7 @@ type schemaRef struct {
 // The schema describes the ENVELOPE, so the walk starts at its data property —
 // the payload is what a value is read from.
 func referencePaths(schema json.RawMessage) []schemaRef {
-	payload := agenttools.PayloadSchema(schema)
+	payload := toolapi.PayloadSchema(schema)
 	if payload == nil {
 		return nil
 	}

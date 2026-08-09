@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	readability "github.com/go-shiori/go-readability"
 )
 
@@ -72,7 +72,7 @@ func (w *WebFetch) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (w *WebFetch) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (w *WebFetch) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -80,7 +80,7 @@ func (w *WebFetch) Impact(map[string]any) int { return agenttools.ImpactObserve 
  * return: JSON schema as raw bytes
  */
 func (w *WebFetch) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"}}}`)
 }
 
 /*
@@ -150,13 +150,13 @@ func setBrowserHeaders(req *http.Request, referer string) {
 // dispatcher prefers ExecuteTyped and keeps the envelope, so the page text is
 // never spliced to fit a character cap and ${node.X.title} still resolves.
 func (w *WebFetch) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(w.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(w.ExecuteTyped(ctx, params))
 }
 
-func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	rawURL, _ := params["url"].(string)
 	if rawURL == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: url is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("web_fetch: url is required")
 	}
 
 	format, _ := params["format"].(string)
@@ -166,7 +166,7 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (age
 
 	// Validate URL
 	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
-		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: invalid URL %q (must start with http:// or https://)", rawURL)
+		return toolapi.ToolMessage{}, fmt.Errorf("web_fetch: invalid URL %q (must start with http:// or https://)", rawURL)
 	}
 
 	method, _ := params["method"].(string)
@@ -182,7 +182,7 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (age
 
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, bodyReader)
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("web_fetch: %w", err)
 	}
 	// Present a coherent desktop-Chrome fingerprint. These headers must stay
 	// internally consistent (UA ↔ sec-ch-ua ↔ platform) — anti-bot filters flag
@@ -201,7 +201,7 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (age
 
 	resp, err := w.client.Do(req)
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("web_fetch: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -211,12 +211,12 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (age
 	// (Content-Type header, URL) are known before the body is read.
 	ctype := resp.Header.Get("Content-Type")
 	readCap := int64(256 * 1024)
-	if agenttools.HasBinaryDecoder(ctype) || looksLikePDFURL(rawURL) {
+	if toolapi.HasBinaryDecoder(ctype) || looksLikePDFURL(rawURL) {
 		readCap = 16 * 1024 * 1024
 	}
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, readCap))
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("web_fetch: read body: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("web_fetch: read body: %w", err)
 	}
 
 	status := fmt.Sprintf("HTTP %d %s", resp.StatusCode, resp.Status)
@@ -224,7 +224,7 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (age
 	// Build the result, then stamp the fetched URL onto it (withURL) at a single
 	// exit — so every outcome, especially a 404 or an empty page, records WHICH url
 	// produced it. A bare "HTTP 404" with no url is un-debuggable in the trace.
-	var out agenttools.ToolMessage
+	var out toolapi.ToolMessage
 
 	// Binary decode (PDF etc.) — only for non-error responses; computed once.
 	var decoded string
@@ -276,7 +276,7 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (age
 // withURL stamps the fetched URL onto a fetch-result envelope: into Data always,
 // and into Detail on any non-ok outcome — so the trace shows exactly WHICH url
 // produced a 404 or an empty page instead of an anonymous error.
-func withURL(rawURL string, m agenttools.ToolMessage, err error) (agenttools.ToolMessage, error) {
+func withURL(rawURL string, m toolapi.ToolMessage, err error) (toolapi.ToolMessage, error) {
 	if err != nil || rawURL == "" {
 		return m, err
 	}
@@ -288,7 +288,7 @@ func withURL(rawURL string, m agenttools.ToolMessage, err error) (agenttools.Too
 	if b, e := json.Marshal(obj); e == nil {
 		m.Data = b
 	}
-	if m.Status != agenttools.StatusOK && !strings.Contains(m.Detail, rawURL) {
+	if m.Status != toolapi.StatusOK && !strings.Contains(m.Detail, rawURL) {
 		if m.Detail == "" {
 			m.Detail = rawURL
 		} else {
@@ -313,25 +313,25 @@ type fetchResult struct {
 	Note string `json:"note,omitempty"`
 }
 
-func marshalFetchResult(r fetchResult) (agenttools.ToolMessage, error) {
+func marshalFetchResult(r fetchResult) (toolapi.ToolMessage, error) {
 	data, err := json.Marshal(r)
 	if err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	// Map the fetch outcome onto the uniform tool envelope: HTTP >= 400 → error;
 	// structurally-fine-but-no-usable-content (Note set, Content empty) → empty;
 	// otherwise ok. The full fetchResult rides in Data so ${node.X.title/.status/
 	// .format} keep resolving; the page text becomes the evidence Content.
-	msg := agenttools.ToolMessage{Type: "page", Data: data}
+	msg := toolapi.ToolMessage{Type: "page", Data: data}
 	switch {
 	case strings.HasPrefix(r.Status, "HTTP 4") || strings.HasPrefix(r.Status, "HTTP 5"):
-		msg.Status = agenttools.StatusError
+		msg.Status = toolapi.StatusError
 		msg.Detail = r.Status
 	case r.Content == "" && r.Note != "":
-		msg.Status = agenttools.StatusEmpty
+		msg.Status = toolapi.StatusEmpty
 		msg.Detail = r.Note
 	default:
-		msg.Status = agenttools.StatusOK
+		msg.Status = toolapi.StatusOK
 		msg.Content = r.Content
 	}
 	return msg, nil
@@ -344,7 +344,7 @@ func marshalFetchResult(r fetchResult) (agenttools.ToolMessage, error) {
  * param: body - raw response body bytes
  * return: JSON {status, content} with body truncated to 8KB
  */
-func (w *WebFetch) formatRaw(status string, body []byte) (agenttools.ToolMessage, error) {
+func (w *WebFetch) formatRaw(status string, body []byte) (toolapi.ToolMessage, error) {
 	s := string(body)
 	if len(s) > 8192 {
 		s = s[:8192] + "\n... (truncated)"
@@ -360,7 +360,7 @@ func (w *WebFetch) formatRaw(status string, body []byte) (agenttools.ToolMessage
 // plugin exists for.) ok=false when no plugin is registered or it returned nothing,
 // so the caller falls back to built-in readability.
 func primaryContent(ctx context.Context, rawURL string) (string, bool) {
-	if txt, ok, _ := agenttools.ReaderFallback(ctx, rawURL); ok {
+	if txt, ok, _ := toolapi.ReaderFallback(ctx, rawURL); ok {
 		if t := strings.TrimSpace(txt); len(t) >= 200 {
 			return t, true
 		}
@@ -377,7 +377,7 @@ func primaryContent(ctx context.Context, rawURL string) (string, bool) {
  * param: body - raw HTML body bytes
  * return: status line with title/author and extracted article text (truncated to 12KB)
  */
-func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, body []byte) (agenttools.ToolMessage, error) {
+func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, body []byte) (toolapi.ToolMessage, error) {
 	// An enabled reader plugin is the primary reader.
 	if txt, ok := primaryContent(ctx, rawURL); ok {
 		if len(txt) > 12000 {
@@ -425,7 +425,7 @@ func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, bo
  * param: body - raw HTML body bytes
  * return: status line followed by plain text content (truncated to 8KB)
  */
-func (w *WebFetch) formatText(_ context.Context, status, rawURL string, body []byte) (agenttools.ToolMessage, error) {
+func (w *WebFetch) formatText(_ context.Context, status, rawURL string, body []byte) (toolapi.ToolMessage, error) {
 	text := stripHTML(string(body))
 	if len(text) > 8192 {
 		text = text[:8192] + "\n... (truncated)"
@@ -443,7 +443,7 @@ func (w *WebFetch) formatText(_ context.Context, status, rawURL string, body []b
  * param: focus - optional focus topic for the LLM summary prompt
  * return: status line with title and LLM-generated summary, or fallback content on failure
  */
-func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, body []byte, focus string) (agenttools.ToolMessage, error) {
+func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, body []byte, focus string) (toolapi.ToolMessage, error) {
 	if w.executor == nil {
 		// No LLM available, fall back to markdown
 		return w.formatMarkdown(ctx, status, rawURL, body)
@@ -610,11 +610,11 @@ func looksLikePDFURL(rawURL string) bool {
 // Content-Type, then (when the type is missing/generic) by a .pdf URL. found is
 // false when no decoder applies and web_fetch continues with HTML extraction.
 func decodePageBinary(contentType, rawURL string, body []byte) (text string, found bool, err error) {
-	if t, ok, e := agenttools.DecodeBinary(contentType, body); ok {
+	if t, ok, e := toolapi.DecodeBinary(contentType, body); ok {
 		return t, true, e
 	}
 	if looksLikePDFURL(rawURL) {
-		return agenttools.DecodeBinary("application/pdf", body)
+		return toolapi.DecodeBinary("application/pdf", body)
 	}
 	return "", false, nil
 }
@@ -811,4 +811,4 @@ func indexFoldASCII(s, needle string) int {
 	return -1
 }
 
-var _ agenttools.Tool = (*WebFetch)(nil)
+var _ toolapi.Tool = (*WebFetch)(nil)

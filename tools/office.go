@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"strings"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // officeMaxChars caps returned text so a huge document can't blow the context
@@ -43,7 +43,7 @@ type OfficeExtract struct{ workspace string }
 // NewOfficeExtract returns the office_extract tool, sandboxed to workspace.
 func NewOfficeExtract(workspace string) *OfficeExtract { return &OfficeExtract{workspace: workspace} }
 
-var _ agenttools.Tool = (*OfficeExtract)(nil)
+var _ toolapi.Tool = (*OfficeExtract)(nil)
 
 func (t *OfficeExtract) Name() string { return "office_extract" }
 
@@ -63,52 +63,52 @@ func (t *OfficeExtract) Parameters() json.RawMessage {
 }
 
 // Impact is observe-only: it opens a file read-only and returns its text.
-func (t *OfficeExtract) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (t *OfficeExtract) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (t *OfficeExtract) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(t.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(t.ExecuteTyped(ctx, params))
 }
 
-func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	raw, _ := params["path"].(string)
 	if strings.TrimSpace(raw) == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("office_extract: 'path' is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: 'path' is required")
 	}
 	path, err := t.resolve(raw)
 	if err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	maxChars := officeMaxChars
-	if v, ok := agenttools.ParamNum(params, "max_chars"); ok && int(v) > 0 {
+	if v, ok := toolapi.ParamNum(params, "max_chars"); ok && int(v) > 0 {
 		maxChars = int(v)
 	}
 
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext == ".doc" || ext == ".ppt" || ext == ".xls" {
-		return agenttools.ToolMessage{}, fmt.Errorf("office_extract: %q is the legacy binary format, which isn't supported — save it as .docx/.pptx/.xlsx and try again", filepath.Base(path))
+		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: %q is the legacy binary format, which isn't supported — save it as .docx/.pptx/.xlsx and try again", filepath.Base(path))
 	}
 
 	zr, err := zip.OpenReader(path)
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("office_extract: open %s: %w", filepath.Base(path), err)
+		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: open %s: %w", filepath.Base(path), err)
 	}
 	defer zr.Close()
 
 	kind, out, err := extractOOXML(&zr.Reader, ext, maxChars)
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("office_extract: %s: %w", filepath.Base(path), err)
+		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: %s: %w", filepath.Base(path), err)
 	}
 	// The document opened and held no text — a scanned page, an empty deck. It
 	// used to say so in a sentence the model had to read and believe; now the
 	// coverage statement carries it.
 	if strings.TrimSpace(out) == "" {
-		return agenttools.ToolEmpty("text", "opened "+filepath.Base(path)+" but found no extractable text"), nil
+		return toolapi.ToolEmpty("text", "opened "+filepath.Base(path)+" but found no extractable text"), nil
 	}
 	if len(out) > maxChars {
 		out = out[:maxChars] + "\n…[truncated]"
 	}
-	return agenttools.ToolOK("text", fmt.Sprintf("%s: %s\n\n%s", kind, filepath.Base(path), out),
+	return toolapi.ToolOK("text", fmt.Sprintf("%s: %s\n\n%s", kind, filepath.Base(path), out),
 		map[string]any{"kind": kind, "file": filepath.Base(path)}), nil
 }
 
@@ -376,9 +376,9 @@ func decodeOfficeBytes(data []byte) (string, error) {
 // search turns up (a linked .docx/.pptx/.xlsx), the same seam the pdf plugin uses
 // for application/pdf. Call once at startup.
 func RegisterOfficeDecoders() {
-	agenttools.RegisterBinaryDecoder(mimeDocx, decodeOfficeBytes)
-	agenttools.RegisterBinaryDecoder(mimePptx, decodeOfficeBytes)
-	agenttools.RegisterBinaryDecoder(mimeXlsx, decodeOfficeBytes)
+	toolapi.RegisterBinaryDecoder(mimeDocx, decodeOfficeBytes)
+	toolapi.RegisterBinaryDecoder(mimePptx, decodeOfficeBytes)
+	toolapi.RegisterBinaryDecoder(mimeXlsx, decodeOfficeBytes)
 }
 
 // ── zip + sandbox helpers ─────────────────────────────────────────────────────

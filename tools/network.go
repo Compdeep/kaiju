@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"time"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // ─── NetInfo ────────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ func (n *NetInfo) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (n *NetInfo) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (n *NetInfo) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * Parameters returns the JSON schema for the tool's input parameters.
@@ -79,7 +79,7 @@ func (n *NetInfo) Parameters() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (n *NetInfo) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -91,10 +91,10 @@ func (n *NetInfo) OutputSchema() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (n *NetInfo) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(n.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(n.ExecuteTyped(ctx, params))
 }
 
-func (n *NetInfo) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (n *NetInfo) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	action, _ := params["action"].(string)
 
 	switch action {
@@ -103,7 +103,7 @@ func (n *NetInfo) ExecuteTyped(ctx context.Context, params map[string]any) (agen
 	case "connectivity":
 		host, _ := params["host"].(string)
 		port := 443
-		if p, ok := agenttools.ParamNum(params, "port"); ok && p > 0 {
+		if p, ok := toolapi.ParamNum(params, "port"); ok && p > 0 {
 			port = int(p)
 		}
 		return netConnectivity(ctx, host, port)
@@ -113,7 +113,7 @@ func (n *NetInfo) ExecuteTyped(ctx context.Context, params map[string]any) (agen
 	case "ports":
 		return netListeningPorts(ctx)
 	default:
-		return agenttools.ToolMessage{}, fmt.Errorf("net_info: unknown action %q (use: interfaces, connectivity, dns, ports)", action)
+		return toolapi.ToolMessage{}, fmt.Errorf("net_info: unknown action %q (use: interfaces, connectivity, dns, ports)", action)
 	}
 }
 
@@ -122,10 +122,10 @@ func (n *NetInfo) ExecuteTyped(ctx context.Context, params map[string]any) (agen
  * desc: Queries the OS for network interfaces that are up and returns their name, flags, MAC, and IP addresses as JSON.
  * return: JSON string with interface details, or error on failure
  */
-func netInterfaces() (agenttools.ToolMessage, error) {
+func netInterfaces() (toolapi.ToolMessage, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("net_info: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("net_info: %w", err)
 	}
 
 	type ifaceInfo struct {
@@ -153,7 +153,7 @@ func netInterfaces() (agenttools.ToolMessage, error) {
 		})
 	}
 
-	return agenttools.ToolOK("net", "", map[string]any{"action": "interfaces", "interfaces": result}), nil
+	return toolapi.ToolOK("net", "", map[string]any{"action": "interfaces", "interfaces": result}), nil
 }
 
 /*
@@ -164,9 +164,9 @@ func netInterfaces() (agenttools.ToolMessage, error) {
  * param: port - TCP port number to connect to
  * return: JSON string with reachability status and latency, or error if host is empty
  */
-func netConnectivity(ctx context.Context, host string, port int) (agenttools.ToolMessage, error) {
+func netConnectivity(ctx context.Context, host string, port int) (toolapi.ToolMessage, error) {
 	if host == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("net_info: host is required for connectivity check")
+		return toolapi.ToolMessage{}, fmt.Errorf("net_info: host is required for connectivity check")
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -175,10 +175,10 @@ func netConnectivity(ctx context.Context, host string, port int) (agenttools.Too
 	elapsed := time.Since(start)
 
 	if err != nil {
-		return agenttools.ToolOK("net", "", map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": false, "error": err.Error(), "latency_ms": elapsed.Milliseconds()}), nil
+		return toolapi.ToolOK("net", "", map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": false, "error": err.Error(), "latency_ms": elapsed.Milliseconds()}), nil
 	}
 	conn.Close()
-	return agenttools.ToolOK("net", "", map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": true, "latency_ms": elapsed.Milliseconds()}), nil
+	return toolapi.ToolOK("net", "", map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": true, "latency_ms": elapsed.Milliseconds()}), nil
 }
 
 /*
@@ -188,18 +188,18 @@ func netConnectivity(ctx context.Context, host string, port int) (agenttools.Too
  * param: host - hostname to resolve
  * return: JSON string with resolved addresses, or error if host is empty
  */
-func netDNS(ctx context.Context, host string) (agenttools.ToolMessage, error) {
+func netDNS(ctx context.Context, host string) (toolapi.ToolMessage, error) {
 	if host == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("net_info: host is required for DNS lookup")
+		return toolapi.ToolMessage{}, fmt.Errorf("net_info: host is required for DNS lookup")
 	}
 
 	resolver := &net.Resolver{}
 	addrs, err := resolver.LookupHost(ctx, host)
 	if err != nil {
-		return agenttools.ToolOK("net", "", map[string]any{"action": "dns", "host": host, "error": err.Error()}), nil
+		return toolapi.ToolOK("net", "", map[string]any{"action": "dns", "host": host, "error": err.Error()}), nil
 	}
 
-	return agenttools.ToolOK("net", "", map[string]any{"action": "dns", "host": host, "addresses": addrs}), nil
+	return toolapi.ToolOK("net", "", map[string]any{"action": "dns", "host": host, "addresses": addrs}), nil
 }
 
 /*
@@ -208,7 +208,7 @@ func netDNS(ctx context.Context, host string) (agenttools.ToolMessage, error) {
  * param: ctx - context for cancellation
  * return: formatted text output of listening ports (truncated to 4KB), or error on command failure
  */
-func netListeningPorts(ctx context.Context) (agenttools.ToolMessage, error) {
+func netListeningPorts(ctx context.Context) (toolapi.ToolMessage, error) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
@@ -227,10 +227,10 @@ func netListeningPorts(ctx context.Context) (agenttools.ToolMessage, error) {
 			cmd = exec.CommandContext(ctx, "netstat", "-tlnp")
 			out, err = cmd.CombinedOutput()
 			if err != nil {
-				return agenttools.ToolMessage{}, fmt.Errorf("net_info: %w", err)
+				return toolapi.ToolMessage{}, fmt.Errorf("net_info: %w", err)
 			}
 		} else {
-			return agenttools.ToolMessage{}, fmt.Errorf("net_info: %w", err)
+			return toolapi.ToolMessage{}, fmt.Errorf("net_info: %w", err)
 		}
 	}
 
@@ -238,8 +238,8 @@ func netListeningPorts(ctx context.Context) (agenttools.ToolMessage, error) {
 	if len(output) > 4096 {
 		output = output[:4096] + "\n... (truncated)"
 	}
-	return agenttools.ToolOK("net", output, nil), nil
+	return toolapi.ToolOK("net", output, nil), nil
 }
 
-var _ agenttools.Tool = (*NetInfo)(nil)
-var _ agenttools.Outputter = (*NetInfo)(nil)
+var _ toolapi.Tool = (*NetInfo)(nil)
+var _ toolapi.Outputter = (*NetInfo)(nil)

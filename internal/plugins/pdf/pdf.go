@@ -20,7 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/plugins"
 	pdflib "github.com/ledongthuc/pdf"
 )
@@ -71,7 +71,7 @@ func (t *extractTool) Parameters() json.RawMessage {
 }
 
 // Impact is observe-only: it opens a file read-only and returns its text.
-func (t *extractTool) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (t *extractTool) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 func (t *extractTool) Execute(_ context.Context, params map[string]any) (string, error) {
 	raw, _ := params["path"].(string)

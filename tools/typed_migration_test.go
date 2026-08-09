@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/config"
 )
 
@@ -16,10 +16,10 @@ import (
 //
 // The list is written out rather than discovered so that adding a tool and
 // forgetting to type it fails here.
-func allTools(t *testing.T) map[string]agenttools.Tool {
+func allTools(t *testing.T) map[string]toolapi.Tool {
 	t.Helper()
 	ws := t.TempDir()
-	return map[string]agenttools.Tool{
+	return map[string]toolapi.Tool{
 		"archive":        NewArchive(),
 		"bash":           NewBash(""),
 		"clipboard":      NewClipboard(),
@@ -46,14 +46,14 @@ func allTools(t *testing.T) map[string]agenttools.Tool {
 		// The variants main actually registers, which take configuration the
 		// plain constructors do not. Missing these was how the first version of
 		// this guard passed while three registered tools went unchecked.
-		"plugin_enable": NewPluginEnable(agenttools.NewRegistry(), &config.Config{}, NewService(ws)),
+		"plugin_enable": NewPluginEnable(toolapi.NewRegistry(), &config.Config{}, NewService(ws)),
 		"web_research":  NewWebResearch(SearchConfig{}, nil),
 	}
 }
 
 func TestEveryToolIsTyped(t *testing.T) {
 	for name, tool := range allTools(t) {
-		if _, ok := tool.(agenttools.TypedExecutor); !ok {
+		if _, ok := tool.(toolapi.TypedExecutor); !ok {
 			t.Errorf("%s does not implement TypedExecutor — the dispatcher will take the string path", name)
 		}
 	}

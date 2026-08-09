@@ -7,7 +7,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // The coverage edge's two prompts live in prompt/prompts.md like every other
@@ -40,9 +40,9 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 		}
 		env := tb.Envelope()
 		switch env.Status {
-		case agenttools.StatusEmpty, agenttools.StatusError:
+		case toolapi.StatusEmpty, toolapi.StatusError:
 			gaps = append(gaps, toolGap{Tag: n.Tag, Tool: n.ToolName, Type: env.Type, Detail: env.Detail})
-		case agenttools.StatusUnclassified:
+		case toolapi.StatusUnclassified:
 			// The tool ran and returned something; it did not say whether that
 			// something was a finding. Stating it is honest — the alternative is
 			// silence, which reads to every consumer as "this one was fine".
@@ -85,7 +85,7 @@ func (a *Agent) hasUsableEvidence(graph *Graph) bool {
 			continue
 		}
 		switch tb.Envelope().Status {
-		case agenttools.StatusOK, agenttools.StatusUnclassified:
+		case toolapi.StatusOK, toolapi.StatusUnclassified:
 			// Unclassified counts. The tool ran and returned something readable;
 			// all that is missing is its own word on whether that counts as a
 			// finding. Excluding it would tell decideAutoAggMode there is nothing

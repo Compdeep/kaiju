@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 type fakeTool struct{ n string }
@@ -13,7 +13,7 @@ type fakeTool struct{ n string }
 func (t fakeTool) Name() string                { return t.n }
 func (t fakeTool) Description() string         { return "" }
 func (t fakeTool) Parameters() json.RawMessage { return json.RawMessage("{}") }
-func (t fakeTool) Impact(map[string]any) int   { return agenttools.ImpactObserve }
+func (t fakeTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
 func (t fakeTool) Execute(context.Context, map[string]any) (string, error) {
 	return "", nil
 }

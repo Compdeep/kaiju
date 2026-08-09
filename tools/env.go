@@ -350,6 +350,11 @@ func (c *Clipboard) OutputSchema() json.RawMessage {
  */
 func (c *Clipboard) Impact(params map[string]any) int {
 	action, _ := params["action"].(string)
+	// No action is the abstract question, answered with the worst this tool
+	// can do — it can write the clipboard.
+	if action == "" {
+		return toolapi.ImpactAffect
+	}
 	if action == "write" {
 		return toolapi.ImpactAffect
 	}

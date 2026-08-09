@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // The target chain has five links: Trigger.Target -> applyRunTarget ->
@@ -22,14 +22,14 @@ type chainTool struct {
 func (t chainTool) Name() string                { return t.name }
 func (t chainTool) Description() string         { return t.name }
 func (t chainTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
-func (t chainTool) Impact(map[string]any) int   { return tools.ImpactObserve }
+func (t chainTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
 func (t chainTool) RequiresTarget() bool        { return t.requires }
 func (t chainTool) Execute(context.Context, map[string]any) (string, error) {
 	return "", nil
 }
 
 func TestTargetReachesTheNode(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	if err := reg.Register(chainTool{"inspect_host", true}); err != nil {
 		t.Fatal(err)
 	}

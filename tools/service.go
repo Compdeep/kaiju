@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -30,13 +30,13 @@ import (
  */
 type Service struct {
 	workspace string
-	mu        sync.Mutex     // serializes registry file writes
+	mu        sync.Mutex // serializes registry file writes
 	stopPoll  chan struct{}
 	crashes   map[string]int // name → consecutive fast-crash count (auto-restart backoff)
 }
 
 // Compile-time interface check
-var _ agenttools.Tool = (*Service)(nil)
+var _ toolapi.Tool = (*Service)(nil)
 
 func NewService(workspace string) *Service {
 	s := &Service{workspace: workspace, stopPoll: make(chan struct{}), crashes: map[string]int{}}
@@ -195,9 +195,9 @@ func (s *Service) Impact(params map[string]any) int {
 	action, _ := params["action"].(string)
 	switch action {
 	case "logs", "status", "list":
-		return agenttools.ImpactObserve
+		return toolapi.ImpactObserve
 	}
-	return agenttools.ImpactAffect
+	return toolapi.ImpactAffect
 }
 
 var serviceParamSchema = json.RawMessage(`{
@@ -225,7 +225,7 @@ type ServiceRecord struct {
 	Port        int       `json:"port,omitempty"`
 	PID         int       `json:"pid"`
 	StartedAt   time.Time `json:"started_at"`
-	Status      string    `json:"status"`                  // running | stopped | crashed
+	Status      string    `json:"status"` // running | stopped | crashed
 	LogOut      string    `json:"log_out"`
 	LogErr      string    `json:"log_err"`
 	AutoRestart bool      `json:"auto_restart,omitempty"` // health loop respawns this on crash
@@ -233,10 +233,10 @@ type ServiceRecord struct {
 
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (s *Service) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(s.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(s.ExecuteTyped(ctx, params))
 }
 
-func (s *Service) ExecuteTyped(_ context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (s *Service) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	action, _ := params["action"].(string)
 	switch action {
 	case "start":
@@ -254,9 +254,9 @@ func (s *Service) ExecuteTyped(_ context.Context, params map[string]any) (agentt
 	case "remove":
 		return s.remove(params)
 	case "":
-		return agenttools.ToolMessage{}, fmt.Errorf("service: action is required (start/stop/restart/status/logs/list/remove)")
+		return toolapi.ToolMessage{}, fmt.Errorf("service: action is required (start/stop/restart/status/logs/list/remove)")
 	default:
-		return agenttools.ToolMessage{}, fmt.Errorf("service: unknown action %q", action)
+		return toolapi.ToolMessage{}, fmt.Errorf("service: unknown action %q", action)
 	}
 }
 
@@ -363,20 +363,20 @@ func killGracefully(pid int, timeout time.Duration) error {
 
 // ── Actions ──
 
-func (s *Service) start(params map[string]any) (agenttools.ToolMessage, error) {
+func (s *Service) start(params map[string]any) (toolapi.ToolMessage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	name, _ := params["name"].(string)
 	command, _ := params["command"].(string)
 	workdir, _ := params["workdir"].(string)
-	port, _ := agenttools.ParamNum(params, "port")
+	port, _ := toolapi.ParamNum(params, "port")
 	autoRestart, _ := params["auto_restart"].(bool)
 	if name == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("start: name is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("start: name is required")
 	}
 	if command == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("start: command is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("start: command is required")
 	}
 	if workdir == "" {
 		workdir = s.workspace
@@ -407,13 +407,13 @@ func (s *Service) start(params map[string]any) (agenttools.ToolMessage, error) {
 
 	existing, recs, idx, err := s.findRecord(name)
 	if err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	if existing != nil {
 		if isAlive(existing.PID) {
 			// Check if command changed — if so, restart with new command
 			if existing.Command == command {
-				return agenttools.ToolOK("service", "", map[string]any{
+				return toolapi.ToolOK("service", "", map[string]any{
 					"status":  "already_running",
 					"name":    existing.Name,
 					"pid":     existing.PID,
@@ -435,7 +435,7 @@ func (s *Service) start(params map[string]any) (agenttools.ToolMessage, error) {
 
 	// Ensure logs directory exists
 	if err := os.MkdirAll(s.logsDir(), 0755); err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("create logs dir: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("create logs dir: %w", err)
 	}
 	logOut := filepath.Join(s.logsDir(), name+".out.log")
 	logErr := filepath.Join(s.logsDir(), name+".err.log")
@@ -447,12 +447,12 @@ func (s *Service) start(params map[string]any) (agenttools.ToolMessage, error) {
 	// loops on a problem that was already resolved.
 	outFile, err := os.OpenFile(logOut, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("open stdout log: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("open stdout log: %w", err)
 	}
 	defer outFile.Close()
 	errFile, err := os.OpenFile(logErr, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("open stderr log: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("open stderr log: %w", err)
 	}
 	defer errFile.Close()
 
@@ -471,7 +471,7 @@ func (s *Service) start(params map[string]any) (agenttools.ToolMessage, error) {
 	cmd.Stderr = errFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("start process: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("start process: %w", err)
 	}
 	pid := cmd.Process.Pid
 	_ = cmd.Process.Release() // don't hold a reaper reference
@@ -495,7 +495,7 @@ func (s *Service) start(params map[string]any) (agenttools.ToolMessage, error) {
 		recs = append(recs, record)
 	}
 	if err := s.saveRegistry(recs); err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("save registry: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("save registry: %w", err)
 	}
 
 	result := map[string]any{
@@ -508,64 +508,64 @@ func (s *Service) start(params map[string]any) (agenttools.ToolMessage, error) {
 	if port > 0 {
 		result["port"] = int(port)
 	}
-	return agenttools.ToolOK("service", "", result), nil
+	return toolapi.ToolOK("service", "", result), nil
 }
 
-func (s *Service) stop(params map[string]any) (agenttools.ToolMessage, error) {
+func (s *Service) stop(params map[string]any) (toolapi.ToolMessage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	name, _ := params["name"].(string)
 	if name == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("stop: name is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("stop: name is required")
 	}
 
 	rec, recs, idx, err := s.findRecord(name)
 	if err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("stop: service %q not found", name)
+		return toolapi.ToolMessage{}, fmt.Errorf("stop: service %q not found", name)
 	}
 
 	if !isAlive(rec.PID) {
 		recs[idx].Status = "stopped"
 		_ = s.saveRegistry(recs)
-		return agenttools.ToolOK("service", "", map[string]any{
+		return toolapi.ToolOK("service", "", map[string]any{
 			"status": "already_stopped",
 			"name":   name,
 		}), nil
 	}
 
 	if err := killGracefully(rec.PID, 5*time.Second); err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("kill process: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("kill process: %w", err)
 	}
 	recs[idx].Status = "stopped"
 	if err := s.saveRegistry(recs); err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
-	return agenttools.ToolOK("service", "", map[string]any{
+	return toolapi.ToolOK("service", "", map[string]any{
 		"status": "stopped",
 		"name":   name,
 	}), nil
 }
 
-func (s *Service) restart(params map[string]any) (agenttools.ToolMessage, error) {
+func (s *Service) restart(params map[string]any) (toolapi.ToolMessage, error) {
 	name, _ := params["name"].(string)
 	if name == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("restart: name is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("restart: name is required")
 	}
 
 	rec, _, _, err := s.findRecord(name)
 	if err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("restart: service %q not found", name)
+		return toolapi.ToolMessage{}, fmt.Errorf("restart: service %q not found", name)
 	}
 
 	if _, err := s.stop(map[string]any{"name": name}); err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	startParams := map[string]any{
 		"name":    name,
@@ -578,24 +578,24 @@ func (s *Service) restart(params map[string]any) (agenttools.ToolMessage, error)
 	return s.start(startParams)
 }
 
-func (s *Service) status(params map[string]any) (agenttools.ToolMessage, error) {
+func (s *Service) status(params map[string]any) (toolapi.ToolMessage, error) {
 	name, _ := params["name"].(string)
 	if name == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("status: name is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("status: name is required")
 	}
 	rec, _, _, err := s.findRecord(name)
 	if err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("status: service %q not found", name)
+		return toolapi.ToolMessage{}, fmt.Errorf("status: service %q not found", name)
 	}
 	alive := isAlive(rec.PID)
 	status := rec.Status
 	if status == "running" && !alive {
 		status = "crashed"
 	}
-	return agenttools.ToolOK("service", "", map[string]any{
+	return toolapi.ToolOK("service", "", map[string]any{
 		"name":       rec.Name,
 		"status":     status,
 		"pid":        rec.PID,
@@ -609,13 +609,13 @@ func (s *Service) status(params map[string]any) (agenttools.ToolMessage, error) 
 	}), nil
 }
 
-func (s *Service) logs(params map[string]any) (agenttools.ToolMessage, error) {
+func (s *Service) logs(params map[string]any) (toolapi.ToolMessage, error) {
 	name, _ := params["name"].(string)
 	if name == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("logs: name is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("logs: name is required")
 	}
 	linesNum := 50
-	if v, ok := agenttools.ParamNum(params, "lines"); ok {
+	if v, ok := toolapi.ParamNum(params, "lines"); ok {
 		linesNum = int(v)
 	}
 	if v, ok := params["lines"].(int); ok {
@@ -631,10 +631,10 @@ func (s *Service) logs(params map[string]any) (agenttools.ToolMessage, error) {
 
 	rec, _, _, err := s.findRecord(name)
 	if err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("logs: service %q not found", name)
+		return toolapi.ToolMessage{}, fmt.Errorf("logs: service %q not found", name)
 	}
 
 	result := map[string]any{"name": name}
@@ -644,13 +644,13 @@ func (s *Service) logs(params map[string]any) (agenttools.ToolMessage, error) {
 	if stream == "err" || stream == "both" {
 		result["stderr"] = tailFile(rec.LogErr, linesNum)
 	}
-	return agenttools.ToolOK("service", "", result), nil
+	return toolapi.ToolOK("service", "", result), nil
 }
 
-func (s *Service) list() (agenttools.ToolMessage, error) {
+func (s *Service) list() (toolapi.ToolMessage, error) {
 	recs, err := s.loadRegistry()
 	if err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	out := make([]map[string]any, 0, len(recs))
 	for _, rec := range recs {
@@ -671,32 +671,32 @@ func (s *Service) list() (agenttools.ToolMessage, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i]["name"].(string) < out[j]["name"].(string)
 	})
-	return agenttools.ToolOK("service", "", map[string]any{"services": out, "count": len(out)}), nil
+	return toolapi.ToolOK("service", "", map[string]any{"services": out, "count": len(out)}), nil
 }
 
-func (s *Service) remove(params map[string]any) (agenttools.ToolMessage, error) {
+func (s *Service) remove(params map[string]any) (toolapi.ToolMessage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	name, _ := params["name"].(string)
 	if name == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("remove: name is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("remove: name is required")
 	}
 	rec, recs, idx, err := s.findRecord(name)
 	if err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("remove: service %q not found", name)
+		return toolapi.ToolMessage{}, fmt.Errorf("remove: service %q not found", name)
 	}
 	if isAlive(rec.PID) {
-		return agenttools.ToolMessage{}, fmt.Errorf("remove: service %q is still running (stop it first)", name)
+		return toolapi.ToolMessage{}, fmt.Errorf("remove: service %q is still running (stop it first)", name)
 	}
 	recs = append(recs[:idx], recs[idx+1:]...)
 	if err := s.saveRegistry(recs); err != nil {
-		return agenttools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
-	return agenttools.ToolOK("service", "", map[string]any{
+	return toolapi.ToolOK("service", "", map[string]any{
 		"status": "removed",
 		"name":   name,
 	}), nil
@@ -731,7 +731,7 @@ func tailFile(path string, n int) string {
 // OutputSchema declares the uniform tool envelope; the service payload is
 // action-specific and carried in data.
 func (s *Service) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 func toJSON(v any) string {
@@ -739,5 +739,5 @@ func toJSON(v any) string {
 	// tool envelope. The action-specific fields (status, name, pid, services, …)
 	// ride in Data, so field access and the scheduler's health-check graft read
 	// them from there.
-	return agenttools.ToolOK("service", "", v).JSON()
+	return toolapi.ToolOK("service", "", v).JSON()
 }

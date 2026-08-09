@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // TestDebugTool_Envelope verifies the debug super-tool echoes its `problem`
@@ -17,8 +17,8 @@ func TestDebugTool_Envelope(t *testing.T) {
 	if d.Name() != debugToolName {
 		t.Fatalf("Name() = %q, want %q", d.Name(), debugToolName)
 	}
-	if d.Impact(nil) != tools.ImpactAffect {
-		t.Fatalf("Impact = %d, want ImpactAffect (%d) — debug fixes edit files", d.Impact(nil), tools.ImpactAffect)
+	if d.Impact(nil) != toolapi.ImpactAffect {
+		t.Fatalf("Impact = %d, want ImpactAffect (%d) — debug fixes edit files", d.Impact(nil), toolapi.ImpactAffect)
 	}
 
 	msg, err := d.ExecuteTyped(context.Background(), map[string]any{"problem": "boom at x.go:3"})
@@ -43,7 +43,7 @@ func TestDebugTool_Envelope(t *testing.T) {
 // brief — from the typed body and the legacy string. If this breaks, the debug
 // super-tool stops spawning investigations.
 func TestDebugProblem_TriggersGraft(t *testing.T) {
-	typed := toolMessageBody{msg: tools.ToolOK("debug", "", map[string]string{"problem": "nil deref"})}
+	typed := toolMessageBody{msg: toolapi.ToolOK("debug", "", map[string]string{"problem": "nil deref"})}
 	if p, ok := debugProblem(nodeCompletion{Body: typed}); !ok || p != "nil deref" {
 		t.Fatalf("typed debug body → (%q,%v), want (nil deref,true)", p, ok)
 	}

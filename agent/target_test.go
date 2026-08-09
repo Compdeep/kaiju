@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 type targetTool struct {
@@ -16,15 +16,15 @@ type targetTool struct {
 func (t targetTool) Name() string                { return t.name }
 func (t targetTool) Description() string         { return t.name }
 func (t targetTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
-func (t targetTool) Impact(map[string]any) int   { return tools.ImpactObserve }
+func (t targetTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
 func (t targetTool) RequiresTarget() bool        { return t.requires }
 func (t targetTool) Execute(context.Context, map[string]any) (string, error) {
 	return "", nil
 }
 
-func targetRegistry(t *testing.T) *tools.Registry {
+func targetRegistry(t *testing.T) *toolapi.Registry {
 	t.Helper()
-	r := tools.NewRegistry()
+	r := toolapi.NewRegistry()
 	if err := r.Register(targetTool{"inspect_host", true}); err != nil {
 		t.Fatal(err)
 	}

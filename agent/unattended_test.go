@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // Whether anyone is watching decides what a run may do. The default reads
@@ -46,7 +46,7 @@ func TestUnattendedUsesTheApplicationsAnswer(t *testing.T) {
 // matters. Supplying it and finding the tool list unchanged would be the
 // failure that looks like success.
 func TestUnattendedReachesTheToolFilter(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	if err := reg.Register(&plainTool{name: "get_alerts"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}

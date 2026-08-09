@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/db"
 )
 
@@ -27,7 +27,7 @@ func (m *mockTool) Execute(_ context.Context, _ map[string]any) (string, error) 
 }
 
 // Compile-time interface check
-var _ agenttools.Tool = (*mockTool)(nil)
+var _ toolapi.Tool = (*mockTool)(nil)
 
 // testLadder is a three-tier intent fixture used across registry tests.
 // The names are deliberately generic — Go production code has no

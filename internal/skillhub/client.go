@@ -59,10 +59,10 @@ type SkillInfo struct {
 			Latest string `json:"latest"`
 		} `json:"tags"`
 		Stats struct {
-			Downloads   int `json:"downloads"`
-			Installs    int `json:"installsAllTime"`
-			Stars       int `json:"stars"`
-			Versions    int `json:"versions"`
+			Downloads int `json:"downloads"`
+			Installs  int `json:"installsAllTime"`
+			Stars     int `json:"stars"`
+			Versions  int `json:"versions"`
 		} `json:"stats"`
 	} `json:"skill"`
 	LatestVersion struct {

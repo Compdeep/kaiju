@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/Compdeep/kaiju/internal/db"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 /*

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // What every tool's declared schemas have to be true of.
@@ -34,8 +34,8 @@ import (
 // schemaFixtures is every tool in this package, built with whatever its
 // constructor needs. Zero values are used where a constructor takes
 // dependencies: nothing here is executed, only asked what it declares.
-func schemaFixtures() map[string]agenttools.Tool {
-	return map[string]agenttools.Tool{
+func schemaFixtures() map[string]toolapi.Tool {
+	return map[string]toolapi.Tool{
 		"archive":       &Archive{},
 		"bash":          &Bash{},
 		"clipboard":     &Clipboard{},
@@ -84,7 +84,7 @@ func looksLikeTheEnvelope(props map[string]json.RawMessage) bool {
 func TestOutputSchemasDescribeTheToolNotTheEnvelope(t *testing.T) {
 	for name, tool := range schemaFixtures() {
 		t.Run(name, func(t *testing.T) {
-			schema := agenttools.GetOutputSchema(tool)
+			schema := toolapi.GetOutputSchema(tool)
 			if schema == nil {
 				t.Skipf("%s declares no output schema", name)
 			}
@@ -92,7 +92,7 @@ func TestOutputSchemasDescribeTheToolNotTheEnvelope(t *testing.T) {
 				t.Fatalf("output schema is not valid JSON:\n%s", schema)
 			}
 
-			payload := agenttools.PayloadSchema(schema)
+			payload := toolapi.PayloadSchema(schema)
 			if payload == nil {
 				return // carries only text; nothing to describe, which is honest
 			}
@@ -150,7 +150,7 @@ func TestParameterSchemasAreWellFormed(t *testing.T) {
 func TestToolsWithoutAnOutputSchemaAreCounted(t *testing.T) {
 	var missing []string
 	for name, tool := range schemaFixtures() {
-		if agenttools.GetOutputSchema(tool) == nil {
+		if toolapi.GetOutputSchema(tool) == nil {
 			missing = append(missing, name)
 		}
 	}
@@ -247,7 +247,7 @@ func TestNoSchemaDeclaresAFieldThatAppearsNowhere(t *testing.T) {
 	}
 
 	for name, tool := range schemaFixtures() {
-		schema := agenttools.GetOutputSchema(tool)
+		schema := toolapi.GetOutputSchema(tool)
 		if schema == nil {
 			continue
 		}
@@ -261,7 +261,7 @@ func TestNoSchemaDeclaresAFieldThatAppearsNowhere(t *testing.T) {
 			continue
 		}
 
-		payload := agenttools.PayloadSchema(schema)
+		payload := toolapi.PayloadSchema(schema)
 		if payload == nil {
 			continue
 		}

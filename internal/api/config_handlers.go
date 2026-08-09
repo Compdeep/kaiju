@@ -91,15 +91,15 @@ type configPatch struct {
 		Tools    *[]string `json:"tools,omitempty"`
 	} `json:"chat,omitempty"`
 	Agent *struct {
-		DAGEnabled  *bool   `json:"dag_enabled,omitempty"`
-		DAGMode     *string `json:"dag_mode,omitempty"`
-		SafetyLevel *int    `json:"safety_level,omitempty"`
-		MaxInvestigations *int `json:"max_investigations,omitempty"`
-		MaxReplans        *int `json:"max_replans,omitempty"`
-		RouteProvider *string `json:"route_provider,omitempty"`
-		RouteModel    *string `json:"route_model,omitempty"`
-		AnswerProvider *string `json:"answer_provider,omitempty"`
-		AnswerModel    *string `json:"answer_model,omitempty"`
+		DAGEnabled        *bool   `json:"dag_enabled,omitempty"`
+		DAGMode           *string `json:"dag_mode,omitempty"`
+		SafetyLevel       *int    `json:"safety_level,omitempty"`
+		MaxInvestigations *int    `json:"max_investigations,omitempty"`
+		MaxReplans        *int    `json:"max_replans,omitempty"`
+		RouteProvider     *string `json:"route_provider,omitempty"`
+		RouteModel        *string `json:"route_model,omitempty"`
+		AnswerProvider    *string `json:"answer_provider,omitempty"`
+		AnswerModel       *string `json:"answer_model,omitempty"`
 	} `json:"agent,omitempty"`
 }
 
@@ -233,11 +233,17 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if patch.Executor != nil && c.agent != nil && c.cfg.Executor.Model != "" {
 		ep := c.cfg.Executor.Endpoint
-		if ep == "" { ep = c.cfg.LLM.Endpoint }
+		if ep == "" {
+			ep = c.cfg.LLM.Endpoint
+		}
 		prov := c.cfg.Executor.Provider
-		if prov == "" { prov = c.cfg.LLM.Provider }
+		if prov == "" {
+			prov = c.cfg.LLM.Provider
+		}
 		key := c.cfg.Executor.APIKey
-		if key == "" { key = c.cfg.LLM.APIKey }
+		if key == "" {
+			key = c.cfg.LLM.APIKey
+		}
 		c.agent.SetExecutorClient(prov, ep, key, c.cfg.Executor.Model)
 		log.Printf("[config] executor model updated: model=%s", c.cfg.Executor.Model)
 	}

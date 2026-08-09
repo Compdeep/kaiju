@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -75,7 +75,7 @@ func (w *WebSearch) Description() string {
 	return "Search the web for information. Returns search results with titles, URLs, and snippets."
 }
 
-func (w *WebSearch) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (w *WebSearch) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 func (w *WebSearch) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -91,7 +91,7 @@ func (w *WebSearch) Parameters() json.RawMessage {
 }
 
 func (w *WebSearch) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema(`{"type":"object","description":"Search results with URLs.","properties":{"query":{"type":"string","description":"the search query executed"},"results":{"type":"array","description":"ranked search results","items":{"type":"object","properties":{"title":{"type":"string","description":"page title"},"url":{"type":"string","x-reference":"web_fetch.url","description":"page URL"},"snippet":{"type":"string","description":"brief excerpt from the page"}}}}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"Search results with URLs.","properties":{"query":{"type":"string","description":"the search query executed"},"results":{"type":"array","description":"ranked search results","items":{"type":"object","properties":{"title":{"type":"string","description":"page title"},"url":{"type":"string","x-reference":"web_fetch.url","description":"page URL"},"snippet":{"type":"string","description":"brief excerpt from the page"}}}}}}`)
 }
 
 /*
@@ -105,17 +105,17 @@ func (w *WebSearch) OutputSchema() json.RawMessage {
 // dispatcher prefers ExecuteTyped, which keeps the envelope the grounding edge
 // reads to tell searched URLs from fetched ones.
 func (w *WebSearch) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(w.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(w.ExecuteTyped(ctx, params))
 }
 
-func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	query, _ := params["query"].(string)
 	if query == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("web_search: query is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("web_search: query is required")
 	}
 
 	maxResults := 5
-	if mr, ok := agenttools.ParamNum(params, "max_results"); ok && mr > 0 {
+	if mr, ok := toolapi.ParamNum(params, "max_results"); ok && mr > 0 {
 		maxResults = int(mr)
 		if maxResults > 10 {
 			maxResults = 10
@@ -125,7 +125,7 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (ag
 	// recency_days: an optional "recent results only" filter the planner can set
 	// for time-sensitive research. Mapped to each provider's coarse date bucket.
 	dateFilter := ""
-	if rd, ok := agenttools.ParamNum(params, "recency_days"); ok {
+	if rd, ok := toolapi.ParamNum(params, "recency_days"); ok {
 		dateFilter = daysToBucket(int(rd))
 	}
 
@@ -136,7 +136,7 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (ag
 		select {
 		case <-time.After(wait):
 		case <-ctx.Done():
-			return agenttools.ToolMessage{}, ctx.Err()
+			return toolapi.ToolMessage{}, ctx.Err()
 		}
 		w.mu.Lock()
 	}
@@ -159,7 +159,7 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (ag
 	}
 
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("web_search: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("web_search: %w", err)
 	}
 
 	// Ground the results before they reach the planner: HEAD-validate each URL,
@@ -177,11 +177,11 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (ag
 	// "results": null and the model hallucinates URLs to fill it. Always return
 	// an explicit [] plus a note so "no results" reads as "no results".
 	if len(results) == 0 {
-		return agenttools.ToolEmpty("search", "no reachable results for this query — try a different query or report that nothing was found"), nil
+		return toolapi.ToolEmpty("search", "no reachable results for this query — try a different query or report that nothing was found"), nil
 	}
 	// Content stays empty: the results are structured and the model reads them
 	// from the payload, which Evidence() falls back to.
-	return agenttools.ToolOK("search", "", map[string]any{"query": query, "results": results}), nil
+	return toolapi.ToolOK("search", "", map[string]any{"query": query, "results": results}), nil
 }
 
 // daysToBucket maps a recency_days count to the coarse date bucket the search
@@ -587,5 +587,5 @@ func stripTags(s string) string {
 	return strings.ReplaceAll(out.String(), "&amp;", "&")
 }
 
-var _ agenttools.Tool = (*WebSearch)(nil)
-var _ agenttools.Outputter = (*WebSearch)(nil)
+var _ toolapi.Tool = (*WebSearch)(nil)
+var _ toolapi.Outputter = (*WebSearch)(nil)

@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // An edge that fires must do both halves. The block alone is not enough: the
@@ -81,7 +81,7 @@ func TestEachEdgeReframesAgainstTheStagesOwnInput(t *testing.T) {
 	g := NewGraph()
 	searchNode(g, "s1", "https://ref.example/unread") // grounded, never fetched
 	failID := g.AddNode(&Node{Type: NodeTool, Tag: "reader", ToolName: "read_file"})
-	g.SetBody(failID, toolMessageBody{msg: agenttools.ToolFail("file", "no such file", nil)})
+	g.SetBody(failID, toolMessageBody{msg: toolapi.ToolFail("file", "no such file", nil)})
 
 	const stageInput = "THE ORIGINAL REQUEST AND EVIDENCE"
 	p := NewStagePrompts("ROLE", stageInput)

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // The two calls an embedding application makes.
@@ -23,7 +23,7 @@ import (
 var namesTheSchedulerSpawns = []string{"bash", "service"}
 
 func TestRegisterSuppliesTheNamesTheEngineExpects(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	registered, err := Register(reg, Deps{})
 	if err != nil {
 		t.Fatalf("Register into an empty registry: %v", err)
@@ -50,7 +50,7 @@ func TestRegisterSuppliesTheNamesTheEngineExpects(t *testing.T) {
 // every call returns an error reads that as the task being impossible, not the
 // tool being missing.
 func TestAnAbsentDependencyOmitsItsTools(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	if _, err := Register(reg, Deps{}); err != nil {
 		t.Fatal(err)
 	} // no memory, no executor
@@ -71,7 +71,7 @@ func TestAnAbsentDependencyOmitsItsTools(t *testing.T) {
 
 // Exclude leaves a tool out, so an application can take its name.
 func TestExcludeLeavesAToolOut(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	registered, err := Register(reg, Deps{Exclude: []string{"clipboard"}})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestExcludeLeavesAToolOut(t *testing.T) {
 // the application meant to leave out, and the application finds out one line
 // later as a name collision — which points at the wrong mistake.
 func TestAnExclusionThatMatchesNothingIsReported(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	registered, err := Register(reg, Deps{Exclude: []string{"proces_kill"}}) // misspelt
 	if err == nil {
 		t.Fatal("a misspelt exclusion was accepted, and process_kill is registered anyway")
@@ -118,7 +118,7 @@ type stubBash struct{}
 
 func (stubBash) Name() string                { return "bash" }
 func (stubBash) Description() string         { return "the application's own" }
-func (stubBash) Impact(map[string]any) int   { return tools.ImpactObserve }
+func (stubBash) Impact(map[string]any) int   { return toolapi.ImpactObserve }
 func (stubBash) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (stubBash) Execute(context.Context, map[string]any) (string, error) {
 	return "from the application", nil
@@ -128,7 +128,7 @@ func (stubBash) Execute(context.Context, map[string]any) (string, error) {
 // under it. The planner still sees one tool for the job and every graft still
 // resolves, and the substitution is visible in the call that made it.
 func TestAnApplicationTakesANameByExcludingIt(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	if _, err := Register(reg, Deps{Exclude: []string{"bash"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestAnApplicationTakesANameByExcludingIt(t *testing.T) {
 // come in, the collision is reported rather than resolved silently.
 func TestANameTakenTwiceIsAnError(t *testing.T) {
 	// Application first, then the core set.
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	if err := reg.Register(stubBash{}); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestANameTakenTwiceIsAnError(t *testing.T) {
 	}
 
 	// Core set first, then the application.
-	reg2 := tools.NewRegistry()
+	reg2 := toolapi.NewRegistry()
 	if _, err := Register(reg2, Deps{}); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestANameTakenTwiceIsAnError(t *testing.T) {
 // Every core tool is reachable by the name it declares, and no two declare the
 // same one.
 func TestEveryRegisteredNameIsTheToolsOwn(t *testing.T) {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	registered, err := Register(reg, Deps{})
 	if err != nil {
 		t.Fatal(err)

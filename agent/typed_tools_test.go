@@ -19,15 +19,15 @@ import (
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/tools"
 )
 
 // typedResult runs a tool through the typed path the dispatcher uses and puts
 // the result on a graph the way the scheduler does.
-func typedResult(t *testing.T, tool agenttools.Tool, params map[string]any) (*agent.Graph, agenttools.ToolMessage) {
+func typedResult(t *testing.T, tool toolapi.Tool, params map[string]any) (*agent.Graph, toolapi.ToolMessage) {
 	t.Helper()
-	typed, ok := tool.(agenttools.TypedExecutor)
+	typed, ok := tool.(toolapi.TypedExecutor)
 	if !ok {
 		t.Fatalf("%s does not implement TypedExecutor", tool.Name())
 	}
@@ -55,7 +55,7 @@ func TestWebFetch_LargePageArrivesWhole(t *testing.T) {
 
 	g, msg := typedResult(t, tools.NewWebFetch(), map[string]any{"url": srv.URL, "format": "text"})
 
-	if msg.Type != "page" || msg.Status != agenttools.StatusOK {
+	if msg.Type != "page" || msg.Status != toolapi.StatusOK {
 		t.Fatalf("envelope = kind %q status %q", msg.Type, msg.Status)
 	}
 	// The evidence a model reads is the page, not the envelope around it.
@@ -99,7 +99,7 @@ func TestFileRead_EmptyFileReachesTheCoverageStatement(t *testing.T) {
 	}
 
 	g, msg := typedResult(t, tools.NewFileRead(dir), map[string]any{"path": "app.conf"})
-	if msg.Status != agenttools.StatusEmpty {
+	if msg.Status != toolapi.StatusEmpty {
 		t.Fatalf("status = %q, want empty", msg.Status)
 	}
 
@@ -120,7 +120,7 @@ func TestFileRead_ContentIsNotReportedAsAGap(t *testing.T) {
 	}
 
 	g, msg := typedResult(t, tools.NewFileRead(dir), map[string]any{"path": "app.conf"})
-	if msg.Status != agenttools.StatusOK || !strings.Contains(msg.Content, "8080") {
+	if msg.Status != toolapi.StatusOK || !strings.Contains(msg.Content, "8080") {
 		t.Fatalf("envelope = status %q content %q", msg.Status, msg.Content)
 	}
 
@@ -148,10 +148,10 @@ func TestWebSearch_ResultsReachTheGroundingEdge(t *testing.T) {
 	g := agent.NewGraph()
 	found := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "search", ToolName: "web_search"})
 	g.SetBody(found, agent.NewToolBody(
-		agenttools.ToolOK("search", "", map[string]any{"query": "q", "results": results})))
+		toolapi.ToolOK("search", "", map[string]any{"query": "q", "results": results})))
 
 	missing := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "readconf", ToolName: "file_read"})
-	g.SetBody(missing, agent.NewToolBody(agenttools.ToolEmpty("text", "the file is empty: app.conf")))
+	g.SetBody(missing, agent.NewToolBody(toolapi.ToolEmpty("text", "the file is empty: app.conf")))
 
 	// The engine reads which fields are handles from the tool's own output
 	// schema, so web_search has to be registered for its url field to be seen.
@@ -174,7 +174,7 @@ func TestWebSearch_ResultsReachTheGroundingEdge(t *testing.T) {
 func TestWebSearch_NoResultsIsAGapAndBlocksCitation(t *testing.T) {
 	g := agent.NewGraph()
 	id := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "search", ToolName: "web_search"})
-	g.SetBody(id, agent.NewToolBody(agenttools.ToolEmpty("search", "no reachable results for this query")))
+	g.SetBody(id, agent.NewToolBody(toolapi.ToolEmpty("search", "no reachable results for this query")))
 
 	a := &agent.Agent{}
 	covered := a.FrameCoverage(context.Background(), g, agent.NewStagePrompts("role", "user"))
@@ -192,7 +192,7 @@ func TestWebSearch_NoResultsIsAGapAndBlocksCitation(t *testing.T) {
 func TestSysinfo_FieldsResolveAndItIsNotAGap(t *testing.T) {
 	g, msg := typedResult(t, tools.NewSysinfo("/tmp/ws"), map[string]any{})
 
-	if msg.Status != agenttools.StatusOK || msg.Content != "" {
+	if msg.Status != toolapi.StatusOK || msg.Content != "" {
 		t.Fatalf("envelope = status %q content %q — the payload is the readable form here", msg.Status, msg.Content)
 	}
 	body := agent.NewToolBody(msg)

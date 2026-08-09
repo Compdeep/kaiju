@@ -13,7 +13,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -48,7 +48,7 @@ func prefixAssistantHistory(history []llm.Message) []llm.Message {
  * param: names - tool names to include
  * return: compiled tool index string
  */
-func compileToolIndex(registry *tools.Registry, names []string) string {
+func compileToolIndex(registry *toolapi.Registry, names []string) string {
 	var sb strings.Builder
 	sb.WriteString("## Tools (* = required param)\n")
 	sb.WriteString("The parameters shown for each tool are the only ones available — use only the parameters listed.\n")
@@ -59,7 +59,7 @@ func compileToolIndex(registry *tools.Registry, names []string) string {
 		}
 		sig := compactParamSignature(skill.Parameters())
 		sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, skill.Description()))
-		if outSchema := tools.GetOutputSchema(skill); outSchema != nil {
+		if outSchema := toolapi.GetOutputSchema(skill); outSchema != nil {
 			if shape := compactOutputShape(outSchema); shape != "" {
 				sb.WriteString("  → returns: " + shape + "\n")
 			}
@@ -1410,7 +1410,7 @@ func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
  * param: dagMode - optional DAG mode override for reflection injection.
  * return: slice of created Node pointers, or error.
  */
-func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *tools.Registry, dagMode ...string) ([]*Node, error) {
+func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *toolapi.Registry, dagMode ...string) ([]*Node, error) {
 	// Pass 1: create nodes and collect their graph IDs
 	nodeIDs := make([]string, len(steps))
 	nodes := make([]*Node, len(steps))
@@ -1523,7 +1523,7 @@ var stepTemplateRe = regexp.MustCompile(`\$\{step\.(\d+)(?:\.([^}]+))?\}`)
 // Field-path warnings against upstream tool output schemas are logged
 // here too — the same diagnostic the param_refs code path used to emit,
 // just keyed off the new template syntax.
-func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string, steps []PlanStep, registry *tools.Registry) []string {
+func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string, steps []PlanStep, registry *toolapi.Registry) []string {
 	var implicitDeps []string
 	walkParams(params, func(s string) (any, bool) {
 		out := stepTemplateRe.ReplaceAllStringFunc(s, func(match string) string {
@@ -1552,7 +1552,7 @@ func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string,
 			if registry != nil && field != "" {
 				upstreamTool := steps[idx].Tool
 				if skill, ok := registry.Get(upstreamTool); ok {
-					outSchema := tools.GetOutputSchema(skill)
+					outSchema := toolapi.GetOutputSchema(skill)
 					if outSchema == nil {
 						log.Printf("[dag] warning: template on %s references %s which has no output schema", owner, upstreamTool)
 					} else if !fieldExistsInSchema(outSchema, field) {
@@ -1609,7 +1609,7 @@ func stepRefsIn(params map[string]any) []stepRef {
 // dead edge the reflector then re-plans forever. Only a tool that DECLARES an
 // output schema is checked, and only its top-level field — so an incomplete deep
 // schema can't cause a false reject.
-func validatePlanEdges(steps []PlanStep, registry *tools.Registry) []string {
+func validatePlanEdges(steps []PlanStep, registry *toolapi.Registry) []string {
 	var errs []string
 	for i, s := range steps {
 		for _, r := range stepRefsIn(s.Params) {
@@ -1628,7 +1628,7 @@ func validatePlanEdges(steps []PlanStep, registry *tools.Registry) []string {
 				if !ok {
 					continue
 				}
-				outSchema := tools.GetOutputSchema(skill)
+				outSchema := toolapi.GetOutputSchema(skill)
 				if outSchema == nil {
 					continue
 				}
@@ -1667,7 +1667,7 @@ func validatePlanEdges(steps []PlanStep, registry *tools.Registry) []string {
 // feedback, instead of the call being rejected later at dispatch and the node
 // just failing. The valid-name set comes from each tool's OWN schema, so it is not
 // a hardcoded list and covers any invented name, not specific ones.
-func validatePlanParams(steps []PlanStep, registry *tools.Registry) []string {
+func validatePlanParams(steps []PlanStep, registry *toolapi.Registry) []string {
 	if registry == nil {
 		return nil
 	}
@@ -1724,7 +1724,7 @@ func fieldExistsInSchema(schemaJSON json.RawMessage, fieldPath string) bool {
 	// A reference names a field of the tool's payload, so it is checked against
 	// the payload's schema. Checking the envelope's instead warned that every
 	// correct reference was to a field the tool does not have.
-	schemaJSON = tools.PayloadSchema(schemaJSON)
+	schemaJSON = toolapi.PayloadSchema(schemaJSON)
 	if schemaJSON == nil {
 		return false
 	}
@@ -1810,7 +1810,7 @@ func isNumericPathSegment(s string) bool {
  * param: target - the run's target, or "" when it has none.
  * param: registry - used to read each tool's target requirement.
  */
-func applyRunTarget(steps []PlanStep, target string, registry *tools.Registry) {
+func applyRunTarget(steps []PlanStep, target string, registry *toolapi.Registry) {
 	if registry == nil {
 		return
 	}
@@ -1819,7 +1819,7 @@ func applyRunTarget(steps []PlanStep, target string, registry *tools.Registry) {
 		if !ok {
 			continue
 		}
-		if tools.RequiresTarget(tool) {
+		if toolapi.RequiresTarget(tool) {
 			if steps[i].Target != "" {
 				continue
 			}

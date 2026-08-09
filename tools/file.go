@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/workspace"
 )
 
@@ -52,7 +52,7 @@ func (f *FileRead) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (f *FileRead) Impact(map[string]any) int { return tools.ImpactObserve }
+func (f *FileRead) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -60,7 +60,7 @@ func (f *FileRead) Impact(map[string]any) int { return tools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (f *FileRead) OutputSchema() json.RawMessage {
-	return tools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -89,13 +89,13 @@ func (f *FileRead) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (f *FileRead) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(f.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(f.ExecuteTyped(ctx, params))
 }
 
-func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	path, _ := params["path"].(string)
 	if path == "" {
-		return tools.ToolMessage{}, fmt.Errorf("file_read: path is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("file_read: path is required")
 	}
 	// Resolve relative paths against workspace
 	if !filepath.IsAbs(path) && f.workspace != "" {
@@ -105,7 +105,7 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (tools
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return tools.ToolMessage{}, fmt.Errorf("file_read: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("file_read: %w", err)
 	}
 
 	// An empty file is a finding, not a blank result. Reported as empty so the
@@ -113,11 +113,11 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (tools
 	// model inferring content from a silent gap. Distinct from a missing file,
 	// which fails the read above and fails the node.
 	if len(data) == 0 {
-		return tools.ToolEmpty("text", "the file is empty: "+path), nil
+		return toolapi.ToolEmpty("text", "the file is empty: "+path), nil
 	}
 
 	maxLines := 500
-	if ml, ok := tools.ParamNum(params, "max_lines"); ok && ml > 0 {
+	if ml, ok := toolapi.ParamNum(params, "max_lines"); ok && ml > 0 {
 		maxLines = int(ml)
 	}
 
@@ -127,10 +127,10 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (tools
 		lines = append(lines, fmt.Sprintf("... (truncated at %d lines)", maxLines))
 	}
 
-	return tools.ToolText(strings.Join(lines, "\n")), nil
+	return toolapi.ToolText(strings.Join(lines, "\n")), nil
 }
 
-var _ tools.Tool = (*FileRead)(nil)
+var _ toolapi.Tool = (*FileRead)(nil)
 
 // ─── FileWrite ──────────────────────────────────────────────────────────────
 
@@ -171,7 +171,7 @@ func (f *FileWrite) Description() string {
  * param: _ - unused parameters
  * return: ImpactAffect (1)
  */
-func (f *FileWrite) Impact(map[string]any) int { return tools.ImpactAffect }
+func (f *FileWrite) Impact(map[string]any) int { return toolapi.ImpactAffect }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -179,7 +179,7 @@ func (f *FileWrite) Impact(map[string]any) int { return tools.ImpactAffect }
  * return: JSON schema as raw bytes
  */
 func (f *FileWrite) OutputSchema() json.RawMessage {
-	return tools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -209,50 +209,50 @@ func (f *FileWrite) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (f *FileWrite) Execute(_ context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(f.ExecuteTyped(nil, params))
+	return toolapi.StringResult(f.ExecuteTyped(nil, params))
 }
 
-func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	path, _ := params["path"].(string)
 	content, _ := params["content"].(string)
 	if path == "" {
-		return tools.ToolMessage{}, fmt.Errorf("file_write: path is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("file_write: path is required")
 	}
 	// Reject unresolved placeholder content — substitution failed or wasn't wired
 	if strings.HasPrefix(content, "${") || strings.HasPrefix(content, "{{") {
-		return tools.ToolMessage{}, fmt.Errorf("file_write: content is an unresolved placeholder %q — wire ${step.N.field} from an upstream step or use compute instead", content)
+		return toolapi.ToolMessage{}, fmt.Errorf("file_write: content is an unresolved placeholder %q — wire ${step.N.field} from an upstream step or use compute instead", content)
 	}
 	// Gate writes to the workspace-relative allowed zones. This blocks the
 	// agent from editing its own source tree (cmd/, internal/, etc.) when
 	// the CLI runs with workspace = cwd inside the Kaiju repo.
 	safePath, safeErr := workspace.SafeJoin(f.workspace, path)
 	if safeErr != nil {
-		return tools.ToolMessage{}, fmt.Errorf("file_write: %w", safeErr)
+		return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", safeErr)
 	}
 	path = safePath
 
 	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return tools.ToolMessage{}, fmt.Errorf("file_write: create dir: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("file_write: create dir: %w", err)
 	}
 
 	appendMode, _ := params["append"].(bool)
 	if appendMode {
 		f2, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			return tools.ToolMessage{}, fmt.Errorf("file_write: %w", err)
+			return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 		}
 		defer f2.Close()
 		if _, err := f2.WriteString(content); err != nil {
-			return tools.ToolMessage{}, fmt.Errorf("file_write: %w", err)
+			return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 		}
-		return tools.ToolText(fmt.Sprintf("appended %d bytes to %s", len(content), path)), nil
+		return toolapi.ToolText(fmt.Sprintf("appended %d bytes to %s", len(content), path)), nil
 	}
 
 	if err := agent.OverwriteFile(path, content); err != nil {
-		return tools.ToolMessage{}, fmt.Errorf("file_write: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 	}
-	return tools.ToolText(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
+	return toolapi.ToolText(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
 }
 
 /*
@@ -262,7 +262,7 @@ func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (tool
  * param: result - the execution result string (unused)
  * return: DisplayHint with plugin/path/title/mime, or nil if no suitable plugin found
  */
-func (f *FileWrite) DisplayHint(params map[string]any, result string) *tools.DisplayHint {
+func (f *FileWrite) DisplayHint(params map[string]any, result string) *toolapi.DisplayHint {
 	path, _ := params["path"].(string)
 	if path == "" {
 		return nil
@@ -272,19 +272,19 @@ func (f *FileWrite) DisplayHint(params map[string]any, result string) *tools.Dis
 
 	switch ext {
 	case ".html", ".htm":
-		return &tools.DisplayHint{Plugin: "preview", Path: path, Title: base, Mime: "text/html"}
+		return &toolapi.DisplayHint{Plugin: "preview", Path: path, Title: base, Mime: "text/html"}
 	case ".svg":
-		return &tools.DisplayHint{Plugin: "preview", Path: path, Title: base, Mime: "image/svg+xml"}
+		return &toolapi.DisplayHint{Plugin: "preview", Path: path, Title: base, Mime: "image/svg+xml"}
 	case ".go", ".js", ".ts", ".py", ".rs", ".java", ".c", ".cpp", ".rb", ".sh",
 		".css", ".json", ".yaml", ".yml", ".toml", ".sql", ".md", ".vue", ".jsx", ".tsx":
-		return &tools.DisplayHint{Plugin: "code", Path: path, Title: base}
+		return &toolapi.DisplayHint{Plugin: "code", Path: path, Title: base}
 	default:
 		return nil
 	}
 }
 
-var _ tools.Tool = (*FileWrite)(nil)
-var _ tools.Displayer = (*FileWrite)(nil)
+var _ toolapi.Tool = (*FileWrite)(nil)
+var _ toolapi.Displayer = (*FileWrite)(nil)
 
 // ─── FileList ───────────────────────────────────────────────────────────────
 
@@ -323,7 +323,7 @@ func (f *FileList) Description() string { return "List files and directories at 
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (f *FileList) Impact(map[string]any) int { return tools.ImpactObserve }
+func (f *FileList) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * Parameters returns the JSON schema for the tool's input parameters.
@@ -346,7 +346,7 @@ func (f *FileList) Parameters() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (f *FileList) OutputSchema() json.RawMessage {
-	return tools.EnvelopeSchema(`{"type":"object","properties":{"entries":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"type":{"type":"string"},"size":{"type":"integer"}}}}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","properties":{"entries":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"type":{"type":"string"},"size":{"type":"integer"}}}}}}`)
 }
 
 /*
@@ -358,10 +358,10 @@ func (f *FileList) OutputSchema() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (f *FileList) Execute(_ context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(f.ExecuteTyped(nil, params))
+	return toolapi.StringResult(f.ExecuteTyped(nil, params))
 }
 
-func (f *FileList) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (f *FileList) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	path, _ := params["path"].(string)
 	path = strings.TrimSpace(path)
 	if (path == "" || path == "." || path == "./") && f.workspace != "" {
@@ -376,7 +376,7 @@ func (f *FileList) ExecuteTyped(_ context.Context, params map[string]any) (tools
 
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return tools.ToolMessage{}, fmt.Errorf("file_list: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("file_list: %w", err)
 	}
 
 	type entry struct {
@@ -398,8 +398,8 @@ func (f *FileList) ExecuteTyped(_ context.Context, params map[string]any) (tools
 		result = append(result, entry{Name: e.Name(), Type: typ, Size: size})
 	}
 
-	return tools.ToolOK("listing", "", map[string]any{"entries": result}), nil
+	return toolapi.ToolOK("listing", "", map[string]any{"entries": result}), nil
 }
 
-var _ tools.Tool = (*FileList)(nil)
-var _ tools.Outputter = (*FileList)(nil)
+var _ toolapi.Tool = (*FileList)(nil)
+var _ toolapi.Outputter = (*FileList)(nil)

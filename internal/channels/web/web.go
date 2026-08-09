@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/Compdeep/kaiju/internal/channels"
+	"github.com/gorilla/websocket"
 )
 
 var upgrader = websocket.Upgrader{

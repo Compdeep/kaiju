@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // outputTool is a test tool that declares an OutputSchema (implements Outputter),
@@ -25,24 +25,24 @@ func (o *outputTool) Execute(context.Context, map[string]any) (string, error) { 
 func (o *outputTool) OutputSchema() json.RawMessage                           { return o.output }
 
 var (
-	_ tools.Tool      = (*outputTool)(nil)
-	_ tools.Outputter = (*outputTool)(nil)
+	_ toolapi.Tool      = (*outputTool)(nil)
+	_ toolapi.Outputter = (*outputTool)(nil)
 )
 
 // planValidateReg builds a registry with web_search and web_fetch whose output
 // schemas are wrapped in the SAME envelope production uses (EnvelopeSchema), so
 // web_search's results[] sits under data, exactly like the real tool.
-func planValidateReg() *tools.Registry {
-	reg := tools.NewRegistry()
+func planValidateReg() *toolapi.Registry {
+	reg := toolapi.NewRegistry()
 	reg.Replace(&outputTool{
 		name:   "web_search",
 		params: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}`),
-		output: tools.EnvelopeSchema(`{"type":"object","properties":{"query":{"type":"string"},"results":{"type":"array","items":{"type":"object","properties":{"url":{"type":"string"},"title":{"type":"string"}}}}}}`),
+		output: toolapi.EnvelopeSchema(`{"type":"object","properties":{"query":{"type":"string"},"results":{"type":"array","items":{"type":"object","properties":{"url":{"type":"string"},"title":{"type":"string"}}}}}}`),
 	}, "builtin")
 	reg.Replace(&outputTool{
 		name:   "web_fetch",
 		params: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"],"additionalProperties":false}`),
-		output: tools.EnvelopeSchema(`{"type":"object","properties":{"content":{"type":"string"}}}`),
+		output: toolapi.EnvelopeSchema(`{"type":"object","properties":{"content":{"type":"string"}}}`),
 	}, "builtin")
 	return reg
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // Turning a compute run into an envelope.
@@ -38,13 +38,13 @@ type computeDescriptor struct {
 // an answering stage which steps produced nothing, and "no code was written"
 // is exactly that. Its `reason` becomes the detail, which is the sentence the
 // stage is shown.
-func computeMessage(kind, raw string) tools.ToolMessage {
+func computeMessage(kind, raw string) toolapi.ToolMessage {
 	var d computeDescriptor
 	if err := json.Unmarshal([]byte(raw), &d); err != nil {
 		// Not JSON. The tool still produced something and the run should see
 		// it, so it goes through unclassified rather than being called a
 		// failure the tool never reported.
-		return tools.ToolUnclassified(raw)
+		return toolapi.ToolUnclassified(raw)
 	}
 
 	if d.NoChanges {
@@ -52,10 +52,10 @@ func computeMessage(kind, raw string) tools.ToolMessage {
 		if reason == "" {
 			reason = "the run made no changes"
 		}
-		return tools.ToolEmpty(kind, reason)
+		return toolapi.ToolEmpty(kind, reason)
 	}
 
-	msg := tools.ToolOK(kind, "", nil)
+	msg := toolapi.ToolOK(kind, "", nil)
 	msg.Data = json.RawMessage(raw)
 	msg.Detail = computeSummary(d)
 	return msg
@@ -86,7 +86,7 @@ func computeSummary(d computeDescriptor) string {
 // services out of a compute result; they go through here so they all read the
 // same place and a result that is not an envelope still works.
 func computePayload(result string) string {
-	if msg, ok := tools.ParseToolMessage(result); ok && len(msg.Data) > 0 {
+	if msg, ok := toolapi.ParseToolMessage(result); ok && len(msg.Data) > 0 {
 		return string(msg.Data)
 	}
 	return result
@@ -96,7 +96,7 @@ func computePayload(result string) string {
 // leaving the envelope around it intact. Used when an exec node's stdout is
 // spliced onto its compute parent.
 func withComputePayload(result, payload string) string {
-	msg, ok := tools.ParseToolMessage(result)
+	msg, ok := toolapi.ParseToolMessage(result)
 	if !ok {
 		return payload
 	}

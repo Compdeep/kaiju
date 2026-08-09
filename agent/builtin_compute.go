@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -18,8 +18,8 @@ type ComputeTool struct {
 }
 
 // Compile-time interface assertions.
-var _ tools.Tool = (*ComputeTool)(nil)
-var _ tools.TypedExecutor = (*ComputeTool)(nil)
+var _ toolapi.Tool = (*ComputeTool)(nil)
+var _ toolapi.TypedExecutor = (*ComputeTool)(nil)
 
 /*
  * NewComputeTool constructs a ComputeTool bound to an Agent.
@@ -43,7 +43,7 @@ func (c *ComputeTool) Description() string {
 }
 
 func (c *ComputeTool) Impact(params map[string]any) int {
-	return tools.ImpactAffect
+	return toolapi.ImpactAffect
 }
 
 var computeParamSchema = json.RawMessage(`{
@@ -88,7 +88,7 @@ func (c *ComputeTool) OutputSchema() json.RawMessage { return computeOutputSchem
 // run there is no graph, budget or model, so it reports that rather than
 // pretending to compute anything.
 func (c *ComputeTool) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(c.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(c.ExecuteTyped(ctx, params))
 }
 
 /*
@@ -102,14 +102,14 @@ func (c *ComputeTool) Execute(ctx context.Context, params map[string]any) (strin
  * param: params - the resolved tool parameters.
  * return: the envelope carrying compute's plan or result JSON as its payload.
  */
-func (c *ComputeTool) ExecuteTyped(ctx context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (c *ComputeTool) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	ec := ExecContextFrom(ctx)
 	if ec == nil {
-		return tools.ToolFail("compute", "compute was called without the run state it needs — no graph, budget or model", nil), nil
+		return toolapi.ToolFail("compute", "compute was called without the run state it needs — no graph, budget or model", nil), nil
 	}
 	raw, err := c.agent.runCompute(ec, params)
 	if err != nil {
-		return tools.ToolMessage{}, err
+		return toolapi.ToolMessage{}, err
 	}
 	return computeMessage("compute", raw), nil
 }

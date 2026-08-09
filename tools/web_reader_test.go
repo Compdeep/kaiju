@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // A search hit that is a PDF must be read through the registered binary decoder
 // (the pdf plugin's seam), not fed to readability as HTML. A stub decoder stands
 // in for the plugin; web_fetch should return the decoded text as ok content.
 func TestWebFetch_BinaryDecoderRoutesPDF(t *testing.T) {
-	agenttools.RegisterBinaryDecoder("application/pdf", func(b []byte) (string, error) {
+	toolapi.RegisterBinaryDecoder("application/pdf", func(b []byte) (string, error) {
 		return "DECODED(" + string(b) + ")", nil
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -25,7 +25,7 @@ func TestWebFetch_BinaryDecoderRoutesPDF(t *testing.T) {
 
 	out, err := NewWebFetch().Execute(context.Background(), map[string]any{"url": srv.URL})
 	m := mustEnvelope(t, out, err)
-	if m.Status != agenttools.StatusOK {
+	if m.Status != toolapi.StatusOK {
 		t.Fatalf("pdf fetch status = %q, want ok (note=%q)", m.Status, m.Detail)
 	}
 	if !strings.Contains(m.Content, "DECODED(%PDF-1.4 fake)") {
@@ -53,10 +53,10 @@ func TestExtractMeta(t *testing.T) {
 // page, not just when built-in readability comes back thin. Here readability WOULD
 // extract the static body, but the registered plugin's content must win.
 func TestFormatMarkdown_PluginIsPrimaryReader(t *testing.T) {
-	agenttools.RegisterReaderFallback(func(context.Context, string) (string, error) {
+	toolapi.RegisterReaderFallback(func(context.Context, string) (string, error) {
 		return strings.Repeat("Rendered by the reader plugin. ", 20), nil
 	})
-	defer agenttools.RegisterReaderFallback(nil) // unregister for other tests
+	defer toolapi.RegisterReaderFallback(nil) // unregister for other tests
 
 	body := []byte("<html><body><article>" +
 		strings.Repeat("Static boilerplate readability would grab. ", 20) +

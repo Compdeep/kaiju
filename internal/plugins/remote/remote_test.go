@@ -10,17 +10,17 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // captureHost records what the bridge contributes at activation.
 type captureHost struct {
-	tools  []agenttools.Tool
+	tools  []toolapi.Tool
 	reader func(ctx context.Context, rawURL string) (string, error)
 }
 
 func (h *captureHost) Workspace() string                                          { return "" }
-func (h *captureHost) AddTool(t agenttools.Tool)                                  { h.tools = append(h.tools, t) }
+func (h *captureHost) AddTool(t toolapi.Tool)                                     { h.tools = append(h.tools, t) }
 func (h *captureHost) RegisterBinaryDecoder(string, func([]byte) (string, error)) {}
 func (h *captureHost) RegisterReaderFallback(fn func(ctx context.Context, rawURL string) (string, error)) {
 	h.reader = fn

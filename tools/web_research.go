@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // WebResearch searches the web AND reads the top results in ONE step: it runs a
@@ -38,7 +38,7 @@ func (w *WebResearch) Description() string {
 	return "Search the web AND read the top results in ONE step. Runs a search, then fetches and extracts the actual text of the top result pages and returns their content. Prefer this over web_search+web_fetch for any research: every source is grounded (the URLs come from the search and are read for you), so you never invent a URL or stop at snippets. Params: query (required); optional max_sources (top results to read, default 4, max 6), recency_days, focus (the facts to extract)."
 }
 
-func (w *WebResearch) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (w *WebResearch) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 func (w *WebResearch) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -56,7 +56,7 @@ func (w *WebResearch) Parameters() json.RawMessage {
 }
 
 func (w *WebResearch) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema(`{"type":"object","description":"Research results: the query plus the sources actually read.","properties":{"query":{"type":"string"},"sources":{"type":"array","description":"each source read","items":{"type":"object","properties":{"url":{"type":"string"},"title":{"type":"string"},"content":{"type":"string"},"note":{"type":"string"}}}}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"Research results: the query plus the sources actually read.","properties":{"query":{"type":"string"},"sources":{"type":"array","description":"each source read","items":{"type":"object","properties":{"url":{"type":"string"},"title":{"type":"string"},"content":{"type":"string"},"note":{"type":"string"}}}}}}`)
 }
 
 type researchSource struct {
@@ -69,17 +69,17 @@ type researchSource struct {
 
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (w *WebResearch) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(w.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(w.ExecuteTyped(ctx, params))
 }
 
-func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	query, _ := params["query"].(string)
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return agenttools.ToolMessage{}, fmt.Errorf("web_research: query is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("web_research: query is required")
 	}
 	maxSources := 4
-	if v, ok := agenttools.ParamNum(params, "max_sources"); ok && int(v) > 0 {
+	if v, ok := toolapi.ParamNum(params, "max_sources"); ok && int(v) > 0 {
 		maxSources = int(v)
 	}
 	if maxSources > 6 {
@@ -89,22 +89,22 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 
 	// 1) Search — ask for a few more URLs than we'll read, as backups.
 	searchParams := map[string]any{"query": query, "max_results": float64(maxSources + 3)}
-	if rd, ok := agenttools.ParamNum(params, "recency_days"); ok {
+	if rd, ok := toolapi.ParamNum(params, "recency_days"); ok {
 		searchParams["recency_days"] = rd
 	}
 	sOut, err := w.search.Execute(ctx, searchParams)
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("web_research: search: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("web_research: search: %w", err)
 	}
-	sMsg, ok := agenttools.ParseToolMessage(sOut)
-	if !ok || sMsg.Status != agenttools.StatusOK {
-		return agenttools.ToolEmpty("research", "the search returned no reachable results for this query — try a different, broader query"), nil
+	sMsg, ok := toolapi.ParseToolMessage(sOut)
+	if !ok || sMsg.Status != toolapi.StatusOK {
+		return toolapi.ToolEmpty("research", "the search returned no reachable results for this query — try a different, broader query"), nil
 	}
 	var sd struct {
 		Results []searchResult `json:"results"`
 	}
 	if json.Unmarshal(sMsg.Data, &sd) != nil || len(sd.Results) == 0 {
-		return agenttools.ToolEmpty("research", "the search returned no results — try a different query"), nil
+		return toolapi.ToolEmpty("research", "the search returned no results — try a different query"), nil
 	}
 
 	// Drop excluded domains (e.g. aggregators the caller doesn't want) before we
@@ -118,7 +118,7 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 		}
 		sd.Results = kept
 		if len(sd.Results) == 0 {
-			return agenttools.ToolEmpty("research", "every result was an excluded domain — broaden the query or relax exclude_domains"), nil
+			return toolapi.ToolEmpty("research", "every result was an excluded domain — broaden the query or relax exclude_domains"), nil
 		}
 	}
 
@@ -147,13 +147,13 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 				sources[i] = src
 				return
 			}
-			if fMsg, ok := agenttools.ParseToolMessage(fOut); ok {
+			if fMsg, ok := toolapi.ParseToolMessage(fOut); ok {
 				var fd struct {
 					Status string `json:"status"`
 				}
 				_ = json.Unmarshal(fMsg.Data, &fd)
 				src.Status = fd.Status
-				if fMsg.Status == agenttools.StatusOK {
+				if fMsg.Status == toolapi.StatusOK {
 					src.Content = fMsg.Content
 				} else {
 					src.Note = fMsg.Detail
@@ -195,16 +195,16 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 
 	dataBytes, _ := json.Marshal(map[string]any{"query": query, "sources": sources})
 	if read == 0 {
-		return agenttools.ToolMessage{
+		return toolapi.ToolMessage{
 			Type:   "research",
-			Status: agenttools.StatusEmpty,
+			Status: toolapi.StatusEmpty,
 			Detail: fmt.Sprintf("found %d URLs but none could be read (all blocked, 404, or empty) — try a different query", n),
 			Data:   dataBytes,
 		}, nil
 	}
-	return agenttools.ToolMessage{
+	return toolapi.ToolMessage{
 		Type:    "research",
-		Status:  agenttools.StatusOK,
+		Status:  toolapi.StatusOK,
 		Content: strings.TrimRight(b.String(), "\n"),
 		Data:    dataBytes,
 	}, nil
@@ -244,6 +244,6 @@ func hostExcluded(rawURL string, excluded []string) bool {
 }
 
 var (
-	_ agenttools.Tool      = (*WebResearch)(nil)
-	_ agenttools.Outputter = (*WebResearch)(nil)
+	_ toolapi.Tool      = (*WebResearch)(nil)
+	_ toolapi.Outputter = (*WebResearch)(nil)
 )

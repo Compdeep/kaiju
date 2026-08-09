@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/plugins"
 )
 
@@ -115,8 +115,8 @@ func readerFrom(rt *remoteTool) func(ctx context.Context, rawURL string) (string
 		if err != nil {
 			return "", err
 		}
-		if msg, ok := agenttools.ParseToolMessage(out); ok {
-			if msg.Status == agenttools.StatusOK {
+		if msg, ok := toolapi.ParseToolMessage(out); ok {
+			if msg.Status == toolapi.StatusOK {
 				return msg.Content, nil
 			}
 			return "", nil
@@ -157,7 +157,7 @@ type remoteTool struct {
 	spec        manifestTool
 }
 
-var _ agenttools.Tool = (*remoteTool)(nil)
+var _ toolapi.Tool = (*remoteTool)(nil)
 
 func (t *remoteTool) Name() string        { return t.spec.Name }
 func (t *remoteTool) Description() string { return t.spec.Description }
@@ -172,11 +172,11 @@ func (t *remoteTool) Parameters() json.RawMessage {
 func (t *remoteTool) Impact(map[string]any) int {
 	switch strings.ToLower(strings.TrimSpace(t.spec.Impact)) {
 	case "", "observe", "read":
-		return agenttools.ImpactObserve
+		return toolapi.ImpactObserve
 	case "control", "destroy", "delete", "irreversible":
-		return agenttools.ImpactControl
+		return toolapi.ImpactControl
 	default:
-		return agenttools.ImpactAffect // unknown side effects → treat as reversible-write
+		return toolapi.ImpactAffect // unknown side effects → treat as reversible-write
 	}
 }
 
@@ -202,17 +202,17 @@ func (t *remoteTool) Execute(ctx context.Context, params map[string]any) (string
 	if err != nil {
 		// A down/stalled host is a tool failure, not a kaiju crash — report it as
 		// one (a timeout here is exactly the "hung reader" case, now capped at 60s).
-		return agenttools.ToolFail(t.spec.Name, "plugin host unreachable: "+err.Error(), nil).JSON(), nil
+		return toolapi.ToolFail(t.spec.Name, "plugin host unreachable: "+err.Error(), nil).JSON(), nil
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024))
 	if resp.StatusCode != http.StatusOK {
-		return agenttools.ToolFail(t.spec.Name, fmt.Sprintf("plugin host HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw))), nil).JSON(), nil
+		return toolapi.ToolFail(t.spec.Name, fmt.Sprintf("plugin host HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw))), nil).JSON(), nil
 	}
 	// The host already returns a ToolMessage envelope — validate and pass through.
-	if _, ok := agenttools.ParseToolMessage(string(raw)); ok {
+	if _, ok := toolapi.ParseToolMessage(string(raw)); ok {
 		return string(raw), nil
 	}
 	// Non-envelope response: wrap the raw body as ok text so it still flows.
-	return agenttools.ToolText(string(raw)).JSON(), nil
+	return toolapi.ToolText(string(raw)).JSON(), nil
 }

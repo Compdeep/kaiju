@@ -11,8 +11,7 @@ import (
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/agent/tools"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // groundingAgent has web_search registered with the schema that marks its url
@@ -20,11 +19,11 @@ import (
 // a tool that is not registered declares nothing and contributes nothing — which
 // is the behaviour, not a test artefact.
 func groundingAgent() *Agent {
-	reg := tools.NewRegistry()
+	reg := toolapi.NewRegistry()
 	reg.Replace(&fakeTool{
 		name:   "web_search",
 		params: json.RawMessage(`{}`),
-		output: agenttools.EnvelopeSchema(`{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"url":{"type":"string","x-reference":"web_fetch.url"},"title":{"type":"string"}}}}}}`),
+		output: toolapi.EnvelopeSchema(`{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"url":{"type":"string","x-reference":"web_fetch.url"},"title":{"type":"string"}}}}}}`),
 	}, "builtin")
 	reg.Replace(&fakeTool{name: "web_fetch", params: json.RawMessage(`{}`)}, "builtin")
 	return &Agent{registry: reg}
@@ -36,7 +35,7 @@ func searchNode(g *Graph, tag string, urls ...string) {
 		results = append(results, map[string]any{"url": u, "title": "t"})
 	}
 	id := g.AddNode(&Node{Type: NodeTool, Tag: tag, ToolName: "web_search"})
-	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("search", "", map[string]any{"results": results})})
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolOK("search", "", map[string]any{"results": results})})
 }
 
 // collectGrounded harvests only URLs that actually came from a web_search result.
@@ -45,7 +44,7 @@ func TestCollectGrounded(t *testing.T) {
 	searchNode(g, "s1", "https://real.example/a", "https://real.example/b")
 	// a non-search ok node contributes nothing.
 	pID := g.AddNode(&Node{Type: NodeTool, Tag: "page", ToolName: "web_fetch"})
-	g.SetBody(pID, toolMessageBody{msg: agenttools.ToolOK("page", "content", nil)})
+	g.SetBody(pID, toolMessageBody{msg: toolapi.ToolOK("page", "content", nil)})
 
 	got := groundingAgent().collectGrounded(g)
 	set := map[string]bool{}
@@ -73,7 +72,7 @@ func TestGroundingEdge_FailOpenToStructural(t *testing.T) {
 	g := NewGraph()
 	searchNode(g, "s", "https://real.example/a") // one real, grounded URL
 	eID := g.AddNode(&Node{Type: NodeTool, Tag: "empty_search", ToolName: "web_search"})
-	g.SetBody(eID, toolMessageBody{msg: agenttools.ToolEmpty("search", "no results")}) // the gap
+	g.SetBody(eID, toolMessageBody{msg: toolapi.ToolEmpty("search", "no results")}) // the gap
 
 	grd := groundingAgent().groundingEdge(context.Background(), g, "find 10 sources")
 	if !strings.HasPrefix(grd, "## Grounding") {
@@ -92,7 +91,7 @@ func TestGroundingEdge_FailOpenToStructural(t *testing.T) {
 func TestGroundingEdge_ReSearchWhenNothingGrounded(t *testing.T) {
 	g := NewGraph()
 	eID := g.AddNode(&Node{Type: NodeTool, Tag: "empty", ToolName: "web_search"})
-	g.SetBody(eID, toolMessageBody{msg: agenttools.ToolEmpty("search", "no results")})
+	g.SetBody(eID, toolMessageBody{msg: toolapi.ToolEmpty("search", "no results")})
 	grd := groundingAgent().groundingEdge(context.Background(), g, "find sources")
 	if !strings.HasPrefix(grd, "## Grounding") || !strings.Contains(grd, "broaden the search") {
 		t.Fatalf("empty-grounded should tell the planner to broaden the search, got:\n%s", grd)
@@ -136,7 +135,7 @@ func TestConclusionFloor_MetWhenSomethingRead(t *testing.T) {
 func TestConclusionFloor_NoSearchNoFloor(t *testing.T) {
 	g := NewGraph()
 	id := g.AddNode(&Node{Type: NodeTool, Tag: "bash", ToolName: "bash"})
-	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("bash", "done", nil)})
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolOK("bash", "done", nil)})
 	if steps, _ := groundingAgent().conclusionFloor(g, 6); steps != nil {
 		t.Fatalf("no search → no floor, got %d steps", len(steps))
 	}
@@ -154,7 +153,7 @@ func TestGroundingEdge_GeneratesFromLLM(t *testing.T) {
 	g := NewGraph()
 	searchNode(g, "s", "https://real.example/a")
 	fID := g.AddNode(&Node{Type: NodeTool, Tag: "bad", ToolName: "web_fetch"})
-	g.SetBody(fID, toolMessageBody{msg: agenttools.ToolFail("page", "HTTP 404", nil)}) // the gap
+	g.SetBody(fID, toolMessageBody{msg: toolapi.ToolFail("page", "HTTP 404", nil)}) // the gap
 
 	grd := a.groundingEdge(context.Background(), g, "find sources")
 	if !strings.HasPrefix(grd, "## Grounding") {

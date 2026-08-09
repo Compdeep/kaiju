@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/agent"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // ─── MemoryStore ────────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ func (m *MemoryStore) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (m *MemoryStore) Impact(map[string]any) int { return tools.ImpactObserve }
+func (m *MemoryStore) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -58,7 +58,7 @@ func (m *MemoryStore) Impact(map[string]any) int { return tools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (m *MemoryStore) OutputSchema() json.RawMessage {
-	return tools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -89,18 +89,18 @@ func (m *MemoryStore) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (m *MemoryStore) Execute(_ context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(m.ExecuteTyped(nil, params))
+	return toolapi.StringResult(m.ExecuteTyped(nil, params))
 }
 
-func (m *MemoryStore) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (m *MemoryStore) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	key, _ := params["key"].(string)
 	value, _ := params["value"].(string)
 	if key == "" {
-		return tools.ToolMessage{}, fmt.Errorf("memory_store: key is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("memory_store: key is required")
 	}
 
 	var ttl time.Duration
-	if ts, ok := tools.ParamNum(params, "ttl_sec"); ok && ts > 0 {
+	if ts, ok := toolapi.ParamNum(params, "ttl_sec"); ok && ts > 0 {
 		ttl = time.Duration(ts) * time.Second
 	}
 
@@ -114,10 +114,10 @@ func (m *MemoryStore) ExecuteTyped(_ context.Context, params map[string]any) (to
 	}
 
 	m.mem.Set(key, value, ttl, tags)
-	return tools.ToolText(fmt.Sprintf("stored key=%q (%d bytes)", key, len(value))), nil
+	return toolapi.ToolText(fmt.Sprintf("stored key=%q (%d bytes)", key, len(value))), nil
 }
 
-var _ tools.Tool = (*MemoryStore)(nil)
+var _ toolapi.Tool = (*MemoryStore)(nil)
 
 // ─── MemoryRecall ───────────────────────────────────────────────────────────
 
@@ -159,7 +159,7 @@ func (m *MemoryRecall) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (m *MemoryRecall) Impact(map[string]any) int { return tools.ImpactObserve }
+func (m *MemoryRecall) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -167,7 +167,7 @@ func (m *MemoryRecall) Impact(map[string]any) int { return tools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (m *MemoryRecall) OutputSchema() json.RawMessage {
-	return tools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -195,22 +195,22 @@ func (m *MemoryRecall) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (m *MemoryRecall) Execute(_ context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(m.ExecuteTyped(nil, params))
+	return toolapi.StringResult(m.ExecuteTyped(nil, params))
 }
 
-func (m *MemoryRecall) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (m *MemoryRecall) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	key, _ := params["key"].(string)
 	if key == "" {
-		return tools.ToolMessage{}, fmt.Errorf("memory_recall: key is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("memory_recall: key is required")
 	}
 	val, ok := m.mem.Get(key)
 	if !ok {
-		return tools.ToolEmpty("kv", fmt.Sprintf("key=%q not found", key)), nil
+		return toolapi.ToolEmpty("kv", fmt.Sprintf("key=%q not found", key)), nil
 	}
-	return tools.ToolOK("kv", val, nil), nil
+	return toolapi.ToolOK("kv", val, nil), nil
 }
 
-var _ tools.Tool = (*MemoryRecall)(nil)
+var _ toolapi.Tool = (*MemoryRecall)(nil)
 
 // ─── MemorySearch ───────────────────────────────────────────────────────────
 
@@ -252,7 +252,7 @@ func (m *MemorySearch) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (m *MemorySearch) Impact(map[string]any) int { return tools.ImpactObserve }
+func (m *MemorySearch) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -260,7 +260,7 @@ func (m *MemorySearch) Impact(map[string]any) int { return tools.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (m *MemorySearch) OutputSchema() json.RawMessage {
-	return tools.EnvelopeSchema(`{"type":"array","items":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"}}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"array","items":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"}}}}`)
 }
 
 /*
@@ -288,17 +288,17 @@ func (m *MemorySearch) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (m *MemorySearch) Execute(_ context.Context, params map[string]any) (string, error) {
-	return tools.StringResult(m.ExecuteTyped(nil, params))
+	return toolapi.StringResult(m.ExecuteTyped(nil, params))
 }
 
-func (m *MemorySearch) ExecuteTyped(_ context.Context, params map[string]any) (tools.ToolMessage, error) {
+func (m *MemorySearch) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	tag, _ := params["tag"].(string)
 	if tag == "" {
-		return tools.ToolMessage{}, fmt.Errorf("memory_search: tag is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("memory_search: tag is required")
 	}
 	results := m.mem.Search([]string{tag})
 	if len(results) == 0 {
-		return tools.ToolEmpty("search", fmt.Sprintf("no entries with tag=%q", tag)), nil
+		return toolapi.ToolEmpty("search", fmt.Sprintf("no entries with tag=%q", tag)), nil
 	}
 	// Format results as key=value pairs
 	type entry struct {
@@ -309,7 +309,7 @@ func (m *MemorySearch) ExecuteTyped(_ context.Context, params map[string]any) (t
 	for i, r := range results {
 		out[i] = entry{Key: r.Key, Value: r.Value}
 	}
-	return tools.ToolOK("search", "", out), nil
+	return toolapi.ToolOK("search", "", out), nil
 }
 
-var _ tools.Tool = (*MemorySearch)(nil)
+var _ toolapi.Tool = (*MemorySearch)(nil)

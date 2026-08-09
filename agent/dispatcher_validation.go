@@ -31,7 +31,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // parsedSchema is the minimal JSON-Schema shape the validator needs.
@@ -85,7 +85,7 @@ func parseToolSchema(raw json.RawMessage) (parsedSchema, error) {
 //
 // Returns nil when every key is allowed. Returns a descriptive error
 // naming the first offending key and the tool's allowed set when not.
-func validateDirectParams(tool tools.Tool, params map[string]any) error {
+func validateDirectParams(tool toolapi.Tool, params map[string]any) error {
 	schema, err := parseToolSchema(tool.Parameters())
 	if err != nil {
 		return fmt.Errorf("validate %s params: %w", tool.Name(), err)

@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // collectGaps is the content-agnostic code half of the coverage edge: it must
@@ -20,13 +20,13 @@ func TestCollectGaps(t *testing.T) {
 	g := NewGraph()
 
 	okID := g.AddNode(&Node{Type: NodeTool, Tag: "fetch_ok", ToolName: "web_fetch"})
-	g.SetBody(okID, toolMessageBody{msg: agenttools.ToolOK("page", "content", nil)})
+	g.SetBody(okID, toolMessageBody{msg: toolapi.ToolOK("page", "content", nil)})
 
 	emID := g.AddNode(&Node{Type: NodeTool, Tag: "search_x", ToolName: "web_search"})
-	g.SetBody(emID, toolMessageBody{msg: agenttools.ToolEmpty("search", "no reachable results")})
+	g.SetBody(emID, toolMessageBody{msg: toolapi.ToolEmpty("search", "no reachable results")})
 
 	erID := g.AddNode(&Node{Type: NodeTool, Tag: "fetch_bad", ToolName: "web_fetch"})
-	g.SetBody(erID, toolMessageBody{msg: agenttools.ToolFail("page", "HTTP 404", nil)})
+	g.SetBody(erID, toolMessageBody{msg: toolapi.ToolFail("page", "HTTP 404", nil)})
 
 	failID := g.AddNode(&Node{Type: NodeTool, Tag: "bash_x", ToolName: "bash"})
 	g.SetError(failID, fmt.Errorf("boom"))
@@ -47,7 +47,7 @@ func TestCollectGaps(t *testing.T) {
 func TestCoverageEdge_CleanRunSkips(t *testing.T) {
 	g := NewGraph()
 	id := g.AddNode(&Node{Type: NodeTool, Tag: "ok", ToolName: "web_fetch"})
-	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("page", "content", nil)})
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolOK("page", "content", nil)})
 
 	if cov := groundingAgent().coverageEdge(nil, g, "some evidence"); cov != "" {
 		t.Fatalf("clean run should skip the edge (return \"\"), got %q", cov)
@@ -62,9 +62,9 @@ func TestCoverageEdge_CleanRunSkips(t *testing.T) {
 func TestCoverageEdge_FailOpenToStructural(t *testing.T) {
 	g := NewGraph()
 	emID := g.AddNode(&Node{Type: NodeTool, Tag: "search_x", ToolName: "web_search"})
-	g.SetBody(emID, toolMessageBody{msg: agenttools.ToolEmpty("search", "no reachable results")})
+	g.SetBody(emID, toolMessageBody{msg: toolapi.ToolEmpty("search", "no reachable results")})
 	erID := g.AddNode(&Node{Type: NodeTool, Tag: "fetch_bad", ToolName: "web_fetch"})
-	g.SetBody(erID, toolMessageBody{msg: agenttools.ToolFail("page", "HTTP 404", nil)})
+	g.SetBody(erID, toolMessageBody{msg: toolapi.ToolFail("page", "HTTP 404", nil)})
 
 	cov := groundingAgent().coverageEdge(context.Background(), g, "REQUEST + EVIDENCE")
 	if cov == "" {
@@ -92,7 +92,7 @@ func TestCoverageEdge_GeneratesFromLLM(t *testing.T) {
 	a := &Agent{executor: llm.NewClient(srv.URL, "k", "test-light")}
 	g := NewGraph()
 	id := g.AddNode(&Node{Type: NodeTool, Tag: "search_x", ToolName: "web_search"})
-	g.SetBody(id, toolMessageBody{msg: agenttools.ToolEmpty("search", "no results")})
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolEmpty("search", "no results")})
 
 	cov := a.coverageEdge(context.Background(), g, "REQUEST: revenue?\nEVIDENCE: none")
 	if !strings.HasPrefix(cov, "## Coverage") {
@@ -115,7 +115,7 @@ func fetchedNode(g *Graph, tag, url string) {
 		Type: NodeTool, Tag: tag, ToolName: "web_fetch",
 		Params: map[string]any{"url": url},
 	})
-	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("page", "content", map[string]any{"url": url})})
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolOK("page", "content", map[string]any{"url": url})})
 }
 
 // Part 2 of the coverage edge: even with NO gaps (every search returned ok), if a

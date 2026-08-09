@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -30,7 +30,7 @@ func NewGit() *Git { return &Git{} }
  * return: JSON schema as raw bytes
  */
 func (g *Git) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -59,13 +59,13 @@ func (g *Git) Impact(params map[string]any) int {
 	action, _ := params["action"].(string)
 	switch action {
 	case "status", "log", "diff", "branch_list", "show":
-		return agenttools.ImpactObserve
+		return toolapi.ImpactObserve
 	case "add", "commit", "branch_create", "checkout", "stash", "tag":
-		return agenttools.ImpactAffect
+		return toolapi.ImpactAffect
 	case "push", "reset", "pull", "merge", "rebase":
-		return agenttools.ImpactControl
+		return toolapi.ImpactControl
 	default:
-		return agenttools.ImpactAffect
+		return toolapi.ImpactAffect
 	}
 }
 
@@ -100,10 +100,10 @@ func (g *Git) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (g *Git) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(g.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(g.ExecuteTyped(ctx, params))
 }
 
-func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	action, _ := params["action"].(string)
 	args, _ := params["args"].(string)
 	path, _ := params["path"].(string)
@@ -129,19 +129,19 @@ func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (agenttoo
 		gitArgs = append([]string{"add"}, strings.Fields(args)...)
 	case "commit":
 		if args == "" {
-			return agenttools.ToolMessage{}, fmt.Errorf("git: commit message required in args")
+			return toolapi.ToolMessage{}, fmt.Errorf("git: commit message required in args")
 		}
 		gitArgs = []string{"commit", "-m", args}
 	case "branch_list":
 		gitArgs = []string{"branch", "-a"}
 	case "branch_create":
 		if args == "" {
-			return agenttools.ToolMessage{}, fmt.Errorf("git: branch name required in args")
+			return toolapi.ToolMessage{}, fmt.Errorf("git: branch name required in args")
 		}
 		gitArgs = []string{"branch", args}
 	case "checkout":
 		if args == "" {
-			return agenttools.ToolMessage{}, fmt.Errorf("git: branch/ref required in args")
+			return toolapi.ToolMessage{}, fmt.Errorf("git: branch/ref required in args")
 		}
 		gitArgs = append([]string{"checkout"}, strings.Fields(args)...)
 	case "push":
@@ -174,11 +174,11 @@ func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (agenttoo
 		gitArgs = append([]string{"reset"}, strings.Fields(args)...)
 	case "merge":
 		if args == "" {
-			return agenttools.ToolMessage{}, fmt.Errorf("git: branch name required in args")
+			return toolapi.ToolMessage{}, fmt.Errorf("git: branch name required in args")
 		}
 		gitArgs = append([]string{"merge"}, strings.Fields(args)...)
 	default:
-		return agenttools.ToolMessage{}, fmt.Errorf("git: unknown action %q", action)
+		return toolapi.ToolMessage{}, fmt.Errorf("git: unknown action %q", action)
 	}
 
 	cmd := exec.CommandContext(ctx, "git", gitArgs...)
@@ -208,15 +208,15 @@ func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (agenttoo
 	// prose with the exit code appended — the coverage statement reads the
 	// status, and "[exit: 1]" inside a string is not something it can read.
 	if err != nil {
-		return agenttools.ToolFail("command", fmt.Sprintf("git %s: %v", action, err),
+		return toolapi.ToolFail("command", fmt.Sprintf("git %s: %v", action, err),
 			map[string]any{"output": output, "action": action}), nil
 	}
 	// git status on a clean tree, git log with no matches: the command worked
 	// and there is nothing to report. That is a finding, not a blank success.
 	if strings.TrimSpace(output) == "" {
-		return agenttools.ToolEmpty("command", "git "+action+" produced no output"), nil
+		return toolapi.ToolEmpty("command", "git "+action+" produced no output"), nil
 	}
-	return agenttools.ToolOK("command", output, map[string]any{"action": action}), nil
+	return toolapi.ToolOK("command", output, map[string]any{"action": action}), nil
 }
 
-var _ agenttools.Tool = (*Git)(nil)
+var _ toolapi.Tool = (*Git)(nil)

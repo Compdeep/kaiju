@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // Every migrated tool now declares the unified envelope schema (derived from
@@ -43,12 +43,12 @@ func TestSchemaUnified(t *testing.T) {
 }
 
 // mustEnvelope asserts a tool's Execute output is a well-formed ToolMessage.
-func mustEnvelope(t *testing.T, out string, err error) agenttools.ToolMessage {
+func mustEnvelope(t *testing.T, out string, err error) toolapi.ToolMessage {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("Execute errored: %v", err)
 	}
-	m, ok := agenttools.ParseToolMessage(out)
+	m, ok := toolapi.ParseToolMessage(out)
 	if !ok {
 		t.Fatalf("output is not a ToolMessage envelope: %s", out)
 	}
@@ -58,7 +58,7 @@ func mustEnvelope(t *testing.T, out string, err error) agenttools.ToolMessage {
 func TestSysinfo_EmitsEnvelope(t *testing.T) {
 	out, err := NewSysinfo().Execute(nil, nil)
 	m := mustEnvelope(t, out, err)
-	if m.Type != "sysinfo" || m.Status != agenttools.StatusOK {
+	if m.Type != "sysinfo" || m.Status != toolapi.StatusOK {
 		t.Fatalf("sysinfo envelope = kind %q status %q", m.Type, m.Status)
 	}
 	if len(m.Data) == 0 {
@@ -73,7 +73,7 @@ func TestFileRead_EmitsTextEnvelope(t *testing.T) {
 	}
 	out, err := NewFileRead(dir).Execute(nil, map[string]any{"path": "f.txt"})
 	m := mustEnvelope(t, out, err)
-	if m.Type != "text" || m.Status != agenttools.StatusOK || m.Content != "hello world" {
+	if m.Type != "text" || m.Status != toolapi.StatusOK || m.Content != "hello world" {
 		t.Fatalf("file_read envelope = kind %q status %q content %q", m.Type, m.Status, m.Content)
 	}
 }
@@ -88,7 +88,7 @@ func TestFileRead_EmptyFileIsReportedAsEmpty(t *testing.T) {
 	}
 	out, err := NewFileRead(dir).Execute(nil, map[string]any{"path": "nothing.txt"})
 	m := mustEnvelope(t, out, err)
-	if m.Status != agenttools.StatusEmpty {
+	if m.Status != toolapi.StatusEmpty {
 		t.Fatalf("status = %q, want empty", m.Status)
 	}
 	if !strings.Contains(m.Detail, "nothing.txt") {
@@ -109,7 +109,7 @@ func TestFileList_EmitsListingEnvelope(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0o644)
 	out, err := NewFileList(dir).Execute(nil, map[string]any{"path": "."})
 	m := mustEnvelope(t, out, err)
-	if m.Type != "listing" || m.Status != agenttools.StatusOK {
+	if m.Type != "listing" || m.Status != toolapi.StatusOK {
 		t.Fatalf("file_list envelope = kind %q status %q", m.Type, m.Status)
 	}
 	if len(m.Data) == 0 {
@@ -120,7 +120,7 @@ func TestFileList_EmitsListingEnvelope(t *testing.T) {
 func TestNetInfo_InterfacesEnvelope(t *testing.T) {
 	out, err := NewNetInfo().Execute(nil, map[string]any{"action": "interfaces"})
 	m := mustEnvelope(t, out, err)
-	if m.Type != "net" || m.Status != agenttools.StatusOK {
+	if m.Type != "net" || m.Status != toolapi.StatusOK {
 		t.Fatalf("net_info envelope = kind %q status %q", m.Type, m.Status)
 	}
 	var d struct {
@@ -136,7 +136,7 @@ func TestNetInfo_InterfacesEnvelope(t *testing.T) {
 func TestEnvList_NoMatchIsEmpty(t *testing.T) {
 	out, err := NewEnvList().Execute(nil, map[string]any{"filter": "ZZ_NO_SUCH_VAR_XYZ_"})
 	m := mustEnvelope(t, out, err)
-	if m.Status != agenttools.StatusEmpty {
+	if m.Status != toolapi.StatusEmpty {
 		t.Fatalf("env_list with no matches should be StatusEmpty, got %q", m.Status)
 	}
 }

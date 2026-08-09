@@ -1,7 +1,7 @@
 package agent
 
 import (
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"strings"
 	"testing"
 )
@@ -22,7 +22,7 @@ func TestReflectionBody(t *testing.T) {
 // edge exists to tell an answering stage which steps produced nothing.
 func TestComputeMessage(t *testing.T) {
 	bp := computeMessage("compute", `{"type":"blueprint","project_root":"/p"}`)
-	if bp.Status != agenttools.StatusOK || bp.Detail != "blueprint: /p" {
+	if bp.Status != toolapi.StatusOK || bp.Detail != "blueprint: /p" {
 		t.Fatalf("blueprint = %q %q", bp.Status, bp.Detail)
 	}
 	if v, ok := NewToolBody(bp).Field("project_root"); !ok || v != "/p" {
@@ -32,12 +32,12 @@ func TestComputeMessage(t *testing.T) {
 		t.Fatalf("result detail = %q", res.Detail)
 	}
 	noop := computeMessage("compute", `{"type":"result","no_changes":true,"reason":"nothing to do"}`)
-	if noop.Status != agenttools.StatusEmpty || !strings.Contains(noop.Detail, "nothing to do") {
+	if noop.Status != toolapi.StatusEmpty || !strings.Contains(noop.Detail, "nothing to do") {
 		t.Fatalf("a run that changed nothing = %q %q, want empty carrying the reason", noop.Status, noop.Detail)
 	}
 	// Output that is not JSON still reaches the run rather than being called a
 	// failure the tool never reported.
-	if raw := computeMessage("compute", "the model wrote prose"); raw.Status != agenttools.StatusUnclassified {
+	if raw := computeMessage("compute", "the model wrote prose"); raw.Status != toolapi.StatusUnclassified {
 		t.Fatalf("non-JSON = %q, want unclassified", raw.Status)
 	}
 }

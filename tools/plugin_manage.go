@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/plugins"
 )
 
@@ -30,22 +30,22 @@ func (p *PluginList) Description() string {
 	return "List the optional plugins built into this kaiju and whether each is active or available (compiled in but switched off). Use when the user asks what plugins or capabilities exist, or whether you can do something that might need a plugin."
 }
 
-func (p *PluginList) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (p *PluginList) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 func (p *PluginList) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 }
 
 func (p *PluginList) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema(`{"type":"array","description":"compiled-in plugins","items":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"active":{"type":"boolean"}}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"array","description":"compiled-in plugins","items":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"active":{"type":"boolean"}}}}`)
 }
 
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (p *PluginList) Execute(_ context.Context, _ map[string]any) (string, error) {
-	return agenttools.StringResult(p.ExecuteTyped(nil, nil))
+	return toolapi.StringResult(p.ExecuteTyped(nil, nil))
 }
 
-func (p *PluginList) ExecuteTyped(_ context.Context, _ map[string]any) (agenttools.ToolMessage, error) {
+func (p *PluginList) ExecuteTyped(_ context.Context, _ map[string]any) (toolapi.ToolMessage, error) {
 	type row struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
@@ -70,7 +70,7 @@ func (p *PluginList) ExecuteTyped(_ context.Context, _ map[string]any) (agenttoo
 		}
 	}
 	if len(rows) == 0 {
-		return agenttools.ToolEmpty("plugins", "no optional plugins are available in this build"), nil
+		return toolapi.ToolEmpty("plugins", "no optional plugins are available in this build"), nil
 	}
 	var b strings.Builder
 	for _, r := range rows {
@@ -80,19 +80,19 @@ func (p *PluginList) ExecuteTyped(_ context.Context, _ map[string]any) (agenttoo
 		}
 		b.WriteString(fmt.Sprintf("- %s [%s]: %s\n", r.Name, state, r.Description))
 	}
-	return agenttools.ToolOK("plugins", strings.TrimRight(b.String(), "\n"), rows), nil
+	return toolapi.ToolOK("plugins", strings.TrimRight(b.String(), "\n"), rows), nil
 }
 
 var (
-	_ agenttools.Tool      = (*PluginList)(nil)
-	_ agenttools.Outputter = (*PluginList)(nil)
+	_ toolapi.Tool      = (*PluginList)(nil)
+	_ toolapi.Outputter = (*PluginList)(nil)
 )
 
 // liveHost implements plugins.Host by writing into the RUNNING tool registry, so
 // a plugin activated at runtime (plugin_enable) adds its tools live — the planner
 // picks them up on the next turn. Seams delegate to the core registrars.
 type liveHost struct {
-	reg       *agenttools.Registry
+	reg       *toolapi.Registry
 	workspace string
 	added     []string
 }
@@ -101,17 +101,17 @@ var _ plugins.Host = (*liveHost)(nil)
 
 func (h *liveHost) Workspace() string { return h.workspace }
 
-func (h *liveHost) AddTool(t agenttools.Tool) {
+func (h *liveHost) AddTool(t toolapi.Tool) {
 	h.reg.Replace(t, "plugin")
 	h.added = append(h.added, t.Name())
 }
 
 func (h *liveHost) RegisterBinaryDecoder(mime string, fn func([]byte) (string, error)) {
-	agenttools.RegisterBinaryDecoder(mime, fn)
+	toolapi.RegisterBinaryDecoder(mime, fn)
 }
 
 func (h *liveHost) RegisterReaderFallback(fn func(ctx context.Context, rawURL string) (string, error)) {
-	agenttools.RegisterReaderFallback(fn)
+	toolapi.RegisterReaderFallback(fn)
 }
 
 // PluginEnable switches on a compiled-but-off plugin at runtime (adding its tools
@@ -119,7 +119,7 @@ func (h *liveHost) RegisterReaderFallback(fn func(ctx context.Context, rawURL st
 // AllowRuntimePluginActivation — so when the capability isn't offered, the tool
 // isn't even present. The plugins skill gates WHEN it is used (explicit user ask).
 type PluginEnable struct {
-	reg       *agenttools.Registry
+	reg       *toolapi.Registry
 	cfg       PluginConfig
 	workspace string
 	svc       *Service // kaiju's process manager — brings up a plugin's backing host
@@ -132,7 +132,7 @@ type PluginEnable struct {
 // here made construction the place a missing config surfaced — at startup,
 // before any tool ran, as a nil dereference with no name attached to it. The
 // tool reports it instead, when it is called, as a failure like any other.
-func NewPluginEnable(reg *agenttools.Registry, cfg PluginConfig, svc *Service) *PluginEnable {
+func NewPluginEnable(reg *toolapi.Registry, cfg PluginConfig, svc *Service) *PluginEnable {
 	workspace := ""
 	if cfg != nil {
 		workspace = cfg.PluginWorkspace()
@@ -148,7 +148,7 @@ func (p *PluginEnable) Description() string {
 
 // Impact is Affect: enabling a plugin grants the agent new capabilities — a real,
 // but reversible, side effect — so it runs through the intent gate and is audited.
-func (p *PluginEnable) Impact(map[string]any) int { return agenttools.ImpactAffect }
+func (p *PluginEnable) Impact(map[string]any) int { return toolapi.ImpactAffect }
 
 func (p *PluginEnable) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"The plugin to enable (a name from plugin_list marked available)."}},"required":["name"],"additionalProperties":false}`)
@@ -156,19 +156,19 @@ func (p *PluginEnable) Parameters() json.RawMessage {
 
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (p *PluginEnable) Execute(_ context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(p.ExecuteTyped(nil, params))
+	return toolapi.StringResult(p.ExecuteTyped(nil, params))
 }
 
-func (p *PluginEnable) ExecuteTyped(_ context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (p *PluginEnable) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	// Enabling a plugin writes it to the configuration, so without one there is
 	// nothing to write to. A failure the caller can read, not a crash.
 	if p.cfg == nil {
-		return agenttools.ToolFail("plugin", "no configuration available — plugins cannot be enabled", nil), nil
+		return toolapi.ToolFail("plugin", "no configuration available — plugins cannot be enabled", nil), nil
 	}
 	name, _ := params["name"].(string)
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return agenttools.ToolFail("plugin", "'name' is required — see plugin_list", nil), nil
+		return toolapi.ToolFail("plugin", "'name' is required — see plugin_list", nil), nil
 	}
 	// A remote CAPABILITY (webreader, …): bring up the bridge pointed at its host
 	// transparently — the user enables the capability, never the "remote" bridge.
@@ -177,11 +177,11 @@ func (p *PluginEnable) ExecuteTyped(_ context.Context, params map[string]any) (a
 	}
 
 	if plugins.IsActive(name) {
-		return agenttools.ToolOK("plugin", fmt.Sprintf("plugin %q is already active", name), nil), nil
+		return toolapi.ToolOK("plugin", fmt.Sprintf("plugin %q is already active", name), nil), nil
 	}
 	pl, ok := plugins.Get(name)
 	if !ok {
-		return agenttools.ToolFail("plugin", fmt.Sprintf("plugin %q is not built into this binary — it needs a rebuild with -tags plugin_%s", name, name), nil), nil
+		return toolapi.ToolFail("plugin", fmt.Sprintf("plugin %q is not built into this binary — it needs a rebuild with -tags plugin_%s", name, name), nil), nil
 	}
 
 	// A remote plugin's bridge reads KAIJU_PLUGIN_HOST; export the configured host
@@ -201,10 +201,10 @@ func (p *PluginEnable) ExecuteTyped(_ context.Context, params map[string]any) (a
 
 	if len(host.added) == 0 {
 		// e.g. the remote bridge activated but its host was unreachable.
-		return agenttools.ToolOK("plugin", fmt.Sprintf("Activated %q, but it added no tools — for a remote plugin the host may be unreachable (check KAIJU_PLUGIN_HOST).%s", name, note), map[string]any{"enabled": name, "tools": []string{}, "persisted": note == ""}), nil
+		return toolapi.ToolOK("plugin", fmt.Sprintf("Activated %q, but it added no tools — for a remote plugin the host may be unreachable (check KAIJU_PLUGIN_HOST).%s", name, note), map[string]any{"enabled": name, "tools": []string{}, "persisted": note == ""}), nil
 	}
 	msg := fmt.Sprintf("Enabled %q. Added tool(s): %s.%s", name, strings.Join(host.added, ", "), note)
-	return agenttools.ToolOK("plugin", msg, map[string]any{"enabled": name, "tools": host.added, "persisted": note == ""}), nil
+	return toolapi.ToolOK("plugin", msg, map[string]any{"enabled": name, "tools": host.added, "persisted": note == ""}), nil
 }
 
 // enableRemote brings up a remote capability (webreader, …): it connects the
@@ -213,10 +213,10 @@ func (p *PluginEnable) ExecuteTyped(_ context.Context, params map[string]any) (a
 // AND SUPERVISED through kaiju's own service manager (auto-restarted on crash),
 // not a fire-and-forget exec. The bridge stays invisible — the user enabled
 // "webreader", never "remote".
-func (p *PluginEnable) enableRemote(r plugins.RemoteInfo) (agenttools.ToolMessage, error) {
+func (p *PluginEnable) enableRemote(r plugins.RemoteInfo) (toolapi.ToolMessage, error) {
 	added, hostURL, err := p.ensureRemoteUp(r)
 	if err != nil {
-		return agenttools.ToolFail("plugin", err.Error(), nil), nil
+		return toolapi.ToolFail("plugin", err.Error(), nil), nil
 	}
 	// Persist so it survives a restart: the bridge in `plugins`, and the host URL.
 	note := ""
@@ -225,7 +225,7 @@ func (p *PluginEnable) enableRemote(r plugins.RemoteInfo) (agenttools.ToolMessag
 	} else if p.cfg.PluginHost() == "" {
 		_ = p.cfg.SetPluginHost(hostURL)
 	}
-	return agenttools.ToolOK("plugin", fmt.Sprintf("Enabled %q — web_fetch reads pages through it, and its host is supervised by kaiju's service manager (auto-restarts if it dies).%s", r.Name, note), map[string]any{"enabled": r.Name, "tools": added, "host": hostURL}), nil
+	return toolapi.ToolOK("plugin", fmt.Sprintf("Enabled %q — web_fetch reads pages through it, and its host is supervised by kaiju's service manager (auto-restarts if it dies).%s", r.Name, note), map[string]any{"enabled": r.Name, "tools": added, "host": hostURL}), nil
 }
 
 // ensureRemoteUp connects the bridge to r's host and returns the tools it
@@ -353,7 +353,7 @@ func (p *PluginOption) Description() string {
 	return `Set and persist a plugin configuration option. Currently supported: the remote plugin host URL — call with {"name":"remote","key":"host","value":"http://127.0.0.1:8091"}, then plugin_enable {"name":"remote"}. Use only when the user asks to configure or point kaiju at a plugin host.`
 }
 
-func (p *PluginOption) Impact(map[string]any) int { return agenttools.ImpactAffect }
+func (p *PluginOption) Impact(map[string]any) int { return toolapi.ImpactAffect }
 
 func (p *PluginOption) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Plugin name (e.g. \"remote\")."},"key":{"type":"string","description":"Option key (e.g. \"host\")."},"value":{"type":"string","description":"Option value (e.g. the host URL)."}},"required":["name","key","value"],"additionalProperties":false}`)
@@ -361,33 +361,33 @@ func (p *PluginOption) Parameters() json.RawMessage {
 
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (p *PluginOption) Execute(_ context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(p.ExecuteTyped(nil, params))
+	return toolapi.StringResult(p.ExecuteTyped(nil, params))
 }
 
-func (p *PluginOption) ExecuteTyped(_ context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (p *PluginOption) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	if p.cfg == nil {
-		return agenttools.ToolFail("plugin", "no configuration available — plugin options cannot be read or set", nil), nil
+		return toolapi.ToolFail("plugin", "no configuration available — plugin options cannot be read or set", nil), nil
 	}
 	key, _ := params["key"].(string)
 	value, _ := params["value"].(string)
 	key = strings.ToLower(strings.TrimSpace(key))
 	value = strings.TrimSpace(value)
 	if key == "" || value == "" {
-		return agenttools.ToolFail("plugin", "'key' and 'value' are required", nil), nil
+		return toolapi.ToolFail("plugin", "'key' and 'value' are required", nil), nil
 	}
 	switch key {
 	case "host", "url", "remote_plugin_host":
 		if err := p.cfg.SetPluginHost(value); err != nil {
-			return agenttools.ToolFail("plugin", "couldn't persist host: "+err.Error(), nil), nil
+			return toolapi.ToolFail("plugin", "couldn't persist host: "+err.Error(), nil), nil
 		}
 		os.Setenv("KAIJU_PLUGIN_HOST", value)
-		return agenttools.ToolOK("plugin", fmt.Sprintf("Set the remote plugin host to %s. Enable it with plugin_enable name=\"remote\".", value), map[string]any{"remote_plugin_host": value}), nil
+		return toolapi.ToolOK("plugin", fmt.Sprintf("Set the remote plugin host to %s. Enable it with plugin_enable name=\"remote\".", value), map[string]any{"remote_plugin_host": value}), nil
 	default:
-		return agenttools.ToolFail("plugin", fmt.Sprintf("unknown option %q — supported: host (the remote plugin host URL)", key), nil), nil
+		return toolapi.ToolFail("plugin", fmt.Sprintf("unknown option %q — supported: host (the remote plugin host URL)", key), nil), nil
 	}
 }
 
-var _ agenttools.Tool = (*PluginOption)(nil)
+var _ toolapi.Tool = (*PluginOption)(nil)
 
 // appendUnique returns list with v appended if absent (a fresh slice, no aliasing).
 func appendUnique(list []string, v string) []string {
@@ -399,4 +399,4 @@ func appendUnique(list []string, v string) []string {
 	return append(append([]string{}, list...), v)
 }
 
-var _ agenttools.Tool = (*PluginEnable)(nil)
+var _ toolapi.Tool = (*PluginEnable)(nil)

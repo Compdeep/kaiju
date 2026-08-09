@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 func unclassifiedBody(text string) toolMessageBody {
-	return toolMessageBody{msg: agenttools.ToolUnclassified(text)}
+	return toolMessageBody{msg: toolapi.ToolUnclassified(text)}
 }
 
 // A tool that never declared an outcome used to enter the graph as a bare
@@ -59,13 +59,13 @@ func TestUnclassified_SummaryIsTheFirstLine(t *testing.T) {
 // claims it deliberately does not make.
 func TestUnclassified_IsNotOkAndNotEmpty(t *testing.T) {
 	env := unclassifiedBody("something").Envelope()
-	if env.Status == agenttools.StatusOK {
+	if env.Status == toolapi.StatusOK {
 		t.Error("must not claim the tool found something")
 	}
-	if env.Status == agenttools.StatusEmpty {
+	if env.Status == toolapi.StatusEmpty {
 		t.Error("must not claim the tool found nothing")
 	}
-	if env.Status != agenttools.StatusUnclassified {
+	if env.Status != toolapi.StatusUnclassified {
 		t.Fatalf("status = %q", env.Status)
 	}
 }
@@ -104,7 +104,7 @@ func TestEmptyAndError_StillCountAsGapsAndNotAsEvidence(t *testing.T) {
 	a := &Agent{}
 	g := NewGraph()
 	e := g.AddNode(&Node{Type: NodeTool, Tag: "procs", ToolName: "list_processes"})
-	g.SetBody(e, toolMessageBody{msg: agenttools.ToolEmpty("listing", "no processes matched")})
+	g.SetBody(e, toolMessageBody{msg: toolapi.ToolEmpty("listing", "no processes matched")})
 
 	if gaps := a.collectGaps(g); len(gaps) != 1 || gaps[0].Detail != "no processes matched" {
 		t.Fatalf("empty must still be reported with its own detail, got %+v", gaps)

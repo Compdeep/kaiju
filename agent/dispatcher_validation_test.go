@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// fakeTool implements tools.Tool with caller-specified Parameters JSON,
+// fakeTool implements toolapi.Tool with caller-specified Parameters JSON,
 // so each test can express a precise schema shape without standing up a
 // real registry entry.
 type fakeTool struct {
@@ -33,8 +33,8 @@ func (f *fakeTool) Execute(context.Context, map[string]any) (string, error) {
 // behaves as a tool with no Outputter at all.
 func (f *fakeTool) OutputSchema() json.RawMessage { return f.output }
 
-var _ tools.Tool = (*fakeTool)(nil)
-var _ tools.Outputter = (*fakeTool)(nil)
+var _ toolapi.Tool = (*fakeTool)(nil)
+var _ toolapi.Outputter = (*fakeTool)(nil)
 
 // ── parseToolSchema ──────────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // ── Scheduler: DAG execution engine ─────────────────────────────────────────
@@ -192,7 +192,7 @@ func scaleReplanCap(base int, steps []PlanStep) int {
 func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *Graph, budget *Budget) (*scheduleOutcome, error) {
 	// Inject data directory override into context for retrieval tools (relay/gateway paths)
 	if trigger.DataDir != "" {
-		ctx = tools.WithDataDir(ctx, trigger.DataDir)
+		ctx = toolapi.WithDataDir(ctx, trigger.DataDir)
 	}
 	// Propagate session ID onto the graph so compute nodes can resolve
 	// per-session interfaces.json without threading trigger through every layer.
@@ -1267,7 +1267,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// Tool/compute node resolved successfully
 				if comp.Body != nil {
 					graph.SetBody(comp.NodeID, comp.Body)
-				} else if msg, ok := tools.ParseToolMessage(comp.Result); ok {
+				} else if msg, ok := toolapi.ParseToolMessage(comp.Result); ok {
 					graph.SetBody(comp.NodeID, toolMessageBody{msg: msg})
 				} else if node.Type == NodeTool {
 					// A tool that declared no outcome — prose, its own JSON shape,
@@ -1275,7 +1275,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					// consumer had to recognise by the body's Go type, and most
 					// read as "nothing to report here". Saying so costs nothing
 					// and stops absence being mistaken for success.
-					graph.SetBody(comp.NodeID, toolMessageBody{msg: tools.ToolUnclassified(comp.Result)})
+					graph.SetBody(comp.NodeID, toolMessageBody{msg: toolapi.ToolUnclassified(comp.Result)})
 				} else {
 					graph.SetResult(comp.NodeID, comp.Result)
 				}
@@ -1371,7 +1371,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					// service now emits a ToolMessage envelope; the action payload
 					// (status/name/pid/port) is in Data.
 					svcSrc := comp.Result
-					if msg, ok := tools.ParseToolMessage(comp.Result); ok {
+					if msg, ok := toolapi.ParseToolMessage(comp.Result); ok {
 						svcSrc = string(msg.Data)
 					}
 					if json.Unmarshal([]byte(svcSrc), &svcResult) == nil && svcResult.Status == "started" {
@@ -2122,7 +2122,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 func bashError(comp nodeCompletion) (error, bool) {
 	if tb, ok := comp.Body.(toolMessageBody); ok {
 		env := tb.Envelope()
-		if env.Type == "command" && env.Status == tools.StatusError {
+		if env.Type == "command" && env.Status == toolapi.StatusError {
 			return fmt.Errorf("bash failed: %s", Text.TruncateLog(env.Detail, 300)), true
 		}
 		return nil, false
@@ -2174,7 +2174,7 @@ func extractBashStdout(result string) string {
 		return ""
 	}
 	// Typed bash: envelope carrying stdout/stderr in data.
-	if msg, ok := tools.ParseToolMessage(trimmed); ok {
+	if msg, ok := toolapi.ParseToolMessage(trimmed); ok {
 		var d struct {
 			Stdout string `json:"stdout"`
 			Stderr string `json:"stderr"`

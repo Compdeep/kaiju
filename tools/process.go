@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // ─── ProcessList ────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ func (p *ProcessList) Description() string {
  * param: _ - unused parameters
  * return: ImpactObserve (0)
  */
-func (p *ProcessList) Impact(map[string]any) int { return agenttools.ImpactObserve }
+func (p *ProcessList) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -57,7 +57,7 @@ func (p *ProcessList) Impact(map[string]any) int { return agenttools.ImpactObser
  * return: JSON schema as raw bytes
  */
 func (p *ProcessList) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -85,13 +85,13 @@ func (p *ProcessList) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (p *ProcessList) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(p.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(p.ExecuteTyped(ctx, params))
 }
 
-func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
+func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	filter, _ := params["filter"].(string)
 	limit := 30
-	if l, ok := agenttools.ParamNum(params, "limit"); ok && l > 0 {
+	if l, ok := toolapi.ParamNum(params, "limit"); ok && l > 0 {
 		limit = int(l)
 	}
 
@@ -107,7 +107,7 @@ func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (
 
 	out, err := cmd.Output()
 	if err != nil {
-		return agenttools.ToolMessage{}, fmt.Errorf("process_list: %w", err)
+		return toolapi.ToolMessage{}, fmt.Errorf("process_list: %w", err)
 	}
 
 	lines := strings.Split(string(out), "\n")
@@ -130,10 +130,10 @@ func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (
 		}
 	}
 
-	return agenttools.ToolText(strings.Join(result, "\n")), nil
+	return toolapi.ToolText(strings.Join(result, "\n")), nil
 }
 
-var _ agenttools.Tool = (*ProcessList)(nil)
+var _ toolapi.Tool = (*ProcessList)(nil)
 
 // ─── ProcessKill ────────────────────────────────────────────────────────────
 
@@ -172,7 +172,7 @@ func (p *ProcessKill) Description() string {
  * param: _ - unused parameters
  * return: ImpactControl (2)
  */
-func (p *ProcessKill) Impact(map[string]any) int { return agenttools.ImpactControl }
+func (p *ProcessKill) Impact(map[string]any) int { return toolapi.ImpactControl }
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -180,7 +180,7 @@ func (p *ProcessKill) Impact(map[string]any) int { return agenttools.ImpactContr
  * return: JSON schema as raw bytes
  */
 func (p *ProcessKill) OutputSchema() json.RawMessage {
-	return agenttools.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema("")
 }
 
 /*
@@ -209,17 +209,17 @@ func (p *ProcessKill) Parameters() json.RawMessage {
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (p *ProcessKill) Execute(ctx context.Context, params map[string]any) (string, error) {
-	return agenttools.StringResult(p.ExecuteTyped(ctx, params))
+	return toolapi.StringResult(p.ExecuteTyped(ctx, params))
 }
 
-func (p *ProcessKill) ExecuteTyped(ctx context.Context, params map[string]any) (agenttools.ToolMessage, error) {
-	pidFloat, ok := agenttools.ParamNum(params, "pid")
+func (p *ProcessKill) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
+	pidFloat, ok := toolapi.ParamNum(params, "pid")
 	if !ok {
-		return agenttools.ToolMessage{}, fmt.Errorf("process_kill: pid is required")
+		return toolapi.ToolMessage{}, fmt.Errorf("process_kill: pid is required")
 	}
 	pid := int(pidFloat)
 	if pid <= 1 {
-		return agenttools.ToolMessage{}, fmt.Errorf("process_kill: refusing to kill pid %d (unsafe — use process_list to find the correct PID first)", pid)
+		return toolapi.ToolMessage{}, fmt.Errorf("process_kill: refusing to kill pid %d (unsafe — use process_list to find the correct PID first)", pid)
 	}
 	force, _ := params["force"].(bool)
 
@@ -241,9 +241,9 @@ func (p *ProcessKill) ExecuteTyped(ctx context.Context, params map[string]any) (
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return agenttools.ToolFail("command", fmt.Sprintf("kill failed: %v — %s", err, strings.TrimSpace(string(out))), nil), nil
+		return toolapi.ToolFail("command", fmt.Sprintf("kill failed: %v — %s", err, strings.TrimSpace(string(out))), nil), nil
 	}
-	return agenttools.ToolText(fmt.Sprintf("killed pid %d (force=%v)\n%s", pid, force, strings.TrimSpace(string(out)))), nil
+	return toolapi.ToolText(fmt.Sprintf("killed pid %d (force=%v)\n%s", pid, force, strings.TrimSpace(string(out)))), nil
 }
 
-var _ agenttools.Tool = (*ProcessKill)(nil)
+var _ toolapi.Tool = (*ProcessKill)(nil)

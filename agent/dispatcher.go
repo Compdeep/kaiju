@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
-	"github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -176,7 +176,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 
 	// Enforce per-tool cooldown before executing
 	if skill, ok := a.registry.Get(n.ToolName); ok {
-		cooldown := tools.GetThrottle(skill)
+		cooldown := toolapi.GetThrottle(skill)
 		if cooldown > 0 {
 			throttle.waitThrottle(ctx, n.ToolName, cooldown)
 		}
@@ -193,7 +193,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// included in the node event when SetResult emits it.
 	if err == nil {
 		if skill, ok := a.registry.Get(n.ToolName); ok {
-			if hint := tools.GetDisplayHint(skill, n.Params, result); hint != nil {
+			if hint := toolapi.GetDisplayHint(skill, n.Params, result); hint != nil {
 				n.Actions = append(n.Actions, NodeAction{
 					Type:    "panel_show",
 					Plugin:  hint.Plugin,
@@ -566,7 +566,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		ctx = WithExecContext(ctx, ec)
 	}
 
-	if tx, ok := skill.(tools.TypedExecutor); ok {
+	if tx, ok := skill.(toolapi.TypedExecutor); ok {
 		// Typed path: the tool returns a ToolMessage directly — no JSON round-trip.
 		// The node records which cards contributed guidance, so a trace shows
 		// what this run was coding against. Only the tools that consume the
@@ -575,7 +575,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		if ec != nil && len(ec.cardNames) > 0 && (toolName == "compute" || toolName == "edit_file") {
 			n.Skills = ec.cardNames
 		}
-		var msg tools.ToolMessage
+		var msg toolapi.ToolMessage
 		if msg, err = tx.ExecuteTyped(ctx, params); err == nil {
 			body = toolMessageBody{msg: msg}
 			result = msg.JSON()

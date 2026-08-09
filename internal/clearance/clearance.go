@@ -20,7 +20,7 @@ import (
 type Endpoint struct {
 	ToolName  string            `json:"tool_name"`
 	URL       string            `json:"url"`
-	TimeoutMs int              `json:"timeout_ms"` // default 2000
+	TimeoutMs int               `json:"timeout_ms"` // default 2000
 	Headers   map[string]string `json:"headers,omitempty"`
 }
 

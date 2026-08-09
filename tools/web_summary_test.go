@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // When a focused summary misses (the model returns the no-content sentinel) but
@@ -46,7 +46,7 @@ func TestFormatSummary_FocusMissFallsBackToGeneral(t *testing.T) {
 	if !strings.Contains(out.Content, "enterprise AI adoption trends") {
 		t.Fatalf("focus-miss on a content-bearing page should return the general summary, got: %+v", out)
 	}
-	if out.Status != agenttools.StatusOK {
+	if out.Status != toolapi.StatusOK {
 		t.Fatalf("a content-bearing page is not empty, got status %q", out.Status)
 	}
 	if strings.Contains(out.Detail, "did not contain the requested information") {
@@ -67,7 +67,7 @@ func TestFormatSummary_GeneralAlsoEmptyStillReportsNoContent(t *testing.T) {
 	out, _ := wf.formatSummary(context.Background(), "HTTP 200 OK", "https://x.example/empty", body, "revenue")
 	// Nothing found is an outcome, not content: it rides in Detail with the
 	// empty status, which is what the coverage statement reads.
-	if out.Status != agenttools.StatusEmpty {
+	if out.Status != toolapi.StatusEmpty {
 		t.Fatalf("both passes empty → status should be empty, got %q", out.Status)
 	}
 	if !strings.Contains(out.Detail, "did not contain the requested information") {

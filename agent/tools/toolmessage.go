@@ -10,6 +10,17 @@ const (
 	StatusOK    ToolStatus = "ok"    // produced usable content
 	StatusEmpty ToolStatus = "empty" // ran fine, nothing to show — absence is a real result
 	StatusError ToolStatus = "error" // failed
+
+	// StatusUnclassified is a tool that ran and produced output without saying
+	// whether it found anything. Not a failure and not an absence: the output is
+	// perfectly readable, and only the outcome is undeclared.
+	//
+	// It is how a tool that emits prose, or its own JSON shape, enters the graph
+	// — previously as no envelope at all, which every consumer had to notice by
+	// the body's Go type and most silently treated as "fine". This is permanent,
+	// not a migration state: plugins and SKILL.md tools produce text by design
+	// and will never declare an outcome.
+	StatusUnclassified ToolStatus = "unclassified"
 )
 
 // ToolMessage is the uniform output envelope every tool emits. The tool-specific
@@ -19,7 +30,7 @@ const (
 // the graph — deliberately NOT a change to what each tool computes.
 type ToolMessage struct {
 	Kind    string          `json:"kind"`              // payload discriminator: search|page|file|listing|command|kv|status|text
-	Status  ToolStatus      `json:"status"`            // ok | empty | error — the framing signal
+	Status  ToolStatus      `json:"status"`            // ok | empty | error | unclassified — the framing signal
 	Content string          `json:"content,omitempty"` // renderable evidence text
 	Detail  string          `json:"detail,omitempty"`  // why: the note when empty, the reason when error
 	Data    json.RawMessage `json:"data,omitempty"`    // the tool's own payload, verbatim + field-addressable
@@ -61,6 +72,23 @@ func ToolText(content string) ToolMessage {
 	return ToolMessage{Kind: "text", Status: StatusOK, Content: content}
 }
 
+/*
+ * ToolUnclassified wraps output from a tool that did not declare an outcome.
+ * desc: The producer's text, kept verbatim, with the outcome left undeclared
+ *       rather than assumed. Used where a result enters the graph without an
+ *       envelope of its own — prose tools, plugins, SKILL.md wrappers, and any
+ *       tool not yet migrated.
+ *
+ *       Deliberately not ToolOK. Calling it ok asserts the tool found something,
+ *       which is the fabrication the outcome signal exists to prevent; calling it
+ *       empty asserts it found nothing, which is the same mistake reversed.
+ * param: content - what the tool returned, unchanged.
+ * return: the envelope.
+ */
+func ToolUnclassified(content string) ToolMessage {
+	return ToolMessage{Kind: "text", Status: StatusUnclassified, Content: content}
+}
+
 // JSON renders the envelope as the string a tool's Execute returns.
 func (m ToolMessage) JSON() string {
 	b, _ := json.Marshal(m)
@@ -92,7 +120,7 @@ func ParseToolMessage(raw string) (ToolMessage, bool) {
 		return ToolMessage{}, false
 	}
 	switch m.Status {
-	case StatusOK, StatusEmpty, StatusError:
+	case StatusOK, StatusEmpty, StatusError, StatusUnclassified:
 		return m, true
 	}
 	return ToolMessage{}, false

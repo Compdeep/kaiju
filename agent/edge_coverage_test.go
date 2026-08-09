@@ -31,7 +31,7 @@ func TestCollectGaps(t *testing.T) {
 	failID := g.AddNode(&Node{Type: NodeTool, Tag: "bash_x", ToolName: "bash"})
 	g.SetError(failID, fmt.Errorf("boom"))
 
-	gaps := (&Agent{}).collectGaps(g)
+	gaps := groundingAgent().collectGaps(g)
 	if len(gaps) != 3 {
 		t.Fatalf("collectGaps = %d, want 3 (empty + error + failed, NOT ok): %+v", len(gaps), gaps)
 	}
@@ -49,7 +49,7 @@ func TestCoverageEdge_CleanRunSkips(t *testing.T) {
 	id := g.AddNode(&Node{Type: NodeTool, Tag: "ok", ToolName: "web_fetch"})
 	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("page", "content", nil)})
 
-	if cov := (&Agent{}).coverageEdge(nil, g, "some evidence"); cov != "" {
+	if cov := groundingAgent().coverageEdge(nil, g, "some evidence"); cov != "" {
 		t.Fatalf("clean run should skip the edge (return \"\"), got %q", cov)
 	}
 }
@@ -66,7 +66,7 @@ func TestCoverageEdge_FailOpenToStructural(t *testing.T) {
 	erID := g.AddNode(&Node{Type: NodeTool, Tag: "fetch_bad", ToolName: "web_fetch"})
 	g.SetBody(erID, toolMessageBody{msg: agenttools.ToolFail("page", "HTTP 404", nil)})
 
-	cov := (&Agent{}).coverageEdge(context.Background(), g, "REQUEST + EVIDENCE")
+	cov := groundingAgent().coverageEdge(context.Background(), g, "REQUEST + EVIDENCE")
 	if cov == "" {
 		t.Fatal("gaps present but edge returned \"\" — the aggregator gets no absence signal and may fabricate")
 	}
@@ -106,7 +106,15 @@ func TestCoverageEdge_GeneratesFromLLM(t *testing.T) {
 // fetchedNode records a web_fetch that actually retrieved a URL — the URL is
 // stamped into the page envelope's Data, which collectFetched reads.
 func fetchedNode(g *Graph, tag, url string) {
-	id := g.AddNode(&Node{Type: NodeTool, Tag: tag, ToolName: "web_fetch"})
+	// The URL goes in the node's PARAMS, which is what marks a handle as
+	// followed — the dispatcher resolves a ${node...} template in place before
+	// execution, so a real fetch node holds the value it was called with. It is
+	// also in the output, as the real tool stamps it there, but nothing reads
+	// that any more.
+	id := g.AddNode(&Node{
+		Type: NodeTool, Tag: tag, ToolName: "web_fetch",
+		Params: map[string]any{"url": url},
+	})
 	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("page", "content", map[string]any{"url": url})})
 }
 
@@ -117,7 +125,7 @@ func fetchedNode(g *Graph, tag, url string) {
 func TestCoverageEdge_ReferencedButNotRetrieved(t *testing.T) {
 	g := NewGraph()
 	searchNode(g, "s1", "https://ref.example/a", "https://ref.example/b") // ok search, no gap
-	cov := (&Agent{}).coverageEdge(context.Background(), g, "get me 10 real sources")
+	cov := groundingAgent().coverageEdge(context.Background(), g, "get me 10 real sources")
 	if cov == "" {
 		t.Fatal("unretrieved references present but edge returned \"\" — aggregator gets no signal and may claim them verified")
 	}
@@ -137,7 +145,7 @@ func TestCoverageEdge_RetrievedUrlNotFlagged(t *testing.T) {
 	g := NewGraph()
 	searchNode(g, "s1", "https://read.example/a")
 	fetchedNode(g, "f1", "https://read.example/a") // same URL, actually read
-	if cov := (&Agent{}).coverageEdge(context.Background(), g, "req"); cov != "" {
+	if cov := groundingAgent().coverageEdge(context.Background(), g, "req"); cov != "" {
 		t.Fatalf("a retrieved URL (no gaps) should leave the edge silent, got:\n%s", cov)
 	}
 }
@@ -147,7 +155,7 @@ func TestCoverageEdge_FlagsOnlyUnretrieved(t *testing.T) {
 	g := NewGraph()
 	searchNode(g, "s1", "https://x.example/read", "https://x.example/unread")
 	fetchedNode(g, "f1", "https://x.example/read")
-	cov := (&Agent{}).coverageEdge(context.Background(), g, "req")
+	cov := groundingAgent().coverageEdge(context.Background(), g, "req")
 	if !strings.Contains(cov, "https://x.example/unread") {
 		t.Fatalf("the unread reference must be flagged:\n%s", cov)
 	}
@@ -160,13 +168,13 @@ func TestCoverageEdge_FlagsOnlyUnretrieved(t *testing.T) {
 // not yet on the envelope protocol (a RawTextBody) carries no structural status,
 // so it must be skipped — not panicked on — as new body types flow through.
 func TestCollectGaps_SkipsNonEnvelopeAndNilGraph(t *testing.T) {
-	if gaps := (&Agent{}).collectGaps(nil); gaps != nil {
+	if gaps := groundingAgent().collectGaps(nil); gaps != nil {
 		t.Fatalf("nil graph should yield no gaps, got %+v", gaps)
 	}
 	g := NewGraph()
 	id := g.AddNode(&Node{Type: NodeTool, Tag: "legacy", ToolName: "web_fetch"})
 	g.SetBody(id, RawTextBody{Text: "some opaque result"})
-	if gaps := (&Agent{}).collectGaps(g); len(gaps) != 0 {
+	if gaps := groundingAgent().collectGaps(g); len(gaps) != 0 {
 		t.Fatalf("a non-envelope tool body must be skipped, got %+v", gaps)
 	}
 }

@@ -153,7 +153,13 @@ func TestWebSearch_ResultsReachTheGroundingEdge(t *testing.T) {
 	missing := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "readconf", ToolName: "file_read"})
 	g.SetBody(missing, agent.NewToolBody(agenttools.ToolEmpty("text", "the file is empty: app.conf")))
 
-	a := &agent.Agent{}
+	// The engine reads which fields are handles from the tool's own output
+	// schema, so web_search has to be registered for its url field to be seen.
+	// A tool that is not registered declares nothing, which is the behaviour
+	// rather than a limitation of the test.
+	a := newTestAgent(t)
+	_ = a.Registry().Register(tools.NewWebSearch())
+
 	framed := a.FrameGrounding(context.Background(), g, agent.NewStagePrompts("role", "user"))
 	for _, want := range []string{"https://example.test/one", "https://example.test/two"} {
 		if !strings.Contains(framed.User, want) {
@@ -203,4 +209,18 @@ func TestSysinfo_FieldsResolveAndItIsNotAGap(t *testing.T) {
 	if framed := a.FrameCoverage(context.Background(), g, agent.NewStagePrompts("role", "user")); framed.User != "user" {
 		t.Errorf("sysinfo always succeeds and is never a gap, got:\n%s", framed.User)
 	}
+}
+
+// newTestAgent builds an agent with an empty registry and nothing else, which
+// is all these tests need — every call under test reads the graph and the
+// registry.
+func newTestAgent(t *testing.T) *agent.Agent {
+	t.Helper()
+	a, err := agent.New(agent.Config{PathConfig: agent.PathConfig{
+		Workspace: t.TempDir(), MetadataDir: t.TempDir(), DataDir: t.TempDir(),
+	}})
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+	return a
 }

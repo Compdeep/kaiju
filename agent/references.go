@@ -265,3 +265,50 @@ func collectParamStrings(v any, into map[string]bool) {
 		}
 	}
 }
+
+/*
+ * chainHints renders a tool's declared handles as wiring instructions for the
+ * planner.
+ * desc: The same declaration the edges read afterwards, stated forwards. A
+ *       tool that marks a field as a handle and names what follows it has said
+ *       everything the planner needs to wire the two steps together, so the
+ *       line is generated from that rather than written again by hand in a
+ *       description — where the two could drift apart, and one of them would be
+ *       wrong.
+ *
+ *       Nothing is named here. The sentence is fixed and every noun in it comes
+ *       from the tool: run against a fleet tool it reads
+ *       "${step.N.peers.0.id} into inspect_host(target)".
+ * param: schema - the tool's declared output schema.
+ * return: one line per handle, empty when the tool declares none.
+ */
+func chainHints(schema json.RawMessage) []string {
+	var out []string
+	for _, ref := range referencePaths(schema) {
+		if ref.resolvedBy == "" {
+			continue // marked as a handle, but nothing said what follows it
+		}
+		tool, param := splitResolver(ref.resolvedBy)
+		target := tool
+		if param != "" {
+			target = tool + "(" + param + ")"
+		}
+		out = append(out, "${step.N."+renderPath(ref.path)+"} into "+target)
+	}
+	sortStrings(out)
+	return out
+}
+
+// renderPath writes a schema path the way the planner writes a template: an
+// array element becomes a concrete index, since the planner has to pick one.
+func renderPath(path []string) string {
+	parts := make([]string, 0, len(path))
+	for _, p := range path {
+		if p == "" {
+			parts = append(parts, "0")
+			continue
+		}
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, ".")
+}

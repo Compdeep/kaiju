@@ -265,3 +265,48 @@ func TestReferences_UndeclaredResolverStaysOutstanding(t *testing.T) {
 		t.Fatalf("got %+v, want it still outstanding — nothing declared what follows it", unresolved)
 	}
 }
+
+// ── the same declaration, read forwards ──────────────────────────────────────
+
+// A tool that declares a handle and what follows it has told the planner how to
+// wire the two steps. The line is generated from that declaration rather than
+// written again in a description, so the wiring the planner is shown and the
+// wiring the edges check afterwards cannot disagree.
+func TestChainHints_GeneratedFromTheDeclaration(t *testing.T) {
+	got := chainHints(listSchema("web_fetch.url"))
+	if len(got) != 1 || got[0] != "${step.N.results.0.url} into web_fetch(url)" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// Nothing in the engine is web-shaped: the same code run against a fleet tool
+// produces the fleet sentence.
+func TestChainHints_CarryNoVocabularyOfTheirOwn(t *testing.T) {
+	schema := agenttools.EnvelopeSchema(`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`)
+	got := chainHints(schema)
+	if len(got) != 1 || got[0] != "${step.N.peers.0.id} into inspect_host(target)" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestChainHints_SilentWhenNothingIsDeclared(t *testing.T) {
+	if got := chainHints(listSchema("")); len(got) != 0 {
+		t.Errorf("unmarked schema: got %q", got)
+	}
+	if got := chainHints(nil); len(got) != 0 {
+		t.Errorf("no schema: got %q", got)
+	}
+	// Marked, but nothing said what follows it — there is no wiring to suggest.
+	if got := chainHints(agenttools.EnvelopeSchema(`{"type":"object","properties":{"id":{"type":"string","x-reference":""}}}`)); len(got) != 0 {
+		t.Errorf("no resolver named: got %q", got)
+	}
+}
+
+// A handle whose producer named a tool but no parameter still cannot be wired
+// blind, so the hint names the tool and stops there.
+func TestChainHints_ToolWithoutParam(t *testing.T) {
+	got := chainHints(listSchema("web_fetch"))
+	if len(got) != 1 || got[0] != "${step.N.results.0.url} into web_fetch" {
+		t.Fatalf("got %q", got)
+	}
+}

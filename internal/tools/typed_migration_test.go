@@ -11,9 +11,11 @@ import (
 // unsatisfied is inert and silent, so it is asserted rather than assumed.
 func TestMigratedToolsSatisfyTypedExecutor(t *testing.T) {
 	migrated := map[string]agenttools.Tool{
-		"bash":      NewBash(""),
-		"web_fetch": NewWebFetch(),
-		"file_read": NewFileRead(""),
+		"bash":       NewBash(""),
+		"web_fetch":  NewWebFetch(),
+		"file_read":  NewFileRead(""),
+		"web_search": NewWebSearch(),
+		"sysinfo":    NewSysinfo(""),
 	}
 	for name, tool := range migrated {
 		if _, ok := tool.(agenttools.TypedExecutor); !ok {

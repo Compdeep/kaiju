@@ -121,8 +121,13 @@ func (b *Bash) Impact(params map[string]any) int {
 	if cmd == "" {
 		cmd, _ = params["script"].(string)
 	}
+	// No command means this is not a call being gated — it is the abstract
+	// question, "what tier is this tool", asked when deciding whether to offer
+	// it at all. A shell's honest answer to that is its worst case. Answering
+	// with the cheapest one ships an unrestricted shell enabled by default,
+	// because a command that is not there matches no destructive pattern.
 	if cmd == "" {
-		return toolapi.ImpactObserve
+		return toolapi.ImpactControl
 	}
 	if destructivePattern.MatchString(cmd) {
 		// Destructive commands targeting only workspace paths are safe —

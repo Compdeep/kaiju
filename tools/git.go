@@ -57,6 +57,11 @@ func (g *Git) Description() string {
  */
 func (g *Git) Impact(params map[string]any) int {
 	action, _ := params["action"].(string)
+	// No action means the abstract question — what tier is git — and the honest
+	// answer is the worst it can do, since push and reset are in the list.
+	if action == "" {
+		return toolapi.ImpactControl
+	}
 	switch action {
 	case "status", "log", "diff", "branch_list", "show":
 		return toolapi.ImpactObserve

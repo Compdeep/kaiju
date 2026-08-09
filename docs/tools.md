@@ -1,14 +1,17 @@
 # Built-in Tools
 
 Every capability the planner can call — a shell command, a web fetch, a file
-edit — is a `Tool`. The Executive picks tools by name, the Dispatcher fires them,
-and the IGX gate decides whether each invocation is allowed. This doc describes
-the tool contract, the registry that holds them, the envelope they emit, and the
-full catalogue of what ships built in.
+edit — is a `Tool`. The Executive picks tools by name, the Dispatcher fires
+them, and the IGX gate decides whether each invocation is allowed. This doc
+describes the tool contract, the registry that holds them, the envelope they
+emit, and the full catalogue of what ships built in.
+
+> Embedding kaiju in your own application? `docs/embedding-tools.md` covers
+> registering the core set and replacing one of its tools with your own.
 
 ## The Tool interface
 
-`internal/agent/tools/skill.go`. Four methods, implemented by every compiled
+`agent/tools/skill.go`. Four methods, implemented by every compiled
 built-in and every SKILL.md wrapper:
 
 ```go
@@ -46,7 +49,7 @@ builtins), so tool authors hardcode them. The gate passes an invocation when
 
 ## The Registry
 
-`internal/agent/tools/registry.go`. One thread-safe, in-process map keyed by tool
+`agent/tools/registry.go`. One thread-safe, in-process map keyed by tool
 name. Each entry carries the tool plus two pieces of metadata:
 
 - **source** — where it came from: `"builtin"`, `"skillmd:<path>"` (a SKILL.md
@@ -62,7 +65,7 @@ OpenAI function-calling defs for the LLM.
 
 ## The ToolMessage envelope
 
-`internal/agent/tools/toolmessage.go`. Every tool result is a uniform envelope so
+`agent/tools/toolmessage.go`. Every tool result is a uniform envelope so
 an edge can frame presence / absence / failure the same way regardless of which
 tool ran. The envelope adds only the framing signals; the tool's own payload
 lives verbatim in `Data`.
@@ -208,10 +211,10 @@ for how those seams feed `web_fetch`.
 
 | file | responsibility |
 |---|---|
-| `internal/agent/tools/skill.go` | `Tool` interface, impact tiers, optional interfaces |
-| `internal/agent/tools/registry.go` | the in-process registry (source + enabled) |
-| `internal/agent/tools/toolmessage.go` | the `ToolMessage` envelope + constructors |
-| `internal/agent/tools/decoders.go` | `web_fetch` binary-decoder + reader-fallback seams |
-| `internal/tools/*.go` | the built-in tool implementations |
+| `agent/tools/skill.go` | `Tool` interface, impact tiers, optional interfaces |
+| `agent/tools/registry.go` | the in-process registry (source + enabled) |
+| `agent/tools/toolmessage.go` | the `ToolMessage` envelope + constructors |
+| `agent/tools/decoders.go` | `web_fetch` binary-decoder + reader-fallback seams |
+| `agent/tools/core/*.go` | the built-in tool implementations |
 | `internal/agent/builtin_compute.go` / `builtin_edit_file.go` / `builtin_debug.go` / `builtin_vision.go` | the agent-bound tools |
 | `cmd/kaiju/main.go` (~L389–510) | registration + config gates |

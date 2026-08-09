@@ -457,7 +457,7 @@ func expandPath(p string) string {
 
 // The plugin tools take a narrow interface rather than this whole type, so an
 // application embedding the engine can supply its own configuration. These six
-// methods are kaiju's implementation of it — see agent/tools/core.PluginConfig.
+// methods are kaiju's implementation of it — see tools.PluginConfig.
 
 // PluginNames are the plugins currently marked active.
 func (c *Config) PluginNames() []string { return c.Plugins }

@@ -20,7 +20,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent"
 	agenttools "github.com/Compdeep/kaiju/agent/tools"
-	"github.com/Compdeep/kaiju/agent/tools/core"
+	"github.com/Compdeep/kaiju/tools"
 )
 
 // typedResult runs a tool through the typed path the dispatcher uses and puts
@@ -53,7 +53,7 @@ func TestWebFetch_LargePageArrivesWhole(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	g, msg := typedResult(t, core.NewWebFetch(), map[string]any{"url": srv.URL, "format": "text"})
+	g, msg := typedResult(t, tools.NewWebFetch(), map[string]any{"url": srv.URL, "format": "text"})
 
 	if msg.Type != "page" || msg.Status != agenttools.StatusOK {
 		t.Fatalf("envelope = kind %q status %q", msg.Type, msg.Status)
@@ -98,7 +98,7 @@ func TestFileRead_EmptyFileReachesTheCoverageStatement(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	g, msg := typedResult(t, core.NewFileRead(dir), map[string]any{"path": "app.conf"})
+	g, msg := typedResult(t, tools.NewFileRead(dir), map[string]any{"path": "app.conf"})
 	if msg.Status != agenttools.StatusEmpty {
 		t.Fatalf("status = %q, want empty", msg.Status)
 	}
@@ -119,7 +119,7 @@ func TestFileRead_ContentIsNotReportedAsAGap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	g, msg := typedResult(t, core.NewFileRead(dir), map[string]any{"path": "app.conf"})
+	g, msg := typedResult(t, tools.NewFileRead(dir), map[string]any{"path": "app.conf"})
 	if msg.Status != agenttools.StatusOK || !strings.Contains(msg.Content, "8080") {
 		t.Fatalf("envelope = status %q content %q", msg.Status, msg.Content)
 	}
@@ -158,7 +158,7 @@ func TestWebSearch_ResultsReachTheGroundingEdge(t *testing.T) {
 	// A tool that is not registered declares nothing, which is the behaviour
 	// rather than a limitation of the test.
 	a := newTestAgent(t)
-	_ = a.Registry().Register(core.NewWebSearch())
+	_ = a.Registry().Register(tools.NewWebSearch())
 
 	framed := a.FrameGrounding(context.Background(), g, agent.NewStagePrompts("role", "user"))
 	for _, want := range []string{"https://example.test/one", "https://example.test/two"} {
@@ -190,7 +190,7 @@ func TestWebSearch_NoResultsIsAGapAndBlocksCitation(t *testing.T) {
 // sysinfo always succeeds and carries its whole result in the payload, so the
 // fields have to stay addressable and it must never look like a gap.
 func TestSysinfo_FieldsResolveAndItIsNotAGap(t *testing.T) {
-	g, msg := typedResult(t, core.NewSysinfo("/tmp/ws"), map[string]any{})
+	g, msg := typedResult(t, tools.NewSysinfo("/tmp/ws"), map[string]any{})
 
 	if msg.Status != agenttools.StatusOK || msg.Content != "" {
 		t.Fatalf("envelope = status %q content %q — the payload is the readable form here", msg.Status, msg.Content)

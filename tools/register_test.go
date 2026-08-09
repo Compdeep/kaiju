@@ -1,4 +1,4 @@
-package core
+package tools
 
 import (
 	"context"
@@ -69,11 +69,10 @@ func TestAnAbsentDependencyOmitsItsTools(t *testing.T) {
 	}
 }
 
-// Exclude is the escape hatch, and a name that is not a core tool is ignored
-// rather than being an error — the set changes between versions.
+// Exclude leaves a tool out, so an application can take its name.
 func TestExcludeLeavesAToolOut(t *testing.T) {
 	reg := tools.NewRegistry()
-	registered, err := Register(reg, Deps{Exclude: []string{"clipboard", "not_a_core_tool"}})
+	registered, err := Register(reg, Deps{Exclude: []string{"clipboard"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +87,28 @@ func TestExcludeLeavesAToolOut(t *testing.T) {
 	}
 	if _, ok := reg.Get("bash"); !ok {
 		t.Error("excluding one tool dropped another")
+	}
+}
+
+// An exclusion that matches nothing is reported. Ignoring it registers the tool
+// the application meant to leave out, and the application finds out one line
+// later as a name collision — which points at the wrong mistake.
+func TestAnExclusionThatMatchesNothingIsReported(t *testing.T) {
+	reg := tools.NewRegistry()
+	registered, err := Register(reg, Deps{Exclude: []string{"proces_kill"}}) // misspelt
+	if err == nil {
+		t.Fatal("a misspelt exclusion was accepted, and process_kill is registered anyway")
+	}
+	if !strings.Contains(err.Error(), "proces_kill") {
+		t.Errorf("the error should name the entry that matched nothing: %v", err)
+	}
+	// The set is still registered — this is a report, not a refusal, since the
+	// tools themselves are fine and the caller may want to carry on.
+	if len(registered) == 0 {
+		t.Error("nothing was registered")
+	}
+	if _, ok := reg.Get("process_kill"); !ok {
+		t.Error("process_kill should be registered — that is the point being reported")
 	}
 }
 

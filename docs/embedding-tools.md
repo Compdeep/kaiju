@@ -1,4 +1,4 @@
-# Embedding Kaiju: the core tools, and replacing one
+# Embedding Kaiju: registering its tools, and taking one of their names
 
 For an application that imports this engine rather than running `kaiju` itself.
 It covers what you must register, what you may leave out, and how to keep a tool
@@ -11,14 +11,14 @@ This one is about the seam between your application and the set.
 
 ```go
 import (
-    "github.com/Compdeep/kaiju/agent/tools/core"
+    "github.com/Compdeep/kaiju/tools"
     mytools "github.com/example/myapp/internal/tools"
 )
 
 reg := ag.Registry()
 
 // 1. The engine's core set, minus any name you intend to take yourself.
-names, err := core.Register(reg, core.Deps{
+names, err := tools.Register(reg, tools.Deps{
     Workspace: cfg.Workspace,
     Memory:    ag.Memory(),
     Executor:  ag.ExecutorClient(),
@@ -40,7 +40,22 @@ The registry does have `Replace`, which takes a name regardless. It exists for
 runtime activation — a plugin registering a tool into a running agent — and is
 not the way to override at startup.
 
-## Why you must register the core set
+## Three groups, one word
+
+`tools` is one package and it holds three different kinds of thing. Knowing
+which is which tells you what you may drop.
+
+| | | |
+|---|---|---|
+| **required** | `bash`, `service` | the scheduler grafts nodes with these names; without them those steps fail at dispatch |
+| **expected** | `file_read`, `file_write`, `file_list`, `process_list`, `sysinfo`, `net_info`, `web_fetch`, `web_search` | nothing breaks, but a planner that cannot read a file or search the web will say it cannot do things |
+| **shipped** | `clipboard`, `git`, `archive`, `office_extract`, `panel_push`, `env_list`, `disk_usage`, `process_kill`, `web_research`, the memory three, the plugin three | useful, and no more part of the engine's contract than a tool of your own |
+
+`Register` puts all three in. Drop what you do not want with `Exclude` — a
+headless service has no use for a clipboard tool, and a planner shown a tool it
+can never sensibly call makes worse plans for it.
+
+## Why the required ones must keep their names
 
 The scheduler spawns nodes by tool name. When a `compute` run emits a plan, the
 scheduler grafts an exec step with `ToolName: "bash"` and a health check with
@@ -53,8 +68,8 @@ will find every grafted step failing at dispatch with `unknown tool`. Nothing
 else reports it. The plan is made, the graft is attempted, the node fails, and
 the reason is a string in a log.
 
-So: register the core set, then change what you need. Do not replace it with a
-parallel set.
+So: register kaiju's set, then change what you need. Do not supply a parallel
+set under names of your own.
 
 ## What `Deps` is, and what happens when a field is empty
 
@@ -64,12 +79,13 @@ type Deps struct {
     Shell     string        // "sh" | "powershell" | "cmd"; empty picks the platform's
     Memory    *agent.Memory // nil omits memory_store, memory_recall, memory_search
     Executor  *llm.Client   // nil omits web_research; web_fetch still registers
-    Search    core.SearchConfig
+    Search    tools.SearchConfig
 
-    Plugins               core.PluginConfig // nil omits plugin_enable, plugin_option
+    Plugins               tools.PluginConfig // nil omits plugin_enable, plugin_option
     AllowPluginActivation bool              // may a run turn a plugin on?
 
-    Exclude []string // names to leave out, so you can take one yourself
+    Exclude []string // names to leave out, so you can take one yourself;
+                     // an entry matching no tool is reported, not ignored
 }
 ```
 
@@ -87,7 +103,7 @@ what your planner is being shown.
 Exclude it, then register your own:
 
 ```go
-core.Register(reg, core.Deps{Exclude: []string{"process_kill"}})
+tools.Register(reg, tools.Deps{Exclude: []string{"process_kill"}})
 reg.Register(mytools.NewProcessKill(store))
 ```
 
@@ -139,13 +155,13 @@ plugin is compiled in. `plugin_enable` and `plugin_option` need somewhere to
 record a change and your permission to make one:
 
 ```go
-core.Register(reg, core.Deps{
-    Plugins:               myPluginConfig,  // implements core.PluginConfig
+tools.Register(reg, tools.Deps{
+    Plugins:               myPluginConfig,  // implements tools.PluginConfig
     AllowPluginActivation: true,
 })
 ```
 
-`core.PluginConfig` is six methods — which plugins are on, where a remote host
+`tools.PluginConfig` is six methods — which plugins are on, where a remote host
 is, how to start it, where the workspace is, and how to persist the first two.
 It is an interface so you do not have to adopt kaiju's configuration file to
 use its plugins; kaiju's own `*config.Config` implements it.

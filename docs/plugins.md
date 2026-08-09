@@ -252,7 +252,7 @@ point `KAIJU_PLUGIN_HOST` at it.
 ## Supervision by kaiju's service manager
 
 The Python host is a process kaiju spawns itself, so kaiju supervises it through
-its **own** service manager (`agent/tools/core/service.go`), the same `service` tool
+its **own** service manager (`tools/service.go`), the same `service` tool
 the planner uses for any long-running process — not systemd or pm2. (See
 `docs/service.md` for the tool itself.)
 
@@ -315,7 +315,7 @@ bridge — the bridge comes up transparently underneath.
 
 ## office_extract is a built-in, not a plugin
 
-`agent/tools/core/office.go`. `office_extract` reads Word / PowerPoint / Excel
+`tools/office.go`. `office_extract` reads Word / PowerPoint / Excel
 (`.docx` / `.pptx` / `.xlsx`) to plain text. Those formats are just a ZIP of XML
 parts, so extraction is **pure standard library** (`archive/zip` +
 `encoding/xml`) — no third-party dependency. That is exactly why it is a built-in,
@@ -365,9 +365,9 @@ bearer token), not the perimeter.
 | `internal/plugins/registry.go` | `Host` / `Plugin` interfaces, `Add`, `Activate`, `Catalog`, `RemoteCatalog` |
 | `internal/plugins/pdf/pdf.go` | `plugin_pdf`: `pdf_extract` tool + `application/pdf` decoder seam |
 | `internal/plugins/remote/remote.go` | `plugin_remote`: manifest fetch, synthesized `remoteTool`, reader seam, 60 s ceiling |
-| `agent/tools/core/plugin_manage.go` | `plugin_list` / `plugin_enable` / `plugin_option`, `liveHost`, `ensureRemoteUp`, `EnsureRemoteHostsUp` |
-| `agent/tools/core/service.go` | process supervisor: health loop, auto-restart, `freePort`, port-skip, crash-backoff, `StartManaged` |
-| `agent/tools/core/office.go` | `office_extract` built-in (stdlib, no build tag) + `RegisterOfficeDecoders` |
+| `tools/plugin_manage.go` | `plugin_list` / `plugin_enable` / `plugin_option`, `liveHost`, `ensureRemoteUp`, `EnsureRemoteHostsUp` |
+| `tools/service.go` | process supervisor: health loop, auto-restart, `freePort`, port-skip, crash-backoff, `StartManaged` |
+| `tools/office.go` | `office_extract` built-in (stdlib, no build tag) + `RegisterOfficeDecoders` |
 | `plugins/host.py` | FastAPI gateway: `/health`, `/plugins`, `/invoke/{tool}` |
 | `plugins/registry.py` | plugin loading + per-plugin semaphore (per-service queue) |
 | `plugins/webreader/plugin.py` | reference remote plugin: static + Playwright render tiers |

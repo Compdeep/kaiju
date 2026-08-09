@@ -1,7 +1,8 @@
-package core
+package tools
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -9,7 +10,26 @@ import (
 	"github.com/Compdeep/kaiju/internal/plugins"
 )
 
-// Registering the core tools, and replacing one of them.
+// Registering kaiju's tools, and taking one of their names.
+//
+// "Core" is one word for three different things, and it is worth separating
+// them before reading the list below.
+//
+//	REQUIRED   bash, service. The scheduler grafts nodes with these names —
+//	           an exec step after a compute run, a health check after a build.
+//	           Without them those steps fail at dispatch with "unknown tool".
+//	EXPECTED   file_read, file_write, file_list, process_list, sysinfo,
+//	           net_info, web_fetch, web_search. Nothing breaks without them,
+//	           but a planner with no way to read a file or search the web is a
+//	           planner that will say it cannot do things.
+//	SHIPPED    clipboard, git, archive, office_extract, panel_push, env_list,
+//	           disk_usage, process_kill, web_research, the memory three, the
+//	           plugin three. Useful, and no more part of this engine's contract
+//	           than any tool of your own.
+//
+// Register puts all three groups in. An application that wants less says so
+// with Exclude — a headless service has no use for clipboard, and a planner
+// shown a tool it can never sensibly call is a planner making worse plans.
 //
 // An application embedding this engine wants two things from this package and
 // nothing else: give me the tools, and let me swap the one that does not suit
@@ -86,10 +106,11 @@ type Deps struct {
 	// this is off unless asked for.
 	AllowPluginActivation bool
 
-	// Exclude names tools to leave unregistered — the escape hatch for an
-	// application that wants the set minus one, without listing the rest. A
-	// name that is not a core tool is ignored, since the set changes between
-	// versions and a stale exclusion should not be an error.
+	// Exclude names tools to leave unregistered, so an application can take one
+	// of their names for itself. An entry matching no tool is reported rather
+	// than ignored: a misspelt exclusion otherwise registers the tool it meant
+	// to leave out, and the application finds out one line later as a name
+	// collision, which points at the wrong mistake.
 	Exclude []string
 }
 
@@ -109,11 +130,19 @@ func Register(reg *tools.Registry, d Deps) ([]string, error) {
 	for _, name := range d.Exclude {
 		skip[name] = true
 	}
+	unused := map[string]bool{}
+	for name := range skip {
+		unused[name] = true
+	}
 
 	var registered []string
 	var failed error
 	put := func(t tools.Tool) {
-		if failed != nil || skip[t.Name()] {
+		if failed != nil {
+			return
+		}
+		delete(unused, t.Name())
+		if skip[t.Name()] {
 			return
 		}
 		if err := reg.RegisterWithSource(t, "core"); err != nil {
@@ -174,5 +203,17 @@ func Register(reg *tools.Registry, d Deps) ([]string, error) {
 		}
 	}
 
-	return registered, failed
+	if failed != nil {
+		return registered, failed
+	}
+	if len(unused) > 0 {
+		names := make([]string, 0, len(unused))
+		for name := range unused {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return registered, fmt.Errorf("core.Register: excluded %v, which name no core tool — "+
+			"the tools they were meant to leave out are registered", names)
+	}
+	return registered, nil
 }

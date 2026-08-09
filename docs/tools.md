@@ -215,6 +215,6 @@ for how those seams feed `web_fetch`.
 | `agent/tools/registry.go` | the in-process registry (source + enabled) |
 | `agent/tools/toolmessage.go` | the `ToolMessage` envelope + constructors |
 | `agent/tools/decoders.go` | `web_fetch` binary-decoder + reader-fallback seams |
-| `agent/tools/core/*.go` | the built-in tool implementations |
+| `tools/*.go` | the built-in tool implementations |
 | `internal/agent/builtin_compute.go` / `builtin_edit_file.go` / `builtin_debug.go` / `builtin_vision.go` | the agent-bound tools |
 | `cmd/kaiju/main.go` (~L389–510) | registration + config gates |

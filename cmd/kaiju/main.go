@@ -15,7 +15,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
-	kaijutools "github.com/Compdeep/kaiju/agent/tools/core"
+	"github.com/Compdeep/kaiju/tools"
 	"github.com/Compdeep/kaiju/agent/uploads"
 	"github.com/Compdeep/kaiju/docs"
 	"github.com/Compdeep/kaiju/internal/api"
@@ -402,7 +402,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	// Register kaiju tools
 	reg := ag.Registry()
 	if cfg.Tools.Sysinfo.Enabled {
-		reg.Replace(kaijutools.NewSysinfo(cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewSysinfo(cfg.Agent.Workspace), "builtin")
 	}
 	// Coding tools (compute + edit_file). disable_coding is the master switch for
 	// the whole coding module — when set, these tools aren't even registered, so
@@ -421,25 +421,25 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		reg.Replace(agent.NewDebugTool(ag), "builtin")
 	}
 	if cfg.Tools.Bash.Enabled {
-		reg.Replace(kaijutools.NewBash(cfg.Tools.Bash.Shell, cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewBash(cfg.Tools.Bash.Shell, cfg.Agent.Workspace), "builtin")
 	}
 	if cfg.Tools.File.Enabled {
-		reg.Replace(kaijutools.NewFileRead(cfg.Agent.Workspace), "builtin")
-		reg.Replace(kaijutools.NewFileWrite(cfg.Agent.Workspace), "builtin")
-		reg.Replace(kaijutools.NewFileList(cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewFileRead(cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewFileWrite(cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewFileList(cfg.Agent.Workspace), "builtin")
 	}
 	if cfg.Tools.Web.Enabled {
-		reg.Replace(kaijutools.NewWebFetchWithLLM(ag.ExecutorClient()), "builtin")
-		searchCfg := kaijutools.SearchConfig{
+		reg.Replace(tools.NewWebFetchWithLLM(ag.ExecutorClient()), "builtin")
+		searchCfg := tools.SearchConfig{
 			Provider: cfg.Tools.Web.SearchProvider,
 			DelaySec: cfg.Tools.Web.SearchDelaySec,
 		}
-		reg.Replace(kaijutools.NewWebSearchWithConfig(searchCfg), "builtin")
+		reg.Replace(tools.NewWebSearchWithConfig(searchCfg), "builtin")
 		// web_research = search + auto-fetch the top results in one step, so the
 		// planner never picks a URL to fetch (can't invent) or decides to fetch
 		// (can't skip). The preferred research path; web_search/web_fetch stay for
 		// the cases that genuinely need just URLs or a specific known page.
-		reg.Replace(kaijutools.NewWebResearch(searchCfg, ag.ExecutorClient()), "builtin")
+		reg.Replace(tools.NewWebResearch(searchCfg, ag.ExecutorClient()), "builtin")
 	}
 
 	// Vision tool: lets the planner read an image mid-plan (a fetched screenshot,
@@ -450,41 +450,41 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	}
 
 	// System tools (always enabled)
-	reg.Replace(kaijutools.NewProcessList(), "builtin")
-	reg.Replace(kaijutools.NewProcessKill(), "builtin")
-	svc := kaijutools.NewService(cfg.Agent.Workspace)
+	reg.Replace(tools.NewProcessList(), "builtin")
+	reg.Replace(tools.NewProcessKill(), "builtin")
+	svc := tools.NewService(cfg.Agent.Workspace)
 	reg.Replace(svc, "builtin")
 	// office_extract: Word/PowerPoint/Excel (.docx/.pptx/.xlsx) reading. Built-in
 	// (not a plugin) because it's pure stdlib — no third-party dependency to gate.
-	reg.Replace(kaijutools.NewOfficeExtract(cfg.Agent.Workspace), "builtin")
-	kaijutools.RegisterOfficeDecoders() // let web_fetch read linked Office files too
-	reg.Replace(kaijutools.NewNetInfo(), "builtin")
-	reg.Replace(kaijutools.NewEnvList(), "builtin")
-	reg.Replace(kaijutools.NewDiskUsage(), "builtin")
-	reg.Replace(kaijutools.NewClipboard(), "builtin")
-	reg.Replace(kaijutools.NewArchive(), "builtin")
-	reg.Replace(kaijutools.NewGit(), "builtin")
-	reg.Replace(kaijutools.NewPanelPush(), "builtin")
+	reg.Replace(tools.NewOfficeExtract(cfg.Agent.Workspace), "builtin")
+	tools.RegisterOfficeDecoders() // let web_fetch read linked Office files too
+	reg.Replace(tools.NewNetInfo(), "builtin")
+	reg.Replace(tools.NewEnvList(), "builtin")
+	reg.Replace(tools.NewDiskUsage(), "builtin")
+	reg.Replace(tools.NewClipboard(), "builtin")
+	reg.Replace(tools.NewArchive(), "builtin")
+	reg.Replace(tools.NewGit(), "builtin")
+	reg.Replace(tools.NewPanelPush(), "builtin")
 
 	// Memory tools
 	mem := ag.Memory()
 	if mem != nil {
-		reg.Replace(kaijutools.NewMemoryStore(mem), "builtin")
-		reg.Replace(kaijutools.NewMemoryRecall(mem), "builtin")
-		reg.Replace(kaijutools.NewMemorySearch(mem), "builtin")
+		reg.Replace(tools.NewMemoryStore(mem), "builtin")
+		reg.Replace(tools.NewMemoryRecall(mem), "builtin")
+		reg.Replace(tools.NewMemorySearch(mem), "builtin")
 	}
 
 	// plugin_list lets the agent report which optional plugins are built in and
 	// which are active (read-only) — only worth registering when at least one
 	// plugin is compiled in. plugin_enable (runtime activation) is offered ONLY
 	// when the host opts in via AllowRuntimePluginActivation.
-	var pluginEnable *kaijutools.PluginEnable
+	var pluginEnable *tools.PluginEnable
 	if len(plugins.Compiled()) > 0 {
-		reg.Replace(kaijutools.NewPluginList(), "builtin")
+		reg.Replace(tools.NewPluginList(), "builtin")
 		if cfg.AllowRuntimePluginActivation {
-			pluginEnable = kaijutools.NewPluginEnable(reg, cfg, svc)
+			pluginEnable = tools.NewPluginEnable(reg, cfg, svc)
 			reg.Replace(pluginEnable, "builtin")
-			reg.Replace(kaijutools.NewPluginOption(cfg), "builtin")
+			reg.Replace(tools.NewPluginOption(cfg), "builtin")
 		}
 	}
 

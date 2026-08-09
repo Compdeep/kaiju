@@ -134,4 +134,4 @@ No config flag. Always available.
 
 ## Implementation
 
-`agent/tools/core/service.go` — single file, ~440 lines. Reuses existing tool infrastructure. No new packages, no new dependencies.
+`tools/service.go` — single file, ~440 lines. Reuses existing tool infrastructure. No new packages, no new dependencies.

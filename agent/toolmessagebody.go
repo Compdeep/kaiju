@@ -24,7 +24,9 @@ func (b toolMessageBody) Envelope() agenttools.ToolMessage { return b.msg }
 
 // Field resolves a dot-path into the tool's payload (Data), matching the
 // pre-envelope behavior. An optional leading "data." is tolerated so both
-// ${node.X.field} and ${node.X.data.field} resolve.
+// ${node.X.field} and ${node.X.data.field} resolve. The envelope's own names —
+// content, detail, status, type — resolve to the envelope, since those are
+// what EnvelopeSchema declares to the planner.
 func (b toolMessageBody) Field(path string) (any, bool) {
 	// Strip the envelope's payload wrapper in either form: "data.field" → "field",
 	// and bare "data" → "" (the whole payload). This body already resolves against
@@ -41,7 +43,7 @@ func (b toolMessageBody) Field(path string) (any, bool) {
 		}
 		v, err := extractJSONFieldAny(b.msg.Content, path)
 		if err != nil {
-			return nil, false
+			return b.envelopeField(path)
 		}
 		return v, true
 	}
@@ -59,9 +61,32 @@ func (b toolMessageBody) Field(path string) (any, bool) {
 	}
 	v, err := extractJSONFieldAny(src, p)
 	if err != nil {
-		return nil, false
+		return b.envelopeField(path)
 	}
 	return v, true
+}
+
+// envelopeField resolves the envelope's own top-level names, which
+// EnvelopeSchema declares and a planner therefore reads as valid paths. Without
+// it, ${node.X.content} passes plan-time validation against the declared schema
+// and then fails at fire time — and a tool whose readable half is Content with
+// only counts in Data has no working path to its text at all.
+//
+// The payload wins where both have the name: web_fetch's payload carries the
+// HTTP status, and ${node.X.status} has always meant that one. Only the bare
+// form falls back, so ${node.X.data.status} stays the payload's.
+func (b toolMessageBody) envelopeField(path string) (any, bool) {
+	switch path {
+	case "content":
+		return b.msg.Content, true
+	case "detail":
+		return b.msg.Detail, true
+	case "status":
+		return string(b.msg.Status), true
+	case "type":
+		return b.msg.Type, true
+	}
+	return nil, false
 }
 
 // Evidence renders what a downstream LLM node should see: content when present,

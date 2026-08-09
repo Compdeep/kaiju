@@ -538,28 +538,21 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	var body NodeBody
 	var err error
 	isContextual := false
-	if tx, ok := skill.(tools.TypedExecutor); ok {
-		// Typed path: the tool returns a ToolMessage directly — no JSON round-trip.
-		var msg tools.ToolMessage
-		if msg, err = tx.ExecuteTyped(ctx, params); err == nil {
-			body = toolMessageBody{msg: msg}
-			result = msg.JSON()
-			isContextual = true // structured envelope — exempt from truncation
-		}
-	} else if cx, ok := skill.(ContextualExecutor); ok && n != nil {
-		isContextual = true
-		// Resolve classifier-active skills into per-role guidance sections.
-		// Compute uses this; other contextual tools may ignore it.
-		// Cards live on the graph (per-investigation).
+
+	// Build the run state once, before choosing a path, and put it on the ctx.
+	// It used to be built inside the contextual branch only, which meant a tool
+	// that returned a typed message could never receive it — the typed branch
+	// wins the fork below, so its graph and budget were simply never built. Now
+	// the two questions are separate: the branch decides what a tool returns,
+	// the ctx carries what it can reach. See WithExecContext.
+	var ec *ExecuteContext
+	if n != nil {
 		var activeCards []string
 		if graph != nil {
 			activeCards = graph.ActiveCards
 		}
-		cards, names := a.resolveComputeSkillCards(activeCards)
-		if len(names) > 0 {
-			n.Skills = names
-		}
-		ec := &ExecuteContext{
+		cards, cardNames := a.resolveComputeSkillCards(activeCards)
+		ec = &ExecuteContext{
 			Ctx:        ctx,
 			Node:       n,
 			Graph:      graph,
@@ -570,6 +563,27 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			AlertID:    alertID,
 			Intent:     intent,
 			SkillCards: cards,
+		}
+		ec.cardNames = cardNames
+		ctx = WithExecContext(ctx, ec)
+	}
+
+	if tx, ok := skill.(tools.TypedExecutor); ok {
+		// Typed path: the tool returns a ToolMessage directly — no JSON round-trip.
+		var msg tools.ToolMessage
+		if msg, err = tx.ExecuteTyped(ctx, params); err == nil {
+			body = toolMessageBody{msg: msg}
+			result = msg.JSON()
+			isContextual = true // structured envelope — exempt from truncation
+		}
+	} else if cx, ok := skill.(ContextualExecutor); ok && ec != nil {
+		isContextual = true
+		// The node records which cards contributed guidance, so a trace shows
+		// what this run was coding against. Only the tools that consume the
+		// cards claim them — every tool now has an ExecuteContext, and marking
+		// them all would say a file_read was guided by the coder doctrine.
+		if len(ec.cardNames) > 0 {
+			n.Skills = ec.cardNames
 		}
 		result, err = cx.ExecuteWithContext(ec, params)
 	} else {

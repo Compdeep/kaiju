@@ -305,11 +305,7 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (tools.T
 // Execute satisfies the Tool interface for non-DAG callers; the dispatcher
 // prefers ExecuteTyped (no round-trip) and reads the typed body directly.
 func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, error) {
-	msg, err := b.ExecuteTyped(ctx, params)
-	if err != nil {
-		return "", err
-	}
-	return msg.JSON(), nil
+	return tools.StringResult(b.ExecuteTyped(ctx, params))
 }
 
 // bashData is the structured payload of a command node: exit status and the

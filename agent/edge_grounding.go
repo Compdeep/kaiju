@@ -2,13 +2,11 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
-	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
 
 // The grounding edge's two prompts live in prompt/prompts.md (sections
@@ -17,89 +15,25 @@ import (
 // prompt.GroundingHook (appended to the reflector/planner role prompt when it
 // fires).
 
-// collectGrounded is the CODE half of the grounding edge: it walks the graph and
-// gathers every URL that actually came out of a web_search result — the only URLs
-// a later step may safely fetch or cite. A URL NOT in this set, typed into a fetch
-// or an answer, is invented. Purely structural: it reads the search envelopes and
-// interprets no meaning, so the edge stays content-agnostic on the gate side.
+// collectGrounded returns every handle the run surfaced — a URL from a search,
+// an id from a listing, whatever a tool declared as a reference in its output
+// schema. See references.go: the engine does not know what any of them mean, and
+// no tool is named here.
 func (a *Agent) collectGrounded(graph *Graph) []string {
-	if graph == nil {
-		return nil
-	}
-	var urls []string
-	seen := map[string]bool{}
-	for _, n := range graph.ResolvedByType(NodeTool) {
-		tb, ok := n.Body.(toolMessageBody)
-		if !ok {
-			continue // not on the protocol — no structured results to read
-		}
-		env := tb.Envelope()
-		if env.Kind != "search" || env.Status != agenttools.StatusOK || len(env.Data) == 0 {
-			continue
-		}
-		var d struct {
-			Results []struct {
-				URL string `json:"url"`
-			} `json:"results"`
-		}
-		if json.Unmarshal(env.Data, &d) != nil {
-			continue
-		}
-		for _, r := range d.Results {
-			u := strings.TrimSpace(r.URL)
-			if u != "" && !seen[u] {
-				seen[u] = true
-				urls = append(urls, u)
-			}
-		}
-	}
-	return urls
-}
-
-// collectFetched returns the set of URLs that web_fetch nodes have already read
-// (web_fetch stamps the fetched URL into its envelope Data). Subtracting these
-// from the grounded set gives the URLs found-but-not-yet-read — which the edge
-// pushes the planner to FETCH before it searches again.
-func (a *Agent) collectFetched(graph *Graph) map[string]bool {
-	out := map[string]bool{}
-	if graph == nil {
-		return out
-	}
-	for _, n := range graph.ResolvedByType(NodeTool) {
-		tb, ok := n.Body.(toolMessageBody)
-		if !ok {
-			continue
-		}
-		env := tb.Envelope()
-		if env.Kind != "page" || len(env.Data) == 0 {
-			continue
-		}
-		var d struct {
-			URL string `json:"url"`
-		}
-		if json.Unmarshal(env.Data, &d) == nil && d.URL != "" {
-			out[d.URL] = true
-		}
+	refs := a.collectReferences(graph)
+	out := make([]string, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, r.Value)
 	}
 	return out
 }
 
-// unretrievedGrounded returns the URLs a search returned that no fetch has read
-// yet — the references the run knows about but never actually retrieved. It's the
-// structural "found but not verified" set, shared by both edges: the grounding
-// edge pushes the planner to READ them; the coverage edge tells the aggregator not
-// to vouch for them. Pure envelope reading — no interpretation of meaning.
+// unretrievedGrounded returns the handles no later step passed to anything.
 func (a *Agent) unretrievedGrounded(graph *Graph) []string {
-	grounded := a.collectGrounded(graph)
-	if len(grounded) == 0 {
-		return nil
-	}
-	fetched := a.collectFetched(graph)
-	var out []string
-	for _, u := range grounded {
-		if !fetched[u] {
-			out = append(out, u)
-		}
+	refs := a.unresolvedReferences(graph)
+	out := make([]string, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, r.Value)
 	}
 	return out
 }
@@ -110,30 +44,38 @@ func (a *Agent) unretrievedGrounded(graph *Graph) []string {
 // scheduler stays domain-agnostic: it grafts whatever steps come back and loops
 // once, knowing nothing about what they are. ALL domain knowledge lives here.
 //
-// Today there is one floor — grounding: a run that found real URLs from a search
-// but read NONE of them must read some before concluding, or the answer would rest
-// on snippets or invention. The remediation is deterministic web_fetch steps for
-// the top unread URLs (sourced from the search, never model-invented). Self-
-// limiting — a run with no search has no grounded URLs, so nothing fires outside
-// web work. A future floor adds a branch HERE, never in the scheduler.
+// Today one floor fires: a run that surfaced handles on things it could retrieve
+// — URLs from a search, ids from a listing — and retrieved none of them. Its
+// answer would rest on what the handles were listed beside rather than on what
+// they lead to.
+//
+// The remediation is built from what the producing tool declared: the reference
+// annotation names the tool that follows a handle and the parameter it goes in,
+// so no tool is named here. A handle whose producer declared no follow-up is
+// still reported by the coverage edge; it just cannot be acted on automatically.
+// Self-limiting — a run that surfaced no handles has no floor to clear.
 func (a *Agent) conclusionFloor(graph *Graph, maxSteps int) (steps []PlanStep, label string) {
-	// Grounding floor: found URLs, read none.
-	if len(a.collectFetched(graph)) == 0 {
-		urls := a.unretrievedGrounded(graph)
-		found := len(urls)
-		if maxSteps > 0 && len(urls) > maxSteps {
-			urls = urls[:maxSteps]
+	all := a.collectReferences(graph)
+	unresolved := a.unresolvedReferences(graph)
+	if len(all) == 0 || len(unresolved) != len(all) {
+		return nil, "" // nothing surfaced, or something was already followed
+	}
+	found := len(unresolved)
+	if maxSteps > 0 && len(unresolved) > maxSteps {
+		unresolved = unresolved[:maxSteps]
+	}
+	for i, r := range unresolved {
+		if r.Tool == "" || r.Param == "" {
+			continue // declared as a handle, but not how to follow it
 		}
-		for i, u := range urls {
-			steps = append(steps, PlanStep{
-				Tool:   "web_fetch",
-				Tag:    fmt.Sprintf("grounding_fetch_%d", i+1),
-				Params: map[string]any{"url": u},
-			})
-		}
-		if len(steps) > 0 {
-			return steps, fmt.Sprintf("grounding: %d source URLs found, none read — reading %d before concluding", found, len(steps))
-		}
+		steps = append(steps, PlanStep{
+			Tool:   r.Tool,
+			Tag:    fmt.Sprintf("grounding_retrieve_%d", i+1),
+			Params: map[string]any{r.Param: r.Value},
+		})
+	}
+	if len(steps) > 0 {
+		return steps, fmt.Sprintf("grounding: %d references surfaced, none retrieved — retrieving %d before concluding", found, len(steps))
 	}
 	return nil, ""
 }

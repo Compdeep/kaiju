@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +11,24 @@ import (
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
+	"github.com/Compdeep/kaiju/agent/tools"
 	agenttools "github.com/Compdeep/kaiju/agent/tools"
 )
+
+// groundingAgent has web_search registered with the schema that marks its url
+// field as a handle. The reference collector reads schemas from the registry, so
+// a tool that is not registered declares nothing and contributes nothing — which
+// is the behaviour, not a test artefact.
+func groundingAgent() *Agent {
+	reg := tools.NewRegistry()
+	reg.Replace(&fakeTool{
+		name:   "web_search",
+		params: json.RawMessage(`{}`),
+		output: agenttools.EnvelopeSchema(`{"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"url":{"type":"string","x-reference":"web_fetch.url"},"title":{"type":"string"}}}}}}`),
+	}, "builtin")
+	reg.Replace(&fakeTool{name: "web_fetch", params: json.RawMessage(`{}`)}, "builtin")
+	return &Agent{registry: reg}
+}
 
 func searchNode(g *Graph, tag string, urls ...string) {
 	results := make([]map[string]any, 0, len(urls))
@@ -30,7 +47,7 @@ func TestCollectGrounded(t *testing.T) {
 	pID := g.AddNode(&Node{Type: NodeTool, Tag: "page", ToolName: "web_fetch"})
 	g.SetBody(pID, toolMessageBody{msg: agenttools.ToolOK("page", "content", nil)})
 
-	got := (&Agent{}).collectGrounded(g)
+	got := groundingAgent().collectGrounded(g)
 	set := map[string]bool{}
 	for _, u := range got {
 		set[u] = true
@@ -44,7 +61,7 @@ func TestCollectGrounded(t *testing.T) {
 func TestGroundingEdge_CleanRunSkips(t *testing.T) {
 	g := NewGraph()
 	searchNode(g, "ok", "https://x/y")
-	if grd := (&Agent{}).groundingEdge(context.Background(), g, "req"); grd != "" {
+	if grd := groundingAgent().groundingEdge(context.Background(), g, "req"); grd != "" {
 		t.Fatalf("clean run should skip the edge, got %q", grd)
 	}
 }
@@ -58,7 +75,7 @@ func TestGroundingEdge_FailOpenToStructural(t *testing.T) {
 	eID := g.AddNode(&Node{Type: NodeTool, Tag: "empty_search", ToolName: "web_search"})
 	g.SetBody(eID, toolMessageBody{msg: agenttools.ToolEmpty("search", "no results")}) // the gap
 
-	grd := (&Agent{}).groundingEdge(context.Background(), g, "find 10 sources")
+	grd := groundingAgent().groundingEdge(context.Background(), g, "find 10 sources")
 	if !strings.HasPrefix(grd, "## Grounding") {
 		t.Fatalf("expected a ## Grounding block, got: %q", grd)
 	}
@@ -76,7 +93,7 @@ func TestGroundingEdge_ReSearchWhenNothingGrounded(t *testing.T) {
 	g := NewGraph()
 	eID := g.AddNode(&Node{Type: NodeTool, Tag: "empty", ToolName: "web_search"})
 	g.SetBody(eID, toolMessageBody{msg: agenttools.ToolEmpty("search", "no results")})
-	grd := (&Agent{}).groundingEdge(context.Background(), g, "find sources")
+	grd := groundingAgent().groundingEdge(context.Background(), g, "find sources")
 	if !strings.HasPrefix(grd, "## Grounding") || !strings.Contains(grd, "broaden the search") {
 		t.Fatalf("empty-grounded should tell the planner to broaden the search, got:\n%s", grd)
 	}
@@ -88,7 +105,7 @@ func TestGroundingEdge_ReSearchWhenNothingGrounded(t *testing.T) {
 func TestConclusionFloor_GroundingUnread(t *testing.T) {
 	g := NewGraph()
 	searchNode(g, "s1", "https://a.example/1", "https://a.example/2", "https://a.example/3")
-	steps, label := (&Agent{}).conclusionFloor(g, 2) // cap at 2
+	steps, label := groundingAgent().conclusionFloor(g, 2) // cap at 2
 	if len(steps) != 2 {
 		t.Fatalf("expected 2 fetch steps (capped from 3), got %d", len(steps))
 	}
@@ -110,7 +127,7 @@ func TestConclusionFloor_MetWhenSomethingRead(t *testing.T) {
 	g := NewGraph()
 	searchNode(g, "s1", "https://a.example/1", "https://a.example/2")
 	fetchedNode(g, "f1", "https://a.example/1") // read one
-	if steps, _ := (&Agent{}).conclusionFloor(g, 6); steps != nil {
+	if steps, _ := groundingAgent().conclusionFloor(g, 6); steps != nil {
 		t.Fatalf("floor is met once anything is read, got %d steps", len(steps))
 	}
 }
@@ -120,7 +137,7 @@ func TestConclusionFloor_NoSearchNoFloor(t *testing.T) {
 	g := NewGraph()
 	id := g.AddNode(&Node{Type: NodeTool, Tag: "bash", ToolName: "bash"})
 	g.SetBody(id, toolMessageBody{msg: agenttools.ToolOK("bash", "done", nil)})
-	if steps, _ := (&Agent{}).conclusionFloor(g, 6); steps != nil {
+	if steps, _ := groundingAgent().conclusionFloor(g, 6); steps != nil {
 		t.Fatalf("no search → no floor, got %d steps", len(steps))
 	}
 }

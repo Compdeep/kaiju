@@ -15,6 +15,10 @@ import (
 type fakeTool struct {
 	name   string
 	params json.RawMessage
+	// output is the tool's declared output schema, read by the reference
+	// collector to find fields marked as handles. Empty means the tool declares
+	// none, which is the common case.
+	output json.RawMessage
 }
 
 func (f *fakeTool) Name() string                { return f.name }
@@ -25,7 +29,12 @@ func (f *fakeTool) Execute(context.Context, map[string]any) (string, error) {
 	return "", nil
 }
 
+// OutputSchema is only honoured when set, so a fakeTool that declares nothing
+// behaves as a tool with no Outputter at all.
+func (f *fakeTool) OutputSchema() json.RawMessage { return f.output }
+
 var _ tools.Tool = (*fakeTool)(nil)
+var _ tools.Outputter = (*fakeTool)(nil)
 
 // ── parseToolSchema ──────────────────────────────────────────────────────
 

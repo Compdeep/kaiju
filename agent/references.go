@@ -1,0 +1,248 @@
+package agent
+
+import (
+	"encoding/json"
+	"strings"
+
+	agenttools "github.com/Compdeep/kaiju/agent/tools"
+)
+
+// Finding what a run referenced and never resolved, without knowing the domain.
+//
+// Some tool output is a fact and some of it is a handle on something else: a
+// search result's URL, an alert id, a peer id. A handle a run surfaced and never
+// followed is the thing a model is most likely to talk about as though it had —
+// citing a page it never opened, describing an alert it never read.
+//
+// The engine cannot tell the two apart by looking. It used to decide by name:
+// output whose Kind was "search" held URLs, and a Kind of "page" meant one had
+// been read. That worked for two web tools and for nothing else, and it put the
+// application's vocabulary inside the engine.
+//
+// A tool already publishes a schema for its output. Marking the field there says
+// the same thing in the place that already describes the payload:
+//
+//	"url": {"type":"string", "x-reference":"web_fetch.url", …}
+//
+// The value is the tool that resolves the handle and the parameter it goes in,
+// so a stage can act on the handle without the engine knowing either. Presence
+// is what marks the field; the value is optional and only needed by a caller
+// that wants to plan the follow-up rather than merely report it.
+//
+// Whether a handle was followed is read from the graph rather than declared: a
+// value that appears in a later node's parameters was acted on. That needs no
+// knowledge of which tool did it or what the value means.
+
+// referenceAnnotation marks a schema property as a handle on something the run
+// can retrieve, rather than a fact about what it already has.
+const referenceAnnotation = "x-reference"
+
+// reference is one handle a tool surfaced.
+type reference struct {
+	Value string // the handle itself, as it appeared in the payload
+	Tool  string // the tool the producer says follows it, empty when undeclared
+	Param string // the parameter the handle goes in, empty when undeclared
+	Tag   string // the step that surfaced it
+}
+
+/*
+ * collectReferences gathers every handle the run surfaced, from any tool.
+ * desc: Walks each resolved tool node, reads its declared output schema, and
+ *       pulls the values of properties marked with the reference annotation.
+ *       A tool that declares no schema, or no reference fields, contributes
+ *       nothing — so this is silent for every tool that has not opted in, and
+ *       adding a tool needs no change here.
+ * param: graph - the run so far.
+ * return: the handles, in the order the steps ran, without duplicates.
+ */
+func (a *Agent) collectReferences(graph *Graph) []reference {
+	if graph == nil || a == nil || a.registry == nil {
+		return nil
+	}
+	var out []reference
+	seen := map[string]bool{}
+	for _, n := range graph.ResolvedByType(NodeTool) {
+		tb, ok := n.Body.(toolMessageBody)
+		if !ok {
+			continue
+		}
+		env := tb.Envelope()
+		if len(env.Data) == 0 {
+			continue
+		}
+		skill, ok := a.registry.Get(n.ToolName)
+		if !ok {
+			continue
+		}
+		schema := agenttools.GetOutputSchema(skill)
+		if schema == nil {
+			continue
+		}
+		for _, path := range referencePaths(schema) {
+			for _, v := range valuesAtPath(env.Data, path.path) {
+				if v == "" || seen[v] {
+					continue
+				}
+				seen[v] = true
+				tool, param := splitResolver(path.resolvedBy)
+				out = append(out, reference{Value: v, Tool: tool, Param: param, Tag: n.Tag})
+			}
+		}
+	}
+	return out
+}
+
+/*
+ * unresolvedReferences returns the handles no later step acted on.
+ * desc: A handle counts as followed when its value appears in any node's
+ *       parameters — the run passed it to something. Read from the graph rather
+ *       than from a second annotation, so a tool declares what it produces and
+ *       nothing has to declare what consumes it.
+ * param: graph - the run so far.
+ * return: the unfollowed handles, in the order they were surfaced.
+ */
+func (a *Agent) unresolvedReferences(graph *Graph) []reference {
+	refs := a.collectReferences(graph)
+	if len(refs) == 0 {
+		return nil
+	}
+	used := valuesPassedAsParams(graph)
+	var out []reference
+	for _, r := range refs {
+		if !used[r.Value] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// splitResolver reads "tool.param" from the annotation. An annotation naming
+// only a tool, or nothing at all, still marks the field — a handle is worth
+// reporting even when nothing declared how to follow it.
+func splitResolver(v string) (tool, param string) {
+	if i := strings.LastIndex(v, "."); i > 0 {
+		return v[:i], v[i+1:]
+	}
+	return v, ""
+}
+
+// schemaRef is a reference-marked property: where to find it, and what the
+// producer says resolves it.
+type schemaRef struct {
+	path       []string // property names from the payload root, "" element = every array item
+	resolvedBy string
+}
+
+// referencePaths walks a tool's output schema and returns the paths of every
+// property carrying the reference annotation.
+//
+// The schema describes the ENVELOPE, so the walk starts at its data property —
+// the payload is what a value is read from.
+func referencePaths(schema json.RawMessage) []schemaRef {
+	var root map[string]any
+	if json.Unmarshal(schema, &root) != nil {
+		return nil
+	}
+	props, _ := root["properties"].(map[string]any)
+	data, _ := props["data"].(map[string]any)
+	if data == nil {
+		// A schema written for the payload alone rather than the envelope.
+		data = root
+	}
+	var out []schemaRef
+	walkSchemaForReferences(data, nil, &out)
+	return out
+}
+
+func walkSchemaForReferences(node map[string]any, path []string, out *[]schemaRef) {
+	if node == nil {
+		return
+	}
+	if items, ok := node["items"].(map[string]any); ok {
+		// An array: every element sits at the same path, marked by an empty
+		// element so valuesAtPath knows to fan out rather than index.
+		walkSchemaForReferences(items, append(append([]string{}, path...), ""), out)
+	}
+	props, _ := node["properties"].(map[string]any)
+	for name, raw := range props {
+		child, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		here := append(append([]string{}, path...), name)
+		if v, marked := child[referenceAnnotation]; marked {
+			resolver, _ := v.(string)
+			*out = append(*out, schemaRef{path: here, resolvedBy: resolver})
+			continue // a reference is a leaf; do not descend into it
+		}
+		walkSchemaForReferences(child, here, out)
+	}
+}
+
+// valuesAtPath pulls every string at a path out of a payload. An empty path
+// element means "each element of this array", so one path can yield many values.
+func valuesAtPath(payload json.RawMessage, path []string) []string {
+	var v any
+	if json.Unmarshal(payload, &v) != nil {
+		return nil
+	}
+	return descend(v, path)
+}
+
+func descend(v any, path []string) []string {
+	if len(path) == 0 {
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			return []string{strings.TrimSpace(s)}
+		}
+		return nil
+	}
+	if path[0] == "" {
+		arr, ok := v.([]any)
+		if !ok {
+			return nil
+		}
+		var out []string
+		for _, item := range arr {
+			out = append(out, descend(item, path[1:])...)
+		}
+		return out
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return descend(obj[path[0]], path[1:])
+}
+
+// valuesPassedAsParams returns every string a node was called with, at any
+// depth. A handle among them was acted on, whatever acted on it.
+//
+// Every node counts, not only the resolved ones: a step that was planned to
+// follow a handle and then failed still means the run did not overlook it, and
+// its failure is already reported by the coverage edge.
+func valuesPassedAsParams(graph *Graph) map[string]bool {
+	used := map[string]bool{}
+	graph.mu.RLock()
+	defer graph.mu.RUnlock()
+	for _, n := range graph.nodes {
+		collectParamStrings(n.Params, used)
+	}
+	return used
+}
+
+func collectParamStrings(v any, into map[string]bool) {
+	switch t := v.(type) {
+	case string:
+		if s := strings.TrimSpace(t); s != "" {
+			into[s] = true
+		}
+	case map[string]any:
+		for _, item := range t {
+			collectParamStrings(item, into)
+		}
+	case []any:
+		for _, item := range t {
+			collectParamStrings(item, into)
+		}
+	}
+}

@@ -53,12 +53,9 @@ import (
 
 // EditFileTool is the registered tool entry for edit_file.
 //
-// Implements both the standard Tool interface (for registry/schema
-// visibility to the Executive) and ContextualExecutor (the real execution
-// path — the Coder pipeline needs graph, budget, and LLM clients that
-// plain Execute cannot carry). The dispatcher always prefers
-// ExecuteWithContext when a tool implements it, so the plain Execute
-// method below is a defensive stub that should never be reached.
+// Returns a ToolMessage like every other tool. The graph, budget and LLM
+// clients the Coder pipeline needs — which plain (ctx, params) cannot carry —
+// ride on the ctx, put there by the dispatcher before it calls anything.
 type EditFileTool struct {
 	agent *Agent
 }
@@ -68,7 +65,7 @@ var _ tools.Tool = (*EditFileTool)(nil)
 var _ tools.TypedExecutor = (*EditFileTool)(nil)
 
 // NewEditFileTool constructs an EditFileTool bound to an Agent. The agent
-// reference gives ExecuteWithContext access to the LLM clients, workspace,
+// reference gives ExecuteTyped access to the LLM clients, workspace,
 // and the runCompute entry point that hosts the Coder pipeline.
 func NewEditFileTool(a *Agent) *EditFileTool { return &EditFileTool{agent: a} }
 
@@ -91,7 +88,7 @@ func (e *EditFileTool) Impact(params map[string]any) int {
 
 // editFileParamSchema is the wire schema shown to the Executive. task_files
 // is marked required so the LLM's tool-definition view enforces it at
-// tool-call time; a runtime check in ExecuteWithContext is the belt-and-
+// tool-call time; a runtime check in ExecuteTyped is the belt-and-
 // braces backstop for the inevitable case where the LLM ignores "required".
 var editFileParamSchema = json.RawMessage(`{
 	"type": "object",
@@ -135,7 +132,7 @@ func (e *EditFileTool) Execute(ctx context.Context, params map[string]any) (stri
 	return tools.StringResult(e.ExecuteTyped(ctx, params))
 }
 
-// ExecuteWithContext validates the required params and delegates to the
+// ExecuteTyped validates the required params and delegates to the
 // Coder pipeline hosted by runCompute. The flow is:
 //
 //  1. Validate task_files is non-empty. If the Executive omitted it, fail

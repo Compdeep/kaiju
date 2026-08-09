@@ -19,7 +19,7 @@ import (
  * desc: Dispatches to computePlan (deep mode, initial planning phase) or
  *       computeCode (shallow mode, or deep mode coding phase) based on the
  *       mode and blueprint_ref params. Returns the result string directly —
- *       called via ComputeTool.ExecuteWithContext from the dispatcher.
+ *       called via ComputeTool.ExecuteTyped from the dispatcher.
  *       Param_refs are already resolved by the dispatcher before this runs.
  * param: ec - the execute context (carries Node, Ctx, LLM clients, workspace).
  * param: params - the resolved tool parameters.

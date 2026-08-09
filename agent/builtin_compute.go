@@ -9,13 +9,9 @@ import (
 
 /*
  * ComputeTool is the registered tool entry for compute.
- * desc: Implements both the standard Tool interface (for registry/schema
- *       visibility to the planner) and ContextualExecutor (the real
- *       execution path — compute needs graph, budget, LLM clients that
- *       plain Execute cannot carry). The dispatcher always prefers
- *       ExecuteWithContext when a tool implements it, so the plain
- *       Execute method below is a defensive stub that should never be
- *       reached in normal operation.
+ * desc: Returns a ToolMessage like every other tool. The graph, budget and
+ *       LLM clients it needs — which plain (ctx, params) cannot carry — ride
+ *       on the ctx, put there by the dispatcher before it calls anything.
  */
 type ComputeTool struct {
 	agent *Agent
@@ -27,7 +23,7 @@ var _ tools.TypedExecutor = (*ComputeTool)(nil)
 
 /*
  * NewComputeTool constructs a ComputeTool bound to an Agent.
- * desc: The agent reference gives ExecuteWithContext access to llm clients,
+ * desc: The agent reference gives ExecuteTyped access to llm clients,
  *       workspace, and the runCompute entry point.
  * param: a - the agent instance to bind.
  * return: a new ComputeTool.
@@ -88,14 +84,9 @@ var computeOutputSchema = json.RawMessage(`{
 
 func (c *ComputeTool) OutputSchema() json.RawMessage { return computeOutputSchema }
 
-/*
- * Execute is a defensive stub.
- * desc: Compute requires a live graph, budget, and LLM clients that plain
- *       (ctx, params) cannot carry. The dispatcher always prefers
- *       ExecuteWithContext when the tool implements ContextualExecutor, so
- *       this path is unreachable in normal use. It exists only to satisfy
- *       the Tool interface for registry compatibility.
- */
+// Execute satisfies the Tool interface for callers outside the DAG. Outside a
+// run there is no graph, budget or model, so it reports that rather than
+// pretending to compute anything.
 func (c *ComputeTool) Execute(ctx context.Context, params map[string]any) (string, error) {
 	return tools.StringResult(c.ExecuteTyped(ctx, params))
 }

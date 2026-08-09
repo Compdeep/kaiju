@@ -24,7 +24,10 @@ var namesTheSchedulerSpawns = []string{"bash", "service"}
 
 func TestRegisterSuppliesTheNamesTheEngineExpects(t *testing.T) {
 	reg := tools.NewRegistry()
-	registered := Register(reg, Deps{})
+	registered, err := Register(reg, Deps{})
+	if err != nil {
+		t.Fatalf("Register into an empty registry: %v", err)
+	}
 
 	for _, name := range namesTheSchedulerSpawns {
 		if _, ok := reg.Get(name); !ok {
@@ -48,7 +51,9 @@ func TestRegisterSuppliesTheNamesTheEngineExpects(t *testing.T) {
 // tool being missing.
 func TestAnAbsentDependencyOmitsItsTools(t *testing.T) {
 	reg := tools.NewRegistry()
-	Register(reg, Deps{}) // no memory, no executor
+	if _, err := Register(reg, Deps{}); err != nil {
+		t.Fatal(err)
+	} // no memory, no executor
 
 	for _, name := range []string{"memory_store", "memory_recall", "memory_search"} {
 		if _, ok := reg.Get(name); ok {
@@ -68,7 +73,10 @@ func TestAnAbsentDependencyOmitsItsTools(t *testing.T) {
 // rather than being an error — the set changes between versions.
 func TestExcludeLeavesAToolOut(t *testing.T) {
 	reg := tools.NewRegistry()
-	registered := Register(reg, Deps{Exclude: []string{"clipboard", "not_a_core_tool"}})
+	registered, err := Register(reg, Deps{Exclude: []string{"clipboard", "not_a_core_tool"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if _, ok := reg.Get("clipboard"); ok {
 		t.Error("clipboard was excluded and is registered")
@@ -95,51 +103,58 @@ func (stubBash) Execute(context.Context, map[string]any) (string, error) {
 	return "from the application", nil
 }
 
-// The override half. An application keeps the engine's name and supplies its
-// own behaviour, so the planner still sees one tool for the job and the
-// scheduler's grafts still resolve.
-func TestAnApplicationCanReplaceACoreTool(t *testing.T) {
+// The override: exclude the name from the core set, then register your own
+// under it. The planner still sees one tool for the job and every graft still
+// resolves, and the substitution is visible in the call that made it.
+func TestAnApplicationTakesANameByExcludingIt(t *testing.T) {
 	reg := tools.NewRegistry()
-	Register(reg, Deps{})
-
-	// Register refuses a name already taken. That is the guard against two
-	// tools for one job arriving by accident.
-	if err := reg.Register(stubBash{}); err == nil {
-		t.Error("Register accepted a name already registered — an application would " +
-			"silently get whichever was registered first")
+	if _, err := Register(reg, Deps{Exclude: []string{"bash"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Register(stubBash{}); err != nil {
+		t.Fatalf("registering into the excluded name: %v", err)
 	}
 
-	// Replace takes it.
-	reg.Replace(stubBash{}, "myapp")
 	got, ok := reg.Get("bash")
 	if !ok {
-		t.Fatal("bash disappeared")
+		t.Fatal("bash is not registered at all")
 	}
 	out, err := got.Execute(context.Background(), nil)
 	if err != nil || out != "from the application" {
 		t.Errorf("Get(bash) = %q, %v — want the application's own implementation", out, err)
 	}
-	if src := reg.GetSource("bash"); src != "myapp" {
-		t.Errorf("source = %q, want the application's, so a trace says which is running", src)
-	}
 }
 
-// Register replaces rather than refuses, so calling it after an application has
-// registered its own does not produce a silent mix that depends on call order.
-// The documented order is core first, then Replace.
-func TestRegisterReplacesWhatIsAlreadyThere(t *testing.T) {
+// A name is registered once and never reassigned. Whichever order the calls
+// come in, the collision is reported rather than resolved silently.
+func TestANameTakenTwiceIsAnError(t *testing.T) {
+	// Application first, then the core set.
 	reg := tools.NewRegistry()
-	reg.Replace(stubBash{}, "myapp")
-
-	Register(reg, Deps{})
-
-	got, _ := reg.Get("bash")
-	if out, _ := got.Execute(context.Background(), nil); out == "from the application" {
-		t.Error("Register left the application's tool in place — an application calling " +
-			"them in the wrong order would get a mix, and would have no way to tell")
+	if err := reg.Register(stubBash{}); err != nil {
+		t.Fatal(err)
 	}
-	if src := reg.GetSource("bash"); src != "core" {
-		t.Errorf("source = %q, want core", src)
+	registered, err := Register(reg, Deps{})
+	if err == nil {
+		t.Fatal("the core set took a name the application already held, without saying so")
+	}
+	if !strings.Contains(err.Error(), "bash") || !strings.Contains(err.Error(), "exclude") {
+		t.Errorf("the error should name the tool and say what to do: %v", err)
+	}
+	// What it did register before stopping is reported, so a caller can see how
+	// far it got rather than guessing.
+	for _, name := range registered {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("reported %q as registered and it is not", name)
+		}
+	}
+
+	// Core set first, then the application.
+	reg2 := tools.NewRegistry()
+	if _, err := Register(reg2, Deps{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg2.Register(stubBash{}); err == nil {
+		t.Error("the application took a name the core set already held, without saying so")
 	}
 }
 
@@ -147,7 +162,10 @@ func TestRegisterReplacesWhatIsAlreadyThere(t *testing.T) {
 // same one.
 func TestEveryRegisteredNameIsTheToolsOwn(t *testing.T) {
 	reg := tools.NewRegistry()
-	registered := Register(reg, Deps{})
+	registered, err := Register(reg, Deps{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	seen := map[string]bool{}
 	for _, name := range registered {

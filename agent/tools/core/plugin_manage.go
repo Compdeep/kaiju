@@ -13,7 +13,6 @@ import (
 	"time"
 
 	agenttools "github.com/Compdeep/kaiju/agent/tools"
-	"github.com/Compdeep/kaiju/internal/config"
 	"github.com/Compdeep/kaiju/internal/plugins"
 )
 
@@ -121,7 +120,7 @@ func (h *liveHost) RegisterReaderFallback(fn func(ctx context.Context, rawURL st
 // isn't even present. The plugins skill gates WHEN it is used (explicit user ask).
 type PluginEnable struct {
 	reg       *agenttools.Registry
-	cfg       *config.Config
+	cfg       PluginConfig
 	workspace string
 	svc       *Service // kaiju's process manager — brings up a plugin's backing host
 }
@@ -133,10 +132,10 @@ type PluginEnable struct {
 // here made construction the place a missing config surfaced — at startup,
 // before any tool ran, as a nil dereference with no name attached to it. The
 // tool reports it instead, when it is called, as a failure like any other.
-func NewPluginEnable(reg *agenttools.Registry, cfg *config.Config, svc *Service) *PluginEnable {
+func NewPluginEnable(reg *agenttools.Registry, cfg PluginConfig, svc *Service) *PluginEnable {
 	workspace := ""
 	if cfg != nil {
-		workspace = cfg.Agent.Workspace
+		workspace = cfg.PluginWorkspace()
 	}
 	return &PluginEnable{reg: reg, cfg: cfg, workspace: workspace, svc: svc}
 }
@@ -187,8 +186,8 @@ func (p *PluginEnable) ExecuteTyped(_ context.Context, params map[string]any) (a
 
 	// A remote plugin's bridge reads KAIJU_PLUGIN_HOST; export the configured host
 	// (set via plugin_option) so enabling "remote" connects to the right place.
-	if p.cfg.RemotePluginHost != "" {
-		os.Setenv("KAIJU_PLUGIN_HOST", p.cfg.RemotePluginHost)
+	if p.cfg.PluginHost() != "" {
+		os.Setenv("KAIJU_PLUGIN_HOST", p.cfg.PluginHost())
 	}
 
 	host := &liveHost{reg: p.reg, workspace: p.workspace}
@@ -196,7 +195,7 @@ func (p *PluginEnable) ExecuteTyped(_ context.Context, params map[string]any) (a
 	plugins.MarkActive(name)
 
 	note := ""
-	if err := p.cfg.SetPluginsPersisted(appendUnique(p.cfg.Plugins, name)); err != nil {
+	if err := p.cfg.SetPluginNames(appendUnique(p.cfg.PluginNames(), name)); err != nil {
 		note = fmt.Sprintf(" (active now, but not persisted: %v — it won't survive a restart)", err)
 	}
 
@@ -221,10 +220,10 @@ func (p *PluginEnable) enableRemote(r plugins.RemoteInfo) (agenttools.ToolMessag
 	}
 	// Persist so it survives a restart: the bridge in `plugins`, and the host URL.
 	note := ""
-	if perr := p.cfg.SetPluginsPersisted(appendUnique(p.cfg.Plugins, "remote")); perr != nil {
+	if perr := p.cfg.SetPluginNames(appendUnique(p.cfg.PluginNames(), "remote")); perr != nil {
 		note = fmt.Sprintf(" (active now, not persisted: %v)", perr)
-	} else if p.cfg.RemotePluginHost == "" {
-		_ = p.cfg.SetRemotePluginHostPersisted(hostURL)
+	} else if p.cfg.PluginHost() == "" {
+		_ = p.cfg.SetPluginHost(hostURL)
 	}
 	return agenttools.ToolOK("plugin", fmt.Sprintf("Enabled %q — web_fetch reads pages through it, and its host is supervised by kaiju's service manager (auto-restarts if it dies).%s", r.Name, note), map[string]any{"enabled": r.Name, "tools": added, "host": hostURL}), nil
 }
@@ -240,7 +239,7 @@ func (p *PluginEnable) ensureRemoteUp(r plugins.RemoteInfo) ([]string, string, e
 	if !ok {
 		return nil, "", fmt.Errorf("%q needs the remote bridge, which isn't built into this binary (rebuild with -tags plugin_remote)", r.Name)
 	}
-	hostURL := strings.TrimRight(p.cfg.RemotePluginHost, "/")
+	hostURL := strings.TrimRight(p.cfg.PluginHost(), "/")
 	if hostURL == "" {
 		hostURL = r.DefaultURL
 	}
@@ -255,7 +254,7 @@ func (p *PluginEnable) ensureRemoteUp(r plugins.RemoteInfo) ([]string, string, e
 	// Host not answering (no tools)? Bring it up through kaiju's service manager —
 	// tracked, health-checked, auto-restarted on crash — then retry the connect.
 	if len(host.added) == 0 {
-		startCmd := p.cfg.RemotePluginStart
+		startCmd := p.cfg.PluginHostStart()
 		if startCmd == "" {
 			startCmd = r.StartCmd
 		}
@@ -289,7 +288,7 @@ func (p *PluginEnable) ensureRemoteUp(r plugins.RemoteInfo) ([]string, string, e
 // "just work" after a restart without the user re-enabling it — and, paired with
 // the service manager's auto-restart, keeps it working when the host later dies.
 func (p *PluginEnable) EnsureRemoteHostsUp() {
-	if !contains(p.cfg.Plugins, "remote") {
+	if !contains(p.cfg.PluginNames(), "remote") {
 		return
 	}
 	for _, r := range plugins.RemoteCatalog {
@@ -343,10 +342,10 @@ func hostUp(rawURL string) bool {
 // meaningful one is the remote plugin host URL (key "host"/"url"), which the
 // `remote` bridge connects to — so a user can point kaiju at their plugin host
 // from chat, then enable it. Registered behind the same runtime-activation flag.
-type PluginOption struct{ cfg *config.Config }
+type PluginOption struct{ cfg PluginConfig }
 
 // NewPluginOption returns the plugin_option tool.
-func NewPluginOption(cfg *config.Config) *PluginOption { return &PluginOption{cfg: cfg} }
+func NewPluginOption(cfg PluginConfig) *PluginOption { return &PluginOption{cfg: cfg} }
 
 func (p *PluginOption) Name() string { return "plugin_option" }
 
@@ -378,7 +377,7 @@ func (p *PluginOption) ExecuteTyped(_ context.Context, params map[string]any) (a
 	}
 	switch key {
 	case "host", "url", "remote_plugin_host":
-		if err := p.cfg.SetRemotePluginHostPersisted(value); err != nil {
+		if err := p.cfg.SetPluginHost(value); err != nil {
 			return agenttools.ToolFail("plugin", "couldn't persist host: "+err.Error(), nil), nil
 		}
 		os.Setenv("KAIJU_PLUGIN_HOST", value)

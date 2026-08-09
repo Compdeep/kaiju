@@ -19,7 +19,7 @@ import (
 // toolGap is a gathering step that produced nothing usable.
 type toolGap struct {
 	Tag    string
-	Kind   string
+	Type   string
 	Detail string
 }
 
@@ -40,12 +40,12 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 		env := tb.Envelope()
 		switch env.Status {
 		case agenttools.StatusEmpty, agenttools.StatusError:
-			gaps = append(gaps, toolGap{Tag: n.Tag, Kind: env.Type, Detail: env.Detail})
+			gaps = append(gaps, toolGap{Tag: n.Tag, Type: env.Type, Detail: env.Detail})
 		case agenttools.StatusUnclassified:
 			// The tool ran and returned something; it did not say whether that
 			// something was a finding. Stating it is honest — the alternative is
 			// silence, which reads to every consumer as "this one was fine".
-			gaps = append(gaps, toolGap{Tag: n.Tag, Kind: env.Type,
+			gaps = append(gaps, toolGap{Tag: n.Tag, Type: env.Type,
 				Detail: "the tool did not report whether it found anything; read its output directly"})
 		}
 	}
@@ -54,7 +54,7 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 		if n.Error != nil {
 			detail = n.Error.Error()
 		}
-		gaps = append(gaps, toolGap{Tag: n.Tag, Kind: n.ToolName, Detail: detail})
+		gaps = append(gaps, toolGap{Tag: n.Tag, Type: n.ToolName, Detail: detail})
 	}
 	return gaps
 }
@@ -122,9 +122,9 @@ func (a *Agent) coverageEdge(ctx context.Context, graph *Graph, evidence string)
 		for _, g := range gaps {
 			label := g.Tag
 			if label == "" {
-				label = g.Kind
+				label = g.Type
 			}
-			gb.WriteString(fmt.Sprintf("- %s (%s): %s\n", label, g.Kind, strings.TrimSpace(g.Detail)))
+			gb.WriteString(fmt.Sprintf("- %s (%s): %s\n", label, g.Type, strings.TrimSpace(g.Detail)))
 		}
 		structural := "These gathering steps returned nothing usable — treat what they were meant to retrieve as unavailable, and do not fabricate to fill them:\n" + gb.String()
 

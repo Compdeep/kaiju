@@ -142,30 +142,16 @@ func validateDataFlow(toolName string, dependsOn []string, params map[string]any
 // paramsContainTemplate reports whether any string-typed leaf reachable
 // from v contains a ${node...} placeholder. Mirror of walkParams in
 // dispatcher.go; kept local here so the validator stays a pure helper.
+// paramsContainTemplate reports whether the params carry a reference to another
+// step's output.
+//
+// Through the reference model rather than a substring scan. A scan for "${node."
+// accepts a placeholder that is only half written — the step passes validation,
+// nothing resolves it at fire time because the pattern does not match, and the
+// tool is handed the literal text. Asking what references are actually there
+// answers the question the caller meant.
 func paramsContainTemplate(v any) bool {
-	switch x := v.(type) {
-	case map[string]any:
-		for _, val := range x {
-			if s, ok := val.(string); ok {
-				if strings.Contains(s, "${node.") || strings.Contains(s, "${step.") {
-					return true
-				}
-			} else if paramsContainTemplate(val) {
-				return true
-			}
-		}
-	case []any:
-		for _, val := range x {
-			if s, ok := val.(string); ok {
-				if strings.Contains(s, "${node.") || strings.Contains(s, "${step.") {
-					return true
-				}
-			} else if paramsContainTemplate(val) {
-				return true
-			}
-		}
-	}
-	return false
+	return len(FindRefs(v)) > 0
 }
 
 // hasNonEmptyTaskFiles reports whether params["task_files"] is a non-empty

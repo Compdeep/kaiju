@@ -82,6 +82,11 @@ func (a *Agent) validateTarget(target string) (err error) {
 	return a.targetValid(target)
 }
 
+// selfTarget is what a plan writes to mean the machine the agent is running on,
+// without having to know its id. The dispatcher rewrites it to that id before
+// anything reads the target, so it is a spelling rather than a state.
+const selfTarget = "self"
+
 /*
  * remoteFor reports whether a node should be dispatched remotely.
  * desc: Only tool nodes are remotable — compute and other LLM-bearing node

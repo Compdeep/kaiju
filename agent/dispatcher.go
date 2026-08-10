@@ -147,6 +147,42 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		}
 	}
 
+	// Which machine this step runs on.
+	//
+	// Only asked where there is more than one answer. An application that
+	// supplied no executor runs everything where the agent runs, so a step that
+	// names no machine is not an omission — it is the only possibility, and
+	// refusing it would refuse every step. An application that CAN send work
+	// elsewhere has to be told, because "here" is then a choice someone made
+	// rather than the only option, and a step that names nothing is a step
+	// nobody decided the location of.
+	//
+	// Tool nodes only. Compute and the reflection types run where the agent
+	// runs whatever anyone writes.
+	if n.Type == NodeTool && a.remoteExec != nil {
+		if skill, ok := a.registry.Get(n.ToolName); ok {
+			// "self" is what a planner writes for this machine without knowing
+			// its id. Resolved before anything reads the target.
+			if n.Target == selfTarget {
+				n.Target = a.cfg.NodeID
+			}
+			if toolapi.RequiresTarget(skill) {
+				if n.Target == "" {
+					log.Printf("[dag] node %s: %q needs a target machine; rejecting empty target",
+						n.ID, n.ToolName)
+					ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf(
+						"tool %q requires step.target — name a machine, or %q for this one",
+						n.ToolName, selfTarget)}
+					return
+				}
+			} else if n.Target != "" {
+				log.Printf("[dag] node %s: %q takes no target; stripping %q",
+					n.ID, n.ToolName, n.Target)
+				n.Target = ""
+			}
+		}
+	}
+
 	// Remote execution: the planner named a machine and the embedding
 	// application supplied an executor, so hand the call over rather than
 	// running it here. Local throttling is deliberately skipped — the cooldown

@@ -180,7 +180,12 @@ func (p *ProcessKill) Impact(map[string]any) int { return toolapi.ImpactControl 
  * return: JSON schema as raw bytes
  */
 func (p *ProcessKill) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(`{"type":"object","properties":{
+		"pid":    {"type":"integer","description":"the process that was signalled"},
+		"force":  {"type":"boolean","description":"true when it was killed rather than asked to stop"},
+		"ok":     {"type":"boolean","description":"true when the signal was delivered"},
+		"output": {"type":"string","description":"what the kill command printed — present only on a failure"}
+	}}`)
 }
 
 /*
@@ -240,10 +245,16 @@ func (p *ProcessKill) ExecuteTyped(ctx context.Context, params map[string]any) (
 	}
 
 	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
 	if err != nil {
-		return toolapi.ToolFail("command", fmt.Sprintf("kill failed: %v — %s", err, strings.TrimSpace(string(out))), nil), nil
+		return toolapi.ToolFail("status", fmt.Sprintf("kill pid %d: %v", pid, err),
+			map[string]any{"pid": pid, "force": force, "ok": false, "output": output}), nil
 	}
-	return toolapi.ToolText(fmt.Sprintf("killed pid %d (force=%v)\n%s", pid, force, strings.TrimSpace(string(out)))), nil
+	// The pid in the payload, not only in the sentence: a later step that has to
+	// confirm the process is gone needs the number, and reading it back out of
+	// rendered text is what the payload exists to avoid.
+	return toolapi.ToolOK("status", fmt.Sprintf("killed pid %d (force=%v)\n%s", pid, force, output),
+		map[string]any{"pid": pid, "force": force, "ok": true}), nil
 }
 
 var _ toolapi.Tool = (*ProcessKill)(nil)

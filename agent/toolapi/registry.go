@@ -13,9 +13,62 @@ import (
  * desc: Internal wrapper that pairs a tool with its source tag and enabled flag
  */
 type registeredTool struct {
-	tool    Tool
-	source  string // "builtin" or "skillmd:<path>"
-	enabled bool   // can be toggled from dashboard
+	tool   Tool
+	source string // "builtin" or "skillmd:<path>"
+	reach  Reach  // how far this tool may be called from
+}
+
+// Reach is how far a registered tool may be called from.
+//
+// One value rather than a flag and a second list. An application that can run a
+// step on another machine has three answers for each tool, not two: nobody may
+// call it, this node may call it on itself, or another machine may ask this
+// node to run it. The middle one is the interesting case and it has nowhere to
+// live in a boolean — a tool that is fine to run here can be a poor thing to
+// let a stranger trigger.
+//
+// Reach says nothing about whether THIS node may call OUT to another machine.
+// That is the plan's business and the remote executor's. This is only about
+// what arrives here.
+type Reach uint8
+
+const (
+	// ReachOff is registered and callable by nobody. The tool still appears in
+	// a listing, which is the difference between off and absent: an operator
+	// can see it exists and turn it on.
+	ReachOff Reach = iota
+
+	// ReachLocal is callable by this node's own runs. The default for a newly
+	// registered tool, because granting more should be something someone typed.
+	ReachLocal
+
+	// ReachEverywhere is callable by this node's runs and by another machine
+	// dispatching a step onto it.
+	ReachEverywhere
+)
+
+// String is the word the API and the dashboard use.
+func (r Reach) String() string {
+	switch r {
+	case ReachLocal:
+		return "local"
+	case ReachEverywhere:
+		return "everywhere"
+	}
+	return "off"
+}
+
+// ParseReach reads the word back, and reports whether it was one.
+func ParseReach(s string) (Reach, bool) {
+	switch s {
+	case "off":
+		return ReachOff, true
+	case "local":
+		return ReachLocal, true
+	case "everywhere":
+		return ReachEverywhere, true
+	}
+	return ReachOff, false
 }
 
 /*
@@ -61,7 +114,7 @@ func (r *Registry) RegisterWithSource(t Tool, source string) error {
 	if _, exists := r.tools[t.Name()]; exists {
 		return fmt.Errorf("tool %q already registered", t.Name())
 	}
-	r.tools[t.Name()] = &registeredTool{tool: t, source: source, enabled: true}
+	r.tools[t.Name()] = &registeredTool{tool: t, source: source, reach: ReachLocal}
 	return nil
 }
 
@@ -74,7 +127,7 @@ func (r *Registry) RegisterWithSource(t Tool, source string) error {
 func (r *Registry) Replace(t Tool, source string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.tools[t.Name()] = &registeredTool{tool: t, source: source, enabled: true}
+	r.tools[t.Name()] = &registeredTool{tool: t, source: source, reach: ReachLocal}
 }
 
 /*
@@ -98,7 +151,7 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	rt, ok := r.tools[name]
-	if !ok || !rt.enabled {
+	if !ok || rt.reach < ReachLocal {
 		return nil, false
 	}
 	return rt.tool, true
@@ -159,6 +212,7 @@ type ToolInfo struct {
 	Impact      int    `json:"impact"` // IGX impact tier index (0/1/2); registry maps to ranks on the configured ladder
 	IsBuiltin   bool   `json:"isBuiltin"`
 	Enabled     bool   `json:"enabled"`
+	Reach       string `json:"reach"` // off | local | everywhere
 	Source      string `json:"source"`
 }
 
@@ -177,7 +231,8 @@ func (r *Registry) ListInfo() []ToolInfo {
 			Description: rt.tool.Description(),
 			Impact:      GetImpact(rt.tool, nil),
 			IsBuiltin:   rt.source == "builtin",
-			Enabled:     rt.enabled,
+			Enabled:     rt.reach != ReachOff,
+			Reach:       rt.reach.String(),
 			Source:      rt.source,
 		})
 	}
@@ -199,7 +254,14 @@ func (r *Registry) SetEnabled(name string, enabled bool) error {
 	if !ok {
 		return fmt.Errorf("tool %q not found", name)
 	}
-	rt.enabled = enabled
+	// On means local, never everywhere: a two-state caller cannot be allowed to
+	// grant another machine the right to run something here, because it has no
+	// way to say it meant to. Use SetReach for that.
+	if enabled {
+		rt.reach = ReachLocal
+	} else {
+		rt.reach = ReachOff
+	}
 	return nil
 }
 
@@ -213,7 +275,7 @@ func (r *Registry) AllToolDefs() []llm.ToolDef {
 	defer r.mu.RUnlock()
 	defs := make([]llm.ToolDef, 0, len(r.tools))
 	for _, rt := range r.tools {
-		if rt.enabled {
+		if rt.reach != ReachOff {
 			defs = append(defs, ToToolDef(rt.tool))
 		}
 	}
@@ -231,9 +293,62 @@ func (r *Registry) ToolDefsForNames(names []string) []llm.ToolDef {
 	defer r.mu.RUnlock()
 	defs := make([]llm.ToolDef, 0, len(names))
 	for _, name := range names {
-		if rt, ok := r.tools[name]; ok && rt.enabled {
+		if rt, ok := r.tools[name]; ok && rt.reach != ReachOff {
 			defs = append(defs, ToToolDef(rt.tool))
 		}
 	}
 	return defs
+}
+
+/*
+ * GetForRemote returns a tool only if another machine may run it here.
+ * desc: The lookup a handler uses for work arriving from elsewhere. A tool at
+ *       ReachLocal is invisible to it and the call fails as an unknown tool,
+ *       which is what an operator means by "this node may do that, and nobody
+ *       else may make it".
+ * param: name - the tool name from the incoming request.
+ * return: the tool and true when it may be run for another machine.
+ */
+func (r *Registry) GetForRemote(name string) (Tool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	rt, ok := r.tools[name]
+	if !ok || rt.reach < ReachEverywhere {
+		return nil, false
+	}
+	return rt.tool, true
+}
+
+/*
+ * SetReach sets how far a tool may be called from.
+ * desc: The three-state form of SetEnabled, for a caller that can say which of
+ *       the two "on" states it means.
+ * param: name - the registered tool.
+ * param: reach - off, local, or everywhere.
+ * return: an error naming the tool when it is not registered.
+ */
+func (r *Registry) SetReach(name string, reach Reach) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rt, ok := r.tools[name]
+	if !ok {
+		return fmt.Errorf("tool %q is not registered", name)
+	}
+	rt.reach = reach
+	return nil
+}
+
+/*
+ * ReachOf returns how far a tool may be called from.
+ * desc: ReachOff for a tool that is not registered at all, since neither can
+ *       be called and a caller asking this question wants to know whether it
+ *       may run, not why it may not.
+ */
+func (r *Registry) ReachOf(name string) Reach {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if rt, ok := r.tools[name]; ok {
+		return rt.reach
+	}
+	return ReachOff
 }

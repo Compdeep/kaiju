@@ -102,7 +102,11 @@ func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (
 			"Get-Process | Sort-Object CPU -Descending | Select-Object -First "+strconv.Itoa(limit*2)+
 				" Id, ProcessName, CPU, @{N='MemMB';E={[math]::Round($_.WorkingSet64/1MB,1)}} | Format-Table -AutoSize")
 	default:
-		cmd = exec.CommandContext(ctx, "ps", "aux", "--sort=-pcpu")
+		// auxww, not aux: without it a long command line is cut at the
+		// terminal width, and the part that identifies a suspicious process
+		// — the script path, the flags, the connect-back address — is
+		// exactly the part that gets cut.
+		cmd = exec.CommandContext(ctx, "ps", "auxww", "--sort=-pcpu")
 	}
 
 	out, err := cmd.Output()

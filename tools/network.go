@@ -7,6 +7,8 @@ import (
 	"net"
 	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -62,11 +64,11 @@ func (n *NetInfo) Parameters() json.RawMessage {
 		"properties": {
 			"action": {
 				"type": "string",
-				"enum": ["interfaces", "connectivity", "dns", "ports"],
-				"description": "Action: interfaces (list IPs), connectivity (check host reachability), dns (resolve hostname), ports (list listening ports)"
+				"enum": ["interfaces", "connectivity", "dns", "ports", "connections"],
+				"description": "Action: interfaces (list IPs), connectivity (check host reachability), dns (resolve hostname), ports (what this host is LISTENING on), connections (what this host is TALKING TO — every TCP and UDP socket in any state, with the process holding it)"
 			},
-			"host": {"type": "string", "description": "Hostname or IP for connectivity/dns checks"},
-			"port": {"type": "integer", "description": "Port number for connectivity check"}
+			"host": {"type": "string", "description": "Hostname or IP for connectivity/dns checks, or a substring to filter connections by"},
+			"port": {"type": "integer", "description": "Port number for a connectivity check, or a port to filter connections by"}
 		},
 		"required": ["action"],
 		"additionalProperties": false
@@ -112,8 +114,15 @@ func (n *NetInfo) ExecuteTyped(ctx context.Context, params map[string]any) (tool
 		return netDNS(ctx, host)
 	case "ports":
 		return netListeningPorts(ctx)
+	case "connections":
+		host, _ := params["host"].(string)
+		port := 0
+		if p, ok := toolapi.ParamNum(params, "port"); ok && p > 0 {
+			port = int(p)
+		}
+		return netConnections(ctx, host, port)
 	default:
-		return toolapi.ToolMessage{}, fmt.Errorf("net_info: unknown action %q (use: interfaces, connectivity, dns, ports)", action)
+		return toolapi.ToolMessage{}, fmt.Errorf("net_info: unknown action %q (use: interfaces, connectivity, dns, ports, connections)", action)
 	}
 }
 
@@ -243,3 +252,82 @@ func netListeningPorts(ctx context.Context) (toolapi.ToolMessage, error) {
 
 var _ toolapi.Tool = (*NetInfo)(nil)
 var _ toolapi.Outputter = (*NetInfo)(nil)
+
+// netConnections lists every TCP and UDP socket in any state, with the process
+// holding it.
+//
+// Distinct from "ports", which is ss -tlnp — listening sockets only. That
+// answers "what can reach this host". This answers "what is this host talking
+// to", which is the question asked of a machine suspected of being compromised,
+// and the two are not interchangeable: a beacon holds an established outbound
+// connection and listens on nothing.
+//
+// host and port filter the rows by substring, so a step that found a suspicious
+// address can ask what is talking to it without reading the whole table.
+func netConnections(ctx context.Context, host string, port int) (toolapi.ToolMessage, error) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+			"Get-NetTCPConnection | Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess | Format-Table -AutoSize")
+	case "darwin":
+		cmd = exec.CommandContext(ctx, "lsof", "-i", "-P", "-n")
+	default:
+		cmd = exec.CommandContext(ctx, "ss", "-tunap")
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if runtime.GOOS == "linux" {
+			cmd = exec.CommandContext(ctx, "netstat", "-tunap")
+			out, err = cmd.CombinedOutput()
+		}
+		if err != nil {
+			return toolapi.ToolFail("net", fmt.Sprintf("net_info connections: %v", err),
+				map[string]any{"output": strings.TrimSpace(string(out))}), nil
+		}
+	}
+
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) == 0 {
+		return toolapi.ToolEmpty("net", "no connections reported by the listing command"), nil
+	}
+
+	// The header rows are not data. PowerShell prints two, ss prints one.
+	headerEnd := 1
+	if runtime.GOOS == "windows" && len(lines) > 1 {
+		headerEnd = 2
+	}
+	if headerEnd > len(lines) {
+		headerEnd = len(lines)
+	}
+	kept := append([]string(nil), lines[:headerEnd]...)
+
+	portStr := ""
+	if port > 0 {
+		portStr = strconv.Itoa(port)
+	}
+	count := 0
+	for _, line := range lines[headerEnd:] {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if host != "" && !strings.Contains(line, host) {
+			continue
+		}
+		if portStr != "" && !strings.Contains(line, portStr) {
+			continue
+		}
+		kept = append(kept, line)
+		count++
+	}
+
+	// Nothing matched is a finding about the host, not a failed listing.
+	if count == 0 {
+		if host != "" || portStr != "" {
+			return toolapi.ToolEmpty("net", fmt.Sprintf("no connection matches host=%q port=%q", host, portStr)), nil
+		}
+		return toolapi.ToolEmpty("net", "this host has no connections"), nil
+	}
+	return toolapi.ToolOK("net", strings.Join(kept, "\n"), map[string]any{"count": count}), nil
+}

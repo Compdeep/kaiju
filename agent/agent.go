@@ -244,6 +244,12 @@ type Agent struct {
 
 	kernel *Kernel // core runtime — owns the scheduler + investigation lifecycle
 
+	// stopped is closed by Stop and read by Start, which is how an agent ends
+	// without ending the context around it. A channel rather than a cancel func
+	// because Stop can arrive before Start does.
+	stopped  chan struct{}
+	stopOnce sync.Once
+
 	// DAG observation (live thought process streaming). Subscribers receive every
 	// investigation's events; each event is tagged with its own Graph's SessionID
 	// at emission, so consumers can route by session.
@@ -334,6 +340,7 @@ func New(cfg Config) (*Agent, error) {
 	}
 
 	a := &Agent{
+		stopped:           make(chan struct{}),
 		cfg:               cfg,
 		llm:               client,
 		executor:          executorClient,
@@ -471,6 +478,23 @@ func (a *Agent) InitKernel(ctx context.Context) {
  * desc: Blocks until ctx is cancelled. Periodically prunes expired memory entries.
  * param: ctx - context controlling the agent's lifetime.
  */
+/*
+ * Stop ends this agent, whatever the context it was given is doing.
+ * desc: For an application that replaces its agent while the process keeps
+ *       running — a model setting changed, a role changed. Without it the
+ *       agent being replaced holds its kernel, its scheduler workers and its
+ *       event loop until the process exits, because every rebuild is handed
+ *       the same process-lifetime context.
+ *
+ *       Safe before Start, safe twice, safe from any goroutine. Returns as
+ *       soon as the stop is signalled rather than waiting for the workers to
+ *       drain, which is what a caller replacing an agent wants: the work in
+ *       flight belongs to the old agent and ends with it.
+ */
+func (a *Agent) Stop() {
+	a.stopOnce.Do(func() { close(a.stopped) })
+}
+
 func (a *Agent) Start(ctx context.Context) {
 	dagLabel := "off"
 	if a.cfg.DAGEnabled {
@@ -478,6 +502,26 @@ func (a *Agent) Start(ctx context.Context) {
 	}
 	log.Printf("[agent] started (model=%s, maxTurns=%d, rateLimit=%d/hr, dag=%s)",
 		a.cfg.LLMModel, a.cfg.MaxTurns, a.cfg.RateLimit, dagLabel)
+
+	// An agent can be stopped on its own, not only by ending the context it was
+	// given. An application that replaces its agent — because a model setting
+	// changed, or a role did — hands the replacement the same process-lifetime
+	// context, so without this the one being replaced keeps its kernel, its
+	// scheduler workers and this loop running until the process exits.
+	//
+	// Derived here rather than in New because this is where the context arrives,
+	// and read through a channel closed by Stop so that stopping an agent before
+	// it has started still stops it. Start is usually called in a goroutine, so
+	// the two orders are both real.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-a.stopped:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 
 	a.InitKernel(ctx)
 

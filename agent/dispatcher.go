@@ -375,14 +375,19 @@ func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error)
 			return v, nil
 		}
 	}
-	// Body.Field missed. Distinguish "envelope not JSON" (a tool bug — degrade
-	// gracefully to the raw string so a working pipeline doesn't break) from
-	// "JSON valid but field absent" (a planner bug — fail loud), preserving the
-	// prior behavior.
+	// Body.Field missed, so the field cannot be read. Both ways of missing are
+	// an error, and the message says which one happened.
+	//
+	// The result not being JSON used to be forgiven here: it was logged, and the
+	// whole result was injected in place of the field. That hands a tool the
+	// entire output of the step before it where one field was asked for, and
+	// nothing says so until whatever reads it misbehaves — far from the step
+	// that caused it. A step asked for a field; if there is no field, the step
+	// is wrong and should say so where it is written.
 	var probe any
 	if json.Unmarshal([]byte(dep.Result), &probe) != nil {
-		log.Printf("[dag] template on %s: dep %s result is not JSON, injecting full result (upstream tool bug, not rejecting)", owner, depID)
-		return dep.Result, nil
+		return nil, fmt.Errorf("template on %s: field %q was asked of dep %s, whose result is not JSON and so has no fields",
+			owner, field, depID)
 	}
 	return nil, fmt.Errorf("template on %s: field %q absent in dep %s", owner, field, depID)
 }

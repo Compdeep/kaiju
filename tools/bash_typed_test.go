@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
@@ -73,5 +75,72 @@ func TestBash_SilentSuccessIsAnAbsence(t *testing.T) {
 	}
 	if msg.Status != toolapi.StatusOK || !strings.Contains(msg.Content, "hello") {
 		t.Errorf("echo hello = %q %q, want ok carrying the output", msg.Status, msg.Content)
+	}
+}
+
+// The timeout is idle, not wall clock: a command doing its job is not killed
+// for taking a while, and a command doing nothing is.
+//
+// This is what a download is. wget on a large file runs for minutes and prints
+// the whole time; a wall clock kills it for succeeding slowly. What was there
+// before guessed instead — it matched the command text for "wget", "npm
+// install" and a dozen others and gave those a longer clock, which is wrong for
+// everything not on the list.
+func TestBash_IdleTimeoutSparesAWorkingCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the shell script here is sh")
+	}
+	b := NewBash("", "")
+
+	// Runs for 2 seconds, prints every 200ms. An idle limit of 1s must not kill
+	// it: it is never quiet for a whole second.
+	start := time.Now()
+	msg, err := b.ExecuteTyped(context.Background(), map[string]any{
+		"command":     "for i in $(seq 1 10); do echo tick $i; sleep 0.2; done",
+		"timeout_sec": 1,
+	})
+	if err != nil {
+		t.Fatalf("bash: %v", err)
+	}
+	if msg.Status != toolapi.StatusOK {
+		t.Fatalf("a command printing every 200ms was killed by a 1s idle limit: %q %q", msg.Status, msg.Detail)
+	}
+	if !strings.Contains(msg.Content, "tick 10") {
+		t.Errorf("it did not run to the end:\n%s", msg.Content)
+	}
+	if elapsed := time.Since(start); elapsed < time.Second {
+		t.Errorf("it returned in %s — it cannot have run the full 2 seconds", elapsed)
+	}
+}
+
+// And the other half: silence is what gets killed.
+func TestBash_IdleTimeoutKillsAStuckCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the shell script here is sh")
+	}
+	start := time.Now()
+	msg, err := NewBash("", "").ExecuteTyped(context.Background(), map[string]any{
+		"command":     "echo starting; sleep 30",
+		"timeout_sec": 1,
+	})
+	if err != nil {
+		t.Fatalf("bash: %v", err)
+	}
+	if msg.Status != toolapi.StatusError {
+		t.Fatalf("a command silent for 30s was not killed: %q", msg.Status)
+	}
+	if !strings.Contains(msg.Detail, "no output") {
+		t.Errorf("the detail should say why it was killed, got %q", msg.Detail)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("it took %s to notice a 1s idle limit", elapsed)
+	}
+	// What it did print before going quiet is kept — it is often the only clue.
+	var fields map[string]any
+	if err := json.Unmarshal(msg.Data, &fields); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	if out, _ := fields["stdout"].(string); !strings.Contains(out, "starting") {
+		t.Errorf("what it printed before stalling was dropped: %v", fields)
 	}
 }

@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -98,7 +100,7 @@ func (b *Bash) Parameters() json.RawMessage {
 			},
 			"timeout_sec": {
 				"type": "integer",
-				"description": "Timeout in seconds. Default 60. Auto-extends for downloads (yt-dlp, curl -o) and builds. Set 0 for long-running tasks (no timeout)."
+				"description": "Seconds of SILENCE before the command is killed — not how long it may run. A download or a build that keeps printing is never killed for taking a while; one that says nothing for this long is treated as stuck. Default 60. Set 0 to allow any amount of silence."
 			}
 		},
 		"required": ["command"],
@@ -198,36 +200,20 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		return toolapi.ToolMessage{}, fmt.Errorf("bash: command is required")
 	}
 
-	timeout := b.timeout
+	// How long the command may be SILENT, not how long it may run.
+	//
+	// A download or a build is working the whole time it is producing output,
+	// and killing it on a wall clock kills the ones that are doing their job.
+	// This used to be guessed at by matching the command text for "wget",
+	// "npm install", "go build" and a dozen others, and giving those a longer
+	// wall clock — a list that is wrong for anything not on it. Measuring
+	// whether the command is saying anything needs no list.
+	//
+	// 0 means never kill for silence. The run's own wall clock still bounds it.
+	idle := b.timeout
 	if ts, ok := toolapi.ParamNum(params, "timeout_sec"); ok {
-		if ts == 0 {
-			timeout = 30 * time.Minute // 0 = long-running (downloads, builds)
-		} else if ts > 0 {
-			timeout = time.Duration(ts) * time.Second // no cap — caller decides
-		}
-	} else {
-		// Auto-detect slow commands and use longer timeout
-		cmdLower := strings.ToLower(command)
-		if strings.Contains(cmdLower, "yt-dlp") ||
-			strings.Contains(cmdLower, "curl -o") ||
-			strings.Contains(cmdLower, "wget ") {
-			timeout = 300 * time.Second // 5 minutes for downloads
-		} else if strings.Contains(cmdLower, "npm install") ||
-			strings.Contains(cmdLower, "pip install") ||
-			strings.Contains(cmdLower, "cargo build") ||
-			strings.Contains(cmdLower, "docker build") ||
-			strings.Contains(cmdLower, "apt install") ||
-			strings.Contains(cmdLower, "apt-get install") ||
-			strings.Contains(cmdLower, "yarn install") ||
-			strings.Contains(cmdLower, "go build") ||
-			strings.Contains(cmdLower, "npm run build") ||
-			strings.Contains(cmdLower, "npx create-") {
-			timeout = 180 * time.Second // 3 minutes for install/build commands
-		}
+		idle = time.Duration(ts) * time.Second
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	var cmd *exec.Cmd
 	switch b.shell {
@@ -247,10 +233,16 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var lastOutput atomic.Int64
+	lastOutput.Store(time.Now().UnixNano())
+	touch := writerFunc(func(p []byte) (int, error) {
+		lastOutput.Store(time.Now().UnixNano())
+		return len(p), nil
+	})
+	cmd.Stdout = io.MultiWriter(&stdout, touch)
+	cmd.Stderr = io.MultiWriter(&stderr, touch)
 
-	err := cmd.Run()
+	err := runUntilIdle(ctx, cmd, idle, &lastOutput)
 	// If context timed out, kill the entire process group
 	if ctx.Err() == context.DeadlineExceeded && cmd.Process != nil {
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
@@ -274,8 +266,17 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 	}
 
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return toolapi.ToolMessage{}, fmt.Errorf("bash: command timed out after %s", timeout)
+		// Silence is a different failure from a non-zero exit, and the model has
+		// to be able to tell them apart: one means the command is stuck, the
+		// other means it ran and said no.
+		if strings.HasPrefix(err.Error(), "no output for ") {
+			return toolapi.ToolFail("command", fmt.Sprintf("killed after %s with no output — the command produced nothing for that long, so it was treated as stuck", idle),
+				map[string]any{"command": command, "idle_timeout": idle.String(),
+					"stdout": headTailTruncate(stdout.String(), 200, 600),
+					"stderr": headTailTruncate(stderr.String(), 200, 600)}), nil
+		}
+		if ctx.Err() != nil {
+			return toolapi.ToolMessage{}, fmt.Errorf("bash: %w", ctx.Err())
 		}
 		// Return structured error as result (nil error so node resolves).
 		// The scheduler detects execute node failures from the result content.
@@ -345,4 +346,81 @@ func headTailTruncate(s string, head, tail int) string {
 	}
 	elided := len(s) - head - tail
 	return s[:head] + fmt.Sprintf("\n... [%d bytes elided] ...\n", elided) + s[len(s)-tail:]
+}
+
+// writerFunc lets a plain function stand in as an io.Writer, so the command's
+// output can be watched without copying it a second time.
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// runUntilIdle runs cmd and kills it when it has produced no output for idle.
+//
+// The whole process group goes, not just the shell: a command that backgrounds
+// something leaves the child running otherwise, and the group is why
+// SysProcAttr.Setpgid is set above.
+//
+// An idle of zero means never kill for silence — the caller has said the
+// command may be quiet for as long as it likes, and the run's wall clock is
+// what stops it.
+func runUntilIdle(ctx context.Context, cmd *exec.Cmd, idle time.Duration, lastOutput *atomic.Int64) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	if idle <= 0 {
+		select {
+		case err := <-done:
+			return err
+		case <-ctx.Done():
+			killGroup(cmd)
+			<-done
+			return ctx.Err()
+		}
+	}
+
+	// A tick well under the limit, so the kill lands close to the limit rather
+	// than up to a whole limit late.
+	tick := idle / 10
+	if tick < 100*time.Millisecond {
+		tick = 100 * time.Millisecond
+	}
+	t := time.NewTicker(tick)
+	defer t.Stop()
+
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-ctx.Done():
+			killGroup(cmd)
+			<-done
+			return ctx.Err()
+		case <-t.C:
+			since := time.Since(time.Unix(0, lastOutput.Load()))
+			if since >= idle {
+				killGroup(cmd)
+				<-done
+				return fmt.Errorf("no output for %s", idle)
+			}
+		}
+	}
+}
+
+// killGroup kills the command's whole process group, not only the shell.
+//
+// A command that backgrounds something — `npx vite &`, a build that spawns
+// workers — leaves those children running when only the shell is signalled, and
+// they hold the port or the file the next step needs. Setpgid above is what
+// makes the group addressable; a negative pid is the group.
+func killGroup(cmd *exec.Cmd) {
+	if cmd.Process == nil {
+		return
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		// No group (or not a platform with them): the process itself still goes.
+		_ = cmd.Process.Kill()
+	}
 }

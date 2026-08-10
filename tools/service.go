@@ -343,22 +343,83 @@ func isAlive(pid int) bool {
 	return true
 }
 
-// killGracefully sends SIGTERM, waits up to timeout, then SIGKILL if still alive.
+// killGracefully sends SIGTERM to the service, waits up to timeout, then
+// SIGKILL to anything still there.
+//
+// To the process group, not the pid. start runs the command through `sh -c` in
+// a session of its own, so the pid on the record is the shell's and the command
+// is its child. Signalling the pid alone killed the shell and left the command
+// running: reparented to init, still bound to whatever port it had, and no
+// longer named in any registry. stop said "stopped" and the service was up.
+// Those are the orphans freePort exists to clear, and this is where they came
+// from.
+//
+// Waiting on the group rather than the shell matters for the same reason. The
+// shell exits at once; a child that is slow to shut down, or ignores SIGTERM,
+// is what the timeout is for.
 func killGracefully(pid int, timeout time.Duration) error {
-	if !isAlive(pid) {
+	if pid <= 1 {
 		return nil
 	}
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if !isAlive(pid) && !groupAlive(pid) {
+		return nil
+	}
+	if err := signalGroup(pid, syscall.SIGTERM); err != nil {
 		return fmt.Errorf("sigterm: %w", err)
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !isAlive(pid) {
+		reap(pid)
+		if !groupAlive(pid) {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return syscall.Kill(pid, syscall.SIGKILL)
+	return signalGroup(pid, syscall.SIGKILL)
+}
+
+// reap collects the shell if it has exited and we started it.
+//
+// It is spawned as a child of this process and never waited on, so once it
+// exits it stays a zombie until this process does. A zombie is still a member
+// of its process group, so without this the group looks occupied for the whole
+// timeout and every stop takes as long as it is allowed to. Services inherited
+// from a previous run of the agent are not our children; the error says so and
+// there is nothing to do about them, because init reaps those itself.
+func reap(pid int) {
+	var status syscall.WaitStatus
+	_, _ = syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
+}
+
+// signalGroup signals every process in the group led by pid.
+//
+// Setsid at spawn makes the service its own session leader, so its group id is
+// its pid. A record written before that, or one whose process is not a leader,
+// has no such group — those fall back to the process on its own, which is what
+// the tool did for everything until now.
+func signalGroup(pid int, sig syscall.Signal) error {
+	err := syscall.Kill(-pid, sig)
+	if err == nil {
+		return nil
+	}
+	if err != syscall.ESRCH {
+		return err
+	}
+	if err := syscall.Kill(pid, sig); err != nil && err != syscall.ESRCH {
+		return err
+	}
+	return nil
+}
+
+// groupAlive reports whether any process is left in the group led by pgid.
+// Signal 0 asks the question without sending anything; being refused permission
+// is still an answer that something is there.
+func groupAlive(pgid int) bool {
+	if pgid <= 1 {
+		return false
+	}
+	err := syscall.Kill(-pgid, 0)
+	return err == nil || err == syscall.EPERM
 }
 
 // ── Actions ──

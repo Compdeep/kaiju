@@ -8,15 +8,13 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// Enbarr's template tests, run against this package's resolver.
+// What resolving a reference has to do, gathered in one place.
 //
-// Two applications each carried a resolver for the same job. Enbarr's is being
-// retired, so before its version goes, everything its tests insisted on is
-// asked of this one. Where the two disagree the disagreement is a decision, not
-// an accident to be discovered later by whatever the resolver is holding up.
-//
-// Named for what each asks rather than kept under the names it had, because the
-// names it had described a function that will not exist.
+// A second implementation of this job existed elsewhere and is being retired.
+// Everything its tests insisted on is asked of this one, so nothing it had
+// checked stops being checked. Where the two disagreed, the disagreement is
+// recorded below as a decision rather than left to be discovered later by
+// whatever the resolver is holding up.
 
 func graphWithDep(t *testing.T, result string, state NodeState) (*Graph, string) {
 	t.Helper()
@@ -131,13 +129,13 @@ func TestAFailedDependencyThatProducedOutputStillResolves(t *testing.T) {
 	}
 }
 
-// The disagreement, and it is a decision rather than a defect on either side.
+// A decision rather than a defect on either side.
 //
-// A step asked for a field of a dependency that returned prose. Enbarr fails,
-// and its test says the failure was chosen over this package's behaviour, which
-// was to log and inject the whole result. Silence here means a tool is handed
-// the entire output of the step before it where a single field was asked for,
-// and nothing says so until whatever reads it misbehaves.
+// A step asked for a field of a dependency that returned prose. This used to be
+// logged, with the whole result injected in place of the field. Failing was
+// chosen over that: silence hands a tool the entire output of the step before it
+// where a single field was asked for, and nothing says so until whatever reads
+// it misbehaves, by then far from the step that caused it.
 func TestAFieldAskedOfProseIsAnError(t *testing.T) {
 	g, dep := graphWithDep(t, "just a string, not JSON", StateResolved)
 	n := &Node{Params: map[string]any{"x": "${node." + dep + ".field}"}}
@@ -201,12 +199,11 @@ func TestParsingADependencyResult(t *testing.T) {
 	}
 }
 
-// What this package's resolver does that Enbarr's cannot.
+// The body answers the field access, so a body that tolerates the envelope
+// wrapper is obeyed and both spellings of the same reference resolve.
 //
-// Enbarr's asks the body for the whole payload and then walks the path itself,
-// so it never reaches the body's own handling of the envelope wrapper. This one
-// asks the body for the field, so a body that tolerates a "data." prefix is
-// obeyed. Both spellings of the same reference resolve.
+// The alternative — ask for the whole payload and walk the path here — never
+// reaches the body's own handling of the wrapper, so only one spelling works.
 func TestBothSpellingsOfAWrappedFieldResolve(t *testing.T) {
 	g := NewGraph()
 	dep := g.AddNode(&Node{Type: NodeTool, Tag: "search", ToolName: "web_search"})
@@ -224,12 +221,11 @@ func TestBothSpellingsOfAWrappedFieldResolve(t *testing.T) {
 }
 
 // One dependency, several fields, and the result is parsed once per field
-// rather than once. Enbarr's resolver parses each dependency once and walks the
-// paths in memory; this one caches by (node, field), so every distinct field
-// unmarshals the whole result again.
+// rather than once: the cache is keyed by (node, field), so every distinct
+// field unmarshals the whole result again. Parsing once per dependency and
+// walking the paths in memory would do it once.
 //
-// Recorded rather than fixed: it is a cost, not a defect, and it belongs with
-// the resolver rather than with the decision to adopt it.
+// Recorded rather than fixed. It is a cost, not a defect.
 func TestManyFieldsOfOneDependencyReparseIt(t *testing.T) {
 	big := `{"a":"1","b":"2","c":"3","d":"4"}`
 	g, dep := graphWithDep(t, big, StateResolved)
@@ -251,12 +247,13 @@ func TestManyFieldsOfOneDependencyReparseIt(t *testing.T) {
 // tool's payload, not the line of text the envelope renders for a human.
 //
 // SetBody stores the evidence text in Result, so reading Result directly for
-// the no-path case handed the next step prose where it wanted the data. Enbarr
-// asked the body and got the payload; its test said paths must not have to gain
-// a "data." prefix and that every existing reference would otherwise break.
+// the no-path case handed the next step prose where it wanted the data. Asking
+// the body gives the payload, which is what references were written against:
+// none of them carries a "data." prefix and every one would break if they had
+// to.
 //
-// Missed by the first pass of this file, because every case ported there used
-// SetResult — raw text — and never an envelope.
+// Missed by the first pass of this file, because every case here used SetResult
+// — raw text — and never an envelope.
 func TestABareReferenceToAnEnvelopeGivesThePayload(t *testing.T) {
 	g := NewGraph()
 	dep := g.AddNode(&Node{Type: NodeTool, ToolName: "process_list"})
@@ -276,5 +273,31 @@ func TestABareReferenceToAnEnvelopeGivesThePayload(t *testing.T) {
 	if _, isEnvelope := got["status"]; isEnvelope {
 		t.Error("x is the envelope rather than the payload — every reference written " +
 			"against the payload would need a data. prefix it never had")
+	}
+}
+
+// A step that declares dependencies and carries a half-written placeholder is
+// rejected, not accepted.
+//
+// The data-flow check used to scan for the text "${node." — which a placeholder
+// that was never finished also contains. The step passed, nothing resolved it at
+// fire time because the pattern did not match, and the tool was handed the
+// literal text. Asking the reference model what is actually there answers the
+// question the check meant to ask.
+func TestAHalfWrittenPlaceholderDoesNotSatisfyTheDataFlowCheck(t *testing.T) {
+	params := map[string]any{"goal": "use ${node. and stop", "mode": "shallow"}
+	if err := validateDataFlow("compute", []string{"n1"}, params); err == nil {
+		t.Error("a step declaring a dependency was accepted on the strength of text " +
+			"that only looks like a reference, so nothing will inject anything and " +
+			"the tool receives the placeholder as prose")
+	}
+}
+
+// And a real reference still satisfies it, so the check did not simply become
+// stricter than the thing it guards.
+func TestARealReferenceSatisfiesTheDataFlowCheck(t *testing.T) {
+	params := map[string]any{"goal": "read ${step.0.content}", "mode": "shallow"}
+	if err := validateDataFlow("compute", []string{"n1"}, params); err != nil {
+		t.Errorf("a step referencing its dependency was rejected: %v", err)
 	}
 }

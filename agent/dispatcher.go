@@ -360,10 +360,24 @@ func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error)
 		log.Printf("[dag] template on %s: injecting from failed dep %s", owner, depID)
 	}
 	if field == "" {
-		// No path: the whole result. Parse it first, so a step receives the
-		// object its predecessor produced rather than the text of one — a tool
-		// given a string where it expected a map fails on the far side, where
-		// the cause is no longer visible.
+		// No path: the whole result. Ask the body for it, so a tool that
+		// returns an envelope gives its payload rather than the line of text
+		// the envelope renders for a human. Reading dep.Result directly used to
+		// give that line, because SetBody stores the evidence text there — so a
+		// step wanting the data of the step before it received prose.
+		//
+		// Parsed when what comes back is text, so a step receives the object its
+		// predecessor produced rather than the text of one: a tool given a
+		// string where it expected a map fails on the far side, where the cause
+		// is no longer visible.
+		if dep.Body != nil {
+			if v, ok := dep.Body.Field(""); ok {
+				if text, isText := v.(string); isText {
+					return parseResultForTemplate(text), nil
+				}
+				return v, nil
+			}
+		}
 		return parseResultForTemplate(dep.Result), nil
 	}
 	// Resolve the dot-path through the node's typed body — the single field

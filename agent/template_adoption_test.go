@@ -246,3 +246,35 @@ func TestManyFieldsOfOneDependencyReparseIt(t *testing.T) {
 		}
 	}
 }
+
+// A reference with no path against a tool that returns an envelope gives the
+// tool's payload, not the line of text the envelope renders for a human.
+//
+// SetBody stores the evidence text in Result, so reading Result directly for
+// the no-path case handed the next step prose where it wanted the data. Enbarr
+// asked the body and got the payload; its test said paths must not have to gain
+// a "data." prefix and that every existing reference would otherwise break.
+//
+// Missed by the first pass of this file, because every case ported there used
+// SetResult — raw text — and never an envelope.
+func TestABareReferenceToAnEnvelopeGivesThePayload(t *testing.T) {
+	g := NewGraph()
+	dep := g.AddNode(&Node{Type: NodeTool, ToolName: "process_list"})
+	g.SetBody(dep, NewToolBody(toolapi.ToolOK("listing", "2 processes", map[string]any{"count": 2})))
+
+	n := &Node{ID: "n2", Params: map[string]any{"x": "${node." + dep + "}"}}
+	if err := substituteTemplates(n, g); err != nil {
+		t.Fatalf("substituteTemplates: %v", err)
+	}
+	got, ok := n.Params["x"].(map[string]any)
+	if !ok {
+		t.Fatalf("x is %T (%v), want the payload the tool produced", n.Params["x"], n.Params["x"])
+	}
+	if got["count"] != float64(2) {
+		t.Errorf("x[count] = %v, want 2", got["count"])
+	}
+	if _, isEnvelope := got["status"]; isEnvelope {
+		t.Error("x is the envelope rather than the payload — every reference written " +
+			"against the payload would need a data. prefix it never had")
+	}
+}

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -104,45 +105,70 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 	}
 	path = filepath.Clean(path)
 
-	data, err := os.ReadFile(path)
+	fh, err := os.Open(path)
 	if err != nil {
+		return toolapi.ToolMessage{}, fmt.Errorf("file_read: %w", err)
+	}
+	defer fh.Close()
+
+	maxLines := 500
+	if ml, ok := toolapi.ParamNum(params, "max_lines"); ok && ml > 0 {
+		maxLines = int(ml)
+	}
+	tailLines := 0
+	if tl, ok := toolapi.ParamNum(params, "tail_lines"); ok && tl > 0 {
+		tailLines = int(tl)
+	}
+
+	// Streamed, not slurped. This read the whole file into memory and then threw
+	// away all but a few lines, so asking for the last five lines of a 200MB log
+	// allocated 412MB — measured, not estimated. A log is exactly what this tool
+	// is pointed at, and an agent reading one on someone's machine should not
+	// need the file's size in memory to do it.
+	//
+	// Head keeps at most maxLines. Tail keeps a ring of tailLines and lets the
+	// rest go. Either way the cost is the lines asked for, whatever the file.
+	sc := bufio.NewScanner(fh)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // a single very long line
+	var head []string
+	var ring []string
+	total := 0
+	for sc.Scan() {
+		total++
+		line := sc.Text()
+		if tailLines > 0 {
+			ring = append(ring, line)
+			if len(ring) > tailLines {
+				ring = ring[1:]
+			}
+			continue
+		}
+		if len(head) < maxLines {
+			head = append(head, line)
+		}
+	}
+	if err := sc.Err(); err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("file_read: %w", err)
 	}
 
 	// An empty file is a finding, not a blank result. Reported as empty so the
 	// coverage statement can say the file had nothing in it, rather than the
 	// model inferring content from a silent gap. Distinct from a missing file,
-	// which fails the read above and fails the node.
-	if len(data) == 0 {
+	// which fails the open above and fails the node.
+	if total == 0 {
 		return toolapi.ToolEmpty("text", "the file is empty: "+path), nil
 	}
 
-	lines := strings.Split(string(data), "\n")
-
-	// The end of the file, when that is what was asked for. Reading the last N
-	// lines of a log is a different question from reading the first N, and
-	// max_lines cannot express it — the interesting part of a log is at the
-	// bottom, and truncating from the top throws it away.
-	if tl, ok := toolapi.ParamNum(params, "tail_lines"); ok && tl > 0 {
-		tailLines := int(tl)
-		if len(lines) > tailLines {
-			lines = lines[len(lines)-tailLines:]
-			lines = append([]string{fmt.Sprintf("... (showing the last %d lines)", tailLines)}, lines...)
+	if tailLines > 0 {
+		if total > tailLines {
+			ring = append([]string{fmt.Sprintf("... (showing the last %d of %d lines)", tailLines, total)}, ring...)
 		}
-		return toolapi.ToolText(strings.Join(lines, "\n")), nil
+		return toolapi.ToolText(strings.Join(ring, "\n")), nil
 	}
-
-	maxLines := 500
-	if ml, ok := toolapi.ParamNum(params, "max_lines"); ok && ml > 0 {
-		maxLines = int(ml)
+	if total > maxLines {
+		head = append(head, fmt.Sprintf("... (truncated at %d of %d lines)", maxLines, total))
 	}
-
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
-		lines = append(lines, fmt.Sprintf("... (truncated at %d lines)", maxLines))
-	}
-
-	return toolapi.ToolText(strings.Join(lines, "\n")), nil
+	return toolapi.ToolText(strings.Join(head, "\n")), nil
 }
 
 var _ toolapi.Tool = (*FileRead)(nil)

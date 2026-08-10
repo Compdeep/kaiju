@@ -127,6 +127,39 @@ func TestAToolThatIsOffIsStillListed(t *testing.T) {
 	}
 }
 
+// Editing the file a tool is defined in is not a statement about who may call
+// it. The skill watcher swaps a tool in whenever its file changes, and that
+// used to reset the reach: a tool an operator had switched off came back on at
+// the next save, and a granted one quietly lost the grant. Nothing re-runs the
+// startup policy afterwards, so the state stayed wrong until a restart.
+func TestReloadingAToolKeepsItsReach(t *testing.T) {
+	for _, want := range []Reach{ReachOff, ReachLocal, ReachEverywhere} {
+		reg := NewRegistry()
+		if err := reg.RegisterWithSource(reachTool{"skill"}, "skillmd:/a/SKILL.md"); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.SetReach("skill", want); err != nil {
+			t.Fatal(err)
+		}
+
+		reg.Replace(reachTool{"skill"}, "skillmd:/a/SKILL.md")
+
+		if got := reg.ReachOf("skill"); got != want {
+			t.Errorf("reach was %v before the file changed and %v after", want, got)
+		}
+	}
+}
+
+// A tool arriving for the first time through Replace is local, the same as one
+// arriving through Register. Replace is also how a new skill file appears.
+func TestReplacingAToolThatWasNotThereMakesItLocal(t *testing.T) {
+	reg := NewRegistry()
+	reg.Replace(reachTool{"fresh"}, "skillmd:/a/SKILL.md")
+	if got := reg.ReachOf("fresh"); got != ReachLocal {
+		t.Errorf("reach = %v, want local", got)
+	}
+}
+
 func TestReachRoundTripsThroughItsWord(t *testing.T) {
 	for _, r := range []Reach{ReachOff, ReachLocal, ReachEverywhere} {
 		got, ok := ParseReach(r.String())

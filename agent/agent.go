@@ -904,14 +904,30 @@ func (a *Agent) ToolsInfo() []toolapi.ToolInfo {
 }
 
 /*
- * SetToolEnabled toggles a tool on/off (dashboard).
- * desc: Enables or disables a specific tool by name.
+ * SetToolEnabled turns a tool on or off (dashboard).
+ * desc: For an application whose tools run only where the agent runs. It can
+ *       never grant remote reach: on means local. An application that dispatches
+ *       work onto other machines wants SetToolReach instead.
  * param: name - the tool name.
  * param: enabled - true to enable, false to disable.
  * return: error if the tool is not found.
  */
 func (a *Agent) SetToolEnabled(name string, enabled bool) error {
 	return a.registry.SetEnabled(name, enabled)
+}
+
+/*
+ * SetToolReach sets how far a tool may be called from (dashboard).
+ * desc: Off means nothing may call it, local means this agent's own runs may,
+ *       everywhere adds whatever the application lets call in from elsewhere.
+ *       The third state is the one a boolean cannot hold: a tool that is fine
+ *       to run here can be a poor thing to let a stranger trigger.
+ * param: name - the tool name.
+ * param: reach - the desired reach.
+ * return: error if the tool is not found.
+ */
+func (a *Agent) SetToolReach(name string, reach toolapi.Reach) error {
+	return a.registry.SetReach(name, reach)
 }
 
 /*

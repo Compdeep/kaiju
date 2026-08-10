@@ -44,6 +44,11 @@ type BootDAGConfig struct {
 	MaxObserverCalls *int   `json:"max_observer_calls"`
 	BatchSize        *int   `json:"batch_size"`
 	WallClockSec     *int   `json:"wall_clock_sec"`
+	// MaxConcurrent is how many investigations run at once — the scheduler's
+	// worker pool. Settable here because it is the one budget an operator tunes
+	// against the machine rather than against the work: a laptop and a server
+	// want different numbers for the same configuration.
+	MaxConcurrent *int `json:"max_concurrent"`
 }
 
 // BootConfig is the parsed representation of a BOOT.md file.
@@ -177,6 +182,9 @@ func (bc *BootConfig) ApplyToConfig(cfg *Config) {
 	}
 	if bc.DAG.MaxNodes != nil {
 		cfg.MaxNodes = *bc.DAG.MaxNodes
+	}
+	if bc.DAG.MaxConcurrent != nil {
+		cfg.MaxConcurrentInvestigations = *bc.DAG.MaxConcurrent
 	}
 	if bc.DAG.MaxPerSkill != nil {
 		cfg.MaxPerSkill = *bc.DAG.MaxPerSkill

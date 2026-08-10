@@ -120,14 +120,22 @@ func (r *Registry) RegisterWithSource(t Tool, source string) error {
 
 /*
  * Replace atomically swaps a tool. Used by hot-reload watcher.
- * desc: Overwrites an existing tool entry or creates a new one; always sets enabled to true
+ * desc: Overwrites an existing tool entry or creates a new one. A tool that was
+ *       already there keeps its reach: editing the file a tool is defined in is
+ *       not a statement about who may call it, and resetting it would put back
+ *       a tool an operator had switched off, on the next save, with nothing
+ *       said. A tool arriving for the first time is local, as at registration.
  * param: t - the replacement tool
  * param: source - the origin tag for the replacement
  */
 func (r *Registry) Replace(t Tool, source string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.tools[t.Name()] = &registeredTool{tool: t, source: source, reach: ReachLocal}
+	reach := ReachLocal
+	if existing, ok := r.tools[t.Name()]; ok {
+		reach = existing.reach
+	}
+	r.tools[t.Name()] = &registeredTool{tool: t, source: source, reach: reach}
 }
 
 /*

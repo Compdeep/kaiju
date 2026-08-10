@@ -34,11 +34,14 @@ type RawTextBody struct{ Text string }
 // RawText wraps a plain string as a NodeBody.
 func RawText(s string) RawTextBody { return RawTextBody{Text: s} }
 
-// Field preserves the legacy template contract: an empty path returns the whole
-// string; otherwise it tries to parse the text as JSON and walk the dot-path,
-// returning (nil, false) when the text is not JSON or the path misses — the
-// caller then degrades to the raw string, exactly as resolveTemplateField does
-// today.
+// Field answers a reference against an opaque string: an empty path returns the
+// whole string; otherwise it parses the text as JSON and walks the dot-path,
+// reporting false when the text is not JSON or the path misses.
+//
+// What the caller does with a miss is the caller's business. Template
+// resolution used to take it as licence to inject the whole string in place of
+// the field, and no longer does — a field asked of something that has none is a
+// mistake in the step, and it says so.
 func (b RawTextBody) Field(path string) (any, bool) {
 	if path == "" {
 		return b.Text, true

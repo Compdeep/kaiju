@@ -10,6 +10,11 @@ import (
 // interface, so tool output flows through the graph and edges like any other
 // typed body.
 //
+// The point of the envelope is that presence, absence and failure become a
+// typed signal rather than prose a later stage has to infer from. A tool that
+// found nothing says so in Status, instead of returning an empty string that
+// reads like a result.
+//
 // Field resolves ${node.X.field} into the tool's own payload (Data), preserving
 // existing references exactly. The envelope's Status/Detail/Kind are the
 // edge-facing framing signals, read via Envelope(), not Field — so a payload

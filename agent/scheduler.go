@@ -129,18 +129,39 @@ const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run —
 // many more.
 const complexFanoutFloor = 6
 
+// triggerIsAwaited reports whether something is waiting on this run's answer.
+//
+// A person typing, or a caller holding a request open. The alternative is work
+// that started on a schedule or an event, where a short "nothing to report" is
+// a fine answer and an unnecessary synthesis pass is just cost.
+func triggerIsAwaited(t Trigger) bool {
+	switch t.Type {
+	case "chat_query", "api_query", "command":
+		return true
+	}
+	return false
+}
+
 // decideAutoAggMode picks the aggregator lane in auto mode (agg_mode -1): 0=skip
 // (use the reflector's verdict), 1=executor model, 2=reasoning model. Pure over the
 // structural signals so it is unit-tested directly (TestDecideAutoAggMode).
 //
+//   - someone is waiting        → 2 (never skip on a run a person asked for)
 //   - compute present            → 1 (a compute run always needs a formatted answer)
 //   - complex + usable evidence   → 2 (a real synthesis, with the honesty framing)
 //   - complex + NO usable evidence→ 0 (nothing to synthesize; the reflector's honest
 //     "couldn't get the data" verdict stands — this is the reflector's override)
 //   - simple + reflector wants it → 2
 //   - simple, reflector done      → 0
-func decideAutoAggMode(hasCompute, complex, hasEvidence bool, reflectorWants *bool) (int, string) {
+//
+// The first case is why awaited is a parameter. Skipping is a saving, and it is
+// paid for by whoever reads the answer: the reflector writes a terse summary
+// that throws away the tool output the question was about. That is acceptable
+// for a run nothing is waiting on, and not for one a person asked for.
+func decideAutoAggMode(hasCompute, complex, hasEvidence, awaited bool, reflectorWants *bool) (int, string) {
 	switch {
+	case awaited:
+		return 2, "someone is waiting on this answer, so it is synthesised whatever the reflector said"
 	case hasCompute:
 		return 1, "compute nodes present, forcing aggregator"
 	case complex && hasEvidence:
@@ -742,6 +763,30 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// debuggerInflight is cleared by the next reflection that
 				// fires (Fix 4 — reflector is the sync point), so no need
 				// to clear it here on individual completion failures.
+
+				// A reflection that FAILED still has to clear the flag. It is
+				// cleared where a reflection succeeds, and this branch returns
+				// before reaching there — so one failed reflection left the flag
+				// set for the rest of the run, and no further reflection was
+				// ever scheduled. Observer and batch spawns pile up behind it
+				// for the same reason.
+				if node.Type == NodeReflection || node.Type == NodeInterjection {
+					reflectionInflight = false
+					workSinceReflection = 0
+				}
+
+				// Credentials that do not work are a configuration problem, not
+				// a transient one. Retrying every remaining node against the
+				// same rejected key spends the whole budget to arrive at the
+				// same place, so stop here and say what is wrong.
+				if llm.IsAuthFailure(errMsg) {
+					log.Printf("[dag] the model rejected our credentials, stopping this run: %v", comp.Err)
+					reflectionConcluded = true
+					reflectionVerdict = "The model rejected the credentials it was given: the API key is missing, invalid, or has no access to the configured model. Nothing further was attempted on this run."
+					graph.SkipAllPending()
+					inflight = 0
+					continue
+				}
 
 				// ── Three-tier retry ──
 				// Tier 1: skip — structural error, no retry will help
@@ -2010,7 +2055,8 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	complex := needsSynthesis || fanout >= complexFanoutFloor // a real gather, not a lookup
 	if aggMode == -1 && pr.ReflectionVerdict != "" {
 		var reason string
-		aggMode, reason = decideAutoAggMode(hasCompute, complex, a.hasUsableEvidence(graph), pr.ReflectionAggregate)
+		aggMode, reason = decideAutoAggMode(hasCompute, complex, a.hasUsableEvidence(graph),
+			triggerIsAwaited(trigger), pr.ReflectionAggregate)
 		log.Printf("[dag] auto agg: %s (needs_synthesis=%v, fanout=%d)", reason, needsSynthesis, fanout)
 	}
 

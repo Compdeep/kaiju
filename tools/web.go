@@ -319,17 +319,31 @@ func marshalFetchResult(r fetchResult) (toolapi.ToolMessage, error) {
 		return toolapi.ToolMessage{}, err
 	}
 	// Map the fetch outcome onto the uniform tool envelope: HTTP >= 400 → error;
-	// structurally-fine-but-no-usable-content (Note set, Content empty) → empty;
-	// otherwise ok. The full fetchResult rides in Data so ${node.X.title/.status/
-	// .format} keep resolving; the page text becomes the evidence Content.
+	// no content → empty; otherwise ok. The full fetchResult rides in Data so
+	// ${node.X.title/.status/.format} keep resolving; the page text becomes the
+	// evidence Content.
+	//
+	// Empty content is empty whether or not a reader left a Note. It used to
+	// need both, and the readers that set one are the summary and document
+	// paths — so a page fetched as markdown with nothing readable in it came
+	// back ok with an empty Content, and a later stage could not tell a page
+	// that held nothing from a page it had successfully read. The Note is the
+	// better detail when there is one, because it says which way the page was
+	// unreadable.
 	msg := toolapi.ToolMessage{Type: "page", Data: data}
 	switch {
 	case strings.HasPrefix(r.Status, "HTTP 4") || strings.HasPrefix(r.Status, "HTTP 5"):
 		msg.Status = toolapi.StatusError
 		msg.Detail = r.Status
-	case r.Content == "" && r.Note != "":
+	case strings.TrimSpace(r.Content) == "":
 		msg.Status = toolapi.StatusEmpty
 		msg.Detail = r.Note
+		if msg.Detail == "" {
+			msg.Detail = "no readable content at that URL"
+			if r.Status != "" {
+				msg.Detail += " (" + r.Status + ")"
+			}
+		}
 	default:
 		msg.Status = toolapi.StatusOK
 		msg.Content = r.Content

@@ -12,7 +12,7 @@ import (
 // rate limit. Those are rules about authority, and they are the same whatever
 // the application does.
 //
-// An application has rules of its own. One of Enbarr's: a tool that opens an
+// An application has rules of its own. One example: a tool that opens an
 // incident may be called by a person asking for one, and may not be called
 // during an automatic investigation, because there the incident is opened from
 // the finished verdict instead. That rule needs to know what an incident is,

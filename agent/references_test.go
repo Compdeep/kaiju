@@ -69,7 +69,7 @@ func TestReferences_SchemaWithoutAnnotationFindsNothing(t *testing.T) {
 }
 
 // A tool that publishes no output schema at all — one of 25 in Kaiju, ten files
-// in Enbarr. It must be skipped, not guessed at.
+// by the application. It must be skipped, not guessed at.
 func TestReferences_NoSchemaFindsNothing(t *testing.T) {
 	a := refAgent("lister", nil)
 	g := NewGraph()

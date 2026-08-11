@@ -103,27 +103,28 @@ func TestRecordRunCarriesTheApplicationsLabels(t *testing.T) {
 // was aimed at — and the rule for choosing between them is its own. It can only
 // apply that rule if the trigger's routing reaches the record.
 //
-// Enbarr filters its investigation list by host. Without these, every row on a
-// queen would carry the queen's id and filtering by any pawn would return
+// An application filtering its run list by host needs these. Without them every
+// row would carry the coordinating machine's id, and filtering by any other host
+// would return
 // nothing.
 func TestRunRecordCarriesTheTriggersRouting(t *testing.T) {
 	st := &recordingStore{}
-	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "queen-1"}}}
+	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "host-1"}}}
 
-	a.recordRun(Trigger{Type: "alert", AlertID: "a-3", Source: "pawn-7", Target: "pawn-9"},
+	a.recordRun(Trigger{Type: "alert", AlertID: "a-3", Source: "host-7", Target: "host-9"},
 		time.Now(), nil, nil, gates.Intent(1), Conclusion{Verdict: "v", Status: "completed"})
 
 	if len(st.runs) != 1 {
 		t.Fatalf("wrote %d runs, want 1", len(st.runs))
 	}
 	got := st.runs[0]
-	if got.Source != "pawn-7" {
+	if got.Source != "host-7" {
 		t.Errorf("Source = %q, want the host the trigger came from", got.Source)
 	}
-	if got.Target != "pawn-9" {
+	if got.Target != "host-9" {
 		t.Errorf("Target = %q, want the host it was aimed at", got.Target)
 	}
-	if got.NodeID != "queen-1" {
+	if got.NodeID != "host-1" {
 		t.Errorf("NodeID = %q; it must stay the machine that ran the work", got.NodeID)
 	}
 }
@@ -131,7 +132,7 @@ func TestRunRecordCarriesTheTriggersRouting(t *testing.T) {
 // A run's identity and its cause are different things. They were the same
 // value, so two attempts at one cause produced two records with one identity —
 // and an application whose table treats that as a key keeps the first and
-// silently discards the second. Enbarr retries an event it could not gather
+// silently discards the second. An application that retries work it could not gather
 // evidence for, so the discarded record is the successful attempt and the one
 // kept is the failure.
 func TestTwoRunsOfOneCauseGetTwoIdentities(t *testing.T) {

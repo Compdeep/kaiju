@@ -139,7 +139,7 @@ func TestReadingThePlanTheOldWayNoLongerWorks(t *testing.T) {
 // putting it beside the envelope's keys instead would leave the reference
 // resolving to nothing.
 //
-// Kaiju only — Enbarr's copy has no exec node.
+// This engine only — the other tree's copy has no exec node.
 func TestExecStdoutLandsInsideThePlan(t *testing.T) {
 	parent := computeMessage("compute", `{"type":"result","files_created":["main.py"]}`).JSON()
 

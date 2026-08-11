@@ -223,10 +223,16 @@ type Agent struct {
 	embedStore        *EmbeddingStore // nil if embeddings disabled
 	embedClient       *llm.Client     // nil if embeddings disabled
 
-	soulPrompt    string // from SOUL.md → BOOT.md body → default
-	skillWatcher  *skillmd.Watcher
-	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
-	fleet         FleetContextProvider        // nil on standalone nodes
+	soulPrompt string // from SOUL.md → BOOT.md body → default
+	// terseSoulPrompt is the persona sent to a stage that must answer with a
+	// schema. A stage told to emit a tool call and nothing else does not need
+	// paragraphs about who it is, and every line of persona it is given is a
+	// line the instructions have to compete with. Equal to soulPrompt when the
+	// prompts file leaves the section out.
+	terseSoulPrompt string
+	skillWatcher    *skillmd.Watcher
+	skillGuidance   map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
+	fleet           FleetContextProvider        // nil on standalone nodes
 	// environment is Config.Environment: the application's description of the
 	// surroundings a run happens in, appended to planning and reflection
 	// prompts. Replaces fleet, whose vocabulary belonged to one product.
@@ -353,6 +359,7 @@ func New(cfg Config) (*Agent, error) {
 		dagSubs:           make(map[int]chan DAGEvent),
 		skillGuidance:     builtinSkills,
 		soulPrompt:        soul,
+		terseSoulPrompt:   terseSoul(soul),
 		intentRegistry:    NewIntentRegistry(),
 	}
 

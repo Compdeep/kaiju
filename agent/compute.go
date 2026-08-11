@@ -343,7 +343,7 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 		}
 	}
 
-	systemPrompt := ComposeSystemPrompt(a.soulPrompt, buildComputeArchitectPrompt(architectGuidance))
+	systemPrompt := ComposeSystemPrompt(a.terseSoulPrompt, buildComputeArchitectPrompt(architectGuidance))
 
 	startedArch := time.Now()
 	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{

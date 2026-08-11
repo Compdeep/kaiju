@@ -19,9 +19,11 @@ func TestBashError_TriggersOnTypedFailure(t *testing.T) {
 	if _, isBash := bashError(nodeCompletion{Body: ok}); isBash {
 		t.Fatal("a successful command must not be flagged as a bash error")
 	}
-	// legacy string path still detected
-	if _, isBash := bashError(nodeCompletion{Result: `{"bash_error":true}`}); !isBash {
-		t.Fatal("legacy bash_error string must still be detected")
+	// A completion with no envelope declares no outcome. Guessing from its text
+	// is what the string search did, and it could only ever have matched a tool
+	// whose output happened to contain the words.
+	if _, isBash := bashError(nodeCompletion{Result: `{"bash_error":true}`}); isBash {
+		t.Fatal("a bare string was read as a failure")
 	}
 }
 
@@ -37,5 +39,30 @@ func TestExtractBashStdout_TypedBash(t *testing.T) {
 	env := toolapi.ToolOK("command", "combined", map[string]any{"stdout": "the-stdout", "exit_code": 0}).JSON()
 	if got := extractBashStdout(env); got != "the-stdout" {
 		t.Fatalf("extractBashStdout(typed) = %q want the-stdout", got)
+	}
+}
+
+// A step that ran on another machine arrives with its envelope intact.
+//
+// The remote path handed back only the result text, so every consumer that
+// reads the typed body saw nothing for a remote step. For bash that meant a
+// command which failed elsewhere was recorded as having succeeded: the node was
+// not marked errored, no failure reached the reflector, and the repair loop
+// never started. Absence read as success.
+func TestARemoteResultKeepsItsEnvelope(t *testing.T) {
+	failed := toolapi.ToolFail("command", "exit 1: no such file", map[string]any{"exit_code": 1})
+
+	// What the dispatcher does with what the far end sent back.
+	var body NodeBody
+	if msg, ok := toolapi.ParseToolMessage(failed.JSON()); ok {
+		body = toolMessageBody{msg: msg}
+	}
+	if body == nil {
+		t.Fatal("an envelope from the far end did not parse, so a remote step " +
+			"carries no outcome at all")
+	}
+	if _, isBash := bashError(nodeCompletion{Body: body}); !isBash {
+		t.Error("a command that failed on another machine was not detected as a " +
+			"failure, so the run treats it as done and never repairs it")
 	}
 }

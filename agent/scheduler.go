@@ -2158,22 +2158,25 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	}, nil
 }
 
-/*
- * isBashError checks if a resolved bash result contains a structured error.
- * desc: Returns the error and true if the result has bash_error:true.
- */
-// bashError reports whether a bash node completed with a failure — from the
-// typed command body (Status==error) when the tool used ExecuteTyped, else the
-// legacy "bash_error":true string. The error carries a short detail for logging.
+// bashError reports whether a bash node completed with a failure, read from its
+// command envelope. Drives the self-repair loop: a failure here marks the node
+// errored, which reaches the reflector, which can send the run to the debugger.
+//
+// It used to fall back to searching the result text for "bash_error":true when
+// a node had no typed body. Nothing has written that string since the tool
+// returned envelopes, and the one path that arrived without a body — a step
+// dispatched to another machine — now parses one, so the search could only ever
+// have matched a tool whose output happened to contain the words.
 func bashError(comp nodeCompletion) (error, bool) {
-	if tb, ok := comp.Body.(toolMessageBody); ok {
-		env := tb.Envelope()
-		if env.Type == "command" && env.Status == toolapi.StatusError {
-			return fmt.Errorf("bash failed: %s", Text.TruncateLog(env.Detail, 300)), true
-		}
+	tb, ok := comp.Body.(toolMessageBody)
+	if !ok {
 		return nil, false
 	}
-	return isBashError(comp.Result)
+	env := tb.Envelope()
+	if env.Type == "command" && env.Status == toolapi.StatusError {
+		return fmt.Errorf("bash failed: %s", Text.TruncateLog(env.Detail, 300)), true
+	}
+	return nil, false
 }
 
 // debugProblem reports whether a node completed as a debug envelope and returns
@@ -2199,13 +2202,6 @@ func debugProblem(comp nodeCompletion) (string, bool) {
 		return dbg.Problem, true
 	}
 	return "", false
-}
-
-func isBashError(result string) (error, bool) {
-	if !strings.Contains(result, `"bash_error":true`) {
-		return nil, false
-	}
-	return fmt.Errorf("bash failed: %s", Text.TruncateLog(result, 300)), true
 }
 
 /*
@@ -2476,7 +2472,7 @@ func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd,
 	//
 	// Failure detection now relies on:
 	//   1. bash exit code on the exec node — non-zero already routes through
-	//      isBashError in the scheduler and is treated as failure.
+	//      bashError in the scheduler and is treated as failure.
 	//   2. the reflector — it reads the exec node's captured stdout from
 	//      comp.Result with full context (goal, code, output) and decides
 	//      continue / investigate / conclude. The reflector is strictly

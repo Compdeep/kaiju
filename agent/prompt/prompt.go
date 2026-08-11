@@ -30,11 +30,7 @@ var embeddedPrompts string
 // prompts.md so they are never empty even before Load runs, and optionally
 // overridden by Load from dataDir/prompts.md.
 var (
-	Soul string
-	// SoulTerse is the persona for a stage that must produce a schema rather
-	// than prose. Empty when a host's prompts file omits the section, in which
-	// case the full persona is used.
-	SoulTerse     string
+	Soul          string
 	Route         string
 	Preflight     string
 	Executive     string
@@ -59,7 +55,6 @@ var (
 // order for validation and logging.
 var sectionOrder = []string{
 	"SOUL",
-	"SOUL_TERSE",
 	"ROUTE",
 	"PREFLIGHT",
 	"EXECUTIVE",
@@ -83,7 +78,6 @@ var sectionOrder = []string{
 // targets maps each required section name to the package var it fills.
 var targets = map[string]*string{
 	"SOUL":           &Soul,
-	"SOUL_TERSE":     &SoulTerse,
 	"ROUTE":          &Route,
 	"PREFLIGHT":      &Preflight,
 	"EXECUTIVE":      &Executive,

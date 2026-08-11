@@ -35,6 +35,16 @@ type WebSearch struct {
 type SearchConfig struct {
 	Provider string  // "startpage" (default), "ddg", "startpage+ddg"
 	DelaySec float64 // min seconds between search requests (default 1.5)
+
+	// HTTPClient replaces the default client. Nil means the default, so this
+	// is invisible to every caller that does not need it.
+	//
+	// A tool whose whole job is an outbound request cannot be exercised without
+	// one: the parsing, the provider fallback and the shape of what comes back
+	// are otherwise only reachable by searching the real web from a test. That
+	// is the same reason an application embedding this needs it — to prove its
+	// own chain from a search result to whatever reads one, offline.
+	HTTPClient *http.Client
 }
 
 /*
@@ -61,9 +71,13 @@ func NewWebSearchWithConfig(cfg SearchConfig) *WebSearch {
 	if delay <= 0 {
 		delay = 0.2
 	}
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
 	log.Printf("[web_search] provider=%s delay=%.1fs", provider, delay)
 	return &WebSearch{
-		client:   &http.Client{Timeout: 10 * time.Second},
+		client:   client,
 		provider: provider,
 		delay:    time.Duration(float64(time.Second) * delay),
 	}

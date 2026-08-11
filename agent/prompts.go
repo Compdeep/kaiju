@@ -488,3 +488,18 @@ func buildComputeCoderPrompt(coderGuidance string) string {
 	}
 	return baseComputeCoderPrompt + "\n\n## Domain Guidance\n" + coderGuidance
 }
+
+/*
+ * terseSoul returns the persona for a stage that must answer with a schema.
+ * desc: The SOUL_TERSE section when the prompts file declares one, else the
+ *       full persona — which is what makes the section optional for a host
+ *       that has no shorter wording to offer.
+ * param: full - the full persona, used when there is no terse one.
+ * return: the persona to send to a schema-producing stage.
+ */
+func terseSoul(full string) string {
+	if s := strings.TrimSpace(prompt.SoulTerse); s != "" {
+		return s
+	}
+	return full
+}

@@ -67,16 +67,77 @@ func portOpen(port int) bool {
 	return true
 }
 
-// freePort best-effort kills whatever holds the given TCP port, so a fresh spawn
-// binds cleanly instead of crash-looping behind — or piling a duplicate on top
-// of — an orphan from a prior run. Scoped to the EXACT port, so it can never
-// touch another service (e.g. the MCS worker on its own port).
-func freePort(port int) {
+// freePort clears the given TCP port of a process THIS TOOL started, so a fresh
+// spawn binds cleanly instead of crash-looping behind — or piling a duplicate on
+// top of — an orphan from a prior run.
+//
+// It used to run `fuser -k <port>/tcp`, which kills whatever holds the port. On
+// a machine that is only running the agent, that is the orphan. On a machine
+// somebody else is using, it is whatever they had bound there — a database, an
+// editor's language server, their own application — killed without a word by a
+// tool asked to start something unrelated.
+//
+// So the port is not the identity. The registry is: it records the pid and
+// command of every process this tool spawned, against the port it was given. A
+// port held by something not in that registry is somebody else's and is left
+// alone, and the spawn that follows fails to bind — which is the honest
+// outcome, and is logged so the reason is visible.
+func (s *Service) freePort(port int) {
 	if port <= 0 {
 		return
 	}
-	_ = exec.Command("fuser", "-k", fmt.Sprintf("%d/tcp", port)).Run()
+	recs, err := s.loadRegistry()
+	if err != nil {
+		log.Printf("[service] port %d: cannot read the registry, leaving it alone: %v", port, err)
+		return
+	}
+	killed := false
+	for _, r := range recs {
+		if r.Port != port || r.PID <= 0 || !isAlive(r.PID) {
+			continue
+		}
+		// A pid outlives the process that owned it, and the registry survives a
+		// reboot, so a recorded pid can belong to a stranger by now. Signalling
+		// the group without checking would kill that stranger and its children.
+		if !pidRunsCommand(r.PID, r.Command) {
+			log.Printf("[service] port %d: pid %d is no longer %q, leaving it alone", port, r.PID, r.Name)
+			continue
+		}
+		log.Printf("[service] port %d: clearing our own %q (pid %d)", port, r.Name, r.PID)
+		_ = killGracefully(r.PID, 5*time.Second)
+		killed = true
+	}
+	if !killed {
+		if portOpen(port) {
+			log.Printf("[service] port %d is held by a process this tool did not start; "+
+				"leaving it alone, so the spawn below will fail to bind", port)
+		}
+		return
+	}
 	time.Sleep(400 * time.Millisecond) // let the socket release before we bind
+}
+
+/*
+ * pidRunsCommand reports whether a live pid is running the recorded command.
+ * desc: Reads the process's own argument vector. start runs the command through
+ *       `sh -c`, so the recorded command appears there verbatim. Fails closed —
+ *       a pid whose arguments cannot be read is treated as not ours, because
+ *       the cost of being wrong is killing a process that belongs to someone
+ *       else.
+ * param: pid - the process to identify.
+ * param: command - the command the registry recorded for it.
+ * return: true only when this is demonstrably the recorded process.
+ */
+func pidRunsCommand(pid int, command string) bool {
+	if pid <= 0 || strings.TrimSpace(command) == "" {
+		return false
+	}
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return false
+	}
+	// The argument vector is NUL-separated; join it back before matching.
+	return strings.Contains(strings.ReplaceAll(string(raw), "\x00", " "), command)
 }
 
 // healthLoop polls registered services every 10 seconds and marks dead
@@ -522,7 +583,7 @@ func (s *Service) start(params map[string]any) (toolapi.ToolMessage, error) {
 	// keeps the port, so the fresh process fails to bind and either crash-loops or
 	// piles up as a duplicate — the exact uvicorn-multiplication this prevents.
 	// One process can ever hold the port, so there is only ever one instance.
-	freePort(int(port))
+	s.freePort(int(port))
 
 	// Spawn in a detached session so the child outlives kaiju.
 	// Setsid makes the child its own session leader.

@@ -184,6 +184,7 @@ func (s *PlanStep) UnmarshalJSON(data []byte) error {
 		ParamRefs map[string]json.RawMessage `json:"param_refs,omitempty"` // legacy — see below
 		DependsOn FlexInts                   `json:"depends_on"`
 		Tag       string                     `json:"tag"`
+		Target    string                     `json:"target,omitempty"`
 		Gap       string                     `json:"gap,omitempty"`
 	}
 	var r raw
@@ -195,6 +196,7 @@ func (s *PlanStep) UnmarshalJSON(data []byte) error {
 	s.Params = r.Params
 	s.DependsOn = r.DependsOn
 	s.Tag = r.Tag
+	s.Target = r.Target
 	s.Gap = r.Gap
 	if s.Params == nil {
 		s.Params = make(map[string]any)
@@ -212,6 +214,23 @@ func (s *PlanStep) UnmarshalJSON(data []byte) error {
 			continue
 		}
 		log.Printf("[dag] plan: dropping legacy object param_ref %q (use ${step.N.field} string templates)", k)
+	}
+	// Anything else the model invented is dropped by the decode above, and a
+	// silent drop in plan parsing is how a step loses its wiring and still
+	// runs. Name what went missing.
+	var seen map[string]json.RawMessage
+	if err := json.Unmarshal(data, &seen); err != nil {
+		return nil // the step decoded; a second parse failing changes nothing
+	}
+	known := map[string]bool{
+		"type": true, "tool": true, "params": true, "param_refs": true,
+		"depends_on": true, "tag": true, "target": true, "gap": true,
+	}
+	for key := range seen {
+		if !known[key] {
+			log.Printf("[plan:warn] step %q (tag=%q) emitted unknown field %q — dropped",
+				s.Tool, s.Tag, key)
+		}
 	}
 	return nil
 }

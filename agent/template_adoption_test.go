@@ -129,24 +129,22 @@ func TestAFailedDependencyThatProducedOutputStillResolves(t *testing.T) {
 	}
 }
 
-// A decision rather than a defect on either side.
+// A field asked of a dependency that returned prose.
 //
-// A step asked for a field of a dependency that returned prose. This used to be
-// logged, with the whole result injected in place of the field. Failing was
-// chosen over that: silence hands a tool the entire output of the step before it
-// where a single field was asked for, and nothing says so until whatever reads
-// it misbehaves, by then far from the step that caused it.
-func TestAFieldAskedOfProseIsAnError(t *testing.T) {
+// This engine forgives it: the miss is logged and the whole result is injected
+// in place of the field, on the reading that a tool returning prose where a
+// field was expected is the tool's bug and should not stop a working pipeline.
+// The other tree failed the step instead. Both are defensible and this one is
+// the engine's, so this one stands.
+func TestAFieldAskedOfProseInjectsTheWholeResult(t *testing.T) {
 	g, dep := graphWithDep(t, "just a string, not JSON", StateResolved)
 	n := &Node{Params: map[string]any{"x": "${node." + dep + ".field}"}}
 	n.ID = g.AddNode(n)
-	err := substituteTemplates(n, g)
-	if err == nil {
-		t.Fatalf("a field was asked of a result that has no fields and it was "+
-			"accepted; x is now %v", n.Params["x"])
+	if err := substituteTemplates(n, g); err != nil {
+		t.Fatalf("substituteTemplates: %v", err)
 	}
-	if !strings.Contains(err.Error(), "field") {
-		t.Errorf("error = %v, want it to name the field that could not be read", err)
+	if n.Params["x"] != "just a string, not JSON" {
+		t.Errorf("x = %v, want the whole result", n.Params["x"])
 	}
 }
 

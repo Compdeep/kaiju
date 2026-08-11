@@ -269,8 +269,8 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	// LLM call in the DAG. Without this prepend the planner has no exposure to
 	// the "I do not give up / never advise the user to do it themselves" cluster
 	// and routinely under-plans (search-and-stop instead of search-fetch-compute).
-	if a.terseSoulPrompt != "" {
-		sb.WriteString(a.terseSoulPrompt)
+	if a.soulPrompt != "" {
+		sb.WriteString(a.soulPrompt)
 		sb.WriteString("\n\n")
 	}
 

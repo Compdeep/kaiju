@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/Compdeep/kaiju/agent/skillmd"
 )
@@ -161,7 +162,7 @@ func TestTheAggregatorAsksTheGate(t *testing.T) {
 // no data directory and no SKILL.md files of its own still has guidance for the
 // ordinary kinds of request.
 func TestTheBuiltInSkillCardsLoad(t *testing.T) {
-	cards := loadBuiltinSkills()
+	cards := loadBuiltinSkills(nil)
 
 	for _, key := range []string{"data_retrieval", "general_reasoning", "self_awareness", "system_operations"} {
 		card, ok := cards[key]
@@ -182,7 +183,7 @@ func TestTheBuiltInSkillCardsLoad(t *testing.T) {
 // "## Planning Guidance" sections were written for a planner that read the other
 // store and never saw them — four files of advice, read by nothing that plans.
 func TestTheBuiltInCardsReachThePlanner(t *testing.T) {
-	a := &Agent{skillGuidance: loadBuiltinSkills(), soulPrompt: ""}
+	a := &Agent{skillGuidance: loadBuiltinSkills(nil), soulPrompt: ""}
 	g := NewGraph()
 	g.ActiveCards = []string{"data_retrieval"}
 
@@ -200,7 +201,7 @@ func TestTheBuiltInCardsReachThePlanner(t *testing.T) {
 // back to none would strip its guidance on any run where selection produced
 // nothing.
 func TestNoSelectionGivesThePlannerEveryCard(t *testing.T) {
-	a := &Agent{skillGuidance: loadBuiltinSkills()}
+	a := &Agent{skillGuidance: loadBuiltinSkills(nil)}
 
 	prompt := a.executiveSystemPrompt(context.Background(), NewGraph(), nil, "", "observe", "")
 
@@ -208,5 +209,37 @@ func TestNoSelectionGivesThePlannerEveryCard(t *testing.T) {
 		if !strings.Contains(prompt, "### "+key) {
 			t.Errorf("%s missing from a run that selected nothing", key)
 		}
+	}
+}
+
+// An application's own card is loaded, and replaces the engine's of that name.
+//
+// This is what lets an application compile in the guidance for its own kind of
+// work without forking the package: the engine's cards are the baseline and the
+// application's are read over them. Without it, an application that embeds this
+// engine ships the engine's cards and none of its own.
+func TestAnApplicationsOwnSkillCardsAreLoaded(t *testing.T) {
+	own := fstest.MapFS{
+		"pest_control/SKILL.md": &fstest.MapFile{Data: []byte(
+			"---\nname: pest_control\ndescription: what to do about pests\n---\n\nCall someone.\n")},
+		"general_reasoning/SKILL.md": &fstest.MapFile{Data: []byte(
+			"---\nname: general_reasoning\ndescription: replaced\n---\n\nMine, not yours.\n")},
+	}
+	cards := loadBuiltinSkills(own)
+
+	if _, ok := cards["pest_control"]; !ok {
+		t.Error("the application's own card did not load, so an application embedding " +
+			"this engine ships the engine's guidance and none of its own")
+	}
+	if len(cards) < 4 {
+		t.Errorf("loaded %d cards; the engine's own should still be there", len(cards))
+	}
+	replaced, ok := cards["general_reasoning"]
+	if !ok {
+		t.Fatal("the engine's card vanished rather than being replaced")
+	}
+	if !strings.Contains(replaced.Body(), "Mine, not yours") {
+		t.Error("a card sharing a name with the engine's did not replace it, so an " +
+			"application cannot override guidance it disagrees with")
 	}
 }

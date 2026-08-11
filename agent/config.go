@@ -1,6 +1,9 @@
 package agent
 
-import "time"
+import (
+	"io/fs"
+	"time"
+)
 
 // Configuration.
 //
@@ -94,6 +97,15 @@ type PathConfig struct {
 	Workspace   string // where files are written (cwd in CLI mode, sandbox in web mode)
 	MetadataDir string // where blueprints, worklog, sessions live (.kaiju/ in CLI, same as workspace in web)
 	CLIMode     bool   // true = workspace is cwd, no project/ prefix, .kaiju/ for metadata
+
+	// BuiltinSkills are skill cards the application compiled into its own
+	// binary, laid out as <name>/SKILL.md at the root of the filesystem.
+	//
+	// The engine's own cards load first and these load over them, so a card
+	// sharing a name with one of the engine's replaces it. Nil means the
+	// application ships none, which is the ordinary case; cards on disk are a
+	// separate matter and override both.
+	BuiltinSkills fs.FS
 }
 
 // IdentityConfig is who this agent is and how much authority it starts with.

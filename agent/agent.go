@@ -14,7 +14,6 @@ import (
 	"github.com/Compdeep/kaiju/agent/prompt"
 	"github.com/Compdeep/kaiju/agent/skillmd"
 	"github.com/Compdeep/kaiju/agent/toolapi"
-	"github.com/Compdeep/kaiju/internal/db"
 )
 
 /*
@@ -370,11 +369,11 @@ func New(cfg Config) (*Agent, error) {
  *       When the config did not explicitly set NodeClearance, this also
  *       resolves the default clearance to the registry's default rank
  *       (the middle of the ladder).
- * param: database - the DB instance.
+ * param: src - where the intent table is read from.
  * return: error if loading fails.
  */
-func (a *Agent) LoadIntentRegistry(database *db.DB) error {
-	if err := a.intentRegistry.Load(database); err != nil {
+func (a *Agent) LoadIntentRegistry(src IntentSource) error {
+	if err := a.intentRegistry.Load(src); err != nil {
 		return err
 	}
 	if !a.clearanceExplicit {

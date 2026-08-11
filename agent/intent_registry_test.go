@@ -55,7 +55,7 @@ func newTestRegistry(t *testing.T) (*IntentRegistry, *db.DB) {
 	}
 
 	reg := NewIntentRegistry()
-	if err := reg.Load(database); err != nil {
+	if err := reg.Load(intentsFromDB(database)); err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
 	return reg, database
@@ -200,7 +200,7 @@ func TestResolveToolIntentWithPin(t *testing.T) {
 	// Pin bash to mid (rank 100). Compiled impact is 200 (destructive).
 	// Pin is a ceiling — compiled 200 gets capped to 100.
 	_ = database.SetToolIntent("bash", "mid")
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	tool := &mockTool{name: "bash", impact: 200}
 	got := reg.ResolveToolIntent("bash", tool, nil)
@@ -228,7 +228,7 @@ func TestResolveToolIntentCustomIntent(t *testing.T) {
 	// Pin net_info to "between" (rank 50). Compiled impact is 100.
 	// Pin caps it to 50.
 	_ = database.SetToolIntent("net_info", "between")
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	tool := &mockTool{name: "net_info", impact: 100}
 	got := reg.ResolveToolIntent("net_info", tool, nil)
@@ -254,7 +254,7 @@ func TestResolveToolIntentUnknownOverrideFallsBack(t *testing.T) {
 	reg, database := newTestRegistry(t)
 
 	database.SetToolIntent("weird_tool", "nonexistent_intent")
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	tool := &mockTool{name: "weird_tool", impact: 100} // compiled default = rank 100
 	got := reg.ResolveToolIntent("weird_tool", tool, nil)
@@ -270,7 +270,7 @@ func TestRegistryMaxRank(t *testing.T) {
 	}
 
 	_ = database.CreateIntent(db.Intent{Name: "topmost", Rank: 300, PromptDescription: "..."})
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 	if r := reg.MaxRank(); r != 300 {
 		t.Errorf("after adding topmost=300, max = %d, want 300", r)
 	}
@@ -292,7 +292,7 @@ func TestRegistryDefaultRankStableWithCustomIntents(t *testing.T) {
 	// Add two custom intents below the default (biasing "middle position" downward)
 	_ = database.CreateIntent(db.Intent{Name: "c1", Rank: 10, PromptDescription: "..."})
 	_ = database.CreateIntent(db.Intent{Name: "c2", Rank: 20, PromptDescription: "..."})
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	// If DefaultRank used list position (len/2), adding two low-end intents
 	// would shift it. With the flag, it stays at 100.
@@ -300,3 +300,33 @@ func TestRegistryDefaultRankStableWithCustomIntents(t *testing.T) {
 		t.Errorf("DefaultRank shifted to %d after adding custom intents; should stay at 100", r)
 	}
 }
+
+// intentsFromDB adapts the test database to what the registry reads.
+//
+// The registry takes an IntentSource so an application can keep its ranks
+// wherever it likes; these tests keep theirs in this module's database, so this
+// is their piece of the join. It is the same shape as the one the CLI uses.
+func intentsFromDB(d *db.DB) IntentSource { return dbIntents{d} }
+
+type dbIntents struct{ db *db.DB }
+
+func (s dbIntents) ListIntents() ([]Intent, error) {
+	rows, err := s.db.ListIntents()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Intent, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Intent{
+			Name:              r.Name,
+			Rank:              r.Rank,
+			Description:       r.Description,
+			PromptDescription: r.PromptDescription,
+			IsBuiltin:         r.IsBuiltin,
+			IsDefault:         r.IsDefault,
+		})
+	}
+	return out, nil
+}
+
+func (s dbIntents) ListToolIntents() (map[string]string, error) { return s.db.ListToolIntents() }

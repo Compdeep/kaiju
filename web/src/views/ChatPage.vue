@@ -704,7 +704,8 @@ watch(() => sessions.sessionId, (newId) => {
   flex: 1; color: var(--text-muted); font-size: 14px;
 }
 
-.msg { display: flex; flex-direction: column; gap: 4px; max-width: 740px; }
+.msg { display: flex; flex-direction: column; gap: 4px; max-width: min(740px, 100%); min-width: 0; }
+.msg-content { max-width: 100%; overflow-wrap: anywhere; }
 .msg-meta { display: flex; align-items: center; gap: 6px; }
 .msg-tools { display: inline-flex; gap: 4px; opacity: 0; transition: opacity .12s; }
 .msg:hover .msg-tools { opacity: 1; }

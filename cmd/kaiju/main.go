@@ -563,7 +563,7 @@ func runChat() {
 	chatDB, dbErr := kaijudb.Open(filepath.Join(cfg.Agent.DataDir, "kaiju.db"))
 	if dbErr == nil {
 		defer chatDB.Close()
-		if err := ag.LoadIntentRegistry(chatDB); err != nil {
+		if err := ag.LoadIntentRegistry(intentsFrom(chatDB)); err != nil {
 			log.Printf("[chat] intent registry load failed: %v", err)
 		}
 	}
@@ -770,7 +770,7 @@ func runServe() {
 	}
 
 	// Load intent registry from DB (seeded with defaults on first run)
-	if err := ag.LoadIntentRegistry(kaijuDB); err != nil {
+	if err := ag.LoadIntentRegistry(intentsFrom(kaijuDB)); err != nil {
 		log.Fatalf("[kaiju] load intent registry: %v", err)
 	}
 	log.Printf("[kaiju] intent registry loaded (%d intents)", len(ag.Intents().List()))
@@ -1042,7 +1042,7 @@ func intentStringToRank(s string, registry *agent.IntentRegistry) int {
 // Used by CLI commands that need to parse intent names without standing up a full agent.
 func loadIntentRegistry(database *kaijudb.DB) *agent.IntentRegistry {
 	reg := agent.NewIntentRegistry()
-	_ = reg.Load(database) // errors are logged inside; fall back to empty registry
+	_ = reg.Load(intentsFrom(database)) // errors are logged inside; fall back to empty registry
 	return reg
 }
 

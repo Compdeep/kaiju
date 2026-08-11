@@ -7,21 +7,47 @@ import (
 	"sync"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
-	"github.com/Compdeep/kaiju/internal/db"
 )
+
+// Intent is one rank in the registry: a name, where it sits in the order, and
+// the wording shown to a model when it is offered the choice.
+//
+// Declared here rather than taken from a store type, so the registry can be
+// filled from any store an application has. The fields are the whole of what
+// this package reads.
+type Intent struct {
+	Name              string `json:"name"`
+	Rank              int    `json:"rank"`
+	Description       string `json:"description"`
+	PromptDescription string `json:"prompt_description"`
+	IsBuiltin         bool   `json:"is_builtin"`
+	IsDefault         bool   `json:"is_default"`
+}
+
+// IntentSource is where the registry reads from.
+//
+// Two methods, because two is all the registry needs: the ranks themselves, and
+// the per-tool overrides that pin a named tool to a named rank. An application
+// owns its store and this package never learns what one is — a database, a file
+// or a table written by hand all satisfy this equally.
+type IntentSource interface {
+	ListIntents() ([]Intent, error)
+	ListToolIntents() (map[string]string, error)
+}
 
 /*
  * IntentRegistry is the in-memory snapshot of the intent registry loaded
  * from the database at agent startup.
  * desc: Provides name↔rank resolution, per-tool intent override lookup,
  *       and prompt-block generation for preflight and planner prompts.
- *       Immutable after Load() — changes to the DB require agent restart.
+ *       Load may be called again: it rebuilds every map under the write
+ *       lock, so a change to the source can be picked up without a restart.
  */
 type IntentRegistry struct {
 	mu            sync.RWMutex
-	byName        map[string]db.Intent
-	byRank        map[int]db.Intent
-	ordered       []db.Intent       // sorted by rank ascending
+	byName        map[string]Intent
+	byRank        map[int]Intent
+	ordered       []Intent          // sorted by rank ascending
 	toolOverrides map[string]string // tool name → intent name
 }
 
@@ -30,28 +56,28 @@ type IntentRegistry struct {
  */
 func NewIntentRegistry() *IntentRegistry {
 	return &IntentRegistry{
-		byName:        make(map[string]db.Intent),
-		byRank:        make(map[int]db.Intent),
+		byName:        make(map[string]Intent),
+		byRank:        make(map[int]Intent),
 		toolOverrides: make(map[string]string),
 	}
 }
 
 /*
- * Load populates the registry from the database.
- * desc: Reads intents + tool_intents. Must be called at agent startup
- *       after database migrations have run (so defaults are seeded).
+ * Load populates the registry from a source.
+ * desc: Must be called at agent startup, after whatever seeds the source's
+ *       defaults has run. Safe to call again to pick up a change.
  */
-func (r *IntentRegistry) Load(database *db.DB) error {
+func (r *IntentRegistry) Load(src IntentSource) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	intents, err := database.ListIntents()
+	intents, err := src.ListIntents()
 	if err != nil {
 		return fmt.Errorf("load intents: %w", err)
 	}
-	r.byName = make(map[string]db.Intent, len(intents))
-	r.byRank = make(map[int]db.Intent, len(intents))
-	r.ordered = make([]db.Intent, 0, len(intents))
+	r.byName = make(map[string]Intent, len(intents))
+	r.byRank = make(map[int]Intent, len(intents))
+	r.ordered = make([]Intent, 0, len(intents))
 	for _, i := range intents {
 		r.byName[i.Name] = i
 		r.byRank[i.Rank] = i
@@ -59,7 +85,7 @@ func (r *IntentRegistry) Load(database *db.DB) error {
 	}
 	sort.Slice(r.ordered, func(a, b int) bool { return r.ordered[a].Rank < r.ordered[b].Rank })
 
-	overrides, err := database.ListToolIntents()
+	overrides, err := src.ListToolIntents()
 	if err != nil {
 		return fmt.Errorf("load tool_intents: %w", err)
 	}
@@ -70,7 +96,7 @@ func (r *IntentRegistry) Load(database *db.DB) error {
 /*
  * ByName resolves an intent name to its full record. Returns false if unknown.
  */
-func (r *IntentRegistry) ByName(name string) (db.Intent, bool) {
+func (r *IntentRegistry) ByName(name string) (Intent, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	i, ok := r.byName[strings.ToLower(strings.TrimSpace(name))]
@@ -102,10 +128,10 @@ func (r *IntentRegistry) NameByRank(rank int) string {
 /*
  * List returns all intents ordered by rank ascending.
  */
-func (r *IntentRegistry) List() []db.Intent {
+func (r *IntentRegistry) List() []Intent {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]db.Intent, len(r.ordered))
+	out := make([]Intent, len(r.ordered))
 	copy(out, r.ordered)
 	return out
 }
@@ -115,10 +141,10 @@ func (r *IntentRegistry) List() []db.Intent {
  * desc: Used by prompt builders to show only intents the current scope
  *       permits. maxRank of -1 returns all.
  */
-func (r *IntentRegistry) ListAllowed(maxRank int) []db.Intent {
+func (r *IntentRegistry) ListAllowed(maxRank int) []Intent {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]db.Intent, 0, len(r.ordered))
+	out := make([]Intent, 0, len(r.ordered))
 	for _, i := range r.ordered {
 		if maxRank < 0 || i.Rank <= maxRank {
 			out = append(out, i)

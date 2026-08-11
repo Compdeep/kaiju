@@ -43,7 +43,7 @@ func newTestStack(t *testing.T) (*IntentRegistry, *gates.Gate, *db.DB) {
 	}
 
 	reg := NewIntentRegistry()
-	if err := reg.Load(database); err != nil {
+	if err := reg.Load(intentsFromDB(database)); err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestEnforce_PinCapsHighImpactTool(t *testing.T) {
 	if err := database.SetToolIntent("bash", "mid"); err != nil {
 		t.Fatalf("set tool intent: %v", err)
 	}
-	if err := reg.Load(database); err != nil {
+	if err := reg.Load(intentsFromDB(database)); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestEnforce_PinWithCustomIntentBetweenSeededRanks(t *testing.T) {
 	if err := database.SetToolIntent("net_info", "between"); err != nil {
 		t.Fatal(err)
 	}
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	tool := &mockTool{name: "net_info", impact: 100}
 
@@ -217,7 +217,7 @@ func TestEnforce_RemovingOverrideRestoresDefault(t *testing.T) {
 	if err := database.SetToolIntent("bash", "low"); err != nil {
 		t.Fatal(err)
 	}
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	tool := &mockTool{name: "bash", impact: 200} // Go default is high
 	// With the low pin, bash should pass even at rank 0
@@ -227,7 +227,7 @@ func TestEnforce_RemovingOverrideRestoresDefault(t *testing.T) {
 
 	// Remove the override
 	_ = database.DeleteToolIntent("bash")
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	// Now falls back to Go default (impact=2 → rank 200) and should be blocked at rank 0
 	if err := simulateDispatch(reg, gate, tool, gates.Intent(0), -1); err == nil {
@@ -270,7 +270,7 @@ func TestCustomIntentFlowsThroughAPIParser(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	// 1. Custom name resolves to its own rank, not collapsed to a seeded rank
 	if got := parseIntentLikeAPI(reg, "between", fallback); got != 50 {
@@ -293,7 +293,7 @@ func TestCustomIntentFlowsThroughAPIParser(t *testing.T) {
 	// a bash tool pinned to "between" should block at rank 0 and pass at
 	// rank 50, rank 100, and rank 300.
 	_ = database.SetToolIntent("bash", "between")
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	tool := &mockTool{name: "bash", impact: 200}
 
@@ -319,7 +319,7 @@ func TestPromptBlockIncludesCustomIntent(t *testing.T) {
 		Rank:              50,
 		PromptDescription: "diagnostic monitoring",
 	})
-	_ = reg.Load(database)
+	_ = reg.Load(intentsFromDB(database))
 
 	block := reg.PromptBlock(-1)
 	if !containsString(block, "between") {

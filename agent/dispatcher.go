@@ -147,42 +147,6 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		}
 	}
 
-	// Which machine this step runs on.
-	//
-	// Only asked where there is more than one answer. An application that
-	// supplied no executor runs everything where the agent runs, so a step that
-	// names no machine is not an omission — it is the only possibility, and
-	// refusing it would refuse every step. An application that CAN send work
-	// elsewhere has to be told, because "here" is then a choice someone made
-	// rather than the only option, and a step that names nothing is a step
-	// nobody decided the location of.
-	//
-	// Tool nodes only. Compute and the reflection types run where the agent
-	// runs whatever anyone writes.
-	if n.Type == NodeTool && a.remoteExec != nil {
-		if skill, ok := a.registry.Get(n.ToolName); ok {
-			// "self" is what a planner writes for this machine without knowing
-			// its id. Resolved before anything reads the target.
-			if n.Target == selfTarget {
-				n.Target = a.cfg.NodeID
-			}
-			if toolapi.RequiresTarget(skill) {
-				if n.Target == "" {
-					log.Printf("[dag] node %s: %q needs a target machine; rejecting empty target",
-						n.ID, n.ToolName)
-					ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf(
-						"tool %q requires step.target — name a machine, or %q for this one",
-						n.ToolName, selfTarget)}
-					return
-				}
-			} else if n.Target != "" {
-				log.Printf("[dag] node %s: %q takes no target; stripping %q",
-					n.ID, n.ToolName, n.Target)
-				n.Target = ""
-			}
-		}
-	}
-
 	// Remote execution: the planner named a machine and the embedding
 	// application supplied an executor, so hand the call over rather than
 	// running it here. Local throttling is deliberately skipped — the cooldown
@@ -389,19 +353,13 @@ func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error)
 			return v, nil
 		}
 	}
-	// Body.Field missed, so the field cannot be read. Both ways of missing are
-	// an error, and the message says which one happened.
-	//
-	// The result not being JSON used to be forgiven here: it was logged, and the
-	// whole result was injected in place of the field. That hands a tool the
-	// entire output of the step before it where one field was asked for, and
-	// nothing says so until whatever reads it misbehaves — far from the step
-	// that caused it. A step asked for a field; if there is no field, the step
-	// is wrong and should say so where it is written.
+	// Body.Field missed. Distinguish "envelope not JSON" (a tool bug — degrade
+	// gracefully to the raw string so a working pipeline doesn't break) from
+	// "JSON valid but field absent" (a planner bug — fail loud).
 	var probe any
 	if json.Unmarshal([]byte(dep.Result), &probe) != nil {
-		return nil, fmt.Errorf("template on %s: field %q was asked of dep %s, whose result is not JSON and so has no fields",
-			owner, field, depID)
+		log.Printf("[dag] template on %s: dep %s result is not JSON, injecting full result (upstream tool bug, not rejecting)", owner, depID)
+		return dep.Result, nil
 	}
 	return nil, fmt.Errorf("template on %s: field %q absent in dep %s", owner, field, depID)
 }

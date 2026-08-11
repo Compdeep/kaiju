@@ -99,32 +99,59 @@ func ComposeGuidance(cards []SkillCard, heading, label string) string {
  *       SKILL.md files of its own still has guidance for the ordinary kinds of
  *       request. Anything loaded from disk afterwards overrides one of the same
  *       name.
+ *
+ *       An application compiling this package into its own binary embeds its
+ *       cards too, and passes them as extra. Its cards are read second, so one
+ *       sharing a name with an engine card replaces it — which is how an
+ *       application says "for this kind of request, do it my way" without
+ *       forking the card it is replacing.
+ * param: extra - the application's own cards, laid out as <name>/SKILL.md at
+ *        the root. Nil when it has none.
  * return: the cards, by key.
  */
-func loadBuiltinSkills() map[string]*skillmd.SkillMD {
+func loadBuiltinSkills(extra fs.FS) map[string]*skillmd.SkillMD {
 	out := make(map[string]*skillmd.SkillMD)
-	entries, err := fs.ReadDir(builtinSkillsFS, "prompts/skills")
+	readCardsInto(out, builtinSkillsFS, "prompts/skills", "built-in")
+	if extra != nil {
+		readCardsInto(out, extra, ".", "application")
+	}
+	return out
+}
+
+/*
+ * readCardsInto parses every <dir>/<name>/SKILL.md into out.
+ * desc: A card that will not parse is skipped and named, because the run that
+ *       follows behaves as though it was never written.
+ * param: out - the map to fill; later callers overwrite earlier ones by name.
+ * param: fsys - where to read from.
+ * param: root - the directory holding one subdirectory per card.
+ * param: kind - what to call these cards in a log line.
+ */
+func readCardsInto(out map[string]*skillmd.SkillMD, fsys fs.FS, root, kind string) {
+	entries, err := fs.ReadDir(fsys, root)
 	if err != nil {
-		log.Printf("[agent] no built-in skill cards: %v", err)
-		return out
+		log.Printf("[agent] no %s skill cards: %v", kind, err)
+		return
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		path := "prompts/skills/" + entry.Name() + "/SKILL.md"
-		data, err := builtinSkillsFS.ReadFile(path)
+		path := entry.Name() + "/SKILL.md"
+		if root != "." {
+			path = root + "/" + path
+		}
+		data, err := fs.ReadFile(fsys, path)
 		if err != nil {
 			continue
 		}
 		fm, body, err := skillmd.Parse(data)
 		if err != nil {
-			log.Printf("[agent] skip built-in skill card %s: %v", path, err)
+			log.Printf("[agent] skip %s skill card %s: %v", kind, path, err)
 			continue
 		}
 		out[fm.Name] = skillmd.NewSkillMD(fm, body, "", path, time.Time{}, nil)
 	}
-	return out
 }
 
 /*

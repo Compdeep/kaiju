@@ -309,7 +309,7 @@ func New(cfg Config) (*Agent, error) {
 
 	// Load externalized prompts
 	soul := loadSoulPrompt(cfg.DataDir)
-	builtinSkills := loadBuiltinSkills()
+	builtinSkills := loadBuiltinSkills(cfg.BuiltinSkills)
 
 	// Executor defaults to same client if not configured separately
 	executorClient := client

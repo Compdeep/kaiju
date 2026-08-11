@@ -113,7 +113,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	toolSection.WriteString(fmt.Sprintf("Only tools with impact ≤ %d (%s) will succeed.\n\n", int(resolvedIntent), resolvedIntent))
 	a.toolSectionLines(&toolSection, int(resolvedIntent), agentToolName)
 
-	sysPrompt := ComposeSystemPrompt(a.terseSoulPrompt, prompt.Observer) + toolSection.String() + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Observer) + toolSection.String() + a.fleetSection()
 	userPrompt := sb.String()
 	messages := []llm.Message{
 		{Role: "system", Content: sysPrompt},

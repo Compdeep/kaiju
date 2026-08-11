@@ -13,10 +13,17 @@ import (
 // Later directories override earlier ones (same name = last wins).
 //
 // Precedence (low → high):
-//  1. <dataDir>/skills             user skills (seeded from repo's skills/bundled/ on install, editable)
-//  2. <workspace>/skills           workspace-specific overrides (highest)
+//  1. <dataDir>/skills/bundled     shipped with the binary, replaced on upgrade
+//  2. <dataDir>/skills             user-installed, never touched by an upgrade
+//  3. <workspace>/skills           workspace-specific overrides (highest)
+//
+// The first two are separate directories rather than one because an upgrade has
+// to be able to replace the cards it ships without deciding what to do about
+// the ones somebody wrote. Seeding shipped cards into the user directory makes
+// every upgrade choose between overwriting an edit and leaving a stale card.
 func DefaultDirs(dataDir, workspace string) []string {
 	dirs := []string{
+		filepath.Join(dataDir, "skills", "bundled"),
 		filepath.Join(dataDir, "skills"),
 	}
 	if workspace != "" {

@@ -1051,14 +1051,23 @@ func (a *Agent) NodeClearance() int {
 
 /*
  * UpdateGate modifies gate configuration at runtime.
- * desc: Updates rate limit, max turns, and lockdown status as specified.
+ * desc: Updates rate limit, max turns, clearance and lockdown as specified.
  *       nil values are left unchanged.
+ *
+ *       Setting the clearance marks it explicit, so a later registry load
+ *       does not overwrite the operator's choice with the registry's default
+ *       — which is the whole point of raising or lowering it by hand.
  * param: rateLimit - new rate limit (nil to keep current).
  * param: maxTurns - new max turns (nil to keep current).
+ * param: clearance - new clearance rank (nil to keep current).
  * param: lockdown - new lockdown state (nil to keep current).
  */
-func (a *Agent) UpdateGate(rateLimit, maxTurns *int, lockdown *bool) {
+func (a *Agent) UpdateGate(rateLimit, maxTurns, clearance *int, lockdown *bool) {
 	a.gate.Update(rateLimit, maxTurns)
+	if clearance != nil {
+		a.clearance.Set(*clearance)
+		a.clearanceExplicit = true
+	}
 	if lockdown != nil {
 		a.gate.SetLockdown(*lockdown)
 	}

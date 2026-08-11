@@ -24,16 +24,16 @@ func TestUnclassified_EvidenceIsTheTextUnchanged(t *testing.T) {
 
 func TestUnclassified_FieldResolvesFromTheTopOfTheText(t *testing.T) {
 	// The shape jsonResult produces: fields at the top level, no envelope.
-	body := unclassifiedBody(`{"text":"3 processes","count":3,"host":"queen-1"}`)
+	body := unclassifiedBody(`{"text":"3 processes","count":3,"host":"host-1"}`)
 
 	if v, ok := body.Field("count"); !ok || v != float64(3) {
 		t.Errorf("Field(count) = (%v, %v), want (3, true)", v, ok)
 	}
-	if v, ok := body.Field("host"); !ok || v != "queen-1" {
-		t.Errorf("Field(host) = (%v, %v), want (queen-1, true)", v, ok)
+	if v, ok := body.Field("host"); !ok || v != "host-1" {
+		t.Errorf("Field(host) = (%v, %v), want (host-1, true)", v, ok)
 	}
 	// The whole result, as RawTextBody returned for an empty path.
-	if v, ok := body.Field(""); !ok || !strings.Contains(v.(string), "queen-1") {
+	if v, ok := body.Field(""); !ok || !strings.Contains(v.(string), "host-1") {
 		t.Errorf("Field(\"\") = (%v, %v), want the whole text", v, ok)
 	}
 	// A miss is a miss, not a panic.

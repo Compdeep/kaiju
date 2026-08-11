@@ -167,16 +167,16 @@ func TestAttributionDefaultsAndOverride(t *testing.T) {
 		t.Errorf("defaults not sent: referer=%q title=%q", gotReferer, gotTitle)
 	}
 
-	SetAttribution("https://example.invalid/app", "Omamori")
+	SetAttribution("https://example.invalid/app", "ExampleApp")
 	call()
-	if gotTitle != "Omamori" || gotReferer != "https://example.invalid/app" {
+	if gotTitle != "ExampleApp" || gotReferer != "https://example.invalid/app" {
 		t.Errorf("override not sent: referer=%q title=%q", gotReferer, gotTitle)
 	}
 
 	// An empty value must not blank a header — it leaves the current value.
 	SetAttribution("", "")
 	call()
-	if gotTitle != "Omamori" {
+	if gotTitle != "ExampleApp" {
 		t.Errorf("empty override clobbered the title: %q", gotTitle)
 	}
 }

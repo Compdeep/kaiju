@@ -141,7 +141,7 @@ func init() {
  *       Call once at startup, before anything reads a prompt. The section
  *       variables are package-level and read on every LLM call, so applying
  *       them while work is in flight is a data race.
- * param: source - a label for logs and errors (e.g. "enbarr/prompts.md").
+ * param: source - a label for logs and errors (e.g. "myapp/prompts.md").
  * param: data - the prompts.md content, `=== NAME ===` delimited.
  * return: an error if the content is malformed or names an empty section.
  */

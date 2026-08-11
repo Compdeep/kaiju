@@ -57,15 +57,15 @@ func TestParamNumSaysWhenThereIsNoNumber(t *testing.T) {
 
 func TestParamStringsReadsEveryShape(t *testing.T) {
 	var fromJSON map[string]any
-	if err := json.Unmarshal([]byte(`{"tags": ["fleet", "queen"]}`), &fromJSON); err != nil {
+	if err := json.Unmarshal([]byte(`{"tags": ["alpha", "beta"]}`), &fromJSON); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"fleet", "queen"}
+	want := []string{"alpha", "beta"}
 
 	for _, params := range []map[string]any{
 		fromJSON,
-		{"tags": []string{"fleet", "queen"}},
-		{"tags": []any{"fleet", "queen"}},
+		{"tags": []string{"alpha", "beta"}},
+		{"tags": []any{"alpha", "beta"}},
 	} {
 		if got := ParamStrings(params, "tags"); !reflect.DeepEqual(got, want) {
 			t.Errorf("ParamStrings = %#v for %T, want %#v", got, params["tags"], want)
@@ -74,14 +74,14 @@ func TestParamStringsReadsEveryShape(t *testing.T) {
 
 	// Entries that are not usable strings are dropped rather than turned into
 	// empty ones, so a caller never acts on a value that is not there.
-	got := ParamStrings(map[string]any{"tags": []any{"fleet", "", 7, nil, "queen"}}, "tags")
+	got := ParamStrings(map[string]any{"tags": []any{"alpha", "", 7, nil, "beta"}}, "tags")
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ParamStrings with unusable entries = %#v, want %#v", got, want)
 	}
 	if got := ParamStrings(map[string]any{}, "tags"); got != nil {
 		t.Errorf("an absent array = %#v, want nil", got)
 	}
-	if got := ParamStrings(map[string]any{"tags": "fleet"}, "tags"); got != nil {
+	if got := ParamStrings(map[string]any{"tags": "alpha"}, "tags"); got != nil {
 		t.Errorf("a bare string is not an array of them, got %#v", got)
 	}
 }

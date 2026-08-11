@@ -13,7 +13,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// The preflight pipeline had no tests. These come from Enbarr's copy of the
+// The preflight pipeline had no tests. These come from the copy of the
 // engine, where they existed, and are pointed at this pipeline — which routes
 // chat with a cheap call before paying for plan preparation, and skips routing
 // altogether when nobody is watching.

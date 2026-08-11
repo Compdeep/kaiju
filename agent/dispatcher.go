@@ -170,7 +170,17 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			Intent:        int(intent),
 			CorrelationID: alertID,
 		})
-		ch <- nodeCompletion{NodeID: n.ID, Result: result, Err: err}
+		// Parse the envelope the far end returned, so a result that ran
+		// elsewhere arrives in the same shape as one that ran here. Without it
+		// every consumer that reads the typed body — the failure detector, the
+		// field references, the coverage statement — sees nothing for a remote
+		// step and reads absence as success. A far end that returned something
+		// other than an envelope leaves the body nil, exactly as before.
+		var body NodeBody
+		if msg, ok := toolapi.ParseToolMessage(result); ok {
+			body = toolMessageBody{msg: msg}
+		}
+		ch <- nodeCompletion{NodeID: n.ID, Result: result, Body: body, Err: err}
 		return
 	}
 

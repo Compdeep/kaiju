@@ -163,7 +163,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			return
 		}
 		log.Printf("[dag] remote exec %s (%s) -> %s", n.ID, n.ToolName, Text.TruncateLog(n.Target, 12))
-		result, err := a.remoteExec.Execute(ctx, RemoteRequest{
+		result, err := a.remoteExecute(ctx, RemoteRequest{
 			Target:        n.Target,
 			Tool:          n.ToolName,
 			Params:        n.Params,
@@ -527,7 +527,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		if scope != nil {
 			username = scope.Username
 		}
-		if err := a.clearanceCheck.Check(ctx, toolName, params, username); err != nil {
+		if err := a.checkClearance(ctx, toolName, params, username); err != nil {
 			a.gate.Audit(gates.AuditEntry{
 				Tool:    toolName,
 				AlertID: alertID,
@@ -631,7 +631,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 				paramsJSON = string(b)
 			}
 		}
-		a.eventStore.InsertAction(Action{
+		a.storeAction(Action{
 			ID:         fmt.Sprintf("act-%d", time.Now().UnixNano()),
 			NodeID:     a.cfg.NodeID,
 			Timestamp:  time.Now().Unix(),

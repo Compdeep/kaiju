@@ -26,7 +26,7 @@ func (a *Agent) fleetSection() string {
 	// The application decides what to say and how to word it; this package
 	// appends the text and attaches no meaning to it.
 	if a.environment != nil {
-		if text := a.environment(); text != "" {
+		if text := a.describeEnvironment(); text != "" {
 			return "\n\n" + text
 		}
 		return ""

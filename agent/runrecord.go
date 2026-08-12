@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
@@ -54,7 +55,7 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 		runID = graph.RunID
 	}
 
-	a.eventStore.InsertRun(Run{
+	a.storeRun(Run{
 		ID:              runID,
 		NodeID:          a.cfg.NodeID,
 		TriggerType:     trigger.Type,
@@ -122,4 +123,53 @@ func runIDOf(graph *Graph, correlationID string) string {
 		return graph.RunID
 	}
 	return correlationID
+}
+
+// Writing to the application's store.
+//
+// The store is the application's code and it is called at the end of a run, when
+// the answer already exists and the graph is finished. So a store that crashes
+// costs a row and nothing else — failing the run would throw away work that
+// succeeded because the bookkeeping for it did not, which is the same reasoning
+// writeAnswer applies when the answering callback crashes.
+//
+// Both writers log and continue. An application that wants a failed write to be
+// loud can make its own implementation say so; this package has no answer worth
+// giving beyond the line.
+
+/*
+ * storeRun files a finished run, if the application supplied a store.
+ * param: r - the run.
+ */
+func (a *Agent) storeRun(r Run) {
+	if a == nil || a.eventStore == nil {
+		return
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("[agent] the run store panicked recording %s, continuing: %v", r.ID, p)
+		}
+	}()
+	if err := a.eventStore.InsertRun(r); err != nil {
+		log.Printf("[agent] could not record run %s: %v", r.ID, err)
+	}
+}
+
+/*
+ * storeAction files one state-changing tool call, if the application supplied a
+ * store.
+ * param: act - the call that was made.
+ */
+func (a *Agent) storeAction(act Action) {
+	if a == nil || a.eventStore == nil {
+		return
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("[agent] the action store panicked recording %s, continuing: %v", act.ActionType, p)
+		}
+	}()
+	if err := a.eventStore.InsertAction(act); err != nil {
+		log.Printf("[agent] could not record action %s: %v", act.ActionType, err)
+	}
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -82,28 +83,122 @@ func TestApplicationCodeThatPanicsDoesNotEndTheRun(t *testing.T) {
 			t.Error("every reasoning stage would read nothing")
 		}
 	})
+
+	t.Run("a crashed executor fails the step rather than passing it", func(t *testing.T) {
+		a := &Agent{remoteExec: panicExec{}}
+		result, err := a.remoteExecute(context.Background(), RemoteRequest{Target: "machine-a"})
+		if err == nil {
+			t.Error("a crash part-way through a dial was reported as a step that ran")
+		}
+		if result != "" {
+			t.Errorf("result = %q; nothing came back from the far end", result)
+		}
+		if !strings.Contains(err.Error(), "machine-a") {
+			t.Errorf("err = %v; the machine is not named", err)
+		}
+	})
+
+	t.Run("a crashed clearance check refuses, because it has not approved", func(t *testing.T) {
+		a := &Agent{clearanceCheck: panicClearance{}}
+		err := a.checkClearance(context.Background(), "process_kill", nil, "u1")
+		if err == nil {
+			t.Error("a check that crashed approved a call that is about to change something")
+		}
+		if !strings.Contains(err.Error(), "process_kill") {
+			t.Errorf("err = %v; the tool is not named", err)
+		}
+	})
+
+	t.Run("a crashed store costs a row and not the run", func(t *testing.T) {
+		a := &Agent{eventStore: panicStore{}}
+		a.storeRun(Run{ID: "run-1"})
+		a.storeAction(Action{ActionType: "process_kill"})
+		// Reaching here is the assertion: neither call may panic out, because
+		// both run after the answer already exists.
+	})
+
+	t.Run("a crashed environment describes nothing", func(t *testing.T) {
+		a := &Agent{environment: func() string { boom(); return "" }}
+		if got := a.describeEnvironment(); got != "" {
+			t.Errorf("describeEnvironment = %q, want the same answer a missing one gives", got)
+		}
+	})
 }
+
+// The three capabilities that are interfaces rather than function types. A
+// function can be written inline; these need a receiver to panic from.
+
+type panicExec struct{}
+
+func (panicExec) Execute(context.Context, RemoteRequest) (string, error) {
+	panic("application fault")
+}
+
+type panicClearance struct{}
+
+func (panicClearance) Check(context.Context, string, map[string]any, string) error {
+	panic("application fault")
+}
+
+type panicStore struct{}
+
+func (panicStore) InsertRun(Run) error       { panic("application fault") }
+func (panicStore) InsertAction(Action) error { panic("application fault") }
 
 // TestEveryCallIntoApplicationCodeIsGuarded is the one that matters. Every test
 // above passes on a wrapper written today; this catches the tenth capability
 // somebody adds later, because the failure mode is forgetting entirely — which
 // is how two of these came to be written without a guard in the first place.
 func TestEveryCallIntoApplicationCodeIsGuarded(t *testing.T) {
-	// Each entry is the wrapper this package calls application code through.
-	for _, c := range []struct{ file, fn string }{
-		{"admission.go", "admit"},
-		{"allowtool.go", "allowTool"},
-		{"answer.go", "writeAnswer"},
-		{"unattended.go", "unattended"},
-		{"token_category.go", "tokenCategory"},
-		{"remote.go", "validateTarget"},
-		{"remote.go", "runTargets"},
-		{"loop_react.go", "formatTrigger"},
-		{"refine.go", "refinePreflight"},
-	} {
+	// Each entry is a wrapper this package calls application code through, and
+	// the Capabilities field it guards. Store has two because it is written at
+	// two points in a run; every other capability has one.
+	wrappers := []struct{ capability, file, fn string }{
+		{"Admit", "admission.go", "admit"},
+		{"AllowTool", "allowtool.go", "allowTool"},
+		{"Answer", "answer.go", "writeAnswer"},
+		{"Unattended", "unattended.go", "unattended"},
+		{"TokenCategory", "token_category.go", "tokenCategory"},
+		{"ValidateTarget", "remote.go", "validateTarget"},
+		{"RunTargets", "remote.go", "runTargets"},
+		{"Remote", "remote.go", "remoteExecute"},
+		{"DescribeTrigger", "loop_react.go", "formatTrigger"},
+		{"Refine", "refine.go", "refinePreflight"},
+		{"Clearance", "clearance.go", "checkClearance"},
+		{"Store", "runrecord.go", "storeRun"},
+		{"Store", "runrecord.go", "storeAction"},
+		{"Environment", "environment.go", "describeEnvironment"},
+	}
+
+	for _, c := range wrappers {
 		body := funcBody(t, readSource(t, c.file), c.fn)
 		if !strings.Contains(body, "recover()") {
 			t.Errorf("%s calls application code with no guard: a panic there ends the process", c.fn)
+		}
+	}
+
+	// And the list is complete, which the loop above cannot tell.
+	//
+	// This is the half that was missing. The list said nine and Capabilities had
+	// thirteen fields, so four capabilities called application code unguarded
+	// while a test named "every call" passed. Checking the wrappers against the
+	// struct rather than against a number means a fourteenth capability cannot
+	// be added without one.
+	guarded := map[string]bool{}
+	for _, c := range wrappers {
+		guarded[c.capability] = true
+	}
+	caps := reflect.TypeOf(Capabilities{})
+	for i := 0; i < caps.NumField(); i++ {
+		if name := caps.Field(i).Name; !guarded[name] {
+			t.Errorf("Capabilities.%s is application code with no wrapper in this list — "+
+				"either it is called somewhere unguarded, or the list has fallen behind "+
+				"the struct", name)
+		}
+	}
+	for name := range guarded {
+		if _, ok := caps.FieldByName(name); !ok {
+			t.Errorf("this list guards %q, which is not a field of Capabilities", name)
 		}
 	}
 }

@@ -136,3 +136,25 @@ func (a *Agent) runTargets(t Trigger) (out []string) {
 	}
 	return nil
 }
+
+/*
+ * remoteExecute hands a call to the application's executor.
+ * desc: A panic in the executor fails the node. The executor dials another
+ *       machine, and a crash part-way through says nothing about whether the
+ *       call landed — so the honest answer is that this step failed, not that it
+ *       succeeded and not that it never ran. Recording it as done would claim a
+ *       step ran somewhere nobody can check.
+ * param: ctx - cancelled with the run.
+ * param: req - the call to run elsewhere.
+ * return: what the far end returned, or the failure.
+ */
+func (a *Agent) remoteExecute(ctx context.Context, req RemoteRequest) (result string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[agent] the remote executor panicked, failing the step: %v", r)
+			result = ""
+			err = fmt.Errorf("the remote executor failed on %q", req.Target)
+		}
+	}()
+	return a.remoteExec.Execute(ctx, req)
+}

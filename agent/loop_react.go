@@ -279,7 +279,7 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 		if scope != nil {
 			username = scope.Username
 		}
-		if err := a.clearanceCheck.Check(ctx, toolName, params, username); err != nil {
+		if err := a.checkClearance(ctx, toolName, params, username); err != nil {
 			a.gate.Audit(gates.AuditEntry{
 				Tool:    toolName,
 				AlertID: alertID,

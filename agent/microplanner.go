@@ -67,6 +67,8 @@ func extractDebugSummary(raw string) string {
 func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph,
 	budget *Budget, ch chan<- nodeCompletion, gateCtx *ContextResponse, trigger Trigger, intent gates.Intent) {
 
+	defer a.guardNodeCompletion("fireMicroPlanner", mpNode.ID, ch)
+
 	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Microplanner) + a.fleetSection()
 	userPrompt := assembleDebuggerPrompt(mpNode, gateCtx, trigger, a, intent)
 

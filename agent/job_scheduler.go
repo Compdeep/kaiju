@@ -4,7 +4,9 @@ import (
 	"container/heap"
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -375,7 +377,7 @@ func (s *Scheduler) worker() {
 		var res *SyncResult
 		var err error
 		if job.ctx.Err() == nil {
-			res, err = s.exec(withInterject(job.ctx, job.interject), job.trigger)
+			res, err = s.runJob(job)
 		} else {
 			err = job.ctx.Err()
 		}
@@ -426,4 +428,34 @@ func interjectFrom(ctx context.Context) chan string {
 		return ch
 	}
 	return nil
+}
+
+/*
+ * runJob executes one job, containing a panic inside it.
+ * desc: Guarded here rather than at the top of worker() because of what has to
+ *       happen afterwards. The worker holds a slot, a background counter and a
+ *       session entry, and it delivers the result to whoever submitted the job;
+ *       a guard that returned from worker() would skip all of that, so the pool
+ *       would lose a worker on every panic, a synchronous caller would wait for
+ *       a result that is never delivered, and the queue would back up behind a
+ *       scheduler that reports itself busy.
+ *
+ *       Contained here, the panic becomes an ordinary failed job: the caller
+ *       gets an error, the slot is released, and the worker takes the next one.
+ *
+ *       This is the widest guard in the package, because s.exec is the whole
+ *       synchronous run — preflight, the planner, the aggregator and everything
+ *       they call. The per-node guards cover the goroutines the run fans out to,
+ *       which this one cannot reach.
+ * param: job - the job to run.
+ * return: the run's result, or the failure.
+ */
+func (s *Scheduler) runJob(job *Job) (res *SyncResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[scheduler] the run panicked: %v\n%s", r, debug.Stack())
+			res, err = nil, fmt.Errorf("the run panicked: %v", r)
+		}
+	}()
+	return s.exec(withInterject(job.ctx, job.interject), job.trigger)
 }

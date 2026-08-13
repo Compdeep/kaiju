@@ -2317,6 +2317,8 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 	graph *Graph, budget *Budget, ch chan nodeCompletion, errMsg string,
 	intent gates.Intent, scope *ResolvedScope) {
 
+	defer a.guardNodeCompletion("oneshotRetry", comp.NodeID, ch)
+
 	command, _ := node.Params["command"].(string)
 	if command == "" {
 		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}

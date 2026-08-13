@@ -760,6 +760,7 @@ func (a *Agent) SubscribeDAG() (<-chan DAGEvent, func()) {
  * param: graph - the investigation that owns this observer channel.
  */
 func (a *Agent) dagFanOut(src <-chan DAGEvent, graph *Graph) {
+	defer guardLoop("the DAG event fan-out")
 	for evt := range src {
 		a.broadcastDAGEvent(graph, evt)
 	}

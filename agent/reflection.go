@@ -88,6 +88,8 @@ func (b ReflectionBody) Summary() string {
 func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	budget *Budget, ch chan<- nodeCompletion, trigger Trigger, gateCtx *ContextResponse, intent ...gates.Intent) {
 
+	defer a.guardNodeCompletion("fireReflection", rNode.ID, ch)
+
 	// Prepend SOUL.md (identity + persistence litany) — same reach as the
 	// aggregator. Without this the reflector lacks the "don't give up / don't
 	// punt to other apps" cluster and takes the easy "conclude · too complex"

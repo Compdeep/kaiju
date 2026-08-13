@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -107,10 +108,14 @@ func readSource(t *testing.T, name string) string {
  */
 func funcBody(t *testing.T, src, name string) string {
 	t.Helper()
-	start := strings.Index(src, "func (a *Agent) "+name+"(")
-	if start < 0 {
+	// Any receiver, or none: the functions asked about live on *Agent, on
+	// *Scheduler and at package level, and a helper that only matched the first
+	// would report "not found" for a function that is there.
+	loc := regexp.MustCompile(`(?m)^func (\([^)]*\) )?` + regexp.QuoteMeta(name) + `\(`).FindStringIndex(src)
+	if loc == nil {
 		t.Fatalf("function %s not found", name)
 	}
+	start := loc[0]
 	if end := strings.Index(src[start:], "\n}\n"); end >= 0 {
 		return src[start : start+end]
 	}

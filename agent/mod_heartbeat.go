@@ -34,6 +34,7 @@ func (h *HeartbeatModule) Stop() error {
 }
 
 func (h *HeartbeatModule) run() {
+	defer guardLoop("the heartbeat")
 	ticker := time.NewTicker(h.interval)
 	defer ticker.Stop()
 	for {

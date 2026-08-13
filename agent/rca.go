@@ -329,6 +329,8 @@ func holmesSeenHypothesis(state *HolmesState, h string) bool {
 func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 	budget *Budget, ch chan<- nodeCompletion, trigger Trigger, intent gates.Intent) {
 
+	defer a.guardNodeCompletion("fireHolmes", sNode.ID, ch)
+
 	state, err := loadHolmesState(sNode)
 	if err != nil {
 		ch <- nodeCompletion{NodeID: sNode.ID, Err: fmt.Errorf("holmes state: %w", err)}

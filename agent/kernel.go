@@ -68,6 +68,7 @@ func (k *Kernel) Register(m Module) {
 
 // Run starts the kernel's main event loop. Blocks until ctx is cancelled.
 func (k *Kernel) Run(ctx context.Context) {
+	defer guardLoop("the kernel")
 	k.ctx, k.cancel = context.WithCancel(ctx)
 
 	// Start the work-dispatch subsystem, then the modules.

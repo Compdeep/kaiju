@@ -45,6 +45,13 @@ type observerOutput struct {
 func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	graph *Graph, budget *Budget, ch chan<- nodeCompletion, trigger Trigger, intent ...gates.Intent) {
 
+	// Declared before the guard so the guard can name the node once it exists.
+	// The caller counted this goroutine as in flight before starting it, so a
+	// panic before the node is added still owes a completion — the scheduler
+	// decrements on receipt and ignores an id it cannot find.
+	var obsID string
+	defer func() { a.guardNodeCompletion("fireObserver", obsID, ch) }()
+
 	resolvedIntent := gates.Intent(0)
 	if len(intent) > 0 {
 		resolvedIntent = intent[0]
@@ -104,7 +111,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		Type: NodeObserver,
 		Tag:  "observer_" + completedNode.Tag,
 	}
-	obsID := graph.AddNode(obsNode)
+	obsID = graph.AddNode(obsNode)
 	graph.SetState(obsID, StateRunning)
 
 	// Build system prompt with intent-filtered tools for injection

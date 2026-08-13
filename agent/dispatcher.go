@@ -109,6 +109,8 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	budget *Budget, ch chan<- nodeCompletion, alertID string,
 	throttle *toolThrottle, intent gates.Intent, scope *ResolvedScope) {
 
+	defer a.guardNodeCompletion("fireNode", n.ID, ch)
+
 	// Tag every node with the investigation's active skills so the
 	// frontend can show which skills guided this run. Skills are
 	// investigation-wide (set by preflight), not tool-specific.

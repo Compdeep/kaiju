@@ -66,7 +66,10 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	log.Printf("[react] sees %d tools (%d callable, %d guidance-only)", len(relevant), len(toolDefs), len(relevant)-len(toolDefs))
 
 	if len(toolDefs) == 0 {
-		return &SyncResult{Verdict: "No tools available."}, nil
+		verdict := "No tools available."
+		a.recordRun(trigger, startTime, nil, nil, trigger.Intent(),
+			Conclusion{Verdict: verdict, Status: "failed"})
+		return &SyncResult{Verdict: verdict}, nil
 	}
 
 	// IGX: derive intent. Auto falls back to the registry's default rank.
@@ -99,6 +102,12 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			MaxTokens:   a.cfg.MaxTokens,
 		})
 		if err != nil {
+			a.recordRun(trigger, startTime, nil, nil, intent, Conclusion{
+				Verdict:  fmt.Sprintf("react LLM error turn %d: %v", turn, err),
+				Status:   "failed",
+				Nodes:    totalToolCalls,
+				LLMCalls: totalLLMCalls,
+			})
 			return nil, fmt.Errorf("react LLM error turn %d: %w", turn, err)
 		}
 		totalLLMCalls++
@@ -198,6 +207,13 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	elapsed := time.Since(startTime)
 	log.Printf("[react] sync complete in %s (alert=%s, tools=%d, llm=%d)",
 		elapsed.Round(time.Millisecond), trigger.AlertID, totalToolCalls, totalLLMCalls)
+
+	a.recordRun(trigger, startTime, nil, nil, intent, Conclusion{
+		Verdict:  verdict,
+		Status:   "completed",
+		Nodes:    totalToolCalls,
+		LLMCalls: totalLLMCalls,
+	})
 
 	return &SyncResult{
 		Verdict:  verdict,

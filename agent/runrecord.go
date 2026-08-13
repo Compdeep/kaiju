@@ -49,6 +49,9 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 	if budget != nil {
 		llmCalls = int(budget.LLMCount())
 	}
+	if graph == nil && budget == nil {
+		nodes, llmCalls = c.Nodes, c.LLMCalls
+	}
 
 	runID := trigger.AlertID
 	if graph != nil && graph.RunID != "" {
@@ -90,8 +93,17 @@ type Conclusion struct {
 	// unless it supplied an Answer capability. Passed through untouched.
 	Severity string
 	Category string
-	// Status is "completed", "failed" or "timeout".
+	// Status is "completed", "failed", "timeout" or "not_admitted".
 	Status string
+
+	// Nodes and LLMCalls are what the run did, for a run that has no graph and
+	// no budget to be counted from. The ReAct loop is the only one: it is a flat
+	// loop rather than a graph, and it keeps its own tallies.
+	//
+	// Read only when graph and budget are nil, so there is one source for these
+	// numbers and it is the graph wherever a graph exists.
+	Nodes    int
+	LLMCalls int
 }
 
 /*

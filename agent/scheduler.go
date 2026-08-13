@@ -1948,18 +1948,29 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// Carry the per-request model selection so every heavy/light lane call in
 	// this run routes to the host-chosen provider (see model_route.go).
 	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))
+	startTime := time.Now()
+
+	// Run admission before any work or model call, and before the branch below,
+	// so it covers every mode. It used to sit under the branch, which meant a
+	// run asking for the ReAct loop was never put to the application at all —
+	// the mode a request names decided whether the application's rule applied.
+	//
+	// A refusal comes back as a result carrying the application's own wording
+	// rather than an error: the caller asked for work the application had
+	// already decided not to do, which is not a failure. It is also recorded,
+	// because "we chose not to" is the likeliest answer to the question the run
+	// record exists for — why nothing happened — and it was the one exit that
+	// left nothing behind.
+	if ok, reason := a.admit(trigger); !ok {
+		log.Printf("[dag] run not admitted (type=%s alert=%s): %s", trigger.Type, trigger.AlertID, reason)
+		a.recordRun(trigger, startTime, nil, nil, trigger.Intent(),
+			Conclusion{Verdict: reason, Status: "not_admitted"})
+		return &SyncResult{Verdict: reason, NotAdmitted: true}, nil
+	}
+
 	// Route to ReAct loop if mode=react
 	if trigger.DAGMode == "react" {
 		return a.RunReActSync(ctx, trigger)
-	}
-
-	// Run admission before any work or model call. A refusal comes back as a
-	// result carrying the application's own wording rather than an error: the
-	// caller asked for work the application had already decided not to do,
-	// which is not a failure.
-	if ok, reason := a.admit(trigger); !ok {
-		log.Printf("[dag] run not admitted (type=%s alert=%s): %s", trigger.Type, trigger.AlertID, reason)
-		return &SyncResult{Verdict: reason, NotAdmitted: true}, nil
 	}
 
 	log.Printf("[dag] sync investigation: type=%s alert=%s source=%s",
@@ -1971,7 +1982,6 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	markRunStart(a.cfg.MetadataDir, trigger.SessionID)
 	rotateServiceLogs(a.cfg.Workspace)
 
-	startTime := time.Now()
 	graph, budget, cleanup := a.setupDAGPipeline(trigger)
 	defer cleanup()
 
@@ -1986,6 +1996,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		var convErr *ExecutiveConversationalError
 		if errors.As(err, &convErr) {
 			if convErr.Text != "" {
+				// notrecorded: answered without planning — see TestEveryRunExitRecords
 				return &SyncResult{Verdict: convErr.Text}, nil
 			}
 			// Empty plan with no text — make a direct LLM call for conversational response.
@@ -2022,9 +2033,11 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 					MaxTokens:   a.cfg.MaxTokens,
 				})
 				if llmErr == nil && len(resp.Choices) > 0 {
+					// notrecorded: answered without planning — see TestEveryRunExitRecords
 					return &SyncResult{Verdict: resp.Choices[0].Message.Content}, nil
 				}
 			}
+			// notrecorded: answered without planning — see TestEveryRunExitRecords
 			return &SyncResult{Verdict: "I'm not sure how to help with that. Could you be more specific?"}, nil
 		}
 		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), Conclusion{Verdict: "plan_or_schedule_failed", Status: "failed"})

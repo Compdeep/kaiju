@@ -107,3 +107,50 @@ func TestTheRuleIsAskedAfterTheGate(t *testing.T) {
 		t.Error("the application's rule is asked before the engine's gate; it could admit a call the gate refuses")
 	}
 }
+
+// A rule is told where the call will run, because reach is a decision this
+// package does not make and an application cannot make without the fact.
+//
+// The two call sites mean different things by it and both are pinned here: the
+// remote branch names the machine, and executeToolNode leaves it empty because
+// reaching that function means the call runs on this machine, whatever the node
+// happens to name.
+func TestTheRuleIsToldWhereTheCallRuns(t *testing.T) {
+	src := readSource(t, "dispatcher.go")
+
+	remote := funcBody(t, src, "fireNode")
+	if !strings.Contains(remote, "Target:  n.Target,") {
+		t.Error("the remote branch does not tell the rule which machine the call is " +
+			"aimed at, so an application cannot refuse a call for being remote")
+	}
+
+	local := funcBody(t, src, "executeToolNode")
+	i := strings.Index(local, "a.allowTool(")
+	if i < 0 {
+		t.Fatal("executeToolNode no longer asks the rule")
+	}
+	if strings.Contains(local[i:], "Target:") {
+		t.Error("executeToolNode names a target; reaching it means the call runs here, " +
+			"and saying otherwise would have a rule refuse local calls on a node that " +
+			"merely carries a target")
+	}
+}
+
+// The three questions about who is asking are put to a remote step as well.
+// They have no counterpart on the receiving machine: it enforces its own
+// clearance and its own tool list, and knows nothing about the principal here.
+func TestARemoteStepIsAskedWhoWants(t *testing.T) {
+	body := funcBody(t, readSource(t, "dispatcher.go"), "fireNode")
+	branch := body[strings.Index(body, "if a.remoteFor(n) {"):]
+	branch = branch[:strings.Index(branch, "\n\t}\n")]
+
+	for _, want := range []struct{ call, why string }{
+		{"scopeAllows(n.ToolName, scope)", "the principal's tool list is not applied, so a restricted user is restricted here and unrestricted everywhere else"},
+		{"a.checkClearance(", "the application's authorisation hook is not asked"},
+		{"a.allowTool(", "the application's own rule is not asked, though it documents itself as always asked"},
+	} {
+		if !strings.Contains(branch, want.call) {
+			t.Errorf("a remote step skips %s: %s", want.call, want.why)
+		}
+	}
+}

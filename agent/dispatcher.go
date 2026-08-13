@@ -159,9 +159,39 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// here assumes the receiving side trusts the intent travelling with the
 	// request.
 	if a.remoteFor(n) {
+		// Three of executeToolNode's checks are asked here as well, because the
+		// far end cannot ask them: it knows its own clearance and its own tool
+		// list, and nothing about who asked on this side. The other three stay
+		// below and are deliberately not repeated — the registry lookup and the
+		// IGX gate are the RECEIVING machine's to make against its own state,
+		// and the throttle protects this process's rate limits, which a call
+		// running elsewhere does not spend.
+		if err := scopeAllows(n.ToolName, scope); err != nil {
+			ch <- nodeCompletion{NodeID: n.ID, Err: err}
+			return
+		}
 		if err := a.validateTarget(n.Target); err != nil {
 			log.Printf("[dag] node %s: invalid target %q: %v", n.ID, n.Target, err)
 			ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf("invalid target %q: %w", n.Target, err)}
+			return
+		}
+		if err := a.checkClearance(ctx, n.ToolName, n.Params, usernameOf(scope)); err != nil {
+			ch <- nodeCompletion{NodeID: n.ID, Err: err}
+			return
+		}
+		// Asked last here as it is below, and after the target check for the same
+		// reason the local path asks it after the gate: the rule may write to the
+		// parameter map, so nothing that judges the parameters may run after it.
+		// A refusal is the call's result rather than an error, so the model reads
+		// why and does something else.
+		if allow, reason := a.allowTool(ctx, ToolCallRequest{
+			Trigger: triggerOf(graph),
+			Graph:   graph,
+			Tool:    n.ToolName,
+			Params:  n.Params,
+			Target:  n.Target,
+		}); !allow {
+			ch <- nodeCompletion{NodeID: n.ID, Result: reason}
 			return
 		}
 		log.Printf("[dag] remote exec %s (%s) -> %s", n.ID, n.ToolName, Text.TruncateLog(n.Target, 12))
@@ -474,10 +504,8 @@ func dotPrefix(s string) string {
 func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budget *Budget,
 	toolName string, params map[string]any, alertID string, intent gates.Intent, scope *ResolvedScope) (string, NodeBody, error) {
 
-	// Scope check: reject tools not in the user's scope (defense-in-depth)
-	// Wildcard "*" in AllowedTools means all tools allowed.
-	if scope != nil && !scope.AllowedTools["*"] && !scope.AllowedTools[toolName] {
-		return "", nil, fmt.Errorf("gate: %s not in user scope", toolName)
+	if err := scopeAllows(toolName, scope); err != nil {
+		return "", nil, err
 	}
 
 	skill, ok := a.registry.Get(toolName)
@@ -525,11 +553,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 
 	// Clearance: check external authorization endpoint (if configured)
 	if a.clearanceCheck != nil {
-		username := ""
-		if scope != nil {
-			username = scope.Username
-		}
-		if err := a.checkClearance(ctx, toolName, params, username); err != nil {
+		if err := a.checkClearance(ctx, toolName, params, usernameOf(scope)); err != nil {
 			a.gate.Audit(gates.AuditEntry{
 				Tool:    toolName,
 				AlertID: alertID,
@@ -545,6 +569,8 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// gate already allowed, never widen it. A refusal is handed to the model as
 	// the call's result, so it learns why instead of trying again. See
 	// allowtool.go.
+	// Target is left empty on purpose: reaching here means the call runs on this
+	// machine, whatever the node happens to name.
 	if allow, reason := a.allowTool(ctx, ToolCallRequest{
 		Trigger: triggerOf(graph),
 		Graph:   graph,
@@ -666,4 +692,37 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	}
 
 	return result, body, nil
+}
+
+/*
+ * scopeAllows reports whether the principal behind this run may use a tool.
+ * desc: The permission list belongs to whoever asked — a logged-in dashboard
+ *       user, typically — so it has to be applied wherever the call is going.
+ *       A machine at the far end enforces its own clearance and knows nothing
+ *       about who asked here, so this is the one check that has no counterpart
+ *       on the receiving side.
+ *
+ *       A nil scope is full access: a run with no principal, which is what an
+ *       unattended investigation is.
+ * param: toolName - the tool about to be called.
+ * param: scope - the resolved permissions, or nil.
+ * return: nil when the tool may be used.
+ */
+func scopeAllows(toolName string, scope *ResolvedScope) error {
+	if scope == nil || scope.AllowedTools["*"] || scope.AllowedTools[toolName] {
+		return nil
+	}
+	return fmt.Errorf("gate: %s not in user scope", toolName)
+}
+
+/*
+ * usernameOf names the principal a scope belongs to, if any.
+ * param: scope - the resolved permissions, or nil.
+ * return: the username, empty when the run has no principal.
+ */
+func usernameOf(scope *ResolvedScope) string {
+	if scope == nil {
+		return ""
+	}
+	return scope.Username
 }

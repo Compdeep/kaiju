@@ -59,17 +59,56 @@ func TestRecordRunIsSilentWithNoStore(t *testing.T) {
 // TestEveryRunExitRecords pins the CALL SITES. A run that returns without
 // recording leaves no trace, and nothing else fails to say so.
 func TestEveryRunExitRecords(t *testing.T) {
-	src := readSource(t, "scheduler.go")
-	for _, fn := range []string{"RunDAGSync"} {
-		body := funcBody(t, src, fn)
-		// count exits that end the run against recordRun calls
-		if strings.Count(body, "a.recordRun(") < 4 {
-			t.Errorf("%s records at only %d exits; the failure paths write nothing",
-				fn, strings.Count(body, "a.recordRun("))
+	// Both modes, because a run's mode used to decide whether it was written
+	// down at all: the ReAct branch returned above every recordRun call, so an
+	// entire execution mode left no trace.
+	for _, fn := range []struct{ file, name string }{
+		{"scheduler.go", "RunDAGSync"},
+		{"loop_react.go", "RunReActSync"},
+	} {
+		body := funcBody(t, readSource(t, fn.file), fn.name)
+		// Every exit that ends the run has to write one. Counting returns rather
+		// than a fixed number, so an exit added later without a record fails
+		// here — the old form compared against a hardcoded 4 and would have
+		// passed with a fifth exit writing nothing.
+		exits := strings.Count(body, "return &SyncResult{") + strings.Count(body, "return nil, fmt.Errorf")
+		records := strings.Count(body, "a.recordRun(")
+
+		// Three exits are deliberately not recorded and say so where they are:
+		// the run answered without planning — a preflight reply, a direct answer,
+		// or a refusal to guess. Whether a conversational turn belongs in the
+		// same table as an investigation is the APPLICATION's decision, and the
+		// engine writing one either way would make it for them.
+		//
+		// Counted rather than assumed, so a fourth exit added without either a
+		// record or the marker fails here and somebody chooses.
+		excused := strings.Count(body, "// notrecorded:")
+
+		if records+excused < exits {
+			t.Errorf("%s has %d exits, records at %d and excuses %d; a run can end "+
+				"leaving nothing to say it happened. Either record it, or mark it "+
+				"// notrecorded: <why>", fn.name, exits, records, excused)
 		}
 		if strings.Contains(body, "InsertRun(Run{") {
-			t.Errorf("%s still writes a run inline; it should go through recordRun so every exit is consistent", fn)
+			t.Errorf("%s still writes a run inline; it should go through recordRun so every exit is consistent", fn.name)
 		}
+	}
+}
+
+// Admission is asked before the mode is looked at. It used to sit below the
+// branch that routes to the ReAct loop, so a request naming that mode was never
+// put to the application at all — which mode a caller asked for decided whether
+// the application's rule applied to it.
+func TestAdmissionIsAskedBeforeTheModeIsChosen(t *testing.T) {
+	body := funcBody(t, readSource(t, "scheduler.go"), "RunDAGSync")
+	admit := strings.Index(body, "a.admit(trigger)")
+	branch := strings.Index(body, `trigger.DAGMode == "react"`)
+	if admit < 0 || branch < 0 {
+		t.Fatalf("cannot find both the check (%d) and the branch (%d)", admit, branch)
+	}
+	if admit > branch {
+		t.Error("the mode is chosen before the application is asked whether the run " +
+			"may start, so one mode skips the rule entirely")
 	}
 }
 

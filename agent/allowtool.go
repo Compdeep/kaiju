@@ -51,6 +51,17 @@ type ToolCallRequest struct {
 	// Params are the arguments it will run with. Writing to this map changes
 	// the call.
 	Params map[string]any
+
+	// Target is the machine this call will run on, and empty means this one.
+	//
+	// Here because a rule cannot judge a call without knowing where it lands. An
+	// application may allow a tool locally and not allow the same tool to be
+	// aimed at somebody else's machine — that is a decision about reach, which
+	// this package deliberately has no opinion on, so it hands over the fact and
+	// asks.
+	//
+	// Opaque, as everywhere else: whatever the planner set, passed through.
+	Target string
 }
 
 /*

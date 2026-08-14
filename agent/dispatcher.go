@@ -149,6 +149,32 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		}
 	}
 
+	// A step naming another machine with no way to reach one is refused, not
+	// run here. Falling through to local execution was defended as behaving
+	// "exactly as before targets existed", which stopped being true the moment
+	// a planner could name a machine: process_kill aimed at another host then
+	// kills a process on this one, and nothing says so.
+	//
+	// A target equal to this node's own id means "here" and is not this case.
+	// The refusal is an error rather than a tool failure because no choice of
+	// parameters fixes it — remote execution is either configured or it is not,
+	// and the run should say that rather than work around it.
+	if n.Type == NodeTool && n.Target != "" && n.Target != a.cfg.NodeID && a.remoteExec == nil {
+		log.Printf("[dag] node %s: step is for %s and no remote executor is configured", n.ID, Text.TruncateLog(n.Target, 12))
+		ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf(
+			"step is for %q and this agent has no remote executor, so it was not run", n.Target)}
+		return
+	}
+
+	// A node type that is not a tool keeps running here whatever its target
+	// says: compute and the other LLM-bearing types run where the agent runs.
+	// Said out loud because the target is being ignored, and silence about
+	// ignoring an instruction reads as having followed it.
+	if n.Type != NodeTool && n.Target != "" && n.Target != a.cfg.NodeID {
+		log.Printf("[dag] node %s: %s runs where the agent runs; the target %s is ignored",
+			n.ID, n.Type, Text.TruncateLog(n.Target, 12))
+	}
+
 	// Remote execution: the planner named a machine and the embedding
 	// application supplied an executor, so hand the call over rather than
 	// running it here. Local throttling is deliberately skipped — the cooldown
@@ -211,6 +237,12 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		var body NodeBody
 		if msg, ok := toolapi.ParseToolMessage(result); ok {
 			body = toolMessageBody{msg: msg}
+		}
+		// The executor's error is the far end's, and it may not mention which
+		// machine it came from — "dial tcp: i/o timeout" names nothing. The
+		// step's whole point was the machine, so the failure says it.
+		if err != nil {
+			err = fmt.Errorf("step on %q failed: %w", n.Target, err)
 		}
 		ch <- nodeCompletion{NodeID: n.ID, Result: result, Body: body, Err: err}
 		return

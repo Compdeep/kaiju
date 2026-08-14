@@ -48,8 +48,12 @@ type RemoteRequest struct {
 // RemoteExecutor runs a tool call on another machine.
 //
 // Implementations live in the embedding application, which owns the transport.
-// A nil executor means remote execution is simply unavailable: nodes carrying a
-// target then run locally, exactly as before targets existed.
+//
+// A nil executor means remote execution is unavailable, and a tool node naming
+// another machine is refused rather than run here. It used to run locally, on
+// the reasoning that this was the behaviour before targets existed — which
+// stopped holding once a planner could name a machine, since the step then does
+// its work on the wrong one.
 type RemoteExecutor interface {
 	Execute(ctx context.Context, req RemoteRequest) (string, error)
 }

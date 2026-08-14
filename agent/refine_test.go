@@ -148,3 +148,81 @@ func TestRefineDeadlineIsShort(t *testing.T) {
 		t.Error("refineTimeout must be positive or there is no bound at all")
 	}
 }
+
+// A refinement that ignores the deadline is still bounded.
+//
+// Handing a deadline to a synchronous call bounds only a refinement that
+// consults it. The one worth defending against is the one that does not — a
+// reach into something outside the process that hangs — and before this it
+// stalled the run for as long as it hung.
+func TestARefinementThatIgnoresTheDeadlineIsAbandoned(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	a := &Agent{refine: func(context.Context, *PreflightResult, *Trigger) (*PreflightResult, string, error) {
+		<-release // never looks at the context, exactly like a wedged lookup
+		return nil, "", nil
+	}}
+
+	pf := &PreflightResult{Mode: "agent"}
+	trigger := Trigger{Type: "chat_query"}
+
+	start := time.Now()
+	got, reply := a.refinePreflight(context.Background(), pf, &trigger)
+	waited := time.Since(start)
+
+	if waited > refineTimeout*3 {
+		t.Errorf("waited %s on a refinement that never returns; the deadline bounds "+
+			"nothing and one wedged lookup stalls the run", waited.Round(time.Millisecond))
+	}
+	if got != pf {
+		t.Error("preflight's own answer was not kept when the refinement did not arrive")
+	}
+	if reply != "" {
+		t.Errorf("reply = %q; an abandoned refinement has not asked the user anything", reply)
+	}
+}
+
+// The abandoned goroutine keeps running and may still write to the trigger it
+// was given. It is given a copy, so what it writes after the run has moved on
+// goes nowhere — the planner is reading the real one by then.
+func TestALateRefinementCannotChangeTheRun(t *testing.T) {
+	proceed := make(chan struct{})
+	wrote := make(chan struct{})
+
+	a := &Agent{refine: func(_ context.Context, _ *PreflightResult, tr *Trigger) (*PreflightResult, string, error) {
+		<-proceed
+		tr.Target = "machine-the-run-already-passed" // too late, and to a copy
+		close(wrote)
+		return nil, "", nil
+	}}
+
+	trigger := Trigger{Type: "chat_query", Target: "machine-a"}
+	a.refinePreflight(context.Background(), &PreflightResult{Mode: "agent"}, &trigger)
+
+	close(proceed)
+	<-wrote
+
+	if trigger.Target != "machine-a" {
+		t.Errorf("Target = %q; a refinement that answered too late still moved the "+
+			"run to another machine", trigger.Target)
+	}
+}
+
+// A refinement that answers in time may settle which machine the run is about,
+// which is what c0903a5 made the pointer for. Running it elsewhere must not
+// lose that.
+func TestARefinementInTimeStillSettlesTheTarget(t *testing.T) {
+	a := &Agent{refine: func(_ context.Context, _ *PreflightResult, tr *Trigger) (*PreflightResult, string, error) {
+		tr.Target = "web-1"
+		return nil, "", nil
+	}}
+
+	trigger := Trigger{Type: "chat_query"}
+	a.refinePreflight(context.Background(), &PreflightResult{Mode: "agent"}, &trigger)
+
+	if trigger.Target != "web-1" {
+		t.Errorf("Target = %q, want web-1; the refinement resolved a machine and the "+
+			"run did not receive it", trigger.Target)
+	}
+}

@@ -91,18 +91,61 @@ func (a *Agent) refinePreflight(ctx context.Context, pf *PreflightResult, t *Tri
 	rctx, cancel := context.WithTimeout(ctx, refineTimeout)
 	defer cancel()
 
-	refined, reply, err := a.refine(rctx, pf, t)
-	if err != nil {
-		// The application's refinement failed. Its own answer is unavailable, so
-		// preflight's stands — a refinement that cannot run must not stop a run
-		// that would otherwise have proceeded.
+	// Run it on its own goroutine and stop waiting when the deadline passes.
+	//
+	// Handing the deadline to a synchronous call bounds only a refinement that
+	// consults it, which is the well-behaved case and not the one worth
+	// defending against. A refinement typically reaches something outside this
+	// process, and something outside this process is what hangs — so waiting for
+	// it to notice is waiting.
+	//
+	// The goroutine is abandoned rather than stopped, because nothing can stop
+	// it. Go has no way to interrupt a function that is not looking. So it gets
+	// a COPY of the trigger to write to: a refinement may settle which machine
+	// the run is about, and one that returned too late must not write that into
+	// a trigger the planner is already reading. The copy is thrown away with the
+	// answer, and the fields a refinement is meant to set are values rather than
+	// pointers, so nothing it wrote survives.
+	type outcome struct {
+		refined *PreflightResult
+		reply   string
+		err     error
+	}
+	done := make(chan outcome, 1) // buffered: a late goroutine must not block forever
+	scratch := *t
+	go func() {
+		// The recover has to be here too. A panic on this goroutine is not caught
+		// by the deferred recover above, which belongs to the caller's.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[preflight] refinement panicked, keeping preflight's answer: %v", r)
+				done <- outcome{}
+			}
+		}()
+		refined, reply, err := a.refine(rctx, pf, &scratch)
+		done <- outcome{refined, reply, err}
+	}()
+
+	select {
+	case <-rctx.Done():
+		log.Printf("[preflight] refinement did not answer within %s, keeping preflight's own: %v",
+			refineTimeout, rctx.Err())
+		return pf, ""
+	case out := <-done:
+		if out.err != nil {
+			// The application's refinement failed. Its own answer is unavailable,
+			// so preflight's stands — a refinement that cannot run must not stop a
+			// run that would otherwise have proceeded.
+			return pf, ""
+		}
+		// It answered in time, so what it wrote to the trigger is wanted.
+		*t = scratch
+		if out.reply != "" {
+			return pf, out.reply
+		}
+		if out.refined != nil {
+			return out.refined, ""
+		}
 		return pf, ""
 	}
-	if reply != "" {
-		return pf, reply
-	}
-	if refined != nil {
-		return refined, ""
-	}
-	return pf, ""
 }

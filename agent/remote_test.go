@@ -43,13 +43,15 @@ func TestRemoteForOnlyTargetsToolNodes(t *testing.T) {
 	}
 }
 
-// Without an executor, a target is inert: the node runs locally exactly as it
-// did before targets existed.
-func TestNoExecutorMeansLocal(t *testing.T) {
+// Without an executor there is nothing to dispatch to, so remoteFor says no.
+// What happens to the node then is not this function's answer: the step is
+// refused before it reaches here — see TestAStepForAnotherMachineWithNoExecutorIsRefused.
+// It used to run locally, and this test's name said so.
+func TestNoExecutorMeansNothingToDispatchTo(t *testing.T) {
 	a := &Agent{}
 	a.cfg.NodeID = "self"
 	if a.remoteFor(&Node{Type: NodeTool, Target: "elsewhere"}) {
-		t.Error("a target must not be acted on when no executor is wired")
+		t.Error("a target must not be dispatched when no executor is wired")
 	}
 }
 

@@ -168,7 +168,8 @@ type ClearanceChecker interface {
  * Agent is the agentic reasoning engine.
  * desc: Core agent struct that orchestrates investigations via DAG or ReAct loop.
  *       Manages LLM clients, tool registry, IGX gate, memory, gossip, IPC,
- *       embeddings, skill watching, fleet context, and live DAG streaming.
+ *       embeddings, skill watching, the environment description, and live
+ *       DAG streaming.
  */
 type Agent struct {
 	admitRun        AdmitFunc         // nil = every run is admitted
@@ -226,10 +227,10 @@ type Agent struct {
 	soulPrompt    string // from SOUL.md → BOOT.md body → default
 	skillWatcher  *skillmd.Watcher
 	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
-	fleet         FleetContextProvider        // nil on standalone nodes
 	// environment is Config.Environment: the application's description of the
 	// surroundings a run happens in, appended to planning and reflection
-	// prompts. Replaces fleet, whose vocabulary belonged to one product.
+	// prompts. It replaced a provider whose vocabulary belonged to one
+	// product, which was removed with it.
 	environment func() string
 	// describeTrigger is Config.DescribeTrigger: how the application words its
 	// own kinds of work for the planner. Nil falls back to the built-in

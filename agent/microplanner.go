@@ -69,7 +69,7 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 
 	defer a.guardNodeCompletion("fireMicroPlanner", mpNode.ID, ch)
 
-	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Microplanner) + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Microplanner) + a.environmentSection()
 	userPrompt := assembleDebuggerPrompt(mpNode, gateCtx, trigger, a, intent)
 
 	log.Printf("[dag] debugger prompt for %s (%d bytes): %s", mpNode.Tag, len(userPrompt), Text.TruncateLog(userPrompt, 800))

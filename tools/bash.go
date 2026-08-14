@@ -20,8 +20,13 @@ import (
 /*
  * destructivePattern matches commands that are likely destructive.
  * desc: Regex pattern for dangerous shell commands like rm -rf, mkfs, kill, shutdown, etc.
+ *       It also names the firewall commands, because cutting a host off the
+ *       network is a control action and the shell rated it observe — an agent
+ *       could do through bash what a firewall tool is gated for. ip6?tables
+ *       rather than iptables: the IPv6 command is a separate binary and the
+ *       hole is the same one.
  */
-var destructivePattern = regexp.MustCompile(`(?i)\b(rm\s+-rf|rm\s+-r|rmdir|del\s+/|rd\s+/s|format\s+|mkfs|dd\s+if=|kill\s+-9|killall|pkill|shutdown|reboot|halt|init\s+[06]|systemctl\s+(stop|disable|mask)|chmod\s+-R|chown\s+-R)\b`)
+var destructivePattern = regexp.MustCompile(`(?i)\b(rm\s+-rf|rm\s+-r|rmdir|del\s+/|rd\s+/s|format\s+|mkfs|dd\s+if=|kill\s+-9|killall|pkill|shutdown|reboot|halt|init\s+[06]|systemctl\s+(stop|disable|mask)|ip6?tables|netsh|chmod\s+-R|chown\s+-R)\b`)
 
 /*
  * writePattern matches commands that write to disk but aren't destructive.

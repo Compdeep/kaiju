@@ -97,6 +97,24 @@ func TestAGradedToolStillGradesARealCall(t *testing.T) {
 // for, stated where a change to it would be noticed: an application deciding
 // what to enable from the abstract impact must not be told a shell is
 // read-only.
+// Cutting a host off the network is a control action wherever it is done. The
+// pattern named shutdown, reboot and halt but no firewall command, so a rule
+// that drops every packet from an address rated observe — the tier a listing
+// gets — and an agent could reach through the shell for what a firewall tool
+// is gated for.
+func TestTheShellRatesAFirewallChangeAsControl(t *testing.T) {
+	b := NewBash("", "")
+	for _, cmd := range []string{
+		"iptables -A INPUT -s 203.0.113.9 -j DROP",
+		"ip6tables -A OUTPUT -d 2001:db8::1 -j DROP",
+		"netsh advfirewall firewall add rule name=block dir=in action=block remoteip=203.0.113.9",
+	} {
+		if got := b.Impact(map[string]any{"command": cmd}); got != toolapi.ImpactControl {
+			t.Errorf("%q = %d, want control", cmd, got)
+		}
+	}
+}
+
 func TestAShellIsNotAReadOnlyTool(t *testing.T) {
 	if got := NewBash("", "").Impact(nil); got != toolapi.ImpactControl {
 		t.Errorf("bash's abstract impact = %d, want control — anything gating on this "+

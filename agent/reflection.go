@@ -94,7 +94,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// aggregator. Without this the reflector lacks the "don't give up / don't
 	// punt to other apps" cluster and takes the easy "conclude · too complex"
 	// exit on hard queries.
-	sysPrompt := ComposeSystemPrompt(a.soulPrompt, fmt.Sprintf(prompt.Reflector, a.FormatRule())) + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, fmt.Sprintf(prompt.Reflector, a.FormatRule())) + a.environmentSection()
 	// The scheduler stamps a plain-English budget line ("replan round 2 of 3,
 	// 3m40s elapsed") into the reflection node's params so the reflector can
 	// self-regulate. Empty for reflection sites that don't set it.
@@ -299,7 +299,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	toolSection.WriteString(fmt.Sprintf("Only tools with impact ≤ %d (%s) will succeed.\n\n", int(resolvedIntent), resolvedIntent))
 	a.toolSectionLines(&toolSection, int(resolvedIntent), agentToolName)
 
-	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Interjection) + toolSection.String() + a.fleetSection()
+	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Interjection) + toolSection.String() + a.environmentSection()
 
 	// User prompt — operator message first, then graph state
 	var userBuf strings.Builder

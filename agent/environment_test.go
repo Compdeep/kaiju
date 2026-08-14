@@ -10,7 +10,7 @@ import (
 // broken for a configuration field.
 func TestEnvironmentReachesPrompts(t *testing.T) {
 	a := &Agent{environment: func() string { return "machines: alpha, beta" }}
-	got := a.fleetSection()
+	got := a.environmentSection()
 	if !strings.Contains(got, "alpha") {
 		t.Fatalf("Config.Environment did not reach the prompt section: %q", got)
 	}
@@ -21,27 +21,21 @@ func TestEnvironmentReachesPrompts(t *testing.T) {
 
 func TestEmptyEnvironmentAddsNothing(t *testing.T) {
 	a := &Agent{environment: func() string { return "" }}
-	if got := a.fleetSection(); got != "" {
+	if got := a.environmentSection(); got != "" {
 		t.Errorf("an empty description should add nothing, got %q", got)
 	}
 	b := &Agent{}
-	if got := b.fleetSection(); got != "" {
+	if got := b.environmentSection(); got != "" {
 		t.Errorf("no description at all should add nothing, got %q", got)
 	}
 }
 
-// Environment takes precedence: an application that has moved to it should not
-// also get the deprecated fleet text.
-func TestEnvironmentWinsOverFleet(t *testing.T) {
-	a := &Agent{
-		environment: func() string { return "from environment" },
-		fleet:       stubFleet{"from fleet"},
-	}
-	if got := a.fleetSection(); !strings.Contains(got, "environment") {
-		t.Errorf("Environment should take precedence, got %q", got)
+// A description that crashes costs a paragraph, not the run. Seven prompt
+// builders call this, so the alternative is one bad application function ending
+// every stage.
+func TestACrashingDescriptionAddsNothing(t *testing.T) {
+	a := &Agent{environment: func() string { panic("no") }}
+	if got := a.environmentSection(); got != "" {
+		t.Errorf("a panicking description should add nothing, got %q", got)
 	}
 }
-
-type stubFleet struct{ s string }
-
-func (f stubFleet) FleetContext() string { return f.s }

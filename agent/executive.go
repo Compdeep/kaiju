@@ -483,7 +483,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("- info: sysinfo, env_list, disk_usage, net_info\n\n")
 	}
 
-	rolePrompt := sb.String() + a.fleetSection()
+	rolePrompt := sb.String() + a.environmentSection()
 	return rolePrompt
 }
 

@@ -29,7 +29,7 @@ func (a *Agent) systemPrompt(cards []string) string {
 		cardContext = "\n\n" + g
 	}
 	rolePrompt := fmt.Sprintf("You are an agent on node %s.\n%s\n\n%s%s%s",
-		a.cfg.NodeID, roleDescription(a.cfg.NodeRole), prompt.React, cardContext, a.fleetSection())
+		a.cfg.NodeID, roleDescription(a.cfg.NodeRole), prompt.React, cardContext, a.environmentSection())
 	return ComposeSystemPrompt(a.soulPrompt, rolePrompt)
 }
 

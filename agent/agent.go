@@ -277,7 +277,7 @@ func New(cfg Config) (*Agent, error) {
 		log.Fatalf("[agent] prompt load failed: %v", err)
 	}
 
-	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel)
+	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits)
 
 	reg := toolapi.NewRegistry()
 
@@ -329,7 +329,7 @@ func New(cfg Config) (*Agent, error) {
 		if wire == "" {
 			wire = name
 		}
-		providerClients[name] = llm.NewClientWithProvider(wire, p.Endpoint, p.APIKey, "")
+		providerClients[name] = llm.NewClientWithProvider(wire, p.Endpoint, p.APIKey, "").Limits(cfg.Limits)
 	}
 	if len(providerClients) > 0 {
 		names := make([]string, 0, len(providerClients))
@@ -360,11 +360,6 @@ func New(cfg Config) (*Agent, error) {
 	// Wire the handlers the application supplied, so the agent is
 	// fully formed when New returns rather than after a dozen further calls.
 	a.applyHandlers(cfg)
-
-	// Every client this agent holds sizes its replies against the model that
-	// answers them. One place, because a client built without it is a client
-	// whose calls are sized against nothing and nobody notices.
-	a.limitEveryClient()
 	return a, nil
 }
 
@@ -999,8 +994,7 @@ func (a *Agent) GateInfo() (rateLimit, maxTurns, clearance int, lockdown bool) {
  * param: model - the model identifier.
  */
 func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
-	a.llm = llm.NewClientWithProvider(provider, endpoint, apiKey, model)
-	a.limitEveryClient()
+	a.llm = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits)
 	a.cfg.LLMEndpoint = endpoint
 	a.cfg.LLMAPIKey = apiKey
 	a.cfg.LLMModel = model
@@ -1015,8 +1009,7 @@ func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
  * param: model - the model identifier.
  */
 func (a *Agent) SetExecutorClient(provider, endpoint, apiKey, model string) {
-	a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model)
-	a.limitEveryClient()
+	a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits)
 }
 
 /*

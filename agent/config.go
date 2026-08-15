@@ -3,6 +3,8 @@ package agent
 import (
 	"io/fs"
 	"time"
+
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 // Configuration.
@@ -89,7 +91,11 @@ type ModelConfig struct {
 
 // ModelLimits reports what a model can take in and give back, in tokens. Zero
 // for either means the caller does not know, not that the limit is zero.
-type ModelLimits func(model string) (contextTokens, maxOutputTokens int)
+//
+// An alias, not a second type: it is handed straight to the clients that size
+// their replies with it, and a distinct type would need an adapter at every
+// construction for no gain.
+type ModelLimits = llm.ModelLimits
 
 // PathConfig is where the agent reads and writes.
 type PathConfig struct {

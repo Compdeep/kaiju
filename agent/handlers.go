@@ -75,7 +75,7 @@ func (a *Agent) applyHandlers(cfg Config) {
  */
 func (a *Agent) applyModels(cfg Config) {
 	if cfg.LLMEndpoint != "" || cfg.LLMAPIKey != "" || cfg.LLMModel != "" {
-		a.llm = llm.NewClientWithProvider(cfg.LLMProvider, cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel)
+		a.llm = llm.NewClientWithProvider(cfg.LLMProvider, cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits)
 	}
 
 	if cfg.ExecutorEndpoint != "" || cfg.ExecutorAPIKey != "" || cfg.ExecutorModel != "" {
@@ -83,7 +83,7 @@ func (a *Agent) applyModels(cfg Config) {
 		apiKey := firstNonEmpty(cfg.ExecutorAPIKey, cfg.LLMAPIKey)
 		model := firstNonEmpty(cfg.ExecutorModel, cfg.LLMModel)
 		provider := firstNonEmpty(cfg.ExecutorProvider, cfg.LLMProvider)
-		a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model)
+		a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(cfg.Limits)
 	}
 
 	// Per-lane choices. Leaving a lane empty keeps it on the main model.
@@ -109,40 +109,4 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-/*
- * limitEveryClient gives every client this agent holds the model catalog.
- * desc: Called once, after construction and after any client is replaced. A
- *       client without it sends every request exactly as written, which is the
- *       state nine of the engine's eighteen call sites were in.
- */
-func (a *Agent) limitEveryClient() {
-	fn := a.modelLimits()
-	for _, c := range []*llm.Client{a.llm, a.executor} {
-		if c != nil {
-			c.Limits(fn)
-		}
-	}
-	for _, c := range a.providerClients {
-		if c != nil {
-			c.Limits(fn)
-		}
-	}
-}
-
-/*
- * modelLimits is the lookup this agent gives every client it builds.
- * desc: A closure rather than the Config field itself, so a client built before
- *       Config.Limits was set still asks the current one — construction order
- *       stops mattering.
- * return: the lookup, which reports zeroes when the application supplied none.
- */
-func (a *Agent) modelLimits() llm.ModelLimits {
-	return func(model string) (contextTokens, maxOutputTokens int) {
-		if a == nil || a.cfg.Limits == nil {
-			return 0, 0
-		}
-		return a.cfg.Limits(model)
-	}
 }

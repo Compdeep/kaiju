@@ -83,14 +83,14 @@ func TestAskStampsTheLanesModelBeforeSizingTheReply(t *testing.T) {
 	a := agentOnStub(t, model)
 
 	// A window smaller than the request's cap, reported only for the model the
-	// answer lane resolves to. If ask sized before stamping, the lookup would
-	// miss and the cap would stand.
-	a.cfg.Limits = func(m string) (int, int) {
+	// light lane resolves to. The client is what sizes, and it is given its
+	// catalog when it is built — so a test changes the client, not the config.
+	a.executor.Limits(func(m string) (int, int) {
 		if m == a.executor.Model() {
 			return 4096, 512
 		}
 		return 0, 0
-	}
+	})
 
 	req := &llm.ChatRequest{
 		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
@@ -109,7 +109,7 @@ func TestAskStampsTheLanesModelBeforeSizingTheReply(t *testing.T) {
 func TestAskLeavesARequestAloneWhenTheModelIsUnknown(t *testing.T) {
 	model := newStubModel(t, map[string]stubReply{"": {Content: "an answer"}})
 	a := agentOnStub(t, model)
-	a.cfg.Limits = func(string) (int, int) { return 0, 0 }
+	a.executor.Limits(func(string) (int, int) { return 0, 0 })
 
 	req := &llm.ChatRequest{
 		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
@@ -150,7 +150,9 @@ func TestAskParsedReportsACutReplyAndAskDoesNot(t *testing.T) {
 func TestTheNamedDoorsAreTheSameDoor(t *testing.T) {
 	model := newStubModel(t, map[string]stubReply{"": {Content: "an answer"}})
 	a := agentOnStub(t, model)
-	a.cfg.Limits = func(string) (int, int) { return 4096, 512 }
+	small := func(string) (int, int) { return 4096, 512 }
+	a.llm.Limits(small)
+	a.executor.Limits(small)
 
 	for _, c := range []struct {
 		name string

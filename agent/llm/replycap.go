@@ -24,6 +24,27 @@ const replyFloor = 256
 const promptHeadroom = 2000
 
 /*
+ * ReplyCap reports what this request's reply cap will be when it is sent.
+ * desc: For a caller that has to know the number before sending — to tell the
+ *       model its budget, which only means anything if it is the number the
+ *       provider will actually stop at.
+ *
+ *       Asking does not change the request. Sending applies the same answer, so
+ *       a caller that asks and a caller that does not both end up with the same
+ *       cap on the wire.
+ * param: req - the request as it stands.
+ * return: the cap that will be sent.
+ */
+func (c *Client) ReplyCap(req *ChatRequest) int {
+	if req == nil {
+		return 0
+	}
+	capped := *req
+	c.capReply(&capped)
+	return capped.MaxTokens
+}
+
+/*
  * capReply lowers a request's reply cap to what the model can actually produce.
  * desc: Two ceilings apply. The model's published maximum reply is the first.
  *       The room left in its context window after the prompt is the second,

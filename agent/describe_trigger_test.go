@@ -46,6 +46,34 @@ func TestUnrecognisedCauseFallsThroughToDefault(t *testing.T) {
 	}
 }
 
+// The built-in wording is what every application without a DescribeTrigger
+// gets, so it must say only what this package knows: a run started, something
+// caused it, here is what came with it. It used to say "## Alert", "Alert ID"
+// and "Investigate this alert", which told every model driven by this loop that
+// its input was a security alert.
+func TestTheBuiltInWordingClaimsNothingAboutThePayload(t *testing.T) {
+	a := &Agent{}
+	got := a.formatTrigger(Trigger{
+		Type:    "event",
+		AlertID: "corr-9",
+		Source:  "somewhere",
+		Data:    json.RawMessage(`{"k":"v"}`),
+	})
+
+	for _, word := range []string{"Alert", "alert", "Investigate", "threat", "incident"} {
+		if strings.Contains(got, word) {
+			t.Errorf("the built-in wording says %q, which is one product's word for what a run is about:\n%s", word, got)
+		}
+	}
+	// It still has to carry the three things it knows, or an application
+	// without a description loses the context entirely.
+	for _, part := range []string{"event", "corr-9", "somewhere", `{"k":"v"}`} {
+		if !strings.Contains(got, part) {
+			t.Errorf("the built-in wording dropped %q:\n%s", part, got)
+		}
+	}
+}
+
 func TestNoCallbackIsUnchangedBehaviour(t *testing.T) {
 	a := &Agent{}
 	got := a.formatTrigger(Trigger{

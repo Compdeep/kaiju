@@ -192,16 +192,40 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		// IGX gate are the RECEIVING machine's to make against its own state,
 		// and the throttle protects this process's rate limits, which a call
 		// running elsewhere does not spend.
+		// Every one of these lines is written here or nowhere. The local path
+		// audits four times over — a throttle refusal, a gate refusal, a
+		// clearance refusal, and the call itself — and a call that leaves this
+		// machine went through none of that code.
+		auditRemote := func(result string, err error) {
+			e := gates.AuditEntry{
+				Tool:      n.ToolName,
+				Params:    n.Params,
+				Target:    n.Target,
+				TriggerID: triggerID,
+				RunID:     actionRunID(ctx, graph, triggerID),
+				Intent:    int(intent),
+			}
+			if err != nil {
+				e.Error = err.Error()
+			} else {
+				e.Result = Text.TruncateLog(result, 500)
+			}
+			a.gate.Audit(e)
+		}
+
 		if err := scopeAllows(n.ToolName, scope); err != nil {
+			auditRemote("", err)
 			ch <- nodeCompletion{NodeID: n.ID, Err: err}
 			return
 		}
 		if err := a.validateTarget(n.Target); err != nil {
 			log.Printf("[dag] node %s: invalid target %q: %v", n.ID, n.Target, err)
+			auditRemote("", err)
 			ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf("invalid target %q: %w", n.Target, err)}
 			return
 		}
 		if err := a.checkClearance(ctx, n.ToolName, n.Params, usernameOf(scope)); err != nil {
+			auditRemote("", err)
 			ch <- nodeCompletion{NodeID: n.ID, Err: err}
 			return
 		}
@@ -244,6 +268,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		if err != nil {
 			err = fmt.Errorf("step on %q failed: %w", n.Target, err)
 		}
+		auditRemote(result, err)
 		ch <- nodeCompletion{NodeID: n.ID, Result: result, Body: body, Err: err}
 		return
 	}

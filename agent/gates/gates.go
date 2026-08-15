@@ -58,6 +58,15 @@ type AuditEntry struct {
 	Intent    int    `json:"intent,omitempty"`
 	Impact    int    `json:"impact,omitempty"`
 	Clearance int    `json:"clearance,omitempty"`
+
+	// Target is the machine the call ran on, and empty means this one. A line
+	// recording a call that ran somewhere else, without saying where, cannot
+	// answer the question the log exists for.
+	//
+	// Impact is absent on those lines rather than zero-by-default, because
+	// impact is judged against the tool as the receiving machine has it, and
+	// this machine may not carry that tool at all. Zero would read as harmless.
+	Target string `json:"target,omitempty"`
 }
 
 // ─── Gate ───────────────────────────────────────────────────────────────────

@@ -128,9 +128,15 @@ func TestNoContaminationFromTheEmbeddingApplication(t *testing.T) {
 		forbidden[strings.ToLower(w)] = true
 	}
 
-	// The whole module, not one package. The walk used to start at the agent
-	// package, so tools/, internal/, pkg/ and cmd/ were never read — and that is
-	// where AuditEntry.TriggerID sits.
+	// The whole module, not one package, and no directory exempt. The walk used
+	// to start at the agent package, so tools/, internal/, pkg/ and cmd/ were
+	// never read — and that is where AuditEntry.TriggerID sat.
+	//
+	// tests/ was exempt after that, on the reasoning that an evaluation harness
+	// is not the engine. It is still this repository's code: tests/eval/holmes
+	// carries alertID and extractAlertID, and reads /tmp/kaiju-prompts/<alert
+	// _id>.log. A word an engineer meets while reading a harness is a word this
+	// engine appears to use, whichever directory it sits in.
 	root := moduleRoot(t)
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
@@ -138,9 +144,6 @@ func TestNoContaminationFromTheEmbeddingApplication(t *testing.T) {
 		}
 		if strings.Contains(path, "contamination_test.go") {
 			return nil
-		}
-		if strings.Contains(path, string(filepath.Separator)+"tests"+string(filepath.Separator)) {
-			return nil // evaluation harnesses, not the engine
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {

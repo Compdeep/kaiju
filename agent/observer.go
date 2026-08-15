@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -127,7 +126,16 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		{Role: "user", Content: userPrompt},
 	}
 
-	startedObs := time.Now()
+	ctx = withTrace(ctx, TraceID{
+		NodeID:   obsID,
+		NodeType: "observer",
+		Tag:      "observer_" + completedNode.Tag,
+		Input: map[string]string{
+			"completed_node":     completedNode.ID,
+			"completed_node_tag": completedNode.Tag,
+			"completed_tool":     completedNode.ToolName,
+		},
+	})
 	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{observerToolDef()},
@@ -136,25 +144,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		MaxTokens:   1024,
 	})
 
-	traceObs := LLMTrace{
-		RunID:    runIDFrom(ctx),
-		NodeID:   obsID,
-		NodeType: "observer",
-		Tag:      "observer_" + completedNode.Tag,
-		Started:  startedObs,
-		Input: map[string]string{
-			"completed_node":     completedNode.ID,
-			"completed_node_tag": completedNode.Tag,
-			"completed_tool":     completedNode.ToolName,
-		},
-		System:    sysPrompt,
-		User:      userPrompt,
-		LatencyMS: time.Since(startedObs).Milliseconds(),
-	}
-
 	if err != nil {
-		traceObs.Err = err.Error()
-		WriteLLMTrace(traceObs)
 		log.Printf("[dag] observer failed for %s: %v", completedNode.Tag, err)
 		graph.SetResult(obsID, "observer error: "+err.Error())
 		ch <- nodeCompletion{NodeID: obsID, Result: ""}
@@ -163,16 +153,10 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 
 	raw, err := extractToolArgs(resp)
 	if err != nil {
-		traceObs.Err = err.Error()
-		WriteLLMTrace(traceObs)
 		graph.SetResult(obsID, "no response")
 		ch <- nodeCompletion{NodeID: obsID, Result: ""}
 		return
 	}
-	traceObs.Output = raw
-	traceObs.TokensIn = resp.Usage.PromptTokens
-	traceObs.TokensOut = resp.Usage.CompletionTokens
-	WriteLLMTrace(traceObs)
 
 	log.Printf("[dag] observer for %s: %s", completedNode.Tag, Text.TruncateLog(raw, 150))
 	graph.SetBody(obsID, parseObserverBody(raw))

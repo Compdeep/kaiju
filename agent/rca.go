@@ -33,7 +33,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -371,8 +370,19 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 		{Role: "user", Content: userPrompt},
 	}
 
-	started := time.Now()
-	resp, llmErr := a.completeHeavyChecked(ctx, &llm.ChatRequest{
+	holmesID := TraceID{
+		NodeID:   sNode.ID,
+		NodeType: "holmes",
+		Tag:      sNode.Tag,
+		Input: map[string]string{
+			"iter":    fmt.Sprintf("%d/%d", state.Iter, state.MaxIter),
+			"problem": Text.TruncateLog(state.Problem, 200),
+		},
+	}
+	if gateCtx != nil {
+		holmesID.GateReturned = gateCtx.Sources
+	}
+	resp, llmErr := a.completeHeavyChecked(withTrace(ctx, holmesID), &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{holmesToolDef()},
 		ToolChoice:  "required",
@@ -380,43 +390,16 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 		MaxTokens:   1024,
 	})
 
-	trace := LLMTrace{
-		RunID:    runIDFrom(ctx),
-		NodeID:   sNode.ID,
-		NodeType: "holmes",
-		Tag:      sNode.Tag,
-		Model:    "reasoning",
-		Started:  started,
-		Input: map[string]string{
-			"iter":    fmt.Sprintf("%d/%d", state.Iter, state.MaxIter),
-			"problem": Text.TruncateLog(state.Problem, 200),
-		},
-		System:    sysPrompt,
-		User:      userPrompt,
-		LatencyMS: time.Since(started).Milliseconds(),
-	}
-	if gateCtx != nil {
-		trace.GateReturned = gateCtx.Sources
-	}
-
 	if llmErr != nil {
-		trace.Err = llmErr.Error()
-		WriteLLMTrace(trace)
 		ch <- nodeCompletion{NodeID: sNode.ID, Err: fmt.Errorf("holmes LLM: %w", llmErr)}
 		return
 	}
 
 	raw, extractErr := extractToolArgs(resp)
 	if extractErr != nil {
-		trace.Err = extractErr.Error()
-		WriteLLMTrace(trace)
 		ch <- nodeCompletion{NodeID: sNode.ID, Err: fmt.Errorf("holmes: %w", extractErr)}
 		return
 	}
-	trace.Output = raw
-	trace.TokensIn = resp.Usage.PromptTokens
-	trace.TokensOut = resp.Usage.CompletionTokens
-	WriteLLMTrace(trace)
 
 	log.Printf("[dag] holmes iter %d output: %s", state.Iter, Text.TruncateLog(raw, 240))
 

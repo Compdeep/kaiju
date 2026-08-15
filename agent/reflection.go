@@ -126,7 +126,11 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	}})
 
 	started := time.Now()
-	resp, err := a.completeLightChecked(ctx, &llm.ChatRequest{
+	reflectID := TraceID{NodeID: rNode.ID, NodeType: "reflector", Tag: rNode.Tag}
+	if gateCtx != nil {
+		reflectID.GateReturned = gateCtx.Sources
+	}
+	resp, err := a.completeLightChecked(withTrace(ctx, reflectID), &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{reflectorToolDef()},
 		ToolChoice:  "required",
@@ -134,24 +138,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 		MaxTokens:   1024,
 	})
 
-	trace := LLMTrace{
-		RunID:     runIDFrom(ctx),
-		NodeID:    rNode.ID,
-		NodeType:  "reflector",
-		Tag:       rNode.Tag,
-		Model:     "executor",
-		Started:   started,
-		System:    sysPrompt,
-		User:      userPrompt,
-		LatencyMS: time.Since(started).Milliseconds(),
-	}
-	if gateCtx != nil {
-		trace.GateReturned = gateCtx.Sources
-	}
-
 	if err != nil {
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: rNode.ID, Node: &NodeInfo{
 			ID: rNode.ID, Type: "reflection", State: "failed", Tag: "reflect", Ms: time.Since(started).Milliseconds(), Error: err.Error(),
 		}})
@@ -161,18 +148,12 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 
 	raw, err := extractToolArgs(resp)
 	if err != nil {
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: rNode.ID, Node: &NodeInfo{
 			ID: rNode.ID, Type: "reflection", State: "failed", Tag: "reflect", Ms: time.Since(started).Milliseconds(), Error: err.Error(),
 		}})
 		ch <- nodeCompletion{NodeID: rNode.ID, Err: fmt.Errorf("reflection: %w", err)}
 		return
 	}
-	trace.Output = raw
-	trace.TokensIn = resp.Usage.PromptTokens
-	trace.TokensOut = resp.Usage.CompletionTokens
-	WriteLLMTrace(trace)
 
 	log.Printf("[dag] reflection output: %s", Text.TruncateLog(raw, 200))
 
@@ -314,8 +295,19 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 		{Role: "user", Content: userBuf.String()},
 	}
 
-	started := time.Now()
-	resp, err := a.completeLightChecked(ctx, &llm.ChatRequest{
+	interjectID := TraceID{
+		NodeID:   rNode.ID,
+		NodeType: "interjection",
+		Tag:      rNode.Tag,
+		Input: map[string]string{
+			"operator_message": humanMsg,
+			"intent":           resolvedIntent.String(),
+		},
+	}
+	if gateCtx != nil {
+		interjectID.GateReturned = gateCtx.Sources
+	}
+	resp, err := a.completeLightChecked(withTrace(ctx, interjectID), &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{reflectorToolDef()},
 		ToolChoice:  "required",
@@ -323,43 +315,16 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 		MaxTokens:   1024,
 	})
 
-	trace := LLMTrace{
-		RunID:    runIDFrom(ctx),
-		NodeID:   rNode.ID,
-		NodeType: "interjection",
-		Tag:      rNode.Tag,
-		Model:    "executor",
-		Started:  started,
-		Input: map[string]string{
-			"operator_message": humanMsg,
-			"intent":           resolvedIntent.String(),
-		},
-		System:    sysPrompt,
-		User:      userBuf.String(),
-		LatencyMS: time.Since(started).Milliseconds(),
-	}
-	if gateCtx != nil {
-		trace.GateReturned = gateCtx.Sources
-	}
-
 	if err != nil {
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
 		ch <- nodeCompletion{NodeID: rNode.ID, Err: fmt.Errorf("interjection reflection LLM: %w", err)}
 		return
 	}
 
 	raw, err := extractToolArgs(resp)
 	if err != nil {
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
 		ch <- nodeCompletion{NodeID: rNode.ID, Err: fmt.Errorf("interjection reflection: %w", err)}
 		return
 	}
-	trace.Output = raw
-	trace.TokensIn = resp.Usage.PromptTokens
-	trace.TokensOut = resp.Usage.CompletionTokens
-	WriteLLMTrace(trace)
 
 	log.Printf("[dag] interjection reflection output: %s", Text.TruncateLog(raw, 200))
 

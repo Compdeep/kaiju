@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 )
@@ -183,6 +185,14 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 		req.Model = model
 	}
 
+	// Fix the cap here rather than leaving it to the send, so the number stated
+	// below is the number the provider stops at. capReply then finds nothing
+	// left to lower.
+	if cap := c.ReplyCap(req); cap >= budgetFloor {
+		req.MaxTokens = cap
+		stateBudget(req, cap)
+	}
+
 	// Images ride the context so they re-attach on every heavy call this turn,
 	// staying visible across follow-ups. Heavy only, as before: the model check
 	// would make this safe on any lane, but widening it is a behaviour change
@@ -193,4 +203,51 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 		}
 	}
 	return c
+}
+
+// Telling the model its budget.
+//
+// max_tokens is not a hint. The model is never shown the number; the provider
+// counts tokens as they are generated and stops at it, mid-sentence and
+// mid-object. So a model writing to its own sense of length is cut wherever
+// that lands, and every stage that parses the reply then reports malformed
+// input for an answer that was simply too long.
+//
+// The only channel to the model is the prompt, and the only moment the number
+// is final is after the lane is resolved and the cap settled — which is here.
+// A stage building its prompt cannot state it, because at that point the number
+// does not exist.
+
+// budgetMarker opens the line, and identifies it again on a retry. The planner
+// builds its second attempt from the same message slice as its first, so
+// without this the line would be appended twice.
+const budgetMarker = "Reply budget:"
+
+// budgetFloor is the smallest cap worth stating. Below it a caller wants a
+// token or two — a forced route() call takes 16 — and the sentence would be
+// larger than the budget it describes.
+const budgetFloor = 256
+
+/*
+ * stateBudget appends the reply budget to a request's system message.
+ * desc: The first system message only, and nothing at all when there is none:
+ *       a request with no system message is a caller talking to the model
+ *       directly, and this package does not edit that.
+ * param: req - the request, whose system message is extended in place.
+ * param: cap - the number the provider will stop at.
+ */
+func stateBudget(req *llm.ChatRequest, cap int) {
+	for i := range req.Messages {
+		if req.Messages[i].Role != "system" {
+			continue
+		}
+		if strings.Contains(req.Messages[i].Content, budgetMarker) {
+			return
+		}
+		req.Messages[i].Content += fmt.Sprintf(
+			"\n\n%s about %d tokens. Generation stops there, so a longer reply is cut "+
+				"off part-way and cannot be used. Plan the length before you start.",
+			budgetMarker, cap)
+		return
+	}
 }

@@ -429,12 +429,12 @@ func TestWriteLLMTrace_Disabled_NoOp(t *testing.T) {
 	t.Setenv("KAIJU_PROMPT_DEBUG", "")
 	// Without env var, no file should be written.
 	WriteLLMTrace(LLMTrace{
-		RunID: "test-alert",
-		NodeID:    "n1",
-		NodeType:  "test",
-		System:    "sys",
-		User:      "usr",
-		Output:    "out",
+		RunID:    "test-alert",
+		NodeID:   "n1",
+		NodeType: "test",
+		System:   "sys",
+		User:     "usr",
+		Output:   "out",
 	})
 	if _, err := os.Stat(filepath.Join("/tmp/kaiju-prompts", "test-alert.log")); err == nil {
 		// File may exist from prior runs. Just confirm we didn't write to dir.
@@ -448,17 +448,17 @@ func TestWriteLLMTrace_Enabled_WritesFile(t *testing.T) {
 	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 
 	WriteLLMTrace(LLMTrace{
-		RunID: triggerID,
-		NodeID:    "n1",
-		NodeType:  "test_node",
-		Tag:       "test_tag",
-		Model:     "test_model",
-		Started:   time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
-		Input:     map[string]string{"goal": "test goal", "query": "test query"},
-		System:    "system prompt content",
-		User:      "user prompt content",
-		Output:    "llm response",
-		TokensIn:  100, TokensOut: 50, LatencyMS: 1234,
+		RunID:    triggerID,
+		NodeID:   "n1",
+		NodeType: "test_node",
+		Tag:      "test_tag",
+		Model:    "test_model",
+		Started:  time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
+		Input:    map[string]string{"goal": "test goal", "query": "test query"},
+		System:   "system prompt content",
+		User:     "user prompt content",
+		Output:   "llm response",
+		TokensIn: 100, TokensOut: 50, LatencyMS: 1234,
 	})
 
 	data, err := os.ReadFile(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))

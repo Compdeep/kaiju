@@ -2,24 +2,24 @@ package agent
 
 import "github.com/Compdeep/kaiju/agent/llm"
 
-// Applying the optional capabilities an application supplies.
+// Applying the optional handlers an application supplies.
 //
 // Each of these was once a Set* method the caller had to know to call after
 // New. Doing it here means an agent is fully formed when New returns, and
 // Config is the single place to look for what an agent was given.
 //
-// Everything is optional. An absent capability leaves its feature off rather
+// Everything is optional. An absent handler leaves its feature off rather
 // than broken: no executor and targets run locally, no store and nothing is
 // recorded, no environment and prompts simply carry no description of the
 // surroundings.
 
 /*
- * applyCapabilities wires the optional pieces from Config onto the agent.
+ * applyHandlers wires the optional pieces from Config onto the agent.
  * desc: Called by New. Order matters only in that the executor falls back to
  *       the main model's settings, so the main model is resolved first.
  * param: cfg - the configuration New was given.
  */
-func (a *Agent) applyCapabilities(cfg Config) {
+func (a *Agent) applyHandlers(cfg Config) {
 	a.applyModels(cfg)
 
 	if len(cfg.ChatTools) > 0 {

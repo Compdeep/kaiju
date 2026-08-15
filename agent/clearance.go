@@ -11,7 +11,7 @@ import (
 // Config.Clearance is an application's own authorisation, asked per tool call
 // after this package's gate has already allowed it. It typically reaches
 // something outside the process — a directory, an approval service — so it is
-// the capability most likely to be given a bad answer to work from, and the one
+// the handler most likely to be given a bad answer to work from, and the one
 // whose failure must not be read as a yes.
 
 /*

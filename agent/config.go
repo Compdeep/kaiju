@@ -23,7 +23,7 @@ import (
 /*
  * Config holds agent configuration.
  * desc: Seven groups — models and credentials, paths, node identity, the DAG
- *       engine, skill routing, compute, and the capabilities an embedding
+ *       engine, skill routing, compute, and the handlers an embedding
  *       application supplies.
  */
 type Config struct {
@@ -33,7 +33,7 @@ type Config struct {
 	DAGConfig
 	RoutingConfig
 	ComputeConfig
-	Capabilities
+	Handlers
 }
 
 // ModelConfig is which models are called, and with what credentials.
@@ -164,17 +164,34 @@ type ComputeConfig struct {
 	DisableCoding  bool          // when true, deep compute (architect/codebase building) is refused; shallow analytical compute still works
 }
 
-// Capabilities are what an embedding application supplies.
+// Handlers are the application's functions, which this package calls at fixed
+// points in a run.
 //
-// Each is optional, and nil means the capability is absent rather than broken.
-// An application that never sends work to another machine leaves Remote and
-// ValidateTarget unset, and targets are then inert.
+// Each is a function the application writes and hands over once, at
+// construction. This package holds the reference and calls it when it reaches
+// the point that needs it — Admit before a run starts, AllowTool before each
+// tool call, Answer when a run finishes. The call is synchronous: the run waits
+// for the answer.
+//
+// Ten are functions and three are interfaces with one or two methods. The
+// difference is only how many questions each answers.
+//
+// Each is optional, and nil means the question is never asked rather than that
+// something is broken. An application that never sends work to another machine
+// leaves Remote and ValidateTarget unset, and targets are then inert.
+//
+// They were called Handlers, which described the first few — Remote lets
+// the agent reach another machine, Store lets it record — and stopped fitting
+// as the struct grew: Admit and AllowTool take an ability away rather than
+// adding one, and DescribeTrigger supplies a sentence. What all thirteen have
+// in common is that the application handles a question this package cannot
+// answer.
 //
 // These were a dozen Set* methods called after New, which meant a caller had
 // to know they existed, which were required, and in what order. Anything
 // genuinely settable while running stayed a method — see SetToolEnabled,
 // SetClearance and SetDAGEnabled.
-type Capabilities struct {
+type Handlers struct {
 	// Unattended reports whether a run has nobody watching it, which decides
 	// whether it may ask a question or use tools that record a person's
 	// judgement. Nil uses Trigger.ExecutionMode.
@@ -242,7 +259,7 @@ type Capabilities struct {
 	// Returning "" falls through to the built-in rendering, so an application
 	// handles only what it recognises and leaves the rest alone:
 	//
-	//	cfg.Capabilities.DescribeTrigger = func(t Trigger) string {
+	//	cfg.Handlers.DescribeTrigger = func(t Trigger) string {
 	//		c, ok := t.Cause.(*MyCause)
 	//		if !ok {
 	//			return ""          // not mine — use the default

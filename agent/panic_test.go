@@ -151,7 +151,7 @@ func (panicStore) InsertAction(Action) error { panic("application fault") }
 // is how two of these came to be written without a guard in the first place.
 func TestEveryCallIntoApplicationCodeIsGuarded(t *testing.T) {
 	// Each entry is a wrapper this package calls application code through, and
-	// the Capabilities field it guards. Store has two because it is written at
+	// the Handlers field it guards. Store has two because it is written at
 	// two points in a run; every other capability has one.
 	wrappers := []struct{ capability, file, fn string }{
 		{"Admit", "admission.go", "admit"},
@@ -179,7 +179,7 @@ func TestEveryCallIntoApplicationCodeIsGuarded(t *testing.T) {
 
 	// And the list is complete, which the loop above cannot tell.
 	//
-	// This is the half that was missing. The list said nine and Capabilities had
+	// This is the half that was missing. The list said nine and Handlers had
 	// thirteen fields, so four capabilities called application code unguarded
 	// while a test named "every call" passed. Checking the wrappers against the
 	// struct rather than against a number means a fourteenth capability cannot
@@ -188,17 +188,17 @@ func TestEveryCallIntoApplicationCodeIsGuarded(t *testing.T) {
 	for _, c := range wrappers {
 		guarded[c.capability] = true
 	}
-	caps := reflect.TypeOf(Capabilities{})
+	caps := reflect.TypeOf(Handlers{})
 	for i := 0; i < caps.NumField(); i++ {
 		if name := caps.Field(i).Name; !guarded[name] {
-			t.Errorf("Capabilities.%s is application code with no wrapper in this list — "+
+			t.Errorf("Handlers.%s is application code with no wrapper in this list — "+
 				"either it is called somewhere unguarded, or the list has fallen behind "+
 				"the struct", name)
 		}
 	}
 	for name := range guarded {
 		if _, ok := caps.FieldByName(name); !ok {
-			t.Errorf("this list guards %q, which is not a field of Capabilities", name)
+			t.Errorf("this list guards %q, which is not a field of Handlers", name)
 		}
 	}
 }

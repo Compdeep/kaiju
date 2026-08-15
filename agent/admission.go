@@ -22,7 +22,7 @@ import "log"
 // empty reason gets a plain default.
 //
 // Nil admits everything, which is what an application that has no such rules
-// should get — the capability is off, not broken.
+// should get — the handler is absent, not broken.
 //
 // It is consulted once per run, before planning. It is not a substitute for the
 // IGX gate: that decides what a run may DO once started, and applies per tool

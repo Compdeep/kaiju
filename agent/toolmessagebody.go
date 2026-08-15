@@ -167,7 +167,7 @@ func (b toolMessageBody) Summary() string {
 
 /*
  * NewToolBody wraps a tool's envelope as a node body.
- * desc: Exported because an application supplying Capabilities.Answer needs to
+ * desc: Exported because an application supplying Handlers.Answer needs to
  *       build a graph to test that answer against, and a graph whose tool nodes
  *       carry plain strings is not the graph it will be given — the coverage
  *       edge reads the envelope's status to find gaps, and finds none on a

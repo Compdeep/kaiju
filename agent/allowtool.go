@@ -66,7 +66,7 @@ type ToolCallRequest struct {
 
 /*
  * allowTool asks the application whether a call may proceed.
- * desc: A nil capability allows everything the engine already allowed, so an
+ * desc: A nil handler allows everything the engine already allowed, so an
  *       application with no rules of its own pays nothing and behaves exactly
  *       as before this existed.
  * param: ctx - cancelled with the run.

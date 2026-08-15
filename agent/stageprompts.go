@@ -75,7 +75,7 @@ func (p StagePrompts) withEdge(block, hook string) StagePrompts {
  *       because it is written on the evidence that failed to arrive.
  *       runAggregatorWithClient and fireReflection both call it, but an
  *       application that supplies its own final answer through
- *       Capabilities.Answer writes that answer in its own function, and needs
+ *       Handlers.Answer writes that answer in its own function, and needs
  *       the same framing — an answer written without it is the one most likely
  *       to be fabricated, because it is written on the evidence that failed to
  *       arrive.

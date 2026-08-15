@@ -10,8 +10,8 @@ import api from '../api/client'
 
 let eventSource = null
 
-// AlertID -> SessionID mapping for events that may lack session_id
-const alertToSession = new Map()
+// Trigger id -> session id, for events that arrive without a session_id
+const triggerToSession = new Map()
 
 function handleActions(actions) {
   if (!actions || !actions.length) return
@@ -35,12 +35,12 @@ function handleActions(actions) {
 
 /**
  * Resolve which session an SSE event belongs to.
- * Priority: event.session_id > alertToSession mapping > active session (fallback).
+ * Priority: event.session_id > triggerToSession mapping > active session (fallback).
  */
 function resolveSession(ev) {
   if (ev.session_id) return ev.session_id
-  if (ev.alert) {
-    const mapped = alertToSession.get(ev.alert)
+  if (ev.trigger_id) {
+    const mapped = triggerToSession.get(ev.trigger_id)
     if (mapped) return mapped
   }
   return useSessionsStore().sessionId
@@ -63,7 +63,7 @@ export function connect() {
 
       switch (ev.type) {
         case 'start':
-          if (ev.alert && sid) alertToSession.set(ev.alert, sid)
+          if (ev.trigger_id && sid) triggerToSession.set(ev.trigger_id, sid)
           dag.archiveAndClear(sid)
           {
             const ds = dag.getSession(sid)
@@ -143,7 +143,7 @@ export function connect() {
             }
           }
           // Clean up mapping
-          if (ev.alert) alertToSession.delete(ev.alert)
+          if (ev.trigger_id) triggerToSession.delete(ev.trigger_id)
           break
         }
       }

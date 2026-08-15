@@ -44,8 +44,15 @@ type ClearanceSource interface {
 
 // AuditEntry is a single line in the audit log.
 type AuditEntry struct {
-	Time   string `json:"t"`
-	Tool   string `json:"tool"`
+	Time string `json:"t"`
+	Tool string `json:"tool"`
+
+	// Username is the principal the run belongs to, empty when it has none —
+	// an unattended run, which is what most of them are. Here because "who
+	// asked for this" is the first question put to an audit line, and a scope
+	// carries the answer.
+	Username string `json:"username,omitempty"`
+
 	Params any    `json:"params,omitempty"`
 	Result string `json:"result,omitempty"`
 	Error  string `json:"error,omitempty"`

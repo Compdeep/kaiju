@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -241,5 +242,45 @@ func TestAnAuditWriteThatPanicsDoesNotStopTheRun(t *testing.T) {
 
 	if c := fireOne(t, a, &Node{Type: NodeTool, ToolName: "counter", Target: "machine-b"}); c.Err != nil {
 		t.Fatalf("a panicking audit write failed the call: %v", c.Err)
+	}
+}
+
+// Who asked is the first question put to an audit line, and an audit page
+// filters by it. A scope carries the answer, so every line records it.
+func TestAnAuditLineNamesThePrincipal(t *testing.T) {
+	var got []gates.AuditEntry
+	a, _ := auditedAgent(t, &refusalTool{})
+	a.auditFn = func(e gates.AuditEntry) { got = append(got, e) }
+
+	graph := NewGraph()
+	id := graph.AddNode(&Node{Type: NodeTool, ToolName: "counter"})
+	ch := make(chan nodeCompletion, 1)
+	a.fireNode(context.Background(), graph.Get(id), graph,
+		NewBudget(20, 5, 20, 5, time.Minute), ch, "", newToolThrottle(), gates.Intent(0),
+		&ResolvedScope{Username: "ada", AllowedTools: map[string]bool{"*": true}})
+	<-ch
+
+	if len(got) != 1 {
+		t.Fatalf("audit has %d lines, want 1", len(got))
+	}
+	if got[0].Username != "ada" {
+		t.Errorf("Username = %q, want ada — a line that cannot say who asked cannot be filtered by it", got[0].Username)
+	}
+}
+
+// A run with no principal is the ordinary unattended case, and says so by
+// leaving the field empty rather than by inventing a name for it.
+func TestAnUnattendedRunNamesNoPrincipal(t *testing.T) {
+	var got []gates.AuditEntry
+	a, _ := auditedAgent(t, &refusalTool{})
+	a.auditFn = func(e gates.AuditEntry) { got = append(got, e) }
+
+	fireOne(t, a, &Node{Type: NodeTool, ToolName: "counter"})
+
+	if len(got) != 1 {
+		t.Fatalf("audit has %d lines, want 1", len(got))
+	}
+	if got[0].Username != "" {
+		t.Errorf("Username = %q on a run with no scope, want empty", got[0].Username)
 	}
 }

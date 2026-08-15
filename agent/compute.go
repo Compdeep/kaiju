@@ -267,15 +267,6 @@ func rootFromTaskFiles(taskFiles []string) string {
 	return candidate
 }
 
-// graphAlertID safely extracts the trigger TriggerID via the graph's gate.
-// Used to route LLM trace logs to the per-investigation file.
-func graphAlertID(g *Graph) string {
-	if g == nil || g.Context == nil || g.Context.trigger == nil {
-		return ""
-	}
-	return g.Context.trigger.ID
-}
-
 func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query string, ctxData any,
 	hints []any, blueprintRef, blueprintMode, tag string, ts int64, architectGuidance, sessionID string) (string, error) {
 

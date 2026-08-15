@@ -78,18 +78,3 @@ func TestApplyRunTargetIgnoresUnknownToolsAndNilRegistry(t *testing.T) {
 	}
 	applyRunTarget(steps, "run", nil) // must not panic
 }
-
-func TestStripHeaderTag(t *testing.T) {
-	cases := map[string]string{
-		"[plan] do the thing":  "do the thing",
-		"  [thinking]  hello ": "hello",
-		`[{"tool":"x"}]`:       `[{"tool":"x"}]`, // a real JSON plan, untouched
-		"no tag here":          "no tag here",
-		"[unclosed tag":        "[unclosed tag",
-	}
-	for in, want := range cases {
-		if got := stripHeaderTag(in); got != want {
-			t.Errorf("stripHeaderTag(%q) = %q, want %q", in, got, want)
-		}
-	}
-}

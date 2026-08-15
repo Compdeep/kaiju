@@ -113,22 +113,6 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)`,
 
-		// Audit log (IGX gate decisions)
-		`CREATE TABLE IF NOT EXISTS audit_log (
-			id          INTEGER PRIMARY KEY AUTOINCREMENT,
-			timestamp   INTEGER NOT NULL,
-			username    TEXT NOT NULL DEFAULT '',
-			skill       TEXT NOT NULL,
-			params      TEXT NOT NULL DEFAULT '',
-			intent      INTEGER NOT NULL DEFAULT 0,
-			impact      INTEGER NOT NULL DEFAULT 0,
-			result      TEXT NOT NULL DEFAULT '',
-			error       TEXT NOT NULL DEFAULT '',
-			trigger_id  TEXT NOT NULL DEFAULT ''
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_log(username)`,
-
 		// Investigations (DAG execution records)
 		`CREATE TABLE IF NOT EXISTS investigations (
 			id              TEXT PRIMARY KEY,
@@ -226,10 +210,6 @@ func (d *DB) migrate() error {
 		// database the rename finds nothing, on an old one the add finds the
 		// column already present.
 		`ALTER TABLE runs RENAME COLUMN verdict TO outcome`,
-		// audit_log.alert_id became audit_log.trigger_id, for the same reason
-		// and with the same pair of tolerated statements.
-		`ALTER TABLE audit_log RENAME COLUMN alert_id TO trigger_id`,
-		`ALTER TABLE audit_log ADD COLUMN trigger_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE runs ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, m := range alterMigrations {

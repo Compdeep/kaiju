@@ -1841,28 +1841,3 @@ func applyRunTarget(steps []PlanStep, target string, registry *toolapi.Registry)
 		}
 	}
 }
-
-/*
- * stripHeaderTag removes a leading bracketed label from a model's reply.
- * desc: Some models prefix their output with a tag like "[plan]" or
- *       "[thinking]". Only strips a short label with no JSON punctuation in it,
- *       so a reply that genuinely begins with a JSON array is left alone.
- * param: s - the raw reply.
- * return: the reply without its leading label.
- */
-func stripHeaderTag(s string) string {
-	t := strings.TrimSpace(s)
-	if !strings.HasPrefix(t, "[") {
-		return t
-	}
-	close := strings.Index(t, "]")
-	if close <= 0 || close > 60 {
-		return t
-	}
-	inside := t[1:close]
-	// Reject if the label contains JSON punctuation — it may be a real plan.
-	if strings.ContainsAny(inside, `":{},`) {
-		return t
-	}
-	return strings.TrimSpace(t[close+1:])
-}

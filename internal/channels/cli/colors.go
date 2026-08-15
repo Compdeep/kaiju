@@ -128,8 +128,3 @@ func clr(color, text string) string {
 func cb(color, text string) string {
 	return bold + color + text + reset
 }
-
-// statusLine renders a single-line status that can be overwritten
-func statusLine(theme *Theme, text string) string {
-	return fmt.Sprintf("\r%s%s %s %s", clearLine, theme.StatusBg, theme.StatusText+text, reset)
-}

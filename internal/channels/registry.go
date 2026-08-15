@@ -27,12 +27,3 @@ func (r *Registry) Get(id string) (Channel, bool) {
 	ch, ok := r.channels[id]
 	return ch, ok
 }
-
-// All returns all registered channels.
-func (r *Registry) All() []Channel {
-	out := make([]Channel, 0, len(r.channels))
-	for _, ch := range r.channels {
-		out = append(out, ch)
-	}
-	return out
-}

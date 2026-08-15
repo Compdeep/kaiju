@@ -68,14 +68,6 @@ var (
 	activeSet  = map[string]bool{} // plugins whose Register has run (boot or runtime)
 )
 
-// Add records a compiled-in plugin. Call it from an init() in the plugin's
-// build-tagged file so the default build never links the plugin in.
-func Add(p Plugin) {
-	mu.Lock()
-	defer mu.Unlock()
-	registered[p.Name()] = p
-}
-
 // Compiled returns the names of every plugin compiled into this binary, sorted.
 func Compiled() []string {
 	mu.Lock()

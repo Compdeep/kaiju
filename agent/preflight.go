@@ -399,38 +399,3 @@ func lastAssistantMessage(history []llm.Message) string {
 	}
 	return ""
 }
-
-/*
- * truncatedHistory returns the last maxTurns messages from history, with
- * assistant replies truncated to maxAssistantChars.
- * desc: Preflight needs just enough context to resolve short follow-ups
- *       like "yeah do it" without blowing up the input. User messages are
- *       the real signal so they stay whole; assistant replies tend to be
- *       long explanations and get clipped.
- * param: history - full conversation history.
- * param: maxTurns - how many recent messages to include.
- * param: maxAssistantChars - truncation limit for assistant messages.
- * return: truncated message slice ready to splice into the preflight call.
- */
-func truncatedHistory(history []llm.Message, maxTurns, maxAssistantChars int) []llm.Message {
-	if len(history) == 0 {
-		return nil
-	}
-	start := len(history) - maxTurns
-	if start < 0 {
-		start = 0
-	}
-	recent := history[start:]
-	out := make([]llm.Message, 0, len(recent))
-	for _, msg := range recent {
-		if msg.Role == "assistant" && len(msg.Content) > maxAssistantChars {
-			out = append(out, llm.Message{
-				Role:    msg.Role,
-				Content: msg.Content[:maxAssistantChars] + "…",
-			})
-			continue
-		}
-		out = append(out, msg)
-	}
-	return out
-}

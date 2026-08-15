@@ -560,14 +560,6 @@ func (g *ContextGate) logGet(req ContextRequest, resp *ContextResponse, curatorR
 	// caller, which includes the gate's response inline. See debuglog.go.
 }
 
-func specNames(specs []SourceSpec) []string {
-	out := make([]string, 0, len(specs))
-	for _, s := range specs {
-		out = append(out, s.Name)
-	}
-	return out
-}
-
 // ── Curator ─────────────────────────────────────────────────────────────────
 
 // curatorSystemPrompt moved to prompt.Curator

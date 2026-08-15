@@ -52,7 +52,11 @@ func TestEveryGoroutineIsGuarded(t *testing.T) {
 // So this holds the property the guard relies on: in every function that owes a
 // completion, each send is the last thing that happens on its path.
 func TestNodeCompletionsAreTerminal(t *testing.T) {
-	send := regexp.MustCompile(`^\s*(ch|completionCh) <- nodeCompletion`)
+	// Any send on the completion channel, not only a literal nodeCompletion.
+	// The remote and local paths now build theirs through one function and send
+	// what it returns, and a pattern that insisted on the type name would have
+	// stopped seeing every send in fireNode while still passing.
+	send := regexp.MustCompile(`^\s*(ch|completionCh) <- `)
 	for _, s := range spawned {
 		if s.guard != "guardNodeCompletion" {
 			continue
@@ -62,12 +66,19 @@ func TestNodeCompletionsAreTerminal(t *testing.T) {
 			if !send.MatchString(line) {
 				continue
 			}
-			// Walk to the end of the send — it may be a multi-line literal —
-			// then require a return, or the end of the function.
+			// Walk to the end of the send — it may be a multi-line literal or a
+			// multi-line call — then require a return, or the end of the
+			// function. Parentheses count as well as braces: a send of what a
+			// function returns is written the second way, and counting only
+			// braces read the continuation line as the next statement.
 			j := i
-			for depth := strings.Count(line, "{") - strings.Count(line, "}"); depth > 0 && j+1 < len(lines); {
+			depthOf := func(l string) int {
+				return strings.Count(l, "{") - strings.Count(l, "}") +
+					strings.Count(l, "(") - strings.Count(l, ")")
+			}
+			for depth := depthOf(line); depth > 0 && j+1 < len(lines); {
 				j++
-				depth += strings.Count(lines[j], "{") - strings.Count(lines[j], "}")
+				depth += depthOf(lines[j])
 			}
 			if j+1 >= len(lines) {
 				continue // the send is the last statement in the function

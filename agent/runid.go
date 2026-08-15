@@ -47,7 +47,7 @@ func runIDFrom(ctx context.Context) string {
 // RunIDFrom returns the run a context belongs to, for an application writing
 // its own stage.
 //
-// An application that supplies Capabilities.Answer writes the final answer in
+// An application that supplies Handlers.Answer writes the final answer in
 // its own function, with its own model call and its own trace — and that trace
 // has to name the same run as the engine's, or its entry lands in a different
 // file. Exported for that; empty outside a run.

@@ -89,7 +89,7 @@ type Conclusion struct {
 	// Outcome is the answer, or the reason there is none.
 	Outcome string
 	// Severity and Category are the application's labels for the answer, empty
-	// unless it supplied an Answer capability. Passed through untouched.
+	// unless it supplied an Answer handler. Passed through untouched.
 	Labels map[string]string
 	// Status is "completed", "failed", "timeout" or "not_admitted".
 	Status string

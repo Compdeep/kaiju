@@ -357,9 +357,9 @@ func New(cfg Config) (*Agent, error) {
 		intentRegistry:    NewIntentRegistry(),
 	}
 
-	// Wire the optional capabilities the application supplied, so the agent is
+	// Wire the handlers the application supplied, so the agent is
 	// fully formed when New returns rather than after a dozen further calls.
-	a.applyCapabilities(cfg)
+	a.applyHandlers(cfg)
 	return a, nil
 }
 

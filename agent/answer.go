@@ -22,7 +22,7 @@ import (
 // everything that happens up to that point — the budget guards, the assembled
 // evidence, the coverage edge, the run record.
 //
-// So the answer is a capability. Supply Answer and it is asked to write each
+// So the answer is a handler. Supply Answer and it is asked to write each
 // run's answer; leave it nil and the built-in aggregator writes every one. The
 // function may also decline a single run by returning nothing, which is how an
 // application answers some kinds of run itself and lets the built-in aggregator
@@ -115,7 +115,7 @@ type AnswerResult struct {
 
 /*
  * writeAnswer asks the application to write this run's answer.
- * desc: Reports whether it did. A nil capability, or a nil result from it, both
+ * desc: Reports whether it did. A nil handler, or a nil result from it, both
  *       mean it did not, and the caller runs the built-in aggregator — so an
  *       application that answers only some kinds of run says so by returning
  *       nothing, and needs no flag from this package to do it.
@@ -129,7 +129,7 @@ func (a *Agent) writeAnswer(ctx context.Context, req AnswerRequest) (resOut *Ans
 		return nil, false, nil
 	}
 	// Derived from what the engine already holds, and only once something is
-	// there to read them: a run with no Answer capability returned above and
+	// there to read them: a run with no Answer handler returned above and
 	// pays nothing for either.
 	req.Prompt = a.assembleAggregatorPrompt(req.Trigger, req.Graph, req.Evidence)
 	req.Guidance = a.runGuidance(req.Graph)

@@ -14,9 +14,9 @@ import (
 // or a bad type assertion anywhere inside a run ended the process, and in an
 // application embedding this engine that is the whole daemon.
 //
-// The capability wrappers are a different thing and both are needed. Those guard
+// The handler wrappers are a different thing and both are needed. Those guard
 // the points where this package calls the APPLICATION's code, and each one knows
-// which capability failed, so it can substitute the right answer and the run
+// which handler failed, so it can substitute the right answer and the run
 // carries on. These guard everything else — this package's own faults — and all
 // they can know is that a goroutine died.
 //

@@ -126,7 +126,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	}})
 
 	started := time.Now()
-	resp, err := a.completeLight(ctx, &llm.ChatRequest{
+	resp, err := a.completeLightChecked(ctx, &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{reflectorToolDef()},
 		ToolChoice:  "required",
@@ -315,7 +315,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	}
 
 	started := time.Now()
-	resp, err := a.completeLight(ctx, &llm.ChatRequest{
+	resp, err := a.completeLightChecked(ctx, &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{reflectorToolDef()},
 		ToolChoice:  "required",

@@ -270,3 +270,67 @@ func TestAStepThatDependsOnSomethingItNeverReadsIsRejected(t *testing.T) {
 			second.calls)
 	}
 }
+
+// A plan cut off at the token cap is asked for again, shorter.
+//
+// The planner reads finish_reason itself and retries with an instruction to use
+// fewer, larger steps — which is better than reporting the truncation, and is
+// why this stage keeps the unchecked lane call. Without it the fragment is
+// returned as if the planner had chosen to answer in prose.
+func TestATruncatedPlanIsAskedForAgainShorter(t *testing.T) {
+	tool := &countingTool{name: "process_list"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{
+			"mode": "agent", "intent": "observe", "skills": []string{},
+		}},
+		"submit_decision": {Args: map[string]any{
+			"decision": "conclude", "summary": "two processes", "outcome": "two processes are running",
+		}},
+	})
+	// Cut the first plan, answer the second.
+	model.answerNth("plan",
+		stubReply{Args: map[string]any{"steps": []map[string]any{step("process_list", "procs", nil)}}, Cut: true},
+		plan(step("process_list", "procs", nil)),
+	)
+	a := agentOnStub(t, model, tool)
+
+	res, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"what is running?"}`),
+	})
+	if err != nil {
+		t.Fatalf("a truncated plan ended the run instead of being asked for again: %v", err)
+	}
+	if n := model.callsTo("plan"); n != 2 {
+		t.Errorf("the planner was called %d times, want 2 — the cut plan and the shorter one", n)
+	}
+	if tool.calls != 1 {
+		t.Errorf("the retried plan's tool ran %d times, want once", tool.calls)
+	}
+	if res == nil || res.Outcome == "" {
+		t.Error("the run recovered from the cut plan and still produced nothing")
+	}
+}
+
+// The other half: a stage that writes prose for a person keeps a short answer
+// rather than failing. Only the stages that parse are checked, which is why the
+// check is not inside completeHeavy and completeLight.
+func TestATruncatedProseAnswerIsStillAnAnswer(t *testing.T) {
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{
+			"mode": "agent", "intent": "observe", "skills": []string{},
+		}},
+		"plan": plan(step("process_list", "procs", nil)),
+		"":     {Content: "two processes are runn", Cut: true},
+	})
+	a := agentOnStub(t, model, &countingTool{name: "process_list"})
+
+	res, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"what is running?"}`),
+	})
+	if err != nil {
+		t.Fatalf("a short prose answer failed the run: %v", err)
+	}
+	if res == nil || res.Outcome == "" {
+		t.Error("a cut prose answer should still reach the caller — short beats nothing")
+	}
+}

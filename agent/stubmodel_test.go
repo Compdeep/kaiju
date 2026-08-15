@@ -58,6 +58,10 @@ type stubCall struct {
 type stubReply struct {
 	Args    any    // marshalled into the tool call's arguments
 	Content string // used instead when no Args are given
+	// Cut makes the endpoint report finish_reason "length", which is how every
+	// provider says the reply stopped at the token cap rather than because the
+	// model had finished.
+	Cut bool
 }
 
 // newStubModel starts an endpoint that answers each stage from the script.
@@ -149,8 +153,8 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 		if !scripted || content == "" {
 			content = "stub answer"
 		}
-		fmt.Fprintf(w, `{"choices":[{"message":{"content":%s},"finish_reason":"stop"}]}`,
-			mustJSON(content))
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":%s},"finish_reason":%s}]}`,
+			mustJSON(content), mustJSON(finishReason(reply, "stop")))
 		return
 	}
 	args := "{}"
@@ -158,8 +162,17 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(reply.Args)
 		args = string(b)
 	}
-	fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"c1","type":"function","function":{"name":%s,"arguments":%s}}]},"finish_reason":"tool_calls"}]}`,
-		mustJSON(fn), mustJSON(args))
+	fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"c1","type":"function","function":{"name":%s,"arguments":%s}}]},"finish_reason":%s}]}`,
+		mustJSON(fn), mustJSON(args), mustJSON(finishReason(reply, "tool_calls")))
+}
+
+// finishReason is "length" for a scripted-truncated reply and the stage's
+// ordinary reason otherwise.
+func finishReason(reply stubReply, ordinary string) string {
+	if reply.Cut {
+		return "length"
+	}
+	return ordinary
 }
 
 func mustJSON(v string) string {

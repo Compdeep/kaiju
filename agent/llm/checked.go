@@ -43,9 +43,22 @@ func (c *Client) CompleteChecked(ctx context.Context, req *ChatRequest) (*ChatRe
 		return resp, err
 	}
 	if Truncated(resp) {
-		return resp, fmt.Errorf("%w (max_tokens=%d): plan a shorter reply, or raise the cap", ErrReplyTruncated, req.MaxTokens)
+		return resp, TruncationError(req.MaxTokens)
 	}
 	return resp, nil
+}
+
+/*
+ * TruncationError is the error a truncated reply produces.
+ * desc: Exported so a caller that already has a response — one routed through
+ *       its own lane selection, say — reports the same thing in the same words
+ *       as CompleteChecked, rather than inventing a second wording for one
+ *       fault.
+ * param: maxTokens - the cap that was in force, which is what to change.
+ * return: an error wrapping ErrReplyTruncated.
+ */
+func TruncationError(maxTokens int) error {
+	return fmt.Errorf("%w (max_tokens=%d): plan a shorter reply, or raise the cap", ErrReplyTruncated, maxTokens)
 }
 
 /*

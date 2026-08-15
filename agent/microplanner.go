@@ -82,7 +82,7 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 	log.Printf("[dag] debugger calling reasoning model for %s", mpNode.Tag)
 	started := time.Now()
 
-	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
+	resp, err := a.completeHeavyChecked(ctx, &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{debuggerToolDef()},
 		ToolChoice:  "required",

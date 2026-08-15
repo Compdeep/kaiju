@@ -221,14 +221,14 @@ func TestAnActionNamesTheRunThatTookIt(t *testing.T) {
 	g := NewGraph()
 	g.RunID = "a-6-123"
 
-	if got := runIDOf(g, "a-6"); got != "a-6-123" {
-		t.Errorf("runIDOf = %q, want the run", got)
+	if got := actionRunID(g, "a-6"); got != "a-6-123" {
+		t.Errorf("actionRunID = %q, want the run", got)
 	}
-	if got := runIDOf(nil, "a-6"); got != "a-6" {
-		t.Errorf("with no run, runIDOf = %q, want the cause as a fallback", got)
+	if got := actionRunID(nil, "a-6"); got != "a-6" {
+		t.Errorf("with no run, actionRunID = %q, want the cause as a fallback", got)
 	}
-	if got := runIDOf(NewGraph(), "a-6"); got != "a-6" {
-		t.Errorf("with an unstamped graph, runIDOf = %q, want the cause", got)
+	if got := actionRunID(NewGraph(), "a-6"); got != "a-6" {
+		t.Errorf("with an unstamped graph, actionRunID = %q, want the cause", got)
 	}
 }
 
@@ -257,5 +257,30 @@ func TestTheRunRecordCountsReflectionsAndFollowUps(t *testing.T) {
 	}
 	if got.FollowUpCount != 1 {
 		t.Errorf("FollowUpCount = %d, want only the one that grafted work", got.FollowUpCount)
+	}
+}
+
+// Two runs of one caller reference must be distinguishable everywhere a
+// consumer groups by run: the audit line and the DAG event.
+//
+// The reference repeats by design — an application retrying a piece of work
+// hands back the id it was given. Both carried only that reference, so the
+// second run's tool calls were indistinguishable from the first's in the audit,
+// and its graph was drawn into the first run's view in the browser.
+func TestTwoRunsOfOneReferenceAreDistinguishable(t *testing.T) {
+	first, second := NewGraph(), NewGraph()
+	first.RunID = newRunID("ref-1")
+	second.RunID = newRunID("ref-1")
+
+	if first.RunID == second.RunID {
+		t.Fatalf("two runs of ref-1 share a run id: %q", first.RunID)
+	}
+	if actionRunID(first, "ref-1") == actionRunID(second, "ref-1") {
+		t.Error("an action from each run groups under the same id")
+	}
+	for _, g := range []*Graph{first, second} {
+		if !strings.HasPrefix(g.RunID, "ref-1-") {
+			t.Errorf("RunID = %q, want the reference still readable in it", g.RunID)
+		}
 	}
 }

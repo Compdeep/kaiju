@@ -74,10 +74,10 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
 	observerCh := make(chan DAGEvent, 128)
 	graph.SetObserver(observerCh)
 	go a.dagFanOut(observerCh, graph)
-	a.broadcastDAGEvent(graph, DAGEvent{Type: "start", TriggerID: trigger.ID, SessionID: trigger.SessionID, Targets: a.runTargets(trigger), Nodes: graph.Snapshot()})
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "start", TriggerID: trigger.ID, RunID: graph.RunID, SessionID: trigger.SessionID, Targets: a.runTargets(trigger), Nodes: graph.Snapshot()})
 
 	cleanup := func() {
-		a.broadcastDAGEvent(graph, DAGEvent{Type: "done", TriggerID: trigger.ID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "done", TriggerID: trigger.ID, RunID: graph.RunID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
 		close(observerCh)
 	}
 

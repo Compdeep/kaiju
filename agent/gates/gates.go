@@ -44,12 +44,17 @@ type ClearanceSource interface {
 
 // AuditEntry is a single line in the audit log.
 type AuditEntry struct {
-	Time      string `json:"t"`
-	Tool      string `json:"tool"`
-	Params    any    `json:"params,omitempty"`
-	Result    string `json:"result,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Time   string `json:"t"`
+	Tool   string `json:"tool"`
+	Params any    `json:"params,omitempty"`
+	Result string `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
+	// TriggerID is the caller's own reference and RunID is this run. Both,
+	// because they answer different questions and one caller reference can
+	// produce several runs — "which run killed that process" cannot be answered
+	// by the reference alone.
 	TriggerID string `json:"trigger_id,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
 	Intent    int    `json:"intent,omitempty"`
 	Impact    int    `json:"impact,omitempty"`
 	Clearance int    `json:"clearance,omitempty"`

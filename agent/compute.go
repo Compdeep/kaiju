@@ -138,7 +138,7 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 		}
 		result, execErr = a.computePlan(ec.Ctx, ec.Graph, goal, query, ctxData, hints, blueprintRef, blueprintMode, tag, ts, architectGuidance, sessionID)
 	default: // shallow
-		result, execErr = a.computeCode(ec.Ctx, ec.Graph, goal, query, ctxData, hints, blueprintRef, blueprintMode, tag, ts, lang, a.llm, codeCtx, coderGuidance)
+		result, execErr = a.computeCode(ec.Ctx, ec.Graph, goal, query, ctxData, hints, blueprintRef, blueprintMode, tag, ts, lang, codeCtx, coderGuidance)
 	}
 
 	n.EndedAt = time.Now()
@@ -539,7 +539,7 @@ type computeCodeContext struct {
  */
 func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query string, ctxData any,
 	hints []any, blueprintRef, blueprintMode, tag string, ts int64, lang string,
-	client *llm.Client, codeCtx *computeCodeContext, coderGuidance string) (string, error) {
+	codeCtx *computeCodeContext, coderGuidance string) (string, error) {
 
 	// Load blueprint — either from explicit ref or latest on disk.
 	var plan string
@@ -677,7 +677,16 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 
 	coderSystem := buildComputeCoderPrompt(coderGuidance)
 
-	startedCode := time.Now()
+	ctx = withTrace(ctx, TraceID{
+		NodeID:   tag,
+		NodeType: "compute_coder",
+		Tag:      tag,
+		Input: map[string]string{
+			"goal":          goal,
+			"blueprint_ref": blueprintRef,
+			"language":      lang,
+		},
+	})
 	coderReq := &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: coderSystem},
@@ -688,27 +697,9 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		Temperature: 0.2,
 		MaxTokens:   16384,
 	}
-	resp, err := client.Complete(ctx, coderReq)
-
-	traceCode := LLMTrace{
-		RunID:    runIDFrom(ctx),
-		NodeID:   tag,
-		NodeType: "compute_coder",
-		Tag:      tag,
-		Started:  startedCode,
-		Input: map[string]string{
-			"goal":          goal,
-			"blueprint_ref": blueprintRef,
-			"language":      lang,
-		},
-		System:    coderSystem,
-		User:      userPrompt,
-		LatencyMS: time.Since(startedCode).Milliseconds(),
-	}
+	resp, err := a.ask(ctx, Heavy, coderReq)
 
 	if err != nil {
-		traceCode.Err = err.Error()
-		WriteLLMTrace(traceCode)
 		return "", fmt.Errorf("compute code LLM: %w", err)
 	}
 
@@ -717,14 +708,9 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	// Edit mode:  {language, filename, edits: [{old_content, new_content}]} — text replacements
 	raw, err := extractToolArgs(resp)
 	if err != nil {
-		traceCode.Err = err.Error()
-		WriteLLMTrace(traceCode)
+		traceFault(ctx, err.Error())
 		return "", fmt.Errorf("compute code: %w", err)
 	}
-	traceCode.Output = raw
-	traceCode.TokensIn = resp.Usage.PromptTokens
-	traceCode.TokensOut = resp.Usage.CompletionTokens
-	WriteLLMTrace(traceCode)
 
 	// Try edit format first (text-match replacements)
 	var editResp struct {

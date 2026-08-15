@@ -43,6 +43,26 @@ func withTrace(ctx context.Context, id TraceID) context.Context {
 	return context.WithValue(ctx, traceIDKey{}, id)
 }
 
+/*
+ * retracing re-tags a stage that calls the model more than once.
+ * desc: A stage that retries makes several calls under one identity, and
+ *       entries that read the same are entries nobody can tell apart. The tag
+ *       says why this call ran — the planner's three retries are asking for a
+ *       shorter plan, for one that parses, and for one that names real tools.
+ * param: ctx - the stage's context, already carrying its TraceID.
+ * param: tag - what this call is, replacing the stage's own tag.
+ * return: a context for the retry. The original is unchanged, so the calls
+ *         after it keep the stage's tag.
+ */
+func retracing(ctx context.Context, tag string) context.Context {
+	id, named := traceIDFrom(ctx)
+	if !named {
+		return ctx
+	}
+	id.Tag = tag
+	return withTrace(ctx, id)
+}
+
 func traceIDFrom(ctx context.Context) (TraceID, bool) {
 	if ctx == nil {
 		return TraceID{}, false

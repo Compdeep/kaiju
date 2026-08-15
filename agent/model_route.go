@@ -164,69 +164,24 @@ func (a *Agent) clientFor(provider string) *llm.Client {
 	return a.llm
 }
 
-// completeHeavy runs a heavy-lane completion through the routed client. Drop-in
-// for a.llm.Complete. A non-empty routed model overrides req.Model so the
-// selected provider gets its own model id (kaiju's internal default would not
-// exist there); the default lane leaves req.Model untouched.
+// The three named doors, kept as one-line shims onto ask so the call sites this
+// migration has not reached yet keep working. Each was the same four steps
+// written out again; ask is those steps written once.
+
 func (a *Agent) completeHeavy(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, error) {
-	c, model := a.heavyLane(ctx)
-	if model != "" {
-		req.Model = model
-	}
-	a.capReply(resolvedModel(req.Model, c), req)
-	// Vision: when the resolved heavy model accepts images and this turn carries
-	// uploaded images on the ctx, attach them to the latest user message. Images
-	// ride the ctx so they re-attach on every heavy call this turn (kept visible
-	// across follow-ups). A non-vision model never receives image bytes.
-	if imgs := visionImagesFrom(ctx); len(imgs) > 0 && IsVisionModel(req.Model) {
-		llm.AttachImages(req.Messages, imgs)
-	}
-	return c.Complete(ctx, req)
+	return a.ask(ctx, Heavy, req)
 }
 
-// completeLight is completeHeavy's counterpart for the executor lane. Drop-in
-// for a.executor.Complete.
 func (a *Agent) completeLight(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, error) {
-	c, model := a.lightLane(ctx)
-	if model != "" {
-		req.Model = model
-	}
-	a.capReply(resolvedModel(req.Model, c), req)
-	return c.Complete(ctx, req)
+	return a.ask(ctx, Light, req)
 }
-
-// The checked variants, for a caller that parses what comes back.
-//
-// A reply that stopped at the token cap is missing its end — the last JSON
-// object has no closing brace — and a caller that parses it reports "invalid
-// JSON" when the truth is "the answer did not fit". It then retries the same
-// too-large request and gets the same result.
-//
-// Only for callers that parse. A stage writing prose for a person gets a short
-// answer rather than an unusable one, which is why this is not folded into
-// completeHeavy and completeLight: those two serve both kinds of caller, and
-// the aggregator is on the other side of them.
 
 func (a *Agent) completeHeavyChecked(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, error) {
-	resp, err := a.completeHeavy(ctx, req)
-	if err != nil {
-		return resp, err
-	}
-	if llm.Truncated(resp) {
-		return resp, llm.TruncationError(req.MaxTokens)
-	}
-	return resp, nil
+	return a.askParsed(ctx, Heavy, req)
 }
 
 func (a *Agent) completeLightChecked(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, error) {
-	resp, err := a.completeLight(ctx, req)
-	if err != nil {
-		return resp, err
-	}
-	if llm.Truncated(resp) {
-		return resp, llm.TruncationError(req.MaxTokens)
-	}
-	return resp, nil
+	return a.askParsed(ctx, Light, req)
 }
 
 // completeRoute makes the routing-classifier call. If a route model is pinned in
@@ -234,13 +189,17 @@ func (a *Agent) completeLightChecked(ctx context.Context, req *llm.ChatRequest) 
 // decision is reliable; otherwise it falls back to the executor (light) lane so
 // the rest of the cheap background calls are unaffected.
 func (a *Agent) completeRoute(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, error) {
+	return a.ask(ctx, Route, req)
+}
+
+// routeLane resolves the routing classifier's client and model. A pinned route
+// model wins; otherwise the light lane answers, so pinning one small model for
+// this decision leaves the rest of the cheap background calls alone.
+func (a *Agent) routeLane(ctx context.Context) (*llm.Client, string) {
 	if a.routeModel != "" {
-		req.Model = a.routeModel
-		c := a.clientFor(a.routeProvider)
-		a.capReply(resolvedModel(req.Model, c), req)
-		return c.Complete(ctx, req)
+		return a.clientFor(a.routeProvider), a.routeModel
 	}
-	return a.completeLight(ctx, req)
+	return a.lightLane(ctx)
 }
 
 // OneShot runs a single provider-routed LLM completion with NO agent machinery —

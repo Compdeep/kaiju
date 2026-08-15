@@ -28,11 +28,11 @@ func TestRunTargetsUsesTheApplicationsList(t *testing.T) {
 		return []string{"machine-a", "machine-b", "machine-c"}
 	}}
 
-	got := a.runTargets(Trigger{Target: "machine-a", AlertID: "a-1"})
+	got := a.runTargets(Trigger{Target: "machine-a", ID: "a-1"})
 	if len(got) != 3 {
 		t.Fatalf("runTargets = %v, want the application's three", got)
 	}
-	if seen.AlertID != "a-1" {
+	if seen.ID != "a-1" {
 		t.Errorf("the lister was not given the trigger: %+v", seen)
 	}
 }

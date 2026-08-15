@@ -49,7 +49,6 @@ type AuditEntry struct {
 	Params    any    `json:"params,omitempty"`
 	Result    string `json:"result,omitempty"`
 	Error     string `json:"error,omitempty"`
-	AlertID   string `json:"alert_id,omitempty"`
 	TriggerID string `json:"trigger_id,omitempty"`
 	Intent    int    `json:"intent,omitempty"`
 	Impact    int    `json:"impact,omitempty"`

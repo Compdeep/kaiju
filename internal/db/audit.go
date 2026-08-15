@@ -18,7 +18,7 @@ type AuditEntry struct {
 	Impact    int    `json:"impact"`
 	Result    string `json:"result"`
 	Error     string `json:"error"`
-	AlertID   string `json:"alert_id"`
+	TriggerID string `json:"trigger_id"`
 }
 
 /*
@@ -32,9 +32,9 @@ func (d *DB) InsertAudit(e AuditEntry) error {
 		e.Timestamp = time.Now().Unix()
 	}
 	_, err := d.conn.Exec(
-		`INSERT INTO audit_log (timestamp, username, skill, params, intent, impact, result, error, alert_id)
+		`INSERT INTO audit_log (timestamp, username, skill, params, intent, impact, result, error, trigger_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.Timestamp, e.Username, e.Tool, e.Params, e.Intent, e.Impact, e.Result, e.Error, e.AlertID,
+		e.Timestamp, e.Username, e.Tool, e.Params, e.Intent, e.Impact, e.Result, e.Error, e.TriggerID,
 	)
 	return err
 }
@@ -50,7 +50,7 @@ func (d *DB) QueryAudit(limit int) ([]AuditEntry, error) {
 		limit = 100
 	}
 	rows, err := d.conn.Query(
-		`SELECT id, timestamp, username, skill, params, intent, impact, result, error, alert_id
+		`SELECT id, timestamp, username, skill, params, intent, impact, result, error, trigger_id
 		 FROM audit_log ORDER BY timestamp DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -62,7 +62,7 @@ func (d *DB) QueryAudit(limit int) ([]AuditEntry, error) {
 	for rows.Next() {
 		var e AuditEntry
 		if err := rows.Scan(&e.ID, &e.Timestamp, &e.Username, &e.Tool, &e.Params,
-			&e.Intent, &e.Impact, &e.Result, &e.Error, &e.AlertID); err != nil {
+			&e.Intent, &e.Impact, &e.Result, &e.Error, &e.TriggerID); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -82,7 +82,7 @@ func (d *DB) QueryAuditByUser(username string, limit int) ([]AuditEntry, error) 
 		limit = 100
 	}
 	rows, err := d.conn.Query(
-		`SELECT id, timestamp, username, skill, params, intent, impact, result, error, alert_id
+		`SELECT id, timestamp, username, skill, params, intent, impact, result, error, trigger_id
 		 FROM audit_log WHERE username = ? ORDER BY timestamp DESC LIMIT ?`, username, limit,
 	)
 	if err != nil {
@@ -94,7 +94,7 @@ func (d *DB) QueryAuditByUser(username string, limit int) ([]AuditEntry, error) 
 	for rows.Next() {
 		var e AuditEntry
 		if err := rows.Scan(&e.ID, &e.Timestamp, &e.Username, &e.Tool, &e.Params,
-			&e.Intent, &e.Impact, &e.Result, &e.Error, &e.AlertID); err != nil {
+			&e.Intent, &e.Impact, &e.Result, &e.Error, &e.TriggerID); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -107,7 +107,7 @@ func (d *DB) QueryAuditByUser(username string, limit int) ([]AuditEntry, error) 
  * desc: Upserts an investigation row capturing DAG execution metrics and outcome
  * param: id - unique investigation identifier
  * param: nodeID - the originating node ID
- * param: triggerType - what triggered the investigation (e.g. user request, alert)
+ * param: triggerType - what started the run (e.g. a user request, an event)
  * param: startedAt - unix timestamp when the investigation began
  * param: completedAt - unix timestamp when the investigation finished
  * param: durationMs - total duration in milliseconds

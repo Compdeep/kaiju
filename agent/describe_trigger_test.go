@@ -54,10 +54,10 @@ func TestUnrecognisedCauseFallsThroughToDefault(t *testing.T) {
 func TestTheBuiltInWordingClaimsNothingAboutThePayload(t *testing.T) {
 	a := &Agent{}
 	got := a.formatTrigger(Trigger{
-		Type:    "event",
-		AlertID: "corr-9",
-		Source:  "somewhere",
-		Data:    json.RawMessage(`{"k":"v"}`),
+		Type:   "event",
+		ID:     "corr-9",
+		Source: "somewhere",
+		Data:   json.RawMessage(`{"k":"v"}`),
 	})
 
 	for _, word := range []string{"Alert", "alert", "Investigate", "threat", "incident"} {

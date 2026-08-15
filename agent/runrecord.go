@@ -53,7 +53,7 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 		nodes, llmCalls = c.Nodes, c.LLMCalls
 	}
 
-	runID := trigger.AlertID
+	runID := trigger.ID
 	if graph != nil && graph.RunID != "" {
 		runID = graph.RunID
 	}
@@ -62,7 +62,7 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 		ID:              runID,
 		NodeID:          a.cfg.NodeID,
 		TriggerType:     trigger.Type,
-		CorrelationID:   trigger.AlertID,
+		CorrelationID:   trigger.ID,
 		Source:          trigger.Source,
 		Target:          trigger.Target,
 		StartedAt:       startTime.Unix(),

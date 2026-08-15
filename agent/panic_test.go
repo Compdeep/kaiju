@@ -79,7 +79,7 @@ func TestApplicationCodeThatPanicsDoesNotEndTheRun(t *testing.T) {
 
 	t.Run("crashed wording uses the built-in wording", func(t *testing.T) {
 		a := &Agent{describeTrigger: func(Trigger) string { boom(); return "" }}
-		if got := a.formatTrigger(Trigger{Type: "alert", AlertID: "a-1"}); got == "" {
+		if got := a.formatTrigger(Trigger{Type: "alert", ID: "a-1"}); got == "" {
 			t.Error("every reasoning stage would read nothing")
 		}
 	})

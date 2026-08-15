@@ -211,7 +211,7 @@ func (k *Kernel) checkJobProgress(job *Job) {
 
 	elapsed := time.Since(job.startedAt).Round(time.Second)
 	log.Printf("[kernel] heartbeat: investigation %s stuck for %d consecutive ticks (%s elapsed, threshold=%d), injecting progress check",
-		job.trigger.AlertID, stuck, elapsed, threshold)
+		job.trigger.ID, stuck, elapsed, threshold)
 	k.Interject(job.trigger.SessionID, fmt.Sprintf(
 		"Progress check (%s elapsed, %d consecutive stuck ticks): recent steps keep failing. "+
 			"Investigate the root cause via Holmes — don't keep retrying the same fix. "+

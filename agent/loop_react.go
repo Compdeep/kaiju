@@ -46,8 +46,8 @@ func (a *Agent) systemPrompt(cards []string) string {
 func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
 	ctx = a.tagTokens(ctx, trigger)
 	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))
-	log.Printf("[react] sync investigation: type=%s alert=%s source=%s",
-		trigger.Type, trigger.AlertID, trigger.Source)
+	log.Printf("[react] sync run: type=%s id=%s source=%s",
+		trigger.Type, trigger.ID, trigger.Source)
 
 	startTime := time.Now()
 
@@ -156,7 +156,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			}})
 
 			toolStart := time.Now()
-			result, execErr := a.executeToolCall(ctx, tc, trigger.AlertID, intent, trigger.Scope)
+			result, execErr := a.executeToolCall(ctx, tc, trigger.ID, intent, trigger.Scope)
 			toolMs := time.Since(toolStart).Milliseconds()
 
 			toolMsg := llm.Message{
@@ -205,8 +205,8 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	}
 
 	elapsed := time.Since(startTime)
-	log.Printf("[react] sync complete in %s (alert=%s, tools=%d, llm=%d)",
-		elapsed.Round(time.Millisecond), trigger.AlertID, totalToolCalls, totalLLMCalls)
+	log.Printf("[react] sync complete in %s (id=%s, tools=%d, llm=%d)",
+		elapsed.Round(time.Millisecond), trigger.ID, totalToolCalls, totalLLMCalls)
 
 	a.recordRun(trigger, startTime, nil, nil, intent, Conclusion{
 		Outcome:  outcome,
@@ -229,13 +229,13 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
  *       and result truncation.
  * param: ctx - context for execution.
  * param: tc - the LLM tool call to execute.
- * param: alertID - the investigation alert ID.
+ * param: triggerID - the caller's own id for this run.
  * param: intent - the IGX intent level.
  * param: scope - resolved tool access scope (nil for full access).
  * return: result string and error.
  */
 func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
-	alertID string, intent gates.Intent, scope *ResolvedScope) (string, error) {
+	triggerID string, intent gates.Intent, scope *ResolvedScope) (string, error) {
 
 	toolName := tc.Function.Name
 
@@ -253,9 +253,9 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 	// Gate: rate limit
 	if err := a.gate.CheckRateLimit(); err != nil {
 		a.gate.Audit(gates.AuditEntry{
-			Tool:    toolName,
-			AlertID: alertID,
-			Error:   err.Error(),
+			Tool:      toolName,
+			TriggerID: triggerID,
+			Error:     err.Error(),
 		})
 		return "", err
 	}
@@ -280,11 +280,11 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 	}
 	if err := a.gate.CheckTriadWithScope(intent, toolName, impact, scopeCap); err != nil {
 		a.gate.Audit(gates.AuditEntry{
-			Tool:    toolName,
-			AlertID: alertID,
-			Error:   err.Error(),
-			Intent:  int(intent),
-			Impact:  impact,
+			Tool:      toolName,
+			TriggerID: triggerID,
+			Error:     err.Error(),
+			Intent:    int(intent),
+			Impact:    impact,
 		})
 		return "", err
 	}
@@ -297,11 +297,11 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 		}
 		if err := a.checkClearance(ctx, toolName, params, username); err != nil {
 			a.gate.Audit(gates.AuditEntry{
-				Tool:    toolName,
-				AlertID: alertID,
-				Error:   err.Error(),
-				Intent:  int(intent),
-				Impact:  impact,
+				Tool:      toolName,
+				TriggerID: triggerID,
+				Error:     err.Error(),
+				Intent:    int(intent),
+				Impact:    impact,
 			})
 			return "", err
 		}
@@ -312,11 +312,11 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 
 	// Audit
 	entry := gates.AuditEntry{
-		Tool:    toolName,
-		Params:  params,
-		AlertID: alertID,
-		Intent:  int(intent),
-		Impact:  impact,
+		Tool:      toolName,
+		Params:    params,
+		TriggerID: triggerID,
+		Intent:    int(intent),
+		Impact:    impact,
 	}
 	if err != nil {
 		entry.Error = err.Error()
@@ -343,7 +343,7 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 /*
  * formatTrigger converts a trigger into a human-readable message for the LLM.
  * desc: For chat queries, extracts and returns the user's question directly.
- *       For all other trigger types, formats as an alert with type, ID, source,
+ *       For all other trigger types, states the type, the id, the source,
  *       and data fields.
  * param: t - the Trigger to format.
  * return: formatted trigger string for LLM consumption.
@@ -410,8 +410,8 @@ func defaultFormatTrigger(t Trigger) string {
 	// formatTrigger asks first and which this only backs up.
 	sb.WriteString("## What started this run\n\n")
 	sb.WriteString(fmt.Sprintf("**Type:** %s\n", t.Type))
-	if t.AlertID != "" {
-		sb.WriteString(fmt.Sprintf("**Correlation ID:** %s\n", t.AlertID))
+	if t.ID != "" {
+		sb.WriteString(fmt.Sprintf("**Correlation ID:** %s\n", t.ID))
 	}
 	if t.Source != "" {
 		sb.WriteString(fmt.Sprintf("**Source:** %s\n", t.Source))

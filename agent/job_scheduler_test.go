@@ -17,12 +17,12 @@ func controllableExec() (exec func(context.Context, Trigger) (*SyncResult, error
 	exec = func(ctx context.Context, tr Trigger) (*SyncResult, error) {
 		gate := make(chan struct{})
 		mu.Lock()
-		gates[tr.AlertID] = gate
+		gates[tr.ID] = gate
 		mu.Unlock()
-		startedCh <- tr.AlertID
+		startedCh <- tr.ID
 		select {
 		case <-gate:
-			return &SyncResult{Outcome: tr.AlertID}, nil
+			return &SyncResult{Outcome: tr.ID}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -48,14 +48,14 @@ func TestScheduler_ReservesLaneForChat(t *testing.T) {
 	s.Start(ctx)
 
 	// First background job runs on one worker.
-	s.Submit(Trigger{AlertID: "bgA"}, PriorityBackground, "alert:bgA")
+	s.Submit(Trigger{ID: "bgA"}, PriorityBackground, "alert:bgA")
 	if got := <-started; got != "bgA" {
 		t.Fatalf("expected bgA to start, got %s", got)
 	}
 
 	// Second background job is held back even though a worker is idle — that
 	// worker is reserved for chat.
-	s.Submit(Trigger{AlertID: "bgB"}, PriorityBackground, "alert:bgB")
+	s.Submit(Trigger{ID: "bgB"}, PriorityBackground, "alert:bgB")
 	select {
 	case got := <-started:
 		t.Fatalf("bgB started, but the second worker should be reserved for chat: %s", got)
@@ -63,7 +63,7 @@ func TestScheduler_ReservesLaneForChat(t *testing.T) {
 	}
 
 	// A chat query takes the reserved worker immediately.
-	go s.SubmitSync(ctx, Trigger{AlertID: "chatC"}, PriorityChat, "t1")
+	go s.SubmitSync(ctx, Trigger{ID: "chatC"}, PriorityChat, "t1")
 	if got := <-started; got != "chatC" {
 		t.Fatalf("expected chatC to start on the reserved worker, got %s", got)
 	}

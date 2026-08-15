@@ -10,9 +10,9 @@ import (
 // Finding what a run referenced and never resolved, without knowing the domain.
 //
 // Some tool output is a fact and some of it is a handle on something else: a
-// search result's URL, an alert id, a peer id. A handle a run surfaced and never
+// search result's URL, a record id, a machine name. A handle a run surfaced and never
 // followed is the thing a model is most likely to talk about as though it had —
-// citing a page it never opened, describing an alert it never read.
+// citing a page it never opened, describing a record it never read.
 //
 // The engine cannot tell the two apart by looking. It used to decide by name:
 // output whose Kind was "search" held URLs, and a Kind of "page" meant one had
@@ -97,7 +97,7 @@ func (a *Agent) collectReferences(graph *Graph) []reference {
  * desc: A handle counts as followed when the tool its producer named was called
  *       with that value. Matching the tool matters: the first version matched
  *       the value against every parameter in the run, which is safe for a URL
- *       and wrong for a short identifier — a peer id of "self" or an alert id of
+ *       and wrong for a short identifier — a machine named "self" or a record id of
  *       "1" collides with an unrelated parameter and is reported as followed
  *       when nothing followed it.
  *

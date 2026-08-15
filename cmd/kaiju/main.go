@@ -695,7 +695,7 @@ func runChat() {
 				Model:     cm,
 				History:   history,
 				Query:     msg.Text,
-				AlertID:   fmt.Sprintf("cli-%d", time.Now().UnixNano()),
+				TriggerID: fmt.Sprintf("cli-%d", time.Now().UnixNano()),
 				SessionID: sessionID,
 				// Base is copied for an escalated agent sub-run. Carry the session,
 				// history, and intent; leave models empty so it uses the configured
@@ -921,7 +921,7 @@ func runServe() {
 			go func(msg channels.InboundMessage) {
 				trigger := agent.Trigger{
 					Type:    "chat_query",
-					AlertID: fmt.Sprintf("%s-%d", msg.ChannelID, time.Now().UnixNano()),
+					ID:      fmt.Sprintf("%s-%d", msg.ChannelID, time.Now().UnixNano()),
 					Data:    mustJSON(map[string]string{"query": msg.Text}),
 					Source:  msg.ChannelID,
 					AggMode: -1, // auto: let reflector + compute carve-out decide
@@ -1005,7 +1005,7 @@ func runOnce(query string) {
 
 	trigger := agent.Trigger{
 		Type:      "chat_query",
-		AlertID:   fmt.Sprintf("run-%d", time.Now().UnixNano()),
+		ID:        fmt.Sprintf("run-%d", time.Now().UnixNano()),
 		Data:      mustJSON(map[string]string{"query": query}),
 		Source:    "cli",
 		AggMode:   -1, // auto: let reflector + compute carve-out decide

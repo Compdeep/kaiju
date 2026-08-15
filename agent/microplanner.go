@@ -92,12 +92,12 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 
 	// Build trace entry for the debug log.
 	trace := LLMTrace{
-		AlertID:  trigger.AlertID,
-		NodeID:   mpNode.ID,
-		NodeType: "debugger",
-		Tag:      mpNode.Tag,
-		Model:    "reasoning",
-		Started:  started,
+		TriggerID: trigger.ID,
+		NodeID:    mpNode.ID,
+		NodeType:  "debugger",
+		Tag:       mpNode.Tag,
+		Model:     "reasoning",
+		Started:   started,
 		Input: map[string]string{
 			"problem": fmt.Sprintf("%v", mpNode.Params["problem"]),
 		},

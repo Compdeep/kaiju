@@ -14,7 +14,7 @@ func TestExecContextFrom_AbsentIsNilNotAPanic(t *testing.T) {
 
 func TestWithExecContext_RoundTrips(t *testing.T) {
 	g := NewGraph()
-	want := &ExecuteContext{Graph: g, Workspace: "/tmp/ws", AlertID: "a-1"}
+	want := &ExecuteContext{Graph: g, Workspace: "/tmp/ws", TriggerID: "a-1"}
 
 	ctx := WithExecContext(context.Background(), want)
 	got := ExecContextFrom(ctx)
@@ -22,7 +22,7 @@ func TestWithExecContext_RoundTrips(t *testing.T) {
 	if got == nil {
 		t.Fatal("nothing came back")
 	}
-	if got.Graph != g || got.Workspace != "/tmp/ws" || got.AlertID != "a-1" {
+	if got.Graph != g || got.Workspace != "/tmp/ws" || got.TriggerID != "a-1" {
 		t.Fatalf("got %+v, want the state that went in", got)
 	}
 }
@@ -30,9 +30,9 @@ func TestWithExecContext_RoundTrips(t *testing.T) {
 // A nil state must not replace one already on the ctx with something a tool
 // would dereference.
 func TestWithExecContext_NilIsANoOp(t *testing.T) {
-	ctx := WithExecContext(context.Background(), &ExecuteContext{AlertID: "a-1"})
+	ctx := WithExecContext(context.Background(), &ExecuteContext{TriggerID: "a-1"})
 	ctx = WithExecContext(ctx, nil)
-	if ec := ExecContextFrom(ctx); ec == nil || ec.AlertID != "a-1" {
+	if ec := ExecContextFrom(ctx); ec == nil || ec.TriggerID != "a-1" {
 		t.Fatalf("a nil must leave the existing state alone, got %+v", ec)
 	}
 }

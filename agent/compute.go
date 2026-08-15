@@ -267,13 +267,13 @@ func rootFromTaskFiles(taskFiles []string) string {
 	return candidate
 }
 
-// graphAlertID safely extracts the trigger AlertID via the graph's gate.
+// graphAlertID safely extracts the trigger TriggerID via the graph's gate.
 // Used to route LLM trace logs to the per-investigation file.
 func graphAlertID(g *Graph) string {
 	if g == nil || g.Context == nil || g.Context.trigger == nil {
 		return ""
 	}
-	return g.Context.trigger.AlertID
+	return g.Context.trigger.ID
 }
 
 func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query string, ctxData any,
@@ -358,11 +358,11 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 	})
 
 	traceArch := LLMTrace{
-		AlertID:  graphAlertID(graph),
-		NodeID:   tag,
-		NodeType: "compute_architect",
-		Tag:      tag,
-		Started:  startedArch,
+		TriggerID: graphAlertID(graph),
+		NodeID:    tag,
+		NodeType:  "compute_architect",
+		Tag:       tag,
+		Started:   startedArch,
 		Input: map[string]string{
 			"goal":  goal,
 			"query": query,
@@ -706,11 +706,11 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	resp, err := client.Complete(ctx, coderReq)
 
 	traceCode := LLMTrace{
-		AlertID:  graphAlertID(graph),
-		NodeID:   tag,
-		NodeType: "compute_coder",
-		Tag:      tag,
-		Started:  startedCode,
+		TriggerID: graphAlertID(graph),
+		NodeID:    tag,
+		NodeType:  "compute_coder",
+		Tag:       tag,
+		Started:   startedCode,
 		Input: map[string]string{
 			"goal":          goal,
 			"blueprint_ref": blueprintRef,

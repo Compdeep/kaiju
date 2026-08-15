@@ -74,11 +74,11 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 	})
 
 	trace := LLMTrace{
-		AlertID:  trigger.AlertID,
-		NodeID:   "aggregator",
-		NodeType: "aggregator",
-		Tag:      "synthesize",
-		Started:  started,
+		TriggerID: trigger.ID,
+		NodeID:    "aggregator",
+		NodeType:  "aggregator",
+		Tag:       "synthesize",
+		Started:   started,
 		Input: map[string]string{
 			"intent": intentStr,
 		},

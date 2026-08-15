@@ -152,7 +152,7 @@ func TestThePlainLayoutIsUnchanged(t *testing.T) {
 // works, so nothing fails if this reverts — the guidance simply stops being
 // held to a budget, and there are two paths to the same text again.
 func TestTheAggregatorAsksTheGate(t *testing.T) {
-	body := funcBody(t, readSource(t, "aggregator.go"), "runAggregatorWithClient")
+	body := funcBody(t, readSource(t, "aggregator.go"), "runAggregator")
 	if !strings.Contains(body, `LabelledGuidance("## Aggregator Guidance", "aggregator doctrine")`) {
 		t.Error("the aggregator no longer asks the gate for its doctrine")
 	}

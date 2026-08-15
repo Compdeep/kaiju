@@ -12,10 +12,12 @@ import (
 	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
-// runAggregatorWithClient synthesizes the final outcome. model is the routed
-// model id for client; when non-empty it overrides the client's default so a
-// selected provider gets its own model (empty ⇒ client default applies).
-func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, client *llm.Client, model string, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
+// runAggregator synthesizes the final outcome on the given lane — Answer
+// ordinarily, Light when a caller asked for the executor model. It took a
+// client and a routed model id, resolved by its caller; the lane is one
+// argument that says the same thing and goes through the door with everything
+// else.
+func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, l Lane, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
 
 	// Assemble user prompt from gate context plus capability gaps from graph.
 	userPrompt := a.assembleAggregatorPrompt(trigger, graph, gateCtx)
@@ -60,8 +62,7 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 		aggMaxTokens = 8192
 	}
 	started := time.Now()
-	raw, err := client.CompleteStream(ctx, &llm.ChatRequest{
-		Model:       model,
+	raw, err := a.askStream(ctx, l, &llm.ChatRequest{
 		Messages:    messages,
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   aggMaxTokens,

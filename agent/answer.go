@@ -10,7 +10,7 @@ import (
 
 // Writing the final answer.
 //
-// When the graph is finished, runAggregatorWithClient reads the evidence and
+// When the graph is finished, runAggregator reads the evidence and
 // writes a free-text answer for a person to read. That is the right shape for a
 // question typed into a chat box, and the wrong shape for a run whose result is
 // consumed by code — a severity and a confidence that decide whether an incident

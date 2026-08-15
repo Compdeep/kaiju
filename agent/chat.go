@@ -88,7 +88,15 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 //   - Vision: images attach when Model is vision-capable, so an image message is
 //     handled on this same lane (no separate vision path needed).
 func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
-	client := a.clientFor(t.Provider)
+	// The turn names its own provider and model, and this call writes an answer
+	// for a person to read — so it is the answer lane, told what this turn
+	// chose. Stamping the selection rather than resolving a client here is what
+	// puts the call through the door, and with it the reply cap.
+	//
+	// The answer lane falls back to the heavy lane, which defaults to a.llm —
+	// the same client clientFor returns for an empty provider — so a turn that
+	// names nothing reaches what it always did.
+	ctx = withLaneSelection(ctx, laneSelection{answerProvider: t.Provider, answerModel: t.Model})
 
 	system := ComposeSystemPrompt(a.soulPrompt, prompt.Chat)
 	var messages []llm.Message
@@ -106,7 +114,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// (the same channel the agent lane streams on). With no tools in play, no
 	// tool-call JSON can ever reach the stream.
 	res := ChatResult{LLMCalls: 1}
-	resp, err := client.CompleteStreamResp(ctx, &llm.ChatRequest{
+	resp, err := a.askStreamResp(ctx, Answer, &llm.ChatRequest{
 		Model:       t.Model,
 		Messages:    messages,
 		Temperature: 0.7,

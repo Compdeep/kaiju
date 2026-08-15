@@ -191,13 +191,20 @@ func TestAnswerLaneFallsBackToTheHeavyLane(t *testing.T) {
 	}
 }
 
-// The stage that writes the final answer must ask the answer lane for its model.
-// Nothing fails when it asks a different lane — the answer is simply written by
-// the model the user did not choose.
+// The stage that writes the final answer must send on the answer lane. Nothing
+// fails when it names a different one — the answer is simply written by the
+// model the user did not choose.
+//
+// It read "a.answerLane(dagCtx)" when this stage resolved a client itself. It
+// names the lane now and the door resolves it, so the string to look for is the
+// lane rather than the call.
 func TestRunDAGSyncUsesTheAnswerLane(t *testing.T) {
 	body := funcBody(t, readSource(t, "scheduler.go"), "RunDAGSync")
 
-	if !strings.Contains(body, "a.answerLane(dagCtx)") {
-		t.Error("RunDAGSync no longer asks the answer lane; a pinned answer model has no effect")
+	if !strings.Contains(body, "aggLane := Answer") {
+		t.Error("RunDAGSync no longer names the answer lane; a pinned answer model has no effect")
+	}
+	if !strings.Contains(body, "aggLane = Light") {
+		t.Error("agg_mode=1 no longer reaches the executor model")
 	}
 }

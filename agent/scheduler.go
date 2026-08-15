@@ -2103,13 +2103,11 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		// which is what a pinned answer model is for. answerLane falls back to
 		// the heavy lane when none is pinned, so an unset answer model behaves
 		// exactly as before.
-		aggClient, aggModel := a.answerLane(dagCtx)
-		aggLabel := "answer"
+		aggLane := Answer
 		if aggMode == 1 {
-			aggClient, aggModel = a.lightLane(dagCtx) // executor model only when explicitly requested
-			aggLabel = "executor"
+			aggLane = Light // the executor model, only when explicitly requested
 		}
-		log.Printf("[dag] aggregator using %s model (agg_mode=%d)", aggLabel, aggMode)
+		log.Printf("[dag] aggregator using %s model (agg_mode=%d)", aggLane, aggMode)
 
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "running", Tag: "synthesize"}})
 
@@ -2144,7 +2142,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 				recordLine = answered.Text
 			}
 		} else {
-			outcome, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggModel, aggCtxResp2)
+			outcome, actions, aggErr = a.runAggregator(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggLane, aggCtxResp2)
 			if aggErr != nil {
 				a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
 				a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: "aggregator_failed", Status: "failed"})

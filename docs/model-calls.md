@@ -41,7 +41,11 @@ Keeping those apart is why the door is thin.
   askParsed      askStreamResp  ──────────────────────────────
    │                  │         hold a bare *llm.Client, taken
    └────── lane ──────┘         from ag.ExecutorClient(), so they
-          + stamp                are sized without knowing it
+        + stamp                 are sized without knowing it
+        + trace
+           │
+           └── writeTrace, on every send, from what the door already
+               holds plus the TraceID the stage put on the context
 ```
 
 ## The lanes
@@ -134,6 +138,32 @@ Four rules, each with a reason:
 - **The first system message only, and nothing without one.** A request with no
   system message is a caller talking to the model directly, and this package
   does not edit that.
+
+## The trace
+
+The door writes one `LLMTrace` per send. It already holds seven of the fields —
+the run, the model, the start time, the latency, the prompts, the reply, the
+token counts — so a stage supplies only what is its own:
+
+```go
+ctx = withTrace(ctx, TraceID{NodeID: id, NodeType: "observer", Tag: tag,
+	Input: map[string]string{"node": completedNode.Tag}})
+resp, err := a.completeLight(ctx, req)
+```
+
+A call made without `withTrace` is still sent and simply not traced, which is
+what a call outside any stage should do.
+
+**`traceFault(ctx, why)` is for what the door cannot know.** The door writes
+when the call returns, so it has no view of what the stage then made of the
+reply — a forced tool call that carried no arguments, or arguments that would
+not parse. It writes a short second entry naming the same node, landing under
+the call it is about. The log is a file, appended to and never rewritten, so
+amending the first entry is not open to us.
+
+Two stages still build their own. The planner's trace spans its shorter-plan
+retry, so one trace covers two calls; compute's coder holds a bare
+`*llm.Client` and never reaches a lane.
 
 ## What is not here
 

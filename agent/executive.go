@@ -766,6 +766,11 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 
 	choice := resp.Choices[0]
 
+	// This call and its retry below use completeHeavy rather than the checked
+	// variant on purpose: this stage does something better than reporting the
+	// truncation, which is to ask for a shorter plan. The checked variant would
+	// return an error here and the retry would never run.
+	//
 	// The reply ran into its cap and stopped mid-JSON. Providers report this
 	// either as finish_reason "length" — where the tool-call branch below is
 	// skipped and the fragment would be returned to the user as if the planner
@@ -812,7 +817,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
 				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: fmt.Sprintf("Error: %v. Fix the JSON and call plan() again. Remember: goal, mode, query go INSIDE params, not at the step level.", err)},
 			)
-			retryResp, retryErr := a.completeHeavy(ctx, &llm.ChatRequest{
+			retryResp, retryErr := a.completeHeavyChecked(ctx, &llm.ChatRequest{
 				Messages:    retryMessages,
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
@@ -865,7 +870,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
 				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: correction},
 			)
-			replanResp, replanErr := a.completeHeavy(ctx, &llm.ChatRequest{
+			replanResp, replanErr := a.completeHeavyChecked(ctx, &llm.ChatRequest{
 				Messages:    replanMessages,
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
@@ -937,7 +942,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: curToolCalls},
 				llm.Message{Role: "tool", ToolCallID: curToolCallID, Name: "plan", Content: correction},
 			)
-			replanResp, replanErr := a.completeHeavy(ctx, &llm.ChatRequest{
+			replanResp, replanErr := a.completeHeavyChecked(ctx, &llm.ChatRequest{
 				Messages:    replanMessages,
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  llm.ForceToolChoice("plan"),

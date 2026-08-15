@@ -195,6 +195,40 @@ func (a *Agent) completeLight(ctx context.Context, req *llm.ChatRequest) (*llm.C
 	return c.Complete(ctx, req)
 }
 
+// The checked variants, for a caller that parses what comes back.
+//
+// A reply that stopped at the token cap is missing its end — the last JSON
+// object has no closing brace — and a caller that parses it reports "invalid
+// JSON" when the truth is "the answer did not fit". It then retries the same
+// too-large request and gets the same result.
+//
+// Only for callers that parse. A stage writing prose for a person gets a short
+// answer rather than an unusable one, which is why this is not folded into
+// completeHeavy and completeLight: those two serve both kinds of caller, and
+// the aggregator is on the other side of them.
+
+func (a *Agent) completeHeavyChecked(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, error) {
+	resp, err := a.completeHeavy(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+	if llm.Truncated(resp) {
+		return resp, llm.TruncationError(req.MaxTokens)
+	}
+	return resp, nil
+}
+
+func (a *Agent) completeLightChecked(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, error) {
+	resp, err := a.completeLight(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+	if llm.Truncated(resp) {
+		return resp, llm.TruncationError(req.MaxTokens)
+	}
+	return resp, nil
+}
+
 // completeRoute makes the routing-classifier call. If a route model is pinned in
 // config it uses that (a small capable model, e.g. gpt-5-mini) so the run-the-agent
 // decision is reliable; otherwise it falls back to the executor (light) lane so

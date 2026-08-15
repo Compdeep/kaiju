@@ -605,7 +605,7 @@ func (g *ContextGate) runCurator(ctx context.Context, query string, sources map[
 		sb.WriteString("\n\n")
 	}
 
-	resp, err := g.agent.completeLight(ctx, &llm.ChatRequest{
+	resp, err := g.agent.completeLightChecked(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: prompt.Curator},
 			{Role: "user", Content: sb.String()},

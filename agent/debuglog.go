@@ -37,7 +37,7 @@ func debugLogEnabled() bool {
 // All fields are optional; only set what's relevant for the caller's
 // node type.
 type LLMTrace struct {
-	AlertID  string    // routes the entry to /tmp/kaiju-prompts/<alertID>.log
+	AlertID  string    // routes the entry to <debugLogDir>/<id>.log
 	NodeID   string    // n0, n5, etc — empty for pre-graph calls (preflight)
 	NodeType string    // "executive", "compute_architect", "debugger", etc
 	Tag      string    // node tag from the graph (descriptive label)
@@ -78,8 +78,10 @@ func WriteLLMTrace(t LLMTrace) {
 	if !debugLogEnabled() {
 		return
 	}
+	// A call made outside any run still writes somewhere. The name is this
+	// package's own, not one product's word for what usually fills the field.
 	if t.AlertID == "" {
-		t.AlertID = "no_alert"
+		t.AlertID = "uncorrelated"
 	}
 	if t.Started.IsZero() {
 		t.Started = time.Now()

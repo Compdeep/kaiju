@@ -386,8 +386,9 @@ func (a *Agent) formatTrigger(t Trigger) (out string) {
  * return: the rendered text.
  */
 func defaultFormatTrigger(t Trigger) string {
-	// Chat queries: present the user's question directly, not wrapped in alert format.
-	// The planner should see "what processes are running?" not "Alert ID: chat-173..."
+	// A typed question is presented as itself. The planner should see "what
+	// processes are running?" rather than that question wrapped in a header
+	// and a correlation id.
 	if t.Type == "chat_query" {
 		var data map[string]string
 		if json.Unmarshal(t.Data, &data) == nil {
@@ -399,17 +400,25 @@ func defaultFormatTrigger(t Trigger) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("## Alert\n\n")
+	// The built-in wording says what this package knows and no more: a run
+	// started, something caused it, here is what came with it. It used to say
+	// "## Alert", "**Alert ID:**" and "Investigate this alert", which told every
+	// model driven by this loop that its input was a security alert — the one
+	// place this package asserted what the payload means.
+	//
+	// An application that knows better supplies Config.DescribeTrigger, which
+	// formatTrigger asks first and which this only backs up.
+	sb.WriteString("## What started this run\n\n")
 	sb.WriteString(fmt.Sprintf("**Type:** %s\n", t.Type))
 	if t.AlertID != "" {
-		sb.WriteString(fmt.Sprintf("**Alert ID:** %s\n", t.AlertID))
+		sb.WriteString(fmt.Sprintf("**Correlation ID:** %s\n", t.AlertID))
 	}
 	if t.Source != "" {
 		sb.WriteString(fmt.Sprintf("**Source:** %s\n", t.Source))
 	}
 	if len(t.Data) > 0 {
-		sb.WriteString(fmt.Sprintf("\n**Alert Data:**\n```json\n%s\n```\n", string(t.Data)))
+		sb.WriteString(fmt.Sprintf("\n**Data:**\n```json\n%s\n```\n", string(t.Data)))
 	}
-	sb.WriteString("\nInvestigate this alert. Use your available tools to gather more context, then determine the appropriate response.")
+	sb.WriteString("\nUse your available tools to gather context, then decide what to do.")
 	return sb.String()
 }

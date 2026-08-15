@@ -22,7 +22,7 @@ func TestRecordRunWritesTheOutcome(t *testing.T) {
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
 
 	a.recordRun(Trigger{Type: "alert", AlertID: "a-1"}, time.Now().Add(-time.Second),
-		nil, nil, gates.Intent(1), Conclusion{Verdict: "budget_exhausted_before_aggregator", Status: "failed"})
+		nil, nil, gates.Intent(1), Conclusion{Outcome: "budget_exhausted_before_aggregator", Status: "failed"})
 
 	if len(st.runs) != 1 {
 		t.Fatalf("wrote %d runs, want 1", len(st.runs))
@@ -31,8 +31,8 @@ func TestRecordRunWritesTheOutcome(t *testing.T) {
 	if got.Status != "failed" {
 		t.Errorf("Status = %q, want failed", got.Status)
 	}
-	if got.Verdict != "budget_exhausted_before_aggregator" {
-		t.Errorf("Verdict = %q, want the reason", got.Verdict)
+	if got.Outcome != "budget_exhausted_before_aggregator" {
+		t.Errorf("Outcome = %q, want the reason", got.Outcome)
 	}
 	if got.DurationMs <= 0 {
 		t.Errorf("DurationMs = %d, want the elapsed time", got.DurationMs)
@@ -44,16 +44,16 @@ func TestRecordRunWritesTheOutcome(t *testing.T) {
 func TestRecordRunToleratesNoGraphOrBudget(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st}
-	a.recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), Conclusion{Verdict: "plan_or_schedule_failed", Status: "failed"})
+	a.recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), Conclusion{Outcome: "plan_or_schedule_failed", Status: "failed"})
 	if len(st.runs) != 1 {
 		t.Fatal("an early failure wrote no record")
 	}
 }
 
 func TestRecordRunIsSilentWithNoStore(t *testing.T) {
-	(&Agent{}).recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), Conclusion{Verdict: "x", Status: "failed"})
+	(&Agent{}).recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), Conclusion{Outcome: "x", Status: "failed"})
 	var nilAgent *Agent
-	nilAgent.recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), Conclusion{Verdict: "x", Status: "failed"})
+	nilAgent.recordRun(Trigger{}, time.Now(), nil, nil, gates.Intent(0), Conclusion{Outcome: "x", Status: "failed"})
 }
 
 // TestEveryRunExitRecords pins the CALL SITES. A run that returns without
@@ -119,21 +119,19 @@ func TestRecordRunCarriesTheApplicationsLabels(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
 
-	a.recordRun(Trigger{Type: "alert", AlertID: "a-2"}, time.Now(), nil, nil, gates.Intent(1),
-		Conclusion{Verdict: "credential theft on web-1", Severity: "high", Category: "intrusion", Status: "completed"})
+	a.recordRun(Trigger{Type: "event", AlertID: "corr-2"}, time.Now(), nil, nil, gates.Intent(1),
+		Conclusion{Outcome: "the batch finished with two rejects",
+			Labels: map[string]string{"grade": "amber", "kind": "batch"}, Status: "completed"})
 
 	if len(st.runs) != 1 {
 		t.Fatalf("wrote %d runs, want 1", len(st.runs))
 	}
 	got := st.runs[0]
-	if got.Severity != "high" {
-		t.Errorf("Severity = %q, want the label the answer carried", got.Severity)
+	if got.Labels["grade"] != "amber" || got.Labels["kind"] != "batch" {
+		t.Errorf("Labels = %v, want the ones the answer carried", got.Labels)
 	}
-	if got.Category != "intrusion" {
-		t.Errorf("Category = %q, want the label the answer carried", got.Category)
-	}
-	if got.Verdict != "credential theft on web-1" {
-		t.Errorf("Verdict = %q", got.Verdict)
+	if got.Outcome != "the batch finished with two rejects" {
+		t.Errorf("Outcome = %q", got.Outcome)
 	}
 }
 
@@ -151,7 +149,7 @@ func TestRunRecordCarriesTheTriggersRouting(t *testing.T) {
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "host-1"}}}
 
 	a.recordRun(Trigger{Type: "alert", AlertID: "a-3", Source: "host-7", Target: "host-9"},
-		time.Now(), nil, nil, gates.Intent(1), Conclusion{Verdict: "v", Status: "completed"})
+		time.Now(), nil, nil, gates.Intent(1), Conclusion{Outcome: "v", Status: "completed"})
 
 	if len(st.runs) != 1 {
 		t.Fatalf("wrote %d runs, want 1", len(st.runs))
@@ -181,7 +179,7 @@ func TestTwoRunsOfOneCauseGetTwoIdentities(t *testing.T) {
 
 	for range 2 {
 		g, _, cleanup := a.setupDAGPipeline(trigger)
-		a.recordRun(trigger, time.Now(), g, nil, gates.Intent(1), Conclusion{Verdict: "v", Status: "completed"})
+		a.recordRun(trigger, time.Now(), g, nil, gates.Intent(1), Conclusion{Outcome: "v", Status: "completed"})
 		cleanup()
 	}
 
@@ -208,7 +206,7 @@ func TestARunWithNoGraphStillRecords(t *testing.T) {
 	a := &Agent{eventStore: st}
 
 	a.recordRun(Trigger{AlertID: "a-5"}, time.Now(), nil, nil, gates.Intent(0),
-		Conclusion{Verdict: "plan_or_schedule_failed", Status: "failed"})
+		Conclusion{Outcome: "plan_or_schedule_failed", Status: "failed"})
 
 	if len(st.runs) != 1 || st.runs[0].ID != "a-5" {
 		t.Fatalf("runs = %+v, want one identified by its cause", st.runs)
@@ -251,7 +249,7 @@ func TestTheRunRecordCountsReflectionsAndFollowUps(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st}
 	a.recordRun(Trigger{AlertID: "a-7"}, time.Now(), g, nil, gates.Intent(1),
-		Conclusion{Verdict: "v", Status: "completed"})
+		Conclusion{Outcome: "v", Status: "completed"})
 
 	got := st.runs[0]
 	if got.ReflectionCount != 2 {

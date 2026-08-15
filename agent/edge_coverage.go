@@ -73,7 +73,7 @@ func (a *Agent) runFanout(graph *Graph) int {
 
 // hasUsableEvidence reports whether any resolved tool node returned a successful
 // (ok) result. A run that gathered nothing usable has nothing to synthesize — the
-// reflector's honest "couldn't get the data" verdict is the right answer, not an
+// reflector's honest "couldn't get the data" outcome is the right answer, not an
 // aggregator pass over emptiness.
 func (a *Agent) hasUsableEvidence(graph *Graph) bool {
 	if graph == nil {

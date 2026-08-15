@@ -70,7 +70,7 @@ func (p StagePrompts) withEdge(block, hook string) StagePrompts {
  * does not, so it reports the gap instead of inventing a detail to fill it.
  * desc: Exported because the stage that writes the answer is not always one of
  *       this package's. An application with its own answering stage — one that
- *       returns a verdict rather than prose, say — needs the same framing, and
+ *       returns a outcome rather than prose, say — needs the same framing, and
  *       an answer written without it is the one most likely to be fabricated,
  *       because it is written on the evidence that failed to arrive.
  *       runAggregatorWithClient and fireReflection both call it, but an

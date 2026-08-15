@@ -6,7 +6,7 @@ import (
 )
 
 // TestEvidenceStats_CountsToolOutcomes verifies the deterministic tool-outcome
-// counter the verdict gate relies on: only terminal NodeTool nodes count, failed
+// counter the outcome gate relies on: only terminal NodeTool nodes count, failed
 // vs resolved-with-a-real-result are tallied, and non-tool nodes are ignored.
 func TestEvidenceStats_CountsToolOutcomes(t *testing.T) {
 	g := NewGraph()

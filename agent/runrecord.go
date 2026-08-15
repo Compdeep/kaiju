@@ -74,9 +74,8 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 		LLMCalls:        llmCalls,
 		ReflectionCount: reflections,
 		FollowUpCount:   followUps,
-		Verdict:         c.Verdict,
-		Severity:        c.Severity,
-		Category:        c.Category,
+		Outcome:         c.Outcome,
+		Labels:          c.Labels,
 		Status:          c.Status,
 	})
 }
@@ -87,12 +86,11 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 // at a call site says nothing about which is which, and because an application
 // that writes its own answer adds labels of its own — see AnswerResult.
 type Conclusion struct {
-	// Verdict is the answer, or the reason there is none.
-	Verdict string
+	// Outcome is the answer, or the reason there is none.
+	Outcome string
 	// Severity and Category are the application's labels for the answer, empty
 	// unless it supplied an Answer capability. Passed through untouched.
-	Severity string
-	Category string
+	Labels map[string]string
 	// Status is "completed", "failed", "timeout" or "not_admitted".
 	Status string
 

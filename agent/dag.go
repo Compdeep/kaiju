@@ -181,14 +181,14 @@ func (n *Node) IsTerminal() bool {
  * desc: Serializable event sent to SSE subscribers for live dashboard updates.
  */
 type DAGEvent struct {
-	Type      string      `json:"type"` // "start", "node", "add", "done", "verdict"
+	Type      string      `json:"type"` // "start", "node", "add", "done", "outcome"
 	NodeID    string      `json:"id,omitempty"`
 	Node      *NodeInfo   `json:"node,omitempty"`       // for "node" and "add"
 	Nodes     []*NodeInfo `json:"nodes,omitempty"`      // for "start"/"done" (full snapshot)
 	AlertID   string      `json:"alert,omitempty"`      // for "start"
 	SessionID string      `json:"session_id,omitempty"` // session this event belongs to (for frontend routing)
 	Targets   []string    `json:"targets,omitempty"`    // for "start": the machines this run concerns, so a frontend can show each as busy
-	Text      string      `json:"text,omitempty"`       // for "verdict" (streaming token chunk)
+	Text      string      `json:"text,omitempty"`       // for "outcome" (streaming token chunk)
 }
 
 /*
@@ -1512,7 +1512,7 @@ func (g *Graph) SiblingComputeIDs(nodeID string) []string {
 
 // EvidenceStats summarises how much usable evidence the investigation's TOOLS
 // gathered: how many terminal tool nodes ran, how many failed, and how many
-// resolved with a non-empty result. The verdict gate uses this to refuse a
+// resolved with a non-empty result. The outcome gate uses this to refuse a
 // "malicious" call that has no evidence behind it (unreachable node, tool errors)
 // — deterministic, rather than trusting the model to notice its tools failed.
 func (g *Graph) EvidenceStats() (toolNodes, failed, withResult int) {

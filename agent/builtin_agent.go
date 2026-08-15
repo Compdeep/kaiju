@@ -22,8 +22,8 @@ const agentToolName = "agent"
 // overrides only the delegated bits (task, autonomous, fresh alert id). Deriving
 // from the one struct means new request fields flow here for free, instead of
 // being threaded (and dropped) by hand. The agent tool passes an empty base.
-// Returns the verdict plus node/LLM counts.
-func (a *Agent) RunAgentTask(ctx context.Context, base Trigger, task string) (verdict string, nodes, llmCalls int, err error) {
+// Returns the outcome plus node/LLM counts.
+func (a *Agent) RunAgentTask(ctx context.Context, base Trigger, task string) (outcome string, nodes, llmCalls int, err error) {
 	data, merr := json.Marshal(map[string]string{"query": task})
 	if merr != nil {
 		return "", 0, 0, fmt.Errorf("agent: marshal task: %w", merr)
@@ -49,5 +49,5 @@ func (a *Agent) RunAgentTask(ctx context.Context, base Trigger, task string) (ve
 	if res == nil {
 		return "", 0, 0, nil
 	}
-	return res.Verdict, res.Nodes, res.LLMCalls, nil
+	return res.Outcome, res.Nodes, res.LLMCalls, nil
 }

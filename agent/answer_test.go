@@ -14,7 +14,8 @@ import (
 // An application supplying Answer is asked to write each run's answer.
 func TestTheSuppliedAnswerIsUsed(t *testing.T) {
 	a := &Agent{answer: func(_ context.Context, _ AnswerRequest) (*AnswerResult, error) {
-		return &AnswerResult{Text: "credential theft on web-1", Severity: "high", Category: "intrusion"}, nil
+		return &AnswerResult{Text: "the batch finished with two rejects",
+			Labels: map[string]string{"grade": "amber", "kind": "batch"}}, nil
 	}}
 
 	res, ok, err := a.writeAnswer(context.Background(), AnswerRequest{})
@@ -22,8 +23,11 @@ func TestTheSuppliedAnswerIsUsed(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("writeAnswer = %v, %v, %v", res, ok, err)
 	}
-	if res.Text != "credential theft on web-1" || res.Severity != "high" || res.Category != "intrusion" {
-		t.Errorf("the answer came back altered: %+v", res)
+	if res.Text != "the batch finished with two rejects" {
+		t.Errorf("the answer text came back altered: %+v", res)
+	}
+	if res.Labels["grade"] != "amber" || res.Labels["kind"] != "batch" {
+		t.Errorf("the labels came back altered: %+v", res.Labels)
 	}
 }
 
@@ -35,7 +39,7 @@ func TestReturningNothingLeavesTheRunToTheBuiltInAggregator(t *testing.T) {
 		if req.Trigger.Type != "alert" {
 			return nil, nil
 		}
-		return &AnswerResult{Text: "verdict"}, nil
+		return &AnswerResult{Text: "outcome"}, nil
 	}}
 
 	if _, ok, _ := a.writeAnswer(context.Background(), AnswerRequest{Trigger: Trigger{Type: "chat_query"}}); ok {
@@ -210,7 +214,7 @@ func TestTheRecordKeepsTheSummaryWhenThereIsOne(t *testing.T) {
 	if !regexp.MustCompile(`recordLine = answered\.Summary`).MatchString(text) {
 		t.Error("the run record no longer prefers the answer's summary line")
 	}
-	if !regexp.MustCompile(`Conclusion\{Verdict: recordLine`).MatchString(text) {
+	if !regexp.MustCompile(`Conclusion\{Outcome: recordLine`).MatchString(text) {
 		t.Error("the run record no longer uses the chosen line")
 	}
 }
@@ -222,7 +226,7 @@ func TestTheRecordFallsBackToTheAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read scheduler.go: %v", err)
 	}
-	if !regexp.MustCompile(`if recordLine == "" \{\s*recordLine = verdict`).MatchString(string(src)) {
+	if !regexp.MustCompile(`if recordLine == "" \{\s*recordLine = outcome`).MatchString(string(src)) {
 		t.Error("an answer with no summary line no longer falls back to the answer itself")
 	}
 }

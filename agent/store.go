@@ -64,13 +64,16 @@ type Run struct {
 	// may still store it in whatever column it likes.
 	FollowUpCount int
 
-	// Verdict, Severity, Category and Status are the application's
-	// conclusion. The engine passes through whatever the aggregator produced
-	// and attaches no meaning to the values.
-	Verdict  string
-	Severity string
-	Category string
-	Status   string
+	// Outcome and Status are what the run concluded. Outcome is the answer in
+	// words, or a token this package writes for a run that ended without one —
+	// "not_admitted", "wall_clock_expired", "aggregator_failed". It was called
+	// Outcome, which is a courtroom's word for a run's result.
+	//
+	// Labels are the application's own, carried and never read. See
+	// AnswerResult.Labels for why they are a map.
+	Outcome string
+	Labels  map[string]string
+	Status  string
 }
 
 // Action is one state-changing tool call made during a run.

@@ -143,14 +143,14 @@ func triggerIsAwaited(t Trigger) bool {
 }
 
 // decideAutoAggMode picks the aggregator lane in auto mode (agg_mode -1): 0=skip
-// (use the reflector's verdict), 1=executor model, 2=reasoning model. Pure over the
+// (use the reflector's outcome), 1=executor model, 2=reasoning model. Pure over the
 // structural signals so it is unit-tested directly (TestDecideAutoAggMode).
 //
 //   - someone is waiting        → 2 (never skip on a run a person asked for)
 //   - compute present            → 1 (a compute run always needs a formatted answer)
 //   - complex + usable evidence   → 2 (a real synthesis, with the honesty framing)
 //   - complex + NO usable evidence→ 0 (nothing to synthesize; the reflector's honest
-//     "couldn't get the data" verdict stands — this is the reflector's override)
+//     "couldn't get the data" outcome stands — this is the reflector's override)
 //   - simple + reflector wants it → 2
 //   - simple, reflector done      → 0
 //
@@ -167,20 +167,20 @@ func decideAutoAggMode(hasCompute, complex, hasEvidence, awaited bool, reflector
 	case complex && hasEvidence:
 		return 2, "complex query → aggregating"
 	case complex:
-		return 0, "complex query but no usable evidence — using reflector's verdict"
+		return 0, "complex query but no usable evidence — using reflector's outcome"
 	case reflectorWants != nil && *reflectorWants:
 		return 2, "reflector requested aggregation (reasoning model)"
 	default:
-		return 0, "reflector verdict is complete, skipping aggregator"
+		return 0, "reflector outcome is complete, skipping aggregator"
 	}
 }
 
-// scheduleOutcome holds the outcome of plan+schedule, including an optional verdict
+// scheduleOutcome holds the outcome of plan+schedule, including an optional outcome
 // from reflection that can skip the aggregator.
 type scheduleOutcome struct {
 	Intent              gates.Intent
-	ReflectionVerdict   string // non-empty if reflection concluded with a full verdict
-	ReflectionAggregate *bool  // reflector's recommendation: true = needs aggregator, false = verdict is complete
+	ReflectionOutcome   string // non-empty if reflection concluded with a full outcome
+	ReflectionAggregate *bool  // reflector's recommendation: true = needs aggregator, false = outcome is complete
 }
 
 // scaleReplanCap raises the replan ceiling to match the difficulty the executive
@@ -284,7 +284,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		refined, reply := a.refinePreflight(ctx, graph.Preflight, &trigger)
 		if reply != "" {
 			log.Printf("[dag] preflight refinement replied instead of planning: %s", Text.TruncateLog(reply, 200))
-			a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: reply})
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "outcome", Text: reply})
 			return nil, &ExecutiveConversationalError{Text: reply}
 		}
 		if refined != graph.Preflight {
@@ -306,7 +306,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		if errors.As(err, &convErr) {
 			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "direct answer"}})
 			if convErr.Text != "" {
-				a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: convErr.Text})
+				a.broadcastDAGEvent(graph, DAGEvent{Type: "outcome", Text: convErr.Text})
 			}
 			return nil, err
 		}
@@ -334,7 +334,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	throttle := newToolThrottle()
 	batchCounter := 0             // nodes resolved since last reflection (nReflect mode)
 	reflectionConcluded := false  // true if a reflection already decided "conclude"
-	reflectionVerdict := ""       // full verdict from reflection (skips aggregator if non-empty)
+	reflectionOutcome := ""       // full outcome from reflection (skips aggregator if non-empty)
 	var reflectionAggregate *bool // reflector's recommendation on aggregation
 	reflectionInflight := false   // true while a reflection node is running — prevents double injection
 	workSinceReflection := 0      // tool nodes completed since last reflection — used to ensure final reflect
@@ -782,7 +782,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				if llm.IsAuthFailure(errMsg) {
 					log.Printf("[dag] the model rejected our credentials, stopping this run: %v", comp.Err)
 					reflectionConcluded = true
-					reflectionVerdict = "The model rejected the credentials it was given: the API key is missing, invalid, or has no access to the configured model. Nothing further was attempted on this run."
+					reflectionOutcome = "The model rejected the credentials it was given: the API key is missing, invalid, or has no access to the configured model. Nothing further was attempted on this run."
 					graph.SkipAllPending()
 					inflight = 0
 					continue
@@ -1135,8 +1135,8 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 								t := true
 								ref.Aggregate = &t
 							}
-							if ref.Verdict == "" {
-								ref.Verdict = ref.Summary
+							if ref.Outcome == "" {
+								ref.Outcome = ref.Summary
 							}
 						}
 					default:
@@ -1202,22 +1202,22 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							next = ref.Summary
 						}
 
-						// concludeReplan collapses the run to a verdict when replan can't
+						// concludeReplan collapses the run to a outcome when replan can't
 						// or shouldn't continue (cap hit, no budget, executive error, no
 						// new steps). Named what's missing rather than expanding further.
-						concludeReplan := func(reason, verdict string) {
-							if verdict == "" {
-								verdict = ref.Verdict
+						concludeReplan := func(reason, outcome string) {
+							if outcome == "" {
+								outcome = ref.Outcome
 							}
-							if verdict == "" {
-								verdict = ref.Summary
+							if outcome == "" {
+								outcome = ref.Summary
 							}
 							log.Printf("[dag] replan → conclude (%s)", reason)
-							appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "REPLAN_STOP", fmt.Sprintf("%s | %s", reason, Text.TruncateLog(verdict, 180)))
-							graph.SetResult(comp.NodeID, verdict)
+							appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "REPLAN_STOP", fmt.Sprintf("%s | %s", reason, Text.TruncateLog(outcome, 180)))
+							graph.SetResult(comp.NodeID, outcome)
 							graph.SkipAllPending()
 							reflectionConcluded = true
-							reflectionVerdict = verdict
+							reflectionOutcome = outcome
 							if ref.Aggregate != nil {
 								reflectionAggregate = ref.Aggregate
 							} else {
@@ -1250,7 +1250,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "running", Tag: "replan"}})
 						replanResult, rerr := a.runExecutive(ctx, trigger, graph, frame)
 						if rerr != nil {
-							// Executive answered directly (no tools needed) → that answer IS the verdict.
+							// Executive answered directly (no tools needed) → that answer IS the outcome.
 							var convErr *ExecutiveConversationalError
 							if errors.As(rerr, &convErr) {
 								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "replan direct"}})
@@ -1287,13 +1287,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						launchReady()
 
 					case "conclude":
-						// Store the whole reflection (not just the verdict) so
+						// Store the whole reflection (not just the outcome) so
 						// Decision/Next/Summary/Aggregate survive on the node. The
-						// verdict still surfaces via reflectionVerdict below.
+						// outcome still surfaces via reflectionOutcome below.
 						graph.SetBody(comp.NodeID, ReflectionBody{Out: *ref, Raw: comp.Result})
 						graph.SkipAllPending()
 						reflectionConcluded = true
-						reflectionVerdict = ref.Verdict
+						reflectionOutcome = ref.Outcome
 						reflectionAggregate = ref.Aggregate
 						log.Printf("[dag] reflection: conclude early (%s)", ref.Reason)
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONCLUDE", Text.TruncateLog(ref.Reason, 200))
@@ -1894,18 +1894,18 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 	return &scheduleOutcome{
 		Intent:              intent,
-		ReflectionVerdict:   reflectionVerdict,
+		ReflectionOutcome:   reflectionOutcome,
 		ReflectionAggregate: reflectionAggregate,
 	}, nil
 }
 
 /*
  * SyncResult contains the full output from a synchronous DAG investigation.
- * desc: Wraps the synthesized verdict, recommended follow-up actions, and
+ * desc: Wraps the synthesized outcome, recommended follow-up actions, and
  *       any capability gaps declared by the planner.
  */
 type SyncResult struct {
-	Verdict string           // synthesized response text
+	Outcome string           // synthesized response text
 	Actions []ActuatorAction // recommended follow-up actions (caller decides whether to execute)
 
 	// Data is the structured result from an application-supplied Answer, and
@@ -1925,8 +1925,8 @@ type SyncResult struct {
 	Trace json.RawMessage
 
 	// NotAdmitted is true when the application's admission check refused this
-	// run. Verdict then carries its reason and no work was done. A separate
-	// field rather than a sentinel in Verdict, so a caller can tell a refusal
+	// run. Outcome then carries its reason and no work was done. A separate
+	// field rather than a sentinel in Outcome, so a caller can tell a refusal
 	// from an answer without reading the text.
 	NotAdmitted bool
 }
@@ -1939,7 +1939,7 @@ type SyncResult struct {
  *       or returning the planner's conversational text.
  * param: ctx - context for the investigation.
  * param: trigger - the investigation trigger.
- * return: SyncResult pointer with verdict, actions, and gaps, or error.
+ * return: SyncResult pointer with outcome, actions, and gaps, or error.
  */
 func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
 	// Attribute every LLM call in this run to a token-usage category. Principal
@@ -1964,8 +1964,8 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	if ok, reason := a.admit(trigger); !ok {
 		log.Printf("[dag] run not admitted (type=%s alert=%s): %s", trigger.Type, trigger.AlertID, reason)
 		a.recordRun(trigger, startTime, nil, nil, trigger.Intent(),
-			Conclusion{Verdict: reason, Status: "not_admitted"})
-		return &SyncResult{Verdict: reason, NotAdmitted: true}, nil
+			Conclusion{Outcome: reason, Status: "not_admitted"})
+		return &SyncResult{Outcome: reason, NotAdmitted: true}, nil
 	}
 
 	// Route to ReAct loop if mode=react
@@ -1991,13 +1991,13 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 
 	pr, err := a.runPlanAndSchedule(dagCtx, trigger, graph, budget)
 	if err != nil {
-		// If planner returned conversational text, surface it as the verdict
+		// If planner returned conversational text, surface it as the outcome
 		// instead of failing the whole pipeline. This handles vague queries.
 		var convErr *ExecutiveConversationalError
 		if errors.As(err, &convErr) {
 			if convErr.Text != "" {
 				// notrecorded: answered without planning — see TestEveryRunExitRecords
-				return &SyncResult{Verdict: convErr.Text}, nil
+				return &SyncResult{Outcome: convErr.Text}, nil
 			}
 			// Empty plan with no text — make a direct LLM call for conversational response.
 			// Inject any skill guidance the preflight identified so the chat response
@@ -2034,24 +2034,24 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 				})
 				if llmErr == nil && len(resp.Choices) > 0 {
 					// notrecorded: answered without planning — see TestEveryRunExitRecords
-					return &SyncResult{Verdict: resp.Choices[0].Message.Content}, nil
+					return &SyncResult{Outcome: resp.Choices[0].Message.Content}, nil
 				}
 			}
 			// notrecorded: answered without planning — see TestEveryRunExitRecords
-			return &SyncResult{Verdict: "I'm not sure how to help with that. Could you be more specific?"}, nil
+			return &SyncResult{Outcome: "I'm not sure how to help with that. Could you be more specific?"}, nil
 		}
-		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), Conclusion{Verdict: "plan_or_schedule_failed", Status: "failed"})
+		a.recordRun(trigger, startTime, graph, budget, trigger.Intent(), Conclusion{Outcome: "plan_or_schedule_failed", Status: "failed"})
 		return nil, err
 	}
 	resolvedIntent := pr.Intent
 
 	// Aggregator: agg_mode -1=auto (reflector decides), 0=skip, 1=executor model, 2=reasoning model
 	aggMode := trigger.AggMode
-	var verdict string
+	var outcome string
 	var actions []ActuatorAction
-	var severity, category string
+	var labels map[string]string
 	// recordLine is what the run record keeps, which may be shorter than the
-	// answer itself. Empty until an answer says otherwise; the verdict is used.
+	// answer itself. Empty until an answer says otherwise; the outcome is used.
 	var recordLine string
 	// data is the application's structured result, carried back untouched.
 	var data any
@@ -2061,27 +2061,27 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// aggregator — a full synthesis with the honesty framing and 2x token budget —
 	// rather than a short reflector summary. The reflector only wins here when it
 	// couldn't gather usable evidence: then its honest "couldn't get the data"
-	// verdict is the right answer and an aggregator pass over emptiness is skipped.
+	// outcome is the right answer and an aggregator pass over emptiness is skipped.
 	hasCompute := graph.HasNodeOfType(NodeCompute)
 	needsSynthesis := graph.Preflight != nil && graph.Preflight.NeedsSynthesis
 	fanout := a.runFanout(graph)
 	complex := needsSynthesis || fanout >= complexFanoutFloor // a real gather, not a lookup
-	if aggMode == -1 && pr.ReflectionVerdict != "" {
+	if aggMode == -1 && pr.ReflectionOutcome != "" {
 		var reason string
 		aggMode, reason = decideAutoAggMode(hasCompute, complex, a.hasUsableEvidence(graph),
 			triggerIsAwaited(trigger), pr.ReflectionAggregate)
 		log.Printf("[dag] auto agg: %s (needs_synthesis=%v, fanout=%d)", reason, needsSynthesis, fanout)
 	}
 
-	// If reflection concluded AND aggregator is disabled, use reflection verdict directly
-	if pr.ReflectionVerdict != "" && aggMode == 0 {
+	// If reflection concluded AND aggregator is disabled, use reflection outcome directly
+	if pr.ReflectionOutcome != "" && aggMode == 0 {
 		log.Printf("[dag] skipping aggregator (agg_mode=0, reflection concluded)")
-		verdict = pr.ReflectionVerdict
+		outcome = pr.ReflectionOutcome
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize (skipped)"}})
-		a.broadcastDAGEvent(graph, DAGEvent{Type: "verdict", Text: verdict})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "outcome", Text: outcome})
 	} else {
 		if dagCtx.Err() != nil {
-			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "wall_clock_expired", Status: "timeout"})
+			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: "wall_clock_expired", Status: "timeout"})
 			return nil, fmt.Errorf("wall clock expired before aggregator")
 		}
 		// Aggregator is exempt from budget — it must always run to give the user a response
@@ -2126,20 +2126,20 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		})
 		if ansErr != nil {
 			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: ansErr.Error()}})
-			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "aggregator_failed", Status: "failed"})
+			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: "aggregator_failed", Status: "failed"})
 			return nil, fmt.Errorf("supplied answer failed: %w", ansErr)
 		}
 		if ok {
-			verdict, actions = answered.Text, answered.Actions
-			severity, category, data = answered.Severity, answered.Category, answered.Data
+			outcome, actions = answered.Text, answered.Actions
+			labels, data = answered.Labels, answered.Data
 			if recordLine = answered.Summary; recordLine == "" {
 				recordLine = answered.Text
 			}
 		} else {
-			verdict, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggModel, aggCtxResp2)
+			outcome, actions, aggErr = a.runAggregatorWithClient(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggClient, aggModel, aggCtxResp2)
 			if aggErr != nil {
 				a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
-				a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: "aggregator_failed", Status: "failed"})
+				a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: "aggregator_failed", Status: "failed"})
 				return nil, fmt.Errorf("aggregator failed: %w", aggErr)
 			}
 		}
@@ -2152,16 +2152,16 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 
 	// Record investigation in event store
 	if recordLine == "" {
-		recordLine = verdict
+		recordLine = outcome
 	}
-	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Verdict: recordLine, Severity: severity, Category: category, Status: "completed"})
+	a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: recordLine, Labels: labels, Status: "completed"})
 
 	// Snapshot the final graph so the caller can persist the trace server-side.
 	// This is the same node list the "done" event broadcasts to the browser.
 	traceJSON, _ := json.Marshal(graph.Snapshot())
 
 	return &SyncResult{
-		Verdict:  verdict,
+		Outcome:  outcome,
 		Actions:  actions,
 		Data:     data,
 		Gaps:     graph.Gaps,

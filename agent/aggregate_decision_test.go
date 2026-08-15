@@ -21,7 +21,7 @@ func TestDecideAutoAggMode(t *testing.T) {
 	}{
 		{"compute always aggregates", true, false, false, false, nil, 1},
 		{"complex + evidence → reasoning synthesis", false, true, true, false, nil, 2},
-		{"complex + NO evidence → reflector's honest verdict", false, true, false, false, nil, 0},
+		{"complex + NO evidence → reflector's honest outcome", false, true, false, false, nil, 0},
 		{"simple + reflector wants it → aggregate", false, false, true, false, &yes, 2},
 		{"simple + reflector done → skip", false, false, true, false, &no, 0},
 		{"simple + reflector nil → skip", false, false, true, false, nil, 0},

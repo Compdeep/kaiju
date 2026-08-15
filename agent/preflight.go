@@ -215,7 +215,7 @@ func (a *Agent) classifyInvestigate(ctx context.Context, alertID, query string, 
 	// what to classify" signal.
 	if priorContext := lastAssistantMessage(history); priorContext != "" {
 		// Generous truncation — 1500 chars is enough to fit a typical
-		// aggregator verdict including its project-type description.
+		// aggregator outcome including its project-type description.
 		sysPrompt += fmt.Sprintf(preflightPriorContextTemplate, Text.TruncateLog(priorContext, 1500))
 		log.Printf("[dag] preflight: injected prior context (%d chars truncated to 1500)", len(priorContext))
 	}

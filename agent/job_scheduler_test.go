@@ -22,7 +22,7 @@ func controllableExec() (exec func(context.Context, Trigger) (*SyncResult, error
 		startedCh <- tr.AlertID
 		select {
 		case <-gate:
-			return &SyncResult{Verdict: tr.AlertID}, nil
+			return &SyncResult{Outcome: tr.AlertID}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}

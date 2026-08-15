@@ -68,10 +68,10 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	if mayEscalate && a.routeQuery(ctx, t.AlertID, t.Query, t.History) == "agent" {
 		// Chat answers can be long. Force the aggregator (agg_mode=2, reasoning
 		// lane, full synthesis budget) so a reflection-concluded run doesn't hand
-		// back the 1024-token-capped reflection verdict truncated mid-sentence.
+		// back the 1024-token-capped reflection outcome truncated mid-sentence.
 		t.Base.AggMode = 2
-		verdict, nodes, llmCalls, err := a.RunAgentTask(ctx, t.Base, t.Query)
-		return ChatResult{Content: verdict, Nodes: nodes, LLMCalls: llmCalls}, err
+		outcome, nodes, llmCalls, err := a.RunAgentTask(ctx, t.Base, t.Query)
+		return ChatResult{Content: outcome, Nodes: nodes, LLMCalls: llmCalls}, err
 	}
 	// Tool-less conversation.
 	return a.Converse(ctx, t)
@@ -102,7 +102,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		llm.AttachImages(messages, t.Images)
 	}
 
-	// One completion, streamed token-by-token to the frontend as verdict events
+	// One completion, streamed token-by-token to the frontend as outcome events
 	// (the same channel the agent lane streams on). With no tools in play, no
 	// tool-call JSON can ever reach the stream.
 	res := ChatResult{LLMCalls: 1}
@@ -113,7 +113,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		MaxTokens:   1024,
 	}, func(chunk, kind string) {
 		if t.SessionID != "" {
-			evType := "verdict"
+			evType := "outcome"
 			if kind == "reasoning" {
 				evType = "reasoning"
 			}

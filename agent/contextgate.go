@@ -1050,7 +1050,7 @@ func (s *nodeReturnsSource) Load(g *Graph, t *Trigger, a *Agent, params map[stri
 		if len(failed) == 0 {
 			return "", nil
 		}
-		sb.WriteString("The following steps FAILED. Address these — either investigate to find a fix, or conclude with an honest verdict.\n\n")
+		sb.WriteString("The following steps FAILED. Address these — either investigate to find a fix, or conclude with an honest outcome.\n\n")
 		for _, f := range failed {
 			if len(typeSet) > 0 && !typeSet[f.ToolName] {
 				continue

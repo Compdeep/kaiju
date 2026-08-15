@@ -10,7 +10,7 @@ import (
 func TestARefusalReachesTheModelAsAReason(t *testing.T) {
 	a := &Agent{allowToolFn: func(_ context.Context, req ToolCallRequest) (bool, string) {
 		if req.Tool == "create_incident" {
-			return false, "incidents open from the finished verdict, not this tool"
+			return false, "incidents open from the finished outcome, not this tool"
 		}
 		return true, ""
 	}}
@@ -19,7 +19,7 @@ func TestARefusalReachesTheModelAsAReason(t *testing.T) {
 	if allow {
 		t.Fatal("the call was allowed")
 	}
-	if !strings.Contains(reason, "finished verdict") {
+	if !strings.Contains(reason, "finished outcome") {
 		t.Errorf("reason = %q, want the application's own words", reason)
 	}
 

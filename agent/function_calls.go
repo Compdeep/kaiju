@@ -91,13 +91,13 @@ func reflectorToolDef() llm.ToolDef {
 						"type": "string",
 						"description": "Only if replan: the concrete next move. SUCCESS lead → e.g. 'fetch the 3 URLs the searches surfaced'. FAILURE to fix → describe the failure with exact error text, file paths, module names (the executive will plan a debug step to diagnose + fix it). Name the move, not the tool call."
 					},
-					"verdict": {
+					"outcome": {
 						"type": "string",
 						"description": "Only if conclude: final answer for the user."
 					},
 					"aggregate": {
 						"type": "boolean",
-						"description": "Only if conclude: whether the aggregator should run on the verdict."
+						"description": "Only if conclude: whether the aggregator should run on the outcome."
 					}
 				},
 				"required": ["decision", "summary"]

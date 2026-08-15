@@ -116,13 +116,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 }
 
 // execResult builds the common success response shared by every lane (chat,
-// vision, executive): the verdict, run counts, token totals (in/out split read
+// vision, executive): the outcome, run counts, token totals (in/out split read
 // from the ctx accumulator), and elapsed time. Callers that carry extra fields
 // (the executive's Actions/Gaps) set them on the returned value before sending.
 // Single source so the response shape can't drift across lanes.
-func execResult(ctx context.Context, alertID, verdict string, nodes, llmCalls int, total int64, elapsed time.Duration) ExecuteResponse {
+func execResult(ctx context.Context, alertID, outcome string, nodes, llmCalls int, total int64, elapsed time.Duration) ExecuteResponse {
 	return ExecuteResponse{
-		Verdict:    verdict,
+		Outcome:    outcome,
 		DAGID:      alertID,
 		Nodes:      nodes,
 		LLMCalls:   llmCalls,
@@ -133,10 +133,10 @@ func execResult(ctx context.Context, alertID, verdict string, nodes, llmCalls in
 	}
 }
 
-// failureVerdict turns a run error into a user-facing message. Contract: a query
+// failureOutcome turns a run error into a user-facing message. Contract: a query
 // that cannot complete ALWAYS reports that it failed — never a silent empty — so
 // the user knows the run ended and that nothing was fabricated.
-func failureVerdict(err error) string {
+func failureOutcome(err error) string {
 	switch {
 	case errors.Is(err, context.Canceled):
 		return "This request could not be completed — it was cut off before an answer was ready (a timeout, or the connection dropped). Nothing was fabricated. Please try again; a narrower request will finish faster."
@@ -147,9 +147,9 @@ func failureVerdict(err error) string {
 	}
 }
 
-// emptyVerdictNotice is returned when a run finishes with no verdict at all — the
+// emptyOutcomeNotice is returned when a run finishes with no outcome at all — the
 // run technically completed but produced nothing, which still must be reported.
-const emptyVerdictNotice = "The request finished but produced no answer — nothing usable was gathered. Nothing was fabricated; please try rephrasing or narrowing the request."
+const emptyOutcomeNotice = "The request finished but produced no answer — nothing usable was gathered. Nothing was fabricated; please try rephrasing or narrowing the request."
 
 // stripAttachmentBlock removes the "[attached files] … [query]" preamble the
 // frontend prepends when files are attached, returning just the user's typed
@@ -276,7 +276,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	//   Keeping memory out of the execution layer means the only memory
 	//   reads are at the chat input (here, attested by the authenticated
 	//   user) and the only memory writes are at the chat output (the
-	//   aggregator's verdict, also a single attested step).
+	//   aggregator's outcome, also a single attested step).
 	//
 	// If you need memory inside a node, you are doing something wrong.
 	// Reach out to the architecture before adding any memory access path.
@@ -423,11 +423,11 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		elapsed := time.Since(start)
 		if cerr != nil {
 			log.Printf("[api] chat execute error (%s): %v — reporting failure to user", trigger.AlertID, cerr)
-			verdict := failureVerdict(cerr)
+			outcome := failureOutcome(cerr)
 			if memMgr != nil && req.SessionID != "" {
-				memMgr.StoreMessage(req.SessionID, "assistant", verdict)
+				memMgr.StoreMessage(req.SessionID, "assistant", outcome)
 			}
-			jsonResponse(w, execResult(ctx, trigger.AlertID, verdict, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
+			jsonResponse(w, execResult(ctx, trigger.AlertID, outcome, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 			return
 		}
 		if memMgr != nil && res.Content != "" {
@@ -461,11 +461,11 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			elapsed := time.Since(start)
 			if verr != nil {
 				log.Printf("[api] vision execute error (%s): %v — reporting failure to user", trigger.AlertID, verr)
-				verdict := failureVerdict(verr)
+				outcome := failureOutcome(verr)
 				if memMgr != nil && req.SessionID != "" {
-					memMgr.StoreMessage(req.SessionID, "assistant", verdict)
+					memMgr.StoreMessage(req.SessionID, "assistant", outcome)
 				}
-				jsonResponse(w, execResult(ctx, trigger.AlertID, verdict, 0, 1, tokens.RunTotal(ctx), elapsed), http.StatusOK)
+				jsonResponse(w, execResult(ctx, trigger.AlertID, outcome, 0, 1, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 				return
 			}
 			if memMgr != nil && content != "" {
@@ -486,25 +486,25 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		// (so it shows even if the client already disconnected) and return it as
 		// the answer rather than a bare 500.
 		log.Printf("[api] execute error (%s): %v — reporting failure to user", trigger.AlertID, err)
-		verdict := failureVerdict(err)
+		outcome := failureOutcome(err)
 		if memMgr != nil && req.SessionID != "" {
-			memMgr.StoreMessage(req.SessionID, "assistant", verdict)
+			memMgr.StoreMessage(req.SessionID, "assistant", outcome)
 		}
-		jsonResponse(w, execResult(ctx, trigger.AlertID, verdict, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
+		jsonResponse(w, execResult(ctx, trigger.AlertID, outcome, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 		return
 	}
 
-	// A completed run with an empty verdict still must report something — never a
+	// A completed run with an empty outcome still must report something — never a
 	// blank answer. Substitute an explicit "produced no answer" notice.
-	verdict := result.Verdict
-	if strings.TrimSpace(verdict) == "" {
-		log.Printf("[api] empty verdict (%s) — substituting failure notice", trigger.AlertID)
-		verdict = emptyVerdictNotice
+	outcome := result.Outcome
+	if strings.TrimSpace(outcome) == "" {
+		log.Printf("[api] empty outcome (%s) — substituting failure notice", trigger.AlertID)
+		outcome = emptyOutcomeNotice
 	}
 
 	// Store assistant response and auto-compact
 	if memMgr != nil {
-		memMgr.StoreMessage(req.SessionID, "assistant", verdict)
+		memMgr.StoreMessage(req.SessionID, "assistant", outcome)
 		if shouldCompact, _ := memMgr.ShouldCompact(req.SessionID); shouldCompact {
 			go memMgr.Compact(context.Background(), req.SessionID)
 		}
@@ -528,7 +528,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		apiActions = append(apiActions, ActionInfo{Tool: a.Tool, Params: a.Params})
 	}
 
-	resp := execResult(ctx, trigger.AlertID, verdict, result.Nodes, result.LLMCalls, tokens.RunTotal(ctx), elapsed)
+	resp := execResult(ctx, trigger.AlertID, outcome, result.Nodes, result.LLMCalls, tokens.RunTotal(ctx), elapsed)
 	resp.Actions = apiActions
 	resp.Gaps = result.Gaps
 	jsonResponse(w, resp, http.StatusOK)
@@ -582,7 +582,7 @@ func (a *API) handleStop(w http.ResponseWriter, r *http.Request) {
 /*
  * handleUsage returns in-memory LLM token-usage tallies since process start,
  * broken down per (principal, category). In-memory only — resets on restart.
- * Streamed calls (aggregator/verdict) are not yet counted (see llm.CompleteStream).
+ * Streamed calls (aggregator/outcome) are not yet counted (see llm.CompleteStream).
  * param: w - HTTP response writer
  */
 func (a *API) handleUsage(w http.ResponseWriter, _ *http.Request) {

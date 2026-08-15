@@ -80,6 +80,14 @@ func Compiled() []string {
 	return names
 }
 
+// Add records a compiled-in plugin. Call it from an init() in the plugin's
+// build-tagged file so the default build never links the plugin in.
+func Add(p Plugin) {
+	mu.Lock()
+	defer mu.Unlock()
+	registered[p.Name()] = p
+}
+
 // Get returns a compiled-in plugin by name (for runtime activation).
 func Get(name string) (Plugin, bool) {
 	mu.Lock()

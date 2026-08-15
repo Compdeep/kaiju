@@ -1,7 +1,5 @@
 package cli
 
-import "fmt"
-
 // ANSI escape codes
 const (
 	reset     = "\033[0m"

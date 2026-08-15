@@ -554,6 +554,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			a.gate.Audit(gates.AuditEntry{
 				Tool:      toolName,
 				TriggerID: triggerID,
+				RunID:     actionRunID(graph, triggerID),
 				Error:     err.Error(),
 			})
 			return "", nil, err
@@ -576,6 +577,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		a.gate.Audit(gates.AuditEntry{
 			Tool:      toolName,
 			TriggerID: triggerID,
+			RunID:     actionRunID(graph, triggerID),
 			Error:     err.Error(),
 			Intent:    int(intent),
 			Impact:    impact,
@@ -589,6 +591,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			a.gate.Audit(gates.AuditEntry{
 				Tool:      toolName,
 				TriggerID: triggerID,
+				RunID:     actionRunID(graph, triggerID),
 				Error:     err.Error(),
 				Intent:    int(intent),
 				Impact:    impact,
@@ -673,6 +676,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		Tool:      toolName,
 		Params:    params,
 		TriggerID: triggerID,
+		RunID:     actionRunID(graph, triggerID),
 		Intent:    int(intent),
 		Impact:    impact,
 	}
@@ -698,7 +702,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			ActionType: toolName,
 			Params:     paramsJSON,
 			Result:     Text.TruncateLog(result, 500),
-			RunID:      runIDOf(graph, triggerID),
+			RunID:      actionRunID(graph, triggerID),
 			Intent:     int(intent),
 			Impact:     impact,
 		})

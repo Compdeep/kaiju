@@ -181,14 +181,18 @@ func (n *Node) IsTerminal() bool {
  * desc: Serializable event sent to SSE subscribers for live dashboard updates.
  */
 type DAGEvent struct {
-	Type      string      `json:"type"` // "start", "node", "add", "done", "outcome"
-	NodeID    string      `json:"id,omitempty"`
-	Node      *NodeInfo   `json:"node,omitempty"`       // for "node" and "add"
-	Nodes     []*NodeInfo `json:"nodes,omitempty"`      // for "start"/"done" (full snapshot)
-	TriggerID string      `json:"trigger_id,omitempty"` // for "start"
-	SessionID string      `json:"session_id,omitempty"` // session this event belongs to (for frontend routing)
-	Targets   []string    `json:"targets,omitempty"`    // for "start": the machines this run concerns, so a frontend can show each as busy
-	Text      string      `json:"text,omitempty"`       // for "outcome" (streaming token chunk)
+	Type   string      `json:"type"` // "start", "node", "add", "done", "outcome"
+	NodeID string      `json:"id,omitempty"`
+	Node   *NodeInfo   `json:"node,omitempty"`  // for "node" and "add"
+	Nodes  []*NodeInfo `json:"nodes,omitempty"` // for "start"/"done" (full snapshot)
+	// TriggerID is the caller's reference, shown to a person. RunID is what a
+	// consumer groups a run's events by: one reference can produce several
+	// runs, and grouping by it draws the second run into the first one's view.
+	TriggerID string   `json:"trigger_id,omitempty"` // for "start"
+	RunID     string   `json:"run_id,omitempty"`
+	SessionID string   `json:"session_id,omitempty"` // session this event belongs to (for frontend routing)
+	Targets   []string `json:"targets,omitempty"`    // for "start": the machines this run concerns, so a frontend can show each as busy
+	Text      string   `json:"text,omitempty"`       // for "outcome" (streaming token chunk)
 }
 
 /*

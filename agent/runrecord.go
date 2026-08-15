@@ -121,18 +121,18 @@ func newRunID(correlationID string) string {
 }
 
 /*
- * runIDOf returns the run an action belongs to.
+ * actionRunID returns the run an action belongs to.
  * desc: Falls back to the correlation id when there is no graph — a tool call
  *       made outside a run still records something to group by.
  * param: graph - the run, or nil.
  * param: correlationID - the fallback.
  * return: the run identifier.
  */
-func runIDOf(graph *Graph, correlationID string) string {
+func actionRunID(graph *Graph, triggerID string) string {
 	if graph != nil && graph.RunID != "" {
 		return graph.RunID
 	}
-	return correlationID
+	return triggerID
 }
 
 // Writing to the application's store.

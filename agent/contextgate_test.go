@@ -422,8 +422,6 @@ func TestContainsAnyCI(t *testing.T) {
 	}
 }
 
-// ── specNames helper ─────────────────────────────────────────────────────────
-
 func TestWriteLLMTrace_Disabled_NoOp(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KAIJU_PROMPT_DEBUG", "")
@@ -527,24 +525,6 @@ func TestWriteLLMTrace_Error_RecordsError(t *testing.T) {
 	}
 	if !strings.Contains(content, "timed out") {
 		t.Errorf("expected error message, got:\n%s", content)
-	}
-}
-
-func TestSpecNames(t *testing.T) {
-	specs := []SourceSpec{
-		{Name: "a"},
-		{Name: "b"},
-		{Name: "c"},
-	}
-	got := specNames(specs)
-	want := []string{"a", "b", "c"}
-	if len(got) != len(want) {
-		t.Fatalf("expected %v, got %v", want, got)
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Errorf("at %d: expected %q, got %q", i, want[i], got[i])
-		}
 	}
 }
 

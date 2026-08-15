@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -226,20 +225,4 @@ func InstalledSlug(skillDir string) string {
 		return ""
 	}
 	return meta.Slug
-}
-
-/*
- * CheckBins verifies that required binaries are available on PATH.
- * desc: Iterates over the given binary names and checks each with exec.LookPath.
- * param: bins - list of binary names to check
- * return: a list of binary names that were not found on PATH
- */
-func CheckBins(bins []string) []string {
-	var missing []string
-	for _, bin := range bins {
-		if _, err := exec.LookPath(bin); err != nil {
-			missing = append(missing, bin)
-		}
-	}
-	return missing
 }

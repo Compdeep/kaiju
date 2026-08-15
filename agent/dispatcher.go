@@ -507,15 +507,6 @@ func dotPrefix(s string) string {
 }
 
 /*
- * extractJSONField extracts a value from a JSON string by dot-path.
- * desc: Supports nested objects ("host.name") and arrays ("ips.0").
- *       Returns the value as a string (primitives as-is, objects/arrays as JSON).
- * param: jsonStr - the JSON string to parse.
- * param: fieldPath - dot-separated path to the desired field.
- * return: the extracted value as a string, or error.
- */
-
-/*
  * executeToolNode runs a tool through the IGX gate pipeline.
  * desc: Performs scope check, rate limit check, IGX triad check (impact <=
  *       min(intent, clearance, scope_cap)), optional external clearance check,

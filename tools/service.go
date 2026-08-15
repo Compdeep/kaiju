@@ -855,11 +855,3 @@ func tailFile(path string, n int) string {
 func (s *Service) OutputSchema() json.RawMessage {
 	return toolapi.EnvelopeSchema("")
 }
-
-func toJSON(v any) string {
-	// Every service action returns through here — wrap the payload in the uniform
-	// tool envelope. The action-specific fields (status, name, pid, services, …)
-	// ride in Data, so field access and the scheduler's health-check graft read
-	// them from there.
-	return toolapi.ToolOK("service", "", v).JSON()
-}

@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // looksLikeFailure checks if a validator's output indicates failure despite exit code 0.
@@ -221,19 +219,6 @@ func repairUnclosed(s string) string {
 	return s
 }
 
-// flexParseInt parses a json.RawMessage as int, accepting both 0 and "0".
-func flexParseInt(data json.RawMessage) (int, error) {
-	var i int
-	if err := json.Unmarshal(data, &i); err == nil {
-		return i, nil
-	}
-	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
-		return strconv.Atoi(strings.TrimSpace(s))
-	}
-	return 0, fmt.Errorf("cannot parse %s as int", string(data))
-}
-
 // ── Interfaces: shared API interfaces and schema across turns ─────────────
 //
 // Single file at workspace/blueprints/interfaces.json, keyed by session ID.
@@ -376,17 +361,6 @@ func readWorklog(workspace, sessionID string, maxLines int) string {
 		lines = lines[len(lines)-maxLines:]
 	}
 	return strings.Join(lines, "\n")
-}
-
-/*
- * resetWorklog clears the worklog for a given session.
- * desc: Removes the session's worklog file so a subsequent readWorklog returns
- *       empty. Only the target session is affected; a missing file is a no-op.
- */
-func resetWorklog(workspace, sessionID string) {
-	if err := os.Remove(worklogPath(workspace, sessionID)); err != nil && !os.IsNotExist(err) {
-		log.Printf("[worklog] reset %s: %v", sessionID, err)
-	}
 }
 
 /*
@@ -1382,22 +1356,6 @@ func FormatFunctionMapForPrompt(fm FunctionMap, maxBytes int) string {
 	return sb.String()
 }
 
-// FormatFileFunctionMap renders declarations for a single file.
-func FormatFileFunctionMap(decls []FuncDecl) string {
-	if len(decls) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	for _, d := range decls {
-		if d.EndLine > 0 {
-			sb.WriteString(fmt.Sprintf("- `%s` (lines %d-%d):\n```\n%s\n```\n", d.Name, d.StartLine, d.EndLine, d.Context))
-		} else {
-			sb.WriteString(fmt.Sprintf("- `%s` (line %d):\n```\n%s\n```\n", d.Name, d.StartLine, d.Context))
-		}
-	}
-	return sb.String()
-}
-
 // ── Line-Range Splicer ─────────────────────────────────────────────────────
 
 // SpliceFileEdits applies edits to file content. Edits are sorted bottom-to-top
@@ -1458,41 +1416,6 @@ func validateStructural(filePath, content string) error {
 		}
 	}
 	return nil
-}
-
-// FindCallSites searches the workspace for references to a function name.
-// Returns FuncDecl entries for functions that CONTAIN calls to the target.
-// Uses the pre-computed FunctionMap to determine which function contains each call.
-func FindCallSites(workspace string, funcName string, fm FunctionMap) []FuncDecl {
-	var results []FuncDecl
-	searchPattern := funcName + "("
-
-	for relPath, decls := range fm {
-		fullPath := filepath.Join(workspace, relPath)
-		data, err := os.ReadFile(fullPath)
-		if err != nil {
-			continue
-		}
-		lines := strings.Split(string(data), "\n")
-
-		for i, line := range lines {
-			if !strings.Contains(line, searchPattern) {
-				continue
-			}
-			lineNo := i + 1 // 1-based
-			// Find which function contains this call
-			for _, d := range decls {
-				if d.Name == funcName {
-					continue // skip the function's own declaration
-				}
-				if d.EndLine > 0 && lineNo >= d.StartLine && lineNo <= d.EndLine {
-					results = append(results, d)
-					break
-				}
-			}
-		}
-	}
-	return results
 }
 
 // ── Workspace Scanning ─────────────────────────────────────────────────────
@@ -1625,20 +1548,6 @@ func scanWorkspaceDeep(root string, maxDepth int) string {
 	})
 
 	return sb.String()
-}
-
-func extractJSONField(jsonStr, fieldPath string) (string, error) {
-	v, err := extractJSONFieldAny(jsonStr, fieldPath)
-	if err != nil {
-		return "", err
-	}
-	switch x := v.(type) {
-	case string:
-		return x, nil
-	default:
-		b, _ := json.Marshal(x)
-		return string(b), nil
-	}
 }
 
 // extractJSONFieldAny is the typed cousin of extractJSONField — instead

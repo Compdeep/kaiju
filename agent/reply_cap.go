@@ -74,13 +74,3 @@ func resolvedModel(laneModel string, c *llm.Client) string {
 	}
 	return c.Model()
 }
-
-// promptTokens estimates the size of a message list at four characters per
-// token. Tool schemas are not counted; promptHeadroom stands in for them.
-func promptTokens(messages []llm.Message) int {
-	chars := 0
-	for _, m := range messages {
-		chars += len(m.Content)
-	}
-	return chars / 4
-}

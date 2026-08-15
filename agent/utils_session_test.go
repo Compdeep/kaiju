@@ -144,37 +144,6 @@ func TestWorklog_NonExistent_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// ── resetWorklog ─────────────────────────────────────────────────────────────
-
-func TestResetWorklog_TruncatesSessionFile(t *testing.T) {
-	dir := t.TempDir()
-	sid := "test-session"
-	appendWorklog(dir, sid, "tag", "OK", "before reset")
-	resetWorklog(dir, sid)
-
-	wl := readWorklog(dir, sid, 10)
-	if wl != "" {
-		t.Errorf("expected empty after reset, got %q", wl)
-	}
-}
-
-func TestResetWorklog_OnlyAffectsTargetSession(t *testing.T) {
-	dir := t.TempDir()
-	appendWorklog(dir, "session-A", "tag", "OK", "session A entry")
-	appendWorklog(dir, "session-B", "tag", "OK", "session B entry")
-
-	resetWorklog(dir, "session-A")
-
-	a := readWorklog(dir, "session-A", 10)
-	b := readWorklog(dir, "session-B", 10)
-	if a != "" {
-		t.Errorf("session A should be empty after reset: %q", a)
-	}
-	if !strings.Contains(b, "session B entry") {
-		t.Errorf("session B should be untouched: %q", b)
-	}
-}
-
 // ── Blueprint session-scoping ────────────────────────────────────────────────
 
 func TestLatestBlueprintPath_SessionScoped(t *testing.T) {

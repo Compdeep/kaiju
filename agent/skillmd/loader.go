@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
@@ -116,13 +115,4 @@ func LoadFromDirs(dirs []string, reg *toolapi.Registry) ([]*SkillMD, error) {
 	}
 
 	return result, nil
-}
-
-// userHomeDir returns the user's home directory, accounting for platform differences.
-func userHomeDir() string {
-	if runtime.GOOS == "windows" {
-		return os.Getenv("USERPROFILE")
-	}
-	home, _ := os.UserHomeDir()
-	return home
 }

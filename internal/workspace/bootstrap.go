@@ -66,17 +66,6 @@ func bootstrap(workspaceDir string, cliMode bool) error {
 	return nil
 }
 
-/*
- * IsBootstrapped checks if the workspace has been initialized.
- * desc: Returns true if AGENTS.md exists in the workspace directory.
- * param: workspaceDir - the root workspace directory to check
- * return: true if the workspace contains the bootstrap marker file
- */
-func IsBootstrapped(workspaceDir string) bool {
-	_, err := os.Stat(filepath.Join(workspaceDir, "AGENTS.md"))
-	return err == nil
-}
-
 const agentsMD = `# Agent Instructions
 
 Operating instructions for Kaiju. Edit this file to customize how your agent behaves.

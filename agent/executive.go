@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -714,7 +713,15 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	sysPromptN := a.executiveSystemPrompt(ctx, graph, relevant, dagMode, intent, toolIndex)
 	messages := BuildMessagesWithHistory(sysPromptN, userQuery, executiveHistory)
 
-	startedN := time.Now()
+	ctx = withTrace(ctx, TraceID{
+		NodeID:   "executive",
+		NodeType: "executive_native",
+		Tag:      "plan",
+		Input: map[string]string{
+			"dag_mode": dagMode,
+			"intent":   intent,
+		},
+	})
 	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
 		Messages: messages,
 		Tools:    []llm.ToolDef{a.executiveToolDef()},
@@ -727,42 +734,14 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		MaxTokens:   a.planMaxTokens(ctx),
 	})
 
-	traceN := LLMTrace{
-		RunID:    runIDFrom(ctx),
-		NodeID:   "executive",
-		NodeType: "executive_native",
-		Tag:      "plan",
-		Started:  startedN,
-		Input: map[string]string{
-			"dag_mode": dagMode,
-			"intent":   intent,
-		},
-		System:    sysPromptN,
-		User:      userQuery,
-		LatencyMS: time.Since(startedN).Milliseconds(),
-	}
-
 	if err != nil {
-		traceN.Err = err.Error()
-		WriteLLMTrace(traceN)
 		return nil, fmt.Errorf("planner LLM call (native): %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
-		traceN.Err = "no choices"
-		WriteLLMTrace(traceN)
+		traceFault(ctx, "no choices")
 		return nil, fmt.Errorf("planner LLM returned no choices")
 	}
-
-	// Capture output text or tool call args for the trace.
-	if len(resp.Choices[0].Message.ToolCalls) > 0 {
-		traceN.Output = resp.Choices[0].Message.ToolCalls[0].Function.Arguments
-	} else {
-		traceN.Output = resp.Choices[0].Message.Content
-	}
-	traceN.TokensIn = resp.Usage.PromptTokens
-	traceN.TokensOut = resp.Usage.CompletionTokens
-	WriteLLMTrace(traceN)
 
 	choice := resp.Choices[0]
 
@@ -784,7 +763,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			Content: "Your previous plan was cut off before it finished — it ran past the reply limit. " +
 				"Call plan() again with fewer, larger steps, and shorter parameter values.",
 		})
-		retryResp, retryErr := a.completeHeavy(ctx, &llm.ChatRequest{
+		retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_shorter"), &llm.ChatRequest{
 			Messages:    shorter,
 			Tools:       []llm.ToolDef{a.executiveToolDef()},
 			ToolChoice:  llm.ForceToolChoice("plan"),
@@ -817,7 +796,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
 				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: fmt.Sprintf("Error: %v. Fix the JSON and call plan() again. Remember: goal, mode, query go INSIDE params, not at the step level.", err)},
 			)
-			retryResp, retryErr := a.completeHeavyChecked(ctx, &llm.ChatRequest{
+			retryResp, retryErr := a.completeHeavyChecked(retracing(ctx, "plan_reparse"), &llm.ChatRequest{
 				Messages:    retryMessages,
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
@@ -870,7 +849,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
 				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: correction},
 			)
-			replanResp, replanErr := a.completeHeavyChecked(ctx, &llm.ChatRequest{
+			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
 				Messages:    replanMessages,
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
@@ -942,7 +921,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: curToolCalls},
 				llm.Message{Role: "tool", ToolCallID: curToolCallID, Name: "plan", Content: correction},
 			)
-			replanResp, replanErr := a.completeHeavyChecked(ctx, &llm.ChatRequest{
+			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
 				Messages:    replanMessages,
 				Tools:       []llm.ToolDef{a.executiveToolDef()},
 				ToolChoice:  llm.ForceToolChoice("plan"),

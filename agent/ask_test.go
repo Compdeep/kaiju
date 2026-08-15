@@ -2,7 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -178,5 +182,137 @@ func TestTheNamedDoorsAreTheSameDoor(t *testing.T) {
 		if req.MaxTokens != 512 {
 			t.Errorf("%s left MaxTokens at %d; it no longer goes through the door", c.name, req.MaxTokens)
 		}
+	}
+}
+
+// ── the stated budget ────────────────────────────────────────────────────────
+
+// The model is never shown max_tokens — the provider counts and stops. So a
+// model writes to its own sense of length and is cut wherever that lands. The
+// only channel is the prompt, and the only moment the number is final is after
+// the lane resolves and the cap settles.
+func TestTheModelIsToldTheBudgetItWillBeCutAt(t *testing.T) {
+	model := newStubModel(t, map[string]stubReply{"": {Content: "an answer"}})
+	a := agentOnStub(t, model)
+	a.executor.Limits(func(string) (int, int) { return 128000, 2048 })
+
+	req := &llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: "system", Content: "you are a helpful thing"},
+			{Role: "user", Content: "hello"},
+		},
+		MaxTokens: 8192,
+	}
+	if _, err := a.ask(context.Background(), Light, req); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+
+	if req.MaxTokens != 2048 {
+		t.Fatalf("MaxTokens = %d, want the model's 2048", req.MaxTokens)
+	}
+	if !strings.Contains(req.Messages[0].Content, "2048 tokens") {
+		t.Errorf("the system message does not state the budget:\n%s", req.Messages[0].Content)
+	}
+	if !strings.Contains(req.Messages[0].Content, "you are a helpful thing") {
+		t.Error("stating the budget replaced the prompt instead of extending it")
+	}
+	if req.Messages[1].Content != "hello" {
+		t.Error("the user message was edited; only the system message carries this")
+	}
+}
+
+// The number stated has to be the number enforced. A prompt saying 2048 while
+// the provider stops at 512 is worse than saying nothing.
+func TestTheStatedBudgetIsTheOneSent(t *testing.T) {
+	var sent struct {
+		MaxTokens int           `json:"max_tokens"`
+		Messages  []llm.Message `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	a := &Agent{llm: llm.NewClient(srv.URL, "", "some/model").Limits(limitsOf(128000, 700))}
+	_, err := a.ask(context.Background(), Heavy, &llm.ChatRequest{
+		Messages:  []llm.Message{{Role: "system", Content: "do the thing"}},
+		MaxTokens: 8192,
+	})
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if sent.MaxTokens != 700 {
+		t.Fatalf("max_tokens on the wire = %d, want 700", sent.MaxTokens)
+	}
+	if len(sent.Messages) == 0 || !strings.Contains(sent.Messages[0].Content, "700 tokens") {
+		t.Errorf("the prompt on the wire does not state 700:\n%+v", sent.Messages)
+	}
+}
+
+// The planner builds its retry from the same message slice as its first
+// attempt, so the line has to be recognised and not repeated.
+func TestTheBudgetIsStatedOnceHoweverOftenTheRequestIsSent(t *testing.T) {
+	model := newStubModel(t, map[string]stubReply{"": {Content: "an answer"}})
+	a := agentOnStub(t, model)
+	a.executor.Limits(func(string) (int, int) { return 128000, 2048 })
+
+	req := &llm.ChatRequest{
+		Messages:  []llm.Message{{Role: "system", Content: "you are a helpful thing"}},
+		MaxTokens: 8192,
+	}
+	for range 3 {
+		if _, err := a.ask(context.Background(), Light, req); err != nil {
+			t.Fatalf("ask: %v", err)
+		}
+	}
+	if n := strings.Count(req.Messages[0].Content, budgetMarker); n != 1 {
+		t.Errorf("the budget is stated %d times; a retry reuses the messages it was "+
+			"built from, so this has to be recognised rather than appended again", n)
+	}
+}
+
+// A caller that wants a token or two — a forced route() call takes 16 — gets no
+// sentence, because the sentence would be larger than the budget it describes.
+func TestASmallBudgetIsNotWorthStating(t *testing.T) {
+	model := newStubModel(t, map[string]stubReply{"": {Content: "chat"}})
+	a := agentOnStub(t, model)
+	a.executor.Limits(func(string) (int, int) { return 128000, 128000 })
+
+	req := &llm.ChatRequest{
+		Messages:  []llm.Message{{Role: "system", Content: "classify this"}},
+		MaxTokens: 16,
+	}
+	if _, err := a.ask(context.Background(), Route, req); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if strings.Contains(req.Messages[0].Content, budgetMarker) {
+		t.Errorf("a 16-token cap was stated in the prompt:\n%s", req.Messages[0].Content)
+	}
+	if req.MaxTokens != 16 {
+		t.Errorf("MaxTokens = %d; a small cap is still the caller's choice", req.MaxTokens)
+	}
+}
+
+// A request with no system message is a caller talking to the model directly,
+// and this package does not edit that.
+func TestARequestWithNoSystemMessageIsLeftAlone(t *testing.T) {
+	model := newStubModel(t, map[string]stubReply{"": {Content: "an answer"}})
+	a := agentOnStub(t, model)
+	a.executor.Limits(func(string) (int, int) { return 128000, 2048 })
+
+	req := &llm.ChatRequest{
+		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 8192,
+	}
+	if _, err := a.ask(context.Background(), Light, req); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if req.Messages[0].Content != "hello" {
+		t.Errorf("the user message was edited:\n%s", req.Messages[0].Content)
+	}
+	if req.MaxTokens != 2048 {
+		t.Errorf("MaxTokens = %d; the cap still applies", req.MaxTokens)
 	}
 }

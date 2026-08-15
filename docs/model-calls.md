@@ -28,10 +28,10 @@ Keeping those apart is why the door is thin.
               ┌───────────┴────────────┐
               │                        │
         capReply(req)             ReplyCap(req)
-        on every send             ask before sending
+        on every send             asked by the door, before sending
               │                        │
-              │                        └── for a caller that must state the
-              │                            budget in its prompt
+              │                        └── the number it then states in
+              │                            the system message
               ▼
    Complete · CompleteStream · CompleteStreamResp
               ▲
@@ -103,9 +103,37 @@ It never raises what the caller asked for, and never settles below `replyFloor`
 (256) — a prompt that nearly fills the window would otherwise compute a cap of a
 few tokens, which fails in a way that looks like the model refusing to answer.
 
-`ReplyCap(req)` answers what the cap will be without changing the request, for a
-caller that has to state the budget in its prompt. Asking and sending give the
-same answer: a number stated but not enforced is worse than saying nothing.
+`ReplyCap(req)` answers what the cap will be without changing the request.
+Asking and sending give the same answer: a number stated but not enforced is
+worse than saying nothing.
+
+## The stated budget
+
+`max_tokens` is not a hint. The model is never shown the number; the provider
+counts tokens as they are generated and stops at it, mid-sentence and
+mid-object. A model writing to its own sense of length is cut wherever that
+lands, and every stage that parses the reply then reports malformed input for an
+answer that was simply too long.
+
+The only channel to the model is the prompt, and the only moment the number is
+final is after the lane is resolved and the cap settled. So the door fixes the
+cap and appends one line to the system message:
+
+> Reply budget: about 2048 tokens. Generation stops there, so a longer reply is
+> cut off part-way and cannot be used. Plan the length before you start.
+
+Four rules, each with a reason:
+
+- **The number stated is the number sent.** The door sets `req.MaxTokens` to
+  `ReplyCap` before stating it, so `capReply` finds nothing left to lower.
+- **Once, however often the request is sent.** The planner builds its retry from
+  the same message slice as its first attempt, so the line is recognised by its
+  opening words rather than appended again.
+- **Not below 256 tokens.** A forced `route()` call takes 16; the sentence would
+  be larger than the budget it describes.
+- **The first system message only, and nothing without one.** A request with no
+  system message is a caller talking to the model directly, and this package
+  does not edit that.
 
 ## What is not here
 

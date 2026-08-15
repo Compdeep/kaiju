@@ -187,3 +187,67 @@ func TestARemoteRefusalIsAudited(t *testing.T) {
 		})
 	}
 }
+
+// An application keeping its own record gets every line the file gets.
+//
+// The engine writes a file whose name and format it chose, and an application
+// with a dashboard cannot read it. Without this the record a person looks at is
+// the one that stays empty.
+func TestTheApplicationSeesEveryAuditLine(t *testing.T) {
+	var got []gates.AuditEntry
+	gate, err := gates.NewGate(gates.GateConfig{
+		MaxTurns:  10,
+		RateLimit: 1000,
+		Clearance: stubClearance{level: 200},
+		Audit:     func(e gates.AuditEntry) { got = append(got, e) },
+	})
+	if err != nil {
+		t.Fatalf("new gate: %v", err)
+	}
+
+	gate.Audit(gates.AuditEntry{Tool: "counter", Target: "machine-b"})
+
+	if len(got) != 1 {
+		t.Fatalf("the application received %d lines, want 1", len(got))
+	}
+	if got[0].Tool != "counter" || got[0].Target != "machine-b" {
+		t.Errorf("entry = %+v; it arrives as the engine wrote it", got[0])
+	}
+	if got[0].Time == "" {
+		t.Error("Time is empty; the application gets the line after it is completed, not before")
+	}
+}
+
+// With no file configured the application still gets its lines. The two
+// destinations are independent, and an application that keeps a table and no
+// file is an ordinary case.
+func TestTheApplicationSeesLinesWithNoFile(t *testing.T) {
+	seen := 0
+	gate, err := gates.NewGate(gates.GateConfig{
+		Clearance: stubClearance{level: 200},
+		Audit:     func(gates.AuditEntry) { seen++ },
+	})
+	if err != nil {
+		t.Fatalf("new gate: %v", err)
+	}
+
+	gate.Audit(gates.AuditEntry{Tool: "counter"})
+
+	if seen != 1 {
+		t.Fatalf("the application received %d lines with no audit file, want 1", seen)
+	}
+}
+
+// A record that crashes loses its line and nothing else. The alternative is a
+// tool call failing because the writing of its audit line failed.
+func TestAnAuditWriteThatPanicsDoesNotStopTheRun(t *testing.T) {
+	gate, err := gates.NewGate(gates.GateConfig{
+		Clearance: stubClearance{level: 200},
+		Audit:     func(gates.AuditEntry) { panic("the database is gone") },
+	})
+	if err != nil {
+		t.Fatalf("new gate: %v", err)
+	}
+
+	gate.Audit(gates.AuditEntry{Tool: "counter"}) // must return
+}

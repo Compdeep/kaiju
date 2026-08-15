@@ -186,7 +186,7 @@ type ComputeConfig struct {
 // something is broken. An application that never sends work to another machine
 // leaves Remote and ValidateTarget unset, and targets are then inert.
 //
-// They were called Handlers, which described the first few — Remote lets
+// They were called Capabilities, which described the first few — Remote lets
 // the agent reach another machine, Store lets it record — and stopped fitting
 // as the struct grew: Admit and AllowTool take an ability away rather than
 // adding one, and DescribeTrigger supplies a sentence. What all thirteen have
@@ -234,6 +234,16 @@ type Handlers struct {
 	// Store records completed runs and the actions taken during them. Nil
 	// records nothing, and no behaviour depends on the writes succeeding.
 	Store EventStore
+
+	// Audit records one gate decision — every tool call, and every refusal of
+	// one, with the intent and impact it was judged at and the machine it ran
+	// on. The engine writes its own file regardless; this is the copy an
+	// application can put behind a dashboard, since it cannot read that file.
+	//
+	// Nil records nothing. Called after the decision, never before it, so
+	// nothing waits on the write and a write that fails loses its line and
+	// nothing else.
+	Audit AuditFunc
 
 	// Remote runs a step on the machine its Target names. Nil makes targets
 	// inert — every step runs locally, as before targets existed.

@@ -298,6 +298,10 @@ func New(cfg Config) (*Agent, error) {
 		RateLimit: cfg.RateLimit,
 		AuditDir:  agentDir,
 		Clearance: clr,
+		// Given here rather than in applyHandlers, because the gate is built
+		// before that runs and a gate cannot be told about it afterwards
+		// without a setter, which is what Config exists to replace.
+		Audit: cfg.Audit,
 	})
 	if err != nil {
 		return nil, err

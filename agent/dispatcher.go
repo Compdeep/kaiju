@@ -201,6 +201,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 				Tool:      n.ToolName,
 				Params:    n.Params,
 				Target:    n.Target,
+				Username:  usernameOf(scope),
 				TriggerID: triggerID,
 				RunID:     actionRunID(ctx, graph, triggerID),
 				Intent:    int(intent),
@@ -569,6 +570,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		if err := a.gate.CheckRateLimit(); err != nil {
 			a.audit(gates.AuditEntry{
 				Tool:      toolName,
+				Username:  usernameOf(scope),
 				TriggerID: triggerID,
 				RunID:     actionRunID(ctx, graph, triggerID),
 				Error:     err.Error(),
@@ -592,6 +594,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	if err := a.gate.CheckTriadWithScope(intent, toolName, impact, scopeCap); err != nil {
 		a.audit(gates.AuditEntry{
 			Tool:      toolName,
+			Username:  usernameOf(scope),
 			TriggerID: triggerID,
 			RunID:     actionRunID(ctx, graph, triggerID),
 			Error:     err.Error(),
@@ -606,6 +609,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		if err := a.checkClearance(ctx, toolName, params, usernameOf(scope)); err != nil {
 			a.audit(gates.AuditEntry{
 				Tool:      toolName,
+				Username:  usernameOf(scope),
 				TriggerID: triggerID,
 				RunID:     actionRunID(ctx, graph, triggerID),
 				Error:     err.Error(),
@@ -691,6 +695,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	entry := gates.AuditEntry{
 		Tool:      toolName,
 		Params:    params,
+		Username:  usernameOf(scope),
 		TriggerID: triggerID,
 		RunID:     actionRunID(ctx, graph, triggerID),
 		Intent:    int(intent),

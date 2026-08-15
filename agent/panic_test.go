@@ -168,6 +168,7 @@ func TestEveryCallIntoApplicationCodeIsGuarded(t *testing.T) {
 		{"Store", "runrecord.go", "storeRun"},
 		{"Store", "runrecord.go", "storeAction"},
 		{"Environment", "environment.go", "describeEnvironment"},
+		{"Audit", "runrecord.go", "audit"},
 	}
 
 	for _, c := range wrappers {

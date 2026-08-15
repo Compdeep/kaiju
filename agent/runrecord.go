@@ -153,6 +153,42 @@ func actionRunID(ctx context.Context, graph *Graph, triggerID string) string {
 // fields this package documents rather than a second shape of them.
 type AuditFunc func(gates.AuditEntry)
 
+/*
+ * audit records one gate decision, to the file and to the application.
+ * desc: Both, not either. The file is this package's, named and formatted by
+ *       it, and an application cannot read it; the application's copy is the
+ *       one a person looks at. Every gate decision goes through here, so
+ *       neither destination can be given a line the other was not.
+ *
+ *       A record that crashed loses its line and nothing else. A tool call
+ *       failing because the writing of its audit line failed is a worse trade
+ *       in both directions.
+ * param: e - the decision.
+ */
+func (a *Agent) audit(e gates.AuditEntry) {
+	if a == nil {
+		return
+	}
+	// Stamped here rather than left to the gate, which fills it on its own copy
+	// — the application would otherwise receive a line with no time on it while
+	// the file's line has one.
+	if e.Time == "" {
+		e.Time = time.Now().UTC().Format(time.RFC3339)
+	}
+	if a.gate != nil {
+		a.gate.Audit(e)
+	}
+	if a.auditFn == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[agent] the application's audit write panicked, the line is lost: %v", r)
+		}
+	}()
+	a.auditFn(e)
+}
+
 // Writing to the application's store.
 //
 // The store is the application's code and it is called at the end of a run, when

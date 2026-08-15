@@ -4,6 +4,8 @@ import (
 	"context"
 	"reflect"
 	"testing"
+
+	"github.com/Compdeep/kaiju/agent/gates"
 )
 
 // A handler supplied through Config has to reach the field that calls it.
@@ -63,6 +65,10 @@ var wiredTo = map[string]struct {
 			c.AllowTool = func(context.Context, ToolCallRequest) (bool, string) { return true, "" }
 		},
 		func(a *Agent) bool { return a.allowToolFn != nil },
+	},
+	"Audit": {
+		func(c *Handlers) { c.Audit = func(gates.AuditEntry) {} },
+		func(a *Agent) bool { return a.auditFn != nil },
 	},
 	"Clearance": {
 		func(c *Handlers) { c.Clearance = wiringClearance{} },

@@ -210,7 +210,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			} else {
 				e.Result = Text.TruncateLog(result, 500)
 			}
-			a.gate.Audit(e)
+			a.audit(e)
 		}
 
 		if err := scopeAllows(n.ToolName, scope); err != nil {
@@ -567,7 +567,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// Gate: rate limit (rank-0 tools exempt — reading local files should not be throttled)
 	if impact > 0 {
 		if err := a.gate.CheckRateLimit(); err != nil {
-			a.gate.Audit(gates.AuditEntry{
+			a.audit(gates.AuditEntry{
 				Tool:      toolName,
 				TriggerID: triggerID,
 				RunID:     actionRunID(ctx, graph, triggerID),
@@ -590,7 +590,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		}
 	}
 	if err := a.gate.CheckTriadWithScope(intent, toolName, impact, scopeCap); err != nil {
-		a.gate.Audit(gates.AuditEntry{
+		a.audit(gates.AuditEntry{
 			Tool:      toolName,
 			TriggerID: triggerID,
 			RunID:     actionRunID(ctx, graph, triggerID),
@@ -604,7 +604,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// Clearance: check external authorization endpoint (if configured)
 	if a.clearanceCheck != nil {
 		if err := a.checkClearance(ctx, toolName, params, usernameOf(scope)); err != nil {
-			a.gate.Audit(gates.AuditEntry{
+			a.audit(gates.AuditEntry{
 				Tool:      toolName,
 				TriggerID: triggerID,
 				RunID:     actionRunID(ctx, graph, triggerID),
@@ -701,7 +701,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	} else {
 		entry.Result = Text.TruncateLog(result, 500)
 	}
-	a.gate.Audit(entry)
+	a.audit(entry)
 
 	// Record side-effect actions in event store for audit trail
 	if a.eventStore != nil && impact > 0 {

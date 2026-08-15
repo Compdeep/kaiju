@@ -82,7 +82,6 @@ type Gate struct {
 	lockdown     bool            // when true, all impact>0 is blocked
 	auditFile    *os.File        // append-only NDJSON
 	auditEncoder *json.Encoder
-	audit        func(AuditEntry)
 }
 
 // GateConfig holds configuration for the safety gate.
@@ -91,15 +90,6 @@ type GateConfig struct {
 	RateLimit int             // max invocations per hour
 	AuditDir  string          // directory for audit.jsonl
 	Clearance ClearanceSource // nil = deny all (clearance 0)
-
-	// Audit, when set, is called with every entry as well as writing it to the
-	// file. For an application keeping its own record — a table behind a
-	// dashboard, typically, which has no way to read a file this package chose
-	// the name and format of.
-	//
-	// Nil writes the file alone, which is what an application with nowhere to
-	// put them should do.
-	Audit func(AuditEntry)
 }
 
 // NewGate creates a Gate with the given configuration.
@@ -108,7 +98,6 @@ func NewGate(cfg GateConfig) (*Gate, error) {
 		maxTurns:  cfg.MaxTurns,
 		rateLimit: cfg.RateLimit,
 		clearance: cfg.Clearance,
-		audit:     cfg.Audit,
 	}
 
 	if cfg.AuditDir != "" {
@@ -253,44 +242,19 @@ func (g *Gate) CheckTurns(n int) error {
 
 // ─── Audit + Config ─────────────────────────────────────────────────────────
 
-/*
- * Audit records one gate decision.
- * desc: To the file, and to the application's own record when it supplied one.
- *       Both, not either: the file is this package's and an application cannot
- *       read it, while the application's is the one a person looks at.
- * param: entry - the decision. Its Time is filled in when the caller left it
- *        empty, so every line carries one.
- */
+// Audit writes an entry to the audit log.
 func (g *Gate) Audit(entry AuditEntry) {
+	if g.auditEncoder == nil {
+		return
+	}
 	if entry.Time == "" {
 		entry.Time = time.Now().UTC().Format(time.RFC3339)
 	}
-
 	g.mu.Lock()
-	if g.auditEncoder != nil {
-		if err := g.auditEncoder.Encode(entry); err != nil {
-			log.Printf("[agent] audit write error: %v", err)
-		}
+	defer g.mu.Unlock()
+	if err := g.auditEncoder.Encode(entry); err != nil {
+		log.Printf("[agent] audit write error: %v", err)
 	}
-	sink := g.audit
-	g.mu.Unlock()
-
-	if sink == nil {
-		return
-	}
-	// Outside the lock, because this one writes to whatever the application
-	// keeps its record in — a database, most likely — and a slow write holding
-	// the gate's lock would stall every decision behind it.
-	//
-	// A record that crashed loses its line and nothing else. The alternative is
-	// that a tool call fails because the writing of its audit line failed,
-	// which is a worse trade in both directions.
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[agent] the application's audit write panicked, the line is lost: %v", r)
-		}
-	}()
-	sink(entry)
 }
 
 // Update modifies gate configuration at runtime (from dashboard).

@@ -195,17 +195,13 @@ func TestARemoteRefusalIsAudited(t *testing.T) {
 // the one that stays empty.
 func TestTheApplicationSeesEveryAuditLine(t *testing.T) {
 	var got []gates.AuditEntry
-	gate, err := gates.NewGate(gates.GateConfig{
-		MaxTurns:  10,
-		RateLimit: 1000,
-		Clearance: stubClearance{level: 200},
-		Audit:     func(e gates.AuditEntry) { got = append(got, e) },
-	})
-	if err != nil {
-		t.Fatalf("new gate: %v", err)
-	}
+	a, _ := auditedAgent(t, &refusalTool{})
+	a.auditFn = func(e gates.AuditEntry) { got = append(got, e) }
+	a.remoteExec = okExec{}
 
-	gate.Audit(gates.AuditEntry{Tool: "counter", Target: "machine-b"})
+	if c := fireOne(t, a, &Node{Type: NodeTool, ToolName: "counter", Target: "machine-b"}); c.Err != nil {
+		t.Fatalf("the step failed: %v", c.Err)
+	}
 
 	if len(got) != 1 {
 		t.Fatalf("the application received %d lines, want 1", len(got))
@@ -218,36 +214,32 @@ func TestTheApplicationSeesEveryAuditLine(t *testing.T) {
 	}
 }
 
-// With no file configured the application still gets its lines. The two
-// destinations are independent, and an application that keeps a table and no
-// file is an ordinary case.
-func TestTheApplicationSeesLinesWithNoFile(t *testing.T) {
+// Both destinations get the same lines. Neither can be given one the other was
+// not, because every decision goes through the one wrapper.
+func TestTheFileAndTheApplicationAgree(t *testing.T) {
 	seen := 0
-	gate, err := gates.NewGate(gates.GateConfig{
-		Clearance: stubClearance{level: 200},
-		Audit:     func(gates.AuditEntry) { seen++ },
-	})
-	if err != nil {
-		t.Fatalf("new gate: %v", err)
+	a, path := auditedAgent(t, &refusalTool{})
+	a.auditFn = func(gates.AuditEntry) { seen++ }
+	a.remoteExec = failingExec{}
+
+	fireOne(t, a, &Node{Type: NodeTool, ToolName: "counter", Target: "machine-b"})
+
+	if lines := auditLines(t, path); len(lines) != seen {
+		t.Errorf("the file has %d lines and the application saw %d", len(lines), seen)
 	}
-
-	gate.Audit(gates.AuditEntry{Tool: "counter"})
-
 	if seen != 1 {
-		t.Fatalf("the application received %d lines with no audit file, want 1", seen)
+		t.Errorf("the application saw %d lines, want 1", seen)
 	}
 }
 
 // A record that crashes loses its line and nothing else. The alternative is a
 // tool call failing because the writing of its audit line failed.
 func TestAnAuditWriteThatPanicsDoesNotStopTheRun(t *testing.T) {
-	gate, err := gates.NewGate(gates.GateConfig{
-		Clearance: stubClearance{level: 200},
-		Audit:     func(gates.AuditEntry) { panic("the database is gone") },
-	})
-	if err != nil {
-		t.Fatalf("new gate: %v", err)
-	}
+	a, _ := auditedAgent(t, &refusalTool{})
+	a.auditFn = func(gates.AuditEntry) { panic("the database is gone") }
+	a.remoteExec = okExec{}
 
-	gate.Audit(gates.AuditEntry{Tool: "counter"}) // must return
+	if c := fireOne(t, a, &Node{Type: NodeTool, ToolName: "counter", Target: "machine-b"}); c.Err != nil {
+		t.Fatalf("a panicking audit write failed the call: %v", c.Err)
+	}
 }

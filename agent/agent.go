@@ -188,6 +188,7 @@ type Agent struct {
 	// at all before this existed.
 	classifyStub func(query string, history []llm.Message) *PreflightResult
 	allowToolFn  AllowToolFunc   // nil = every call the gate allowed proceeds
+	auditFn      AuditFunc       // nil = gate decisions go to the file alone
 	remoteExec   RemoteExecutor  // nil = steps naming a machine run locally
 	targetValid  TargetValidator // nil = any non-empty target accepted
 	targetLister TargetLister    // nil = a run concerns only its own Target
@@ -298,10 +299,6 @@ func New(cfg Config) (*Agent, error) {
 		RateLimit: cfg.RateLimit,
 		AuditDir:  agentDir,
 		Clearance: clr,
-		// Given here rather than in applyHandlers, because the gate is built
-		// before that runs and a gate cannot be told about it afterwards
-		// without a setter, which is what Config exists to replace.
-		Audit: cfg.Audit,
 	})
 	if err != nil {
 		return nil, err

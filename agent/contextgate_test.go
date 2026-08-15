@@ -28,7 +28,7 @@ func newTestContextGate(t *testing.T) (*ContextGate, *Graph, *Trigger, string) {
 	graph.Preflight = &PreflightResult{ComputeMode: "deep"}
 	trigger := &Trigger{
 		Type:      "chat_query",
-		AlertID:   "test-alert",
+		ID:        "test-alert",
 		SessionID: "test-session",
 	}
 	agent := &Agent{
@@ -429,12 +429,12 @@ func TestWriteLLMTrace_Disabled_NoOp(t *testing.T) {
 	t.Setenv("KAIJU_PROMPT_DEBUG", "")
 	// Without env var, no file should be written.
 	WriteLLMTrace(LLMTrace{
-		AlertID:  "test-alert",
-		NodeID:   "n1",
-		NodeType: "test",
-		System:   "sys",
-		User:     "usr",
-		Output:   "out",
+		TriggerID: "test-alert",
+		NodeID:    "n1",
+		NodeType:  "test",
+		System:    "sys",
+		User:      "usr",
+		Output:    "out",
 	})
 	if _, err := os.Stat(filepath.Join("/tmp/kaiju-prompts", "test-alert.log")); err == nil {
 		// File may exist from prior runs. Just confirm we didn't write to dir.
@@ -444,24 +444,24 @@ func TestWriteLLMTrace_Disabled_NoOp(t *testing.T) {
 
 func TestWriteLLMTrace_Enabled_WritesFile(t *testing.T) {
 	t.Setenv("KAIJU_PROMPT_DEBUG", "1")
-	alertID := fmt.Sprintf("test-alert-%d", time.Now().UnixNano())
-	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", alertID+".log"))
+	triggerID := fmt.Sprintf("test-alert-%d", time.Now().UnixNano())
+	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 
 	WriteLLMTrace(LLMTrace{
-		AlertID:  alertID,
-		NodeID:   "n1",
-		NodeType: "test_node",
-		Tag:      "test_tag",
-		Model:    "test_model",
-		Started:  time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
-		Input:    map[string]string{"goal": "test goal", "query": "test query"},
-		System:   "system prompt content",
-		User:     "user prompt content",
-		Output:   "llm response",
-		TokensIn: 100, TokensOut: 50, LatencyMS: 1234,
+		TriggerID: triggerID,
+		NodeID:    "n1",
+		NodeType:  "test_node",
+		Tag:       "test_tag",
+		Model:     "test_model",
+		Started:   time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
+		Input:     map[string]string{"goal": "test goal", "query": "test query"},
+		System:    "system prompt content",
+		User:      "user prompt content",
+		Output:    "llm response",
+		TokensIn:  100, TokensOut: 50, LatencyMS: 1234,
 	})
 
-	data, err := os.ReadFile(filepath.Join("/tmp/kaiju-prompts", alertID+".log"))
+	data, err := os.ReadFile(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 	if err != nil {
 		t.Fatalf("expected log file to exist: %v", err)
 	}
@@ -490,13 +490,13 @@ func TestWriteLLMTrace_Enabled_WritesFile(t *testing.T) {
 
 func TestWriteLLMTrace_AppendsAcrossCalls(t *testing.T) {
 	t.Setenv("KAIJU_PROMPT_DEBUG", "1")
-	alertID := fmt.Sprintf("test-append-%d", time.Now().UnixNano())
-	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", alertID+".log"))
+	triggerID := fmt.Sprintf("test-append-%d", time.Now().UnixNano())
+	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 
-	WriteLLMTrace(LLMTrace{AlertID: alertID, NodeID: "n1", NodeType: "first", User: "first call"})
-	WriteLLMTrace(LLMTrace{AlertID: alertID, NodeID: "n2", NodeType: "second", User: "second call"})
+	WriteLLMTrace(LLMTrace{TriggerID: triggerID, NodeID: "n1", NodeType: "first", User: "first call"})
+	WriteLLMTrace(LLMTrace{TriggerID: triggerID, NodeID: "n2", NodeType: "second", User: "second call"})
 
-	data, err := os.ReadFile(filepath.Join("/tmp/kaiju-prompts", alertID+".log"))
+	data, err := os.ReadFile(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,16 +511,16 @@ func TestWriteLLMTrace_AppendsAcrossCalls(t *testing.T) {
 
 func TestWriteLLMTrace_Error_RecordsError(t *testing.T) {
 	t.Setenv("KAIJU_PROMPT_DEBUG", "1")
-	alertID := fmt.Sprintf("test-err-%d", time.Now().UnixNano())
-	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", alertID+".log"))
+	triggerID := fmt.Sprintf("test-err-%d", time.Now().UnixNano())
+	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 
 	WriteLLMTrace(LLMTrace{
-		AlertID: alertID, NodeID: "n1", NodeType: "test",
+		TriggerID: triggerID, NodeID: "n1", NodeType: "test",
 		System: "sys", User: "usr",
 		Err: "LLM call timed out after 30s",
 	})
 
-	data, _ := os.ReadFile(filepath.Join("/tmp/kaiju-prompts", alertID+".log"))
+	data, _ := os.ReadFile(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 	content := string(data)
 	if !strings.Contains(content, "--- ERROR ---") {
 		t.Errorf("expected ERROR section, got:\n%s", content)

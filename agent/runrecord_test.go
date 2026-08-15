@@ -21,7 +21,7 @@ func TestRecordRunWritesTheOutcome(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
 
-	a.recordRun(Trigger{Type: "alert", AlertID: "a-1"}, time.Now().Add(-time.Second),
+	a.recordRun(Trigger{Type: "alert", ID: "a-1"}, time.Now().Add(-time.Second),
 		nil, nil, gates.Intent(1), Conclusion{Outcome: "budget_exhausted_before_aggregator", Status: "failed"})
 
 	if len(st.runs) != 1 {
@@ -119,7 +119,7 @@ func TestRecordRunCarriesTheApplicationsLabels(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
 
-	a.recordRun(Trigger{Type: "event", AlertID: "corr-2"}, time.Now(), nil, nil, gates.Intent(1),
+	a.recordRun(Trigger{Type: "event", ID: "corr-2"}, time.Now(), nil, nil, gates.Intent(1),
 		Conclusion{Outcome: "the batch finished with two rejects",
 			Labels: map[string]string{"grade": "amber", "kind": "batch"}, Status: "completed"})
 
@@ -148,7 +148,7 @@ func TestRunRecordCarriesTheTriggersRouting(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "host-1"}}}
 
-	a.recordRun(Trigger{Type: "alert", AlertID: "a-3", Source: "host-7", Target: "host-9"},
+	a.recordRun(Trigger{Type: "alert", ID: "a-3", Source: "host-7", Target: "host-9"},
 		time.Now(), nil, nil, gates.Intent(1), Conclusion{Outcome: "v", Status: "completed"})
 
 	if len(st.runs) != 1 {
@@ -175,7 +175,7 @@ func TestRunRecordCarriesTheTriggersRouting(t *testing.T) {
 func TestTwoRunsOfOneCauseGetTwoIdentities(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
-	trigger := Trigger{Type: "alert", AlertID: "a-4"}
+	trigger := Trigger{Type: "alert", ID: "a-4"}
 
 	for range 2 {
 		g, _, cleanup := a.setupDAGPipeline(trigger)
@@ -205,7 +205,7 @@ func TestARunWithNoGraphStillRecords(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st}
 
-	a.recordRun(Trigger{AlertID: "a-5"}, time.Now(), nil, nil, gates.Intent(0),
+	a.recordRun(Trigger{ID: "a-5"}, time.Now(), nil, nil, gates.Intent(0),
 		Conclusion{Outcome: "plan_or_schedule_failed", Status: "failed"})
 
 	if len(st.runs) != 1 || st.runs[0].ID != "a-5" {
@@ -248,7 +248,7 @@ func TestTheRunRecordCountsReflectionsAndFollowUps(t *testing.T) {
 
 	st := &recordingStore{}
 	a := &Agent{eventStore: st}
-	a.recordRun(Trigger{AlertID: "a-7"}, time.Now(), g, nil, gates.Intent(1),
+	a.recordRun(Trigger{ID: "a-7"}, time.Now(), g, nil, gates.Intent(1),
 		Conclusion{Outcome: "v", Status: "completed"})
 
 	got := st.runs[0]

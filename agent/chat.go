@@ -11,13 +11,13 @@ import (
 // (from memory), INCLUDING the current user message as its last entry; Query is
 // a fallback used only when there is no memory/session and History is empty.
 type ChatTurn struct {
-	Provider string
-	Model    string
-	History  []llm.Message
-	Query    string
-	Images   []string // data URIs; attached only if Model is vision-capable
-	AlertID  string
-	MaxTurns int
+	Provider  string
+	Model     string
+	History   []llm.Message
+	Query     string
+	Images    []string // data URIs; attached only if Model is vision-capable
+	TriggerID string
+	MaxTurns  int
 	// SessionID correlates a routed agent sub-run's step events back to this
 	// conversation so the UI can show the agent working live. It is used for event
 	// attribution only — the sub-run writes no memory to it.
@@ -65,7 +65,7 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// agent directly, callers use execute mode (chat_mode=false), not this lane.
 	// ChatTools is the palette the agent uses if it escalates, never the trigger.
 	mayEscalate := t.Agent == nil || *t.Agent
-	if mayEscalate && a.routeQuery(ctx, t.AlertID, t.Query, t.History) == "agent" {
+	if mayEscalate && a.routeQuery(ctx, t.TriggerID, t.Query, t.History) == "agent" {
 		// Chat answers can be long. Force the aggregator (agg_mode=2, reasoning
 		// lane, full synthesis budget) so a reflection-concluded run doesn't hand
 		// back the 1024-token-capped reflection outcome truncated mid-sentence.

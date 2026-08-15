@@ -149,7 +149,7 @@ func TestTheAnswerIsHandedThePromptAndTheDoctrine(t *testing.T) {
 	g.ActiveCards = []string{"triage"}
 
 	if _, ok, err := a.writeAnswer(context.Background(), AnswerRequest{
-		Trigger: Trigger{Type: "alert", AlertID: "a-1"}, Graph: g,
+		Trigger: Trigger{Type: "alert", ID: "a-1"}, Graph: g,
 		Evidence: &ContextResponse{Sources: map[string]string{"node_returns": "web-1 is unreachable"}},
 	}); !ok || err != nil {
 		t.Fatalf("writeAnswer = %v, %v", ok, err)

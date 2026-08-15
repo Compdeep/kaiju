@@ -13,7 +13,7 @@ import (
 //
 // Every LLM call in the agent is appended to a per-investigation log file at:
 //
-//     /tmp/kaiju-prompts/<alertID>.log
+//     /tmp/kaiju-prompts/<triggerID>.log
 //
 // Each call is one delimited section showing the input that triggered it,
 // the system + user prompts, and the output (or error). The format is
@@ -23,7 +23,7 @@ import (
 // Default: ON — we want these traces when things break. Flip to OFF with
 // KAIJU_PROMPT_DEBUG=0 (e.g. for CI or privacy-sensitive runs).
 //
-// To read:   tail -f /tmp/kaiju-prompts/<alertID>.log
+// To read:   tail -f /tmp/kaiju-prompts/<triggerID>.log
 
 const debugLogDir = "/tmp/kaiju-prompts"
 
@@ -37,12 +37,12 @@ func debugLogEnabled() bool {
 // All fields are optional; only set what's relevant for the caller's
 // node type.
 type LLMTrace struct {
-	AlertID  string    // routes the entry to <debugLogDir>/<id>.log
-	NodeID   string    // n0, n5, etc — empty for pre-graph calls (preflight)
-	NodeType string    // "executive", "compute_architect", "debugger", etc
-	Tag      string    // node tag from the graph (descriptive label)
-	Model    string    // "gpt-4.1", "gpt-4.1-mini" — informational
-	Started  time.Time // call start time (defaults to now if zero)
+	TriggerID string    // routes the entry to <debugLogDir>/<id>.log
+	NodeID    string    // n0, n5, etc — empty for pre-graph calls (preflight)
+	NodeType  string    // "executive", "compute_architect", "debugger", etc
+	Tag       string    // node tag from the graph (descriptive label)
+	Model     string    // "gpt-4.1", "gpt-4.1-mini" — informational
+	Started   time.Time // call start time (defaults to now if zero)
 
 	// Input describing what triggered this LLM call. Free-form key/value;
 	// callers add whatever is relevant (query, problem, goal, etc).
@@ -80,8 +80,8 @@ func WriteLLMTrace(t LLMTrace) {
 	}
 	// A call made outside any run still writes somewhere. The name is this
 	// package's own, not one product's word for what usually fills the field.
-	if t.AlertID == "" {
-		t.AlertID = "uncorrelated"
+	if t.TriggerID == "" {
+		t.TriggerID = "uncorrelated"
 	}
 	if t.Started.IsZero() {
 		t.Started = time.Now()
@@ -91,7 +91,7 @@ func WriteLLMTrace(t LLMTrace) {
 	defer debugLogMu.Unlock()
 
 	_ = os.MkdirAll(debugLogDir, 0755)
-	path := filepath.Join(debugLogDir, t.AlertID+".log")
+	path := filepath.Join(debugLogDir, t.TriggerID+".log")
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return

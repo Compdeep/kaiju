@@ -100,13 +100,13 @@ func (st *toolThrottle) waitThrottle(ctx context.Context, toolName string, coold
  * param: graph - the investigation graph.
  * param: budget - the execution budget.
  * param: ch - channel to send the completion result.
- * param: alertID - the investigation alert ID.
+ * param: triggerID - the caller's own id for this run.
  * param: throttle - the tool throttle instance.
  * param: intent - the IGX intent level.
  * param: scope - resolved tool access scope (nil for full access).
  */
 func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
-	budget *Budget, ch chan<- nodeCompletion, alertID string,
+	budget *Budget, ch chan<- nodeCompletion, triggerID string,
 	throttle *toolThrottle, intent gates.Intent, scope *ResolvedScope) {
 
 	defer a.guardNodeCompletion("fireNode", n.ID, ch)
@@ -226,7 +226,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			Tool:          n.ToolName,
 			Params:        n.Params,
 			Intent:        int(intent),
-			CorrelationID: alertID,
+			CorrelationID: triggerID,
 		})
 		// Parse the envelope the far end returned, so a result that ran
 		// elsewhere arrives in the same shape as one that ran here. Without it
@@ -261,7 +261,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		log.Printf("[dag] exec %s (%s) params=%s", n.ID, n.ToolName, Text.TruncateLog(string(paramJSON), 200))
 	}
 
-	result, body, err := a.executeToolNode(ctx, n, graph, budget, n.ToolName, n.Params, alertID, intent, scope)
+	result, body, err := a.executeToolNode(ctx, n, graph, budget, n.ToolName, n.Params, triggerID, intent, scope)
 
 	// Attach tool actions to the node before completion so they're
 	// included in the node event when SetResult emits it.
@@ -528,13 +528,13 @@ func dotPrefix(s string) string {
  * param: budget - the execution budget (may be nil for actuator path).
  * param: toolName - the name of the tool to execute.
  * param: params - the tool parameters.
- * param: alertID - the investigation alert ID.
+ * param: triggerID - the caller's own id for this run.
  * param: intent - the IGX intent level.
  * param: scope - resolved tool access scope (nil for full access).
  * return: result string and error.
  */
 func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budget *Budget,
-	toolName string, params map[string]any, alertID string, intent gates.Intent, scope *ResolvedScope) (string, NodeBody, error) {
+	toolName string, params map[string]any, triggerID string, intent gates.Intent, scope *ResolvedScope) (string, NodeBody, error) {
 
 	if err := scopeAllows(toolName, scope); err != nil {
 		return "", nil, err
@@ -552,9 +552,9 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	if impact > 0 {
 		if err := a.gate.CheckRateLimit(); err != nil {
 			a.gate.Audit(gates.AuditEntry{
-				Tool:    toolName,
-				AlertID: alertID,
-				Error:   err.Error(),
+				Tool:      toolName,
+				TriggerID: triggerID,
+				Error:     err.Error(),
 			})
 			return "", nil, err
 		}
@@ -574,11 +574,11 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	}
 	if err := a.gate.CheckTriadWithScope(intent, toolName, impact, scopeCap); err != nil {
 		a.gate.Audit(gates.AuditEntry{
-			Tool:    toolName,
-			AlertID: alertID,
-			Error:   err.Error(),
-			Intent:  int(intent),
-			Impact:  impact,
+			Tool:      toolName,
+			TriggerID: triggerID,
+			Error:     err.Error(),
+			Intent:    int(intent),
+			Impact:    impact,
 		})
 		return "", nil, err
 	}
@@ -587,11 +587,11 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	if a.clearanceCheck != nil {
 		if err := a.checkClearance(ctx, toolName, params, usernameOf(scope)); err != nil {
 			a.gate.Audit(gates.AuditEntry{
-				Tool:    toolName,
-				AlertID: alertID,
-				Error:   err.Error(),
-				Intent:  int(intent),
-				Impact:  impact,
+				Tool:      toolName,
+				TriggerID: triggerID,
+				Error:     err.Error(),
+				Intent:    int(intent),
+				Impact:    impact,
 			})
 			return "", nil, err
 		}
@@ -641,7 +641,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			LLM:        a.llm,
 			Executor:   a.executor,
 			Workspace:  a.cfg.Workspace,
-			AlertID:    alertID,
+			TriggerID:  triggerID,
 			Intent:     intent,
 			SkillCards: cards,
 		}
@@ -670,11 +670,11 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 
 	// Audit
 	entry := gates.AuditEntry{
-		Tool:    toolName,
-		Params:  params,
-		AlertID: alertID,
-		Intent:  int(intent),
-		Impact:  impact,
+		Tool:      toolName,
+		Params:    params,
+		TriggerID: triggerID,
+		Intent:    int(intent),
+		Impact:    impact,
 	}
 	if err != nil {
 		entry.Error = err.Error()
@@ -698,7 +698,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			ActionType: toolName,
 			Params:     paramsJSON,
 			Result:     Text.TruncateLog(result, 500),
-			RunID:      runIDOf(graph, alertID),
+			RunID:      runIDOf(graph, triggerID),
 			Intent:     int(intent),
 			Impact:     impact,
 		})

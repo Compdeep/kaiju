@@ -236,7 +236,7 @@ type Capabilities struct {
 
 	// DescribeTrigger renders a run's starting point as the text the planner
 	// reads. It is how an application explains its own kinds of work — an
-	// alert, a sensor reading, a ticket — without this package knowing what
+	// event, a sensor reading, a ticket — without this package knowing what
 	// any of them are.
 	//
 	// Returning "" falls through to the built-in rendering, so an application

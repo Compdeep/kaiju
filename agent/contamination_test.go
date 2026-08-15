@@ -93,7 +93,7 @@ var foreignWords = []string{
 //
 // Whole-word matching was the rule before this, for a good reason — "spawn"
 // contains "pawn" and a check that cannot tell the difference gets switched
-// off. It also missed "no_alert", "fleetSection" and "alertID", which are the
+// off. It also missed "no_alert", "fleetSection" and "triggerID", which are the
 // same leak wearing camel case. Splitting on non-letters and on a lower-to-
 // upper transition gets both: "spawn" stays one word, "fleetSection" becomes
 // two, "no_alert" becomes two.
@@ -130,7 +130,7 @@ func TestNoContaminationFromTheEmbeddingApplication(t *testing.T) {
 
 	// The whole module, not one package. The walk used to start at the agent
 	// package, so tools/, internal/, pkg/ and cmd/ were never read — and that is
-	// where AuditEntry.AlertID sits.
+	// where AuditEntry.TriggerID sits.
 	root := moduleRoot(t)
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {

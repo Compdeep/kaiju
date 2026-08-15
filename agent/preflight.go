@@ -85,7 +85,7 @@ func mentionsLiveInventory(query string) bool {
  * never loads the skills it won't use. Fails safe to "chat" (the cheap lane) on
  * any classifier error.
  */
-func (a *Agent) routeQuery(ctx context.Context, alertID, query string, history []llm.Message) string {
+func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history []llm.Message) string {
 	if a.classifyStub != nil {
 		return a.classifyStub(query, history).Mode
 	}
@@ -102,7 +102,7 @@ func (a *Agent) routeQuery(ctx context.Context, alertID, query string, history [
 		return "agent"
 	}
 	started := time.Now()
-	trace := LLMTrace{AlertID: alertID, NodeType: "preflight", Tag: "route", Started: started, System: prompt.Route, User: query}
+	trace := LLMTrace{TriggerID: triggerID, NodeType: "preflight", Tag: "route", Started: started, System: prompt.Route, User: query}
 	// Give the router just enough context to interpret a terse follow-up, then the
 	// current message. See routeContext for what's included (summary + last turn).
 	msgs := []llm.Message{{Role: "system", Content: prompt.Route}}
@@ -194,7 +194,7 @@ func routeContext(history []llm.Message) []llm.Message {
  * compute mode. The skill manifest is built here — only reached on the
  * investigate path. Any missing/malformed field falls back to a safe default.
  */
-func (a *Agent) classifyInvestigate(ctx context.Context, alertID, query string, history []llm.Message) *PreflightResult {
+func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string, history []llm.Message) *PreflightResult {
 	if a.classifyStub != nil {
 		return a.classifyStub(query, history)
 	}
@@ -233,12 +233,12 @@ func (a *Agent) classifyInvestigate(ctx context.Context, alertID, query string, 
 
 	started := time.Now()
 	trace := LLMTrace{
-		AlertID:  alertID,
-		NodeType: "preflight",
-		Tag:      "classify",
-		Started:  started,
-		System:   sysPrompt,
-		User:     query,
+		TriggerID: triggerID,
+		NodeType:  "preflight",
+		Tag:       "classify",
+		Started:   started,
+		System:    sysPrompt,
+		User:      query,
 	}
 
 	resp, err := a.completeLight(ctx, &llm.ChatRequest{

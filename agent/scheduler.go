@@ -47,12 +47,12 @@ import (
  *       sets up the observer channel for live event streaming, registers
  *       the graph with the agent for SSE subscribers, and returns a cleanup
  *       function that must be deferred.
- * param: trigger - the investigation trigger (used for alert ID).
+ * param: trigger - the run's trigger, whose id seeds the run id.
  * return: graph, budget, and cleanup function.
  */
 func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
 	graph := NewGraph()
-	graph.RunID = newRunID(trigger.AlertID)
+	graph.RunID = newRunID(trigger.ID)
 	budget := NewBudget(
 		a.cfg.MaxNodes,
 		a.cfg.MaxPerSkill,
@@ -74,10 +74,10 @@ func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
 	observerCh := make(chan DAGEvent, 128)
 	graph.SetObserver(observerCh)
 	go a.dagFanOut(observerCh, graph)
-	a.broadcastDAGEvent(graph, DAGEvent{Type: "start", AlertID: trigger.AlertID, SessionID: trigger.SessionID, Targets: a.runTargets(trigger), Nodes: graph.Snapshot()})
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "start", TriggerID: trigger.ID, SessionID: trigger.SessionID, Targets: a.runTargets(trigger), Nodes: graph.Snapshot()})
 
 	cleanup := func() {
-		a.broadcastDAGEvent(graph, DAGEvent{Type: "done", AlertID: trigger.AlertID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "done", TriggerID: trigger.ID, SessionID: trigger.SessionID, Nodes: graph.Snapshot()})
 		close(observerCh)
 	}
 
@@ -246,15 +246,15 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		if execMode == "autonomous" {
 			// Pure agent: no routing (its result would only be discarded). Prepare
 			// the plan directly, so autonomous always has full skills/context.
-			pf = a.classifyInvestigate(ctx, trigger.AlertID, query, trigger.History)
+			pf = a.classifyInvestigate(ctx, trigger.ID, query, trigger.History)
 			pf.Mode = "agent"
 		} else {
 			// Interactive: route first; chat short-circuits before plan-prep, agent plans.
-			switch a.routeQuery(ctx, trigger.AlertID, query, trigger.History) {
+			switch a.routeQuery(ctx, trigger.ID, query, trigger.History) {
 			case "chat":
 				pf = &PreflightResult{Mode: "chat"}
 			default: // "agent"
-				pf = a.classifyInvestigate(ctx, trigger.AlertID, query, trigger.History)
+				pf = a.classifyInvestigate(ctx, trigger.ID, query, trigger.History)
 			}
 		}
 		// Per-investigation preflight + card list live on the Graph, not the
@@ -436,7 +436,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			} else {
 				// Tool/compute nodes pull their own context via graph.Context inside
 				// the dispatcher / compute layer.
-				go a.fireNode(ctx, n, graph, budget, completionCh, trigger.AlertID, throttle, intent, trigger.Scope)
+				go a.fireNode(ctx, n, graph, budget, completionCh, trigger.ID, throttle, intent, trigger.Scope)
 			}
 		}
 	}
@@ -1962,7 +1962,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// record exists for — why nothing happened — and it was the one exit that
 	// left nothing behind.
 	if ok, reason := a.admit(trigger); !ok {
-		log.Printf("[dag] run not admitted (type=%s alert=%s): %s", trigger.Type, trigger.AlertID, reason)
+		log.Printf("[dag] run not admitted (type=%s id=%s): %s", trigger.Type, trigger.ID, reason)
 		a.recordRun(trigger, startTime, nil, nil, trigger.Intent(),
 			Conclusion{Outcome: reason, Status: "not_admitted"})
 		return &SyncResult{Outcome: reason, NotAdmitted: true}, nil
@@ -1973,8 +1973,8 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		return a.RunReActSync(ctx, trigger)
 	}
 
-	log.Printf("[dag] sync investigation: type=%s alert=%s source=%s",
-		trigger.Type, trigger.AlertID, trigger.Source)
+	log.Printf("[dag] sync run: type=%s id=%s source=%s",
+		trigger.Type, trigger.ID, trigger.Source)
 
 	// Mark the start of a new run in the worklog. History is preserved so
 	// Holmes can see prior failures, but the separator lets the reflector
@@ -2147,8 +2147,8 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	}
 
 	elapsed := time.Since(startTime)
-	log.Printf("[dag] sync investigation complete in %s (alert=%s, nodes=%d, llm=%d)",
-		elapsed.Round(time.Millisecond), trigger.AlertID, graph.NodeCount(), budget.LLMCount())
+	log.Printf("[dag] sync run complete in %s (id=%s, nodes=%d, llm=%d)",
+		elapsed.Round(time.Millisecond), trigger.ID, graph.NodeCount(), budget.LLMCount())
 
 	// Record investigation in event store
 	if recordLine == "" {

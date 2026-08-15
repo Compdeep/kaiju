@@ -19,7 +19,7 @@ const agentToolName = "agent"
 // the request's base Trigger so the sub-run inherits everything the request
 // specified — per-request models, resolved intent, tool scope, session (for event
 // attribution; the executive writes no memory), and conversation history — then
-// overrides only the delegated bits (task, autonomous, fresh alert id). Deriving
+// overrides only the delegated bits (task, autonomous, fresh id). Deriving
 // from the one struct means new request fields flow here for free, instead of
 // being threaded (and dropped) by hand. The agent tool passes an empty base.
 // Returns the outcome plus node/LLM counts.
@@ -33,7 +33,7 @@ func (a *Agent) RunAgentTask(ctx context.Context, base Trigger, task string) (ou
 	// session (event attribution), history — then override only the delegated bits.
 	trigger := base
 	trigger.Type = "api_query"
-	trigger.AlertID = fmt.Sprintf("agent-%d", time.Now().UnixNano())
+	trigger.ID = fmt.Sprintf("agent-%d", time.Now().UnixNano())
 	trigger.Data = data
 	trigger.Source = "agent"
 	trigger.ExecutionMode = "autonomous" // always investigate; never chat-escape a delegated task

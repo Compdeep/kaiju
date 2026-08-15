@@ -120,10 +120,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 // from the ctx accumulator), and elapsed time. Callers that carry extra fields
 // (the executive's Actions/Gaps) set them on the returned value before sending.
 // Single source so the response shape can't drift across lanes.
-func execResult(ctx context.Context, alertID, outcome string, nodes, llmCalls int, total int64, elapsed time.Duration) ExecuteResponse {
+func execResult(ctx context.Context, triggerID, outcome string, nodes, llmCalls int, total int64, elapsed time.Duration) ExecuteResponse {
 	return ExecuteResponse{
 		Outcome:    outcome,
-		DAGID:      alertID,
+		DAGID:      triggerID,
 		Nodes:      nodes,
 		LLMCalls:   llmCalls,
 		Tokens:     total,
@@ -246,11 +246,11 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	trigger := agent.Trigger{
-		Type:    "chat_query",
-		AlertID: fmt.Sprintf("api-%d", time.Now().UnixNano()),
-		Data:    mustMarshal(map[string]string{"query": req.Query}),
-		Source:  "api",
-		Scope:   scope,
+		Type:   "chat_query",
+		ID:     fmt.Sprintf("api-%d", time.Now().UnixNano()),
+		Data:   mustMarshal(map[string]string{"query": req.Query}),
+		Source: "api",
+		Scope:  scope,
 		// Per-request model routing (host selection; keys stay in kaiju config).
 		Provider:         req.Provider,
 		Model:            req.Model,
@@ -413,7 +413,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			History:   history,
 			Query:     req.Query,
 			Images:    visionImgs,
-			AlertID:   trigger.AlertID,
+			TriggerID: trigger.ID,
 			SessionID: req.SessionID,
 			Agent:     req.Agent, // nil/true ⇒ escalation allowed; false ⇒ pure chat
 			// Base carries the whole request (models, intent, scope, session, history)
@@ -422,12 +422,12 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		})
 		elapsed := time.Since(start)
 		if cerr != nil {
-			log.Printf("[api] chat execute error (%s): %v — reporting failure to user", trigger.AlertID, cerr)
+			log.Printf("[api] chat execute error (%s): %v — reporting failure to user", trigger.ID, cerr)
 			outcome := failureOutcome(cerr)
 			if memMgr != nil && req.SessionID != "" {
 				memMgr.StoreMessage(req.SessionID, "assistant", outcome)
 			}
-			jsonResponse(w, execResult(ctx, trigger.AlertID, outcome, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
+			jsonResponse(w, execResult(ctx, trigger.ID, outcome, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 			return
 		}
 		if memMgr != nil && res.Content != "" {
@@ -442,7 +442,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		// Token total from the run counter, not res.Tokens: every LLM call on both
 		// the chat lane and an escalated agent sub-run tallies the same ctx counter,
 		// so this is the request's true cost (res.Tokens misses the agent path).
-		jsonResponse(w, execResult(ctx, trigger.AlertID, res.Content, res.Nodes, res.LLMCalls, tokens.RunTotal(ctx), elapsed), http.StatusOK)
+		jsonResponse(w, execResult(ctx, trigger.ID, res.Content, res.Nodes, res.LLMCalls, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 		return
 	}
 
@@ -460,18 +460,18 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			content, toks, verr := a.agent.OneShot(ctx, vp, vm, msgs, 0.3, 1024)
 			elapsed := time.Since(start)
 			if verr != nil {
-				log.Printf("[api] vision execute error (%s): %v — reporting failure to user", trigger.AlertID, verr)
+				log.Printf("[api] vision execute error (%s): %v — reporting failure to user", trigger.ID, verr)
 				outcome := failureOutcome(verr)
 				if memMgr != nil && req.SessionID != "" {
 					memMgr.StoreMessage(req.SessionID, "assistant", outcome)
 				}
-				jsonResponse(w, execResult(ctx, trigger.AlertID, outcome, 0, 1, tokens.RunTotal(ctx), elapsed), http.StatusOK)
+				jsonResponse(w, execResult(ctx, trigger.ID, outcome, 0, 1, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 				return
 			}
 			if memMgr != nil && content != "" {
 				memMgr.StoreMessage(req.SessionID, "assistant", content)
 			}
-			jsonResponse(w, execResult(ctx, trigger.AlertID, content, 0, 1, int64(toks), elapsed), http.StatusOK)
+			jsonResponse(w, execResult(ctx, trigger.ID, content, 0, 1, int64(toks), elapsed), http.StatusOK)
 			return
 		}
 		ctx = agent.WithVisionImages(ctx, visionImgs)
@@ -485,12 +485,12 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		// never a silent empty. Store a user-facing message as the assistant turn
 		// (so it shows even if the client already disconnected) and return it as
 		// the answer rather than a bare 500.
-		log.Printf("[api] execute error (%s): %v — reporting failure to user", trigger.AlertID, err)
+		log.Printf("[api] execute error (%s): %v — reporting failure to user", trigger.ID, err)
 		outcome := failureOutcome(err)
 		if memMgr != nil && req.SessionID != "" {
 			memMgr.StoreMessage(req.SessionID, "assistant", outcome)
 		}
-		jsonResponse(w, execResult(ctx, trigger.AlertID, outcome, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
+		jsonResponse(w, execResult(ctx, trigger.ID, outcome, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
 		return
 	}
 
@@ -498,7 +498,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// blank answer. Substitute an explicit "produced no answer" notice.
 	outcome := result.Outcome
 	if strings.TrimSpace(outcome) == "" {
-		log.Printf("[api] empty outcome (%s) — substituting failure notice", trigger.AlertID)
+		log.Printf("[api] empty outcome (%s) — substituting failure notice", trigger.ID)
 		outcome = emptyOutcomeNotice
 	}
 
@@ -518,7 +518,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// trace reliably survive regardless of client state.
 	if a.db != nil && req.SessionID != "" && len(result.Trace) > 0 {
 		if err := a.db.SetDAGTrace(req.SessionID, string(result.Trace)); err != nil {
-			log.Printf("[api] failed to persist DAG trace (%s): %v", trigger.AlertID, err)
+			log.Printf("[api] failed to persist DAG trace (%s): %v", trigger.ID, err)
 		}
 	}
 
@@ -528,7 +528,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		apiActions = append(apiActions, ActionInfo{Tool: a.Tool, Params: a.Params})
 	}
 
-	resp := execResult(ctx, trigger.AlertID, outcome, result.Nodes, result.LLMCalls, tokens.RunTotal(ctx), elapsed)
+	resp := execResult(ctx, trigger.ID, outcome, result.Nodes, result.LLMCalls, tokens.RunTotal(ctx), elapsed)
 	resp.Actions = apiActions
 	resp.Gaps = result.Gaps
 	jsonResponse(w, resp, http.StatusOK)

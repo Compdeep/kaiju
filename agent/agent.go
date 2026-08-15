@@ -31,7 +31,7 @@ type ResolvedScope struct {
 
 /*
  * Trigger describes what initiated an investigation.
- * desc: Contains the trigger type, alert ID, raw data payload, source peer,
+ * desc: Contains the trigger type, the caller's own id, the raw data payload,
  *       DAG mode override, data directory override, IGX intent cap, tool
  *       access scope, session ID, and conversation history.
  */
@@ -45,7 +45,7 @@ type Trigger struct {
 	Target string `json:"target,omitempty"`
 
 	Type          string          `json:"type"` // "chat_query", "api_query", "scheduled", "event", "command"
-	AlertID       string          `json:"alert_id"`
+	ID            string          `json:"id"`
 	Data          json.RawMessage `json:"data"`
 	Source        string          `json:"source"`                   // peer ID or "local"
 	DAGMode       string          `json:"dag_mode"`                 // optional override: "reflect", "nReflect", "orchestrator"
@@ -69,7 +69,7 @@ type Trigger struct {
 	HeartbeatThreshold int    `json:"heartbeat_threshold,omitempty"` // consecutive stuck ticks before kernel interjects (0 = default 3; raise for long-running work like downloads)
 
 	// Cause carries whatever the application knows about what prompted this
-	// run — a monitoring alert, a sensor reading, a support ticket. It is
+	// run — a monitoring event, a sensor reading, a support ticket. It is
 	// opaque here: carried, handed back, never interpreted.
 	//
 	// The only thing that reads it is the application's own DescribeTrigger,
@@ -103,7 +103,7 @@ func BuildMessagesWithHistory(system, userQuery string, history []llm.Message) [
  * Intent returns the effective IGX intent for this trigger.
  * desc: For chat queries with no explicit override, returns IntentAuto so the
  *       executive can infer the appropriate level. All other trigger types return
- *       their structural intent (never auto — autonomous alerts are hardcoded).
+ *       their structural intent (never auto — autonomous runs are hardcoded).
  *       MaxIntent can only LOWER intent for non-chat triggers (defense in depth).
  * return: the resolved IGX Intent value.
  */
@@ -452,9 +452,9 @@ func (a *Agent) SubmitSync(ctx context.Context, t Trigger) (*SyncResult, error) 
 func (a *Agent) Submit(t Trigger) {
 	select {
 	case a.triggers <- t:
-		log.Printf("[agent] trigger queued: type=%s alert=%s", t.Type, t.AlertID)
+		log.Printf("[agent] trigger queued: type=%s id=%s", t.Type, t.ID)
 	default:
-		log.Printf("[agent] trigger dropped (queue full): type=%s alert=%s", t.Type, t.AlertID)
+		log.Printf("[agent] trigger dropped (queue full): type=%s id=%s", t.Type, t.ID)
 	}
 }
 

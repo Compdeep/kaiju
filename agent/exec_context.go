@@ -75,7 +75,7 @@ type ExecuteContext struct {
 	LLM        *llm.Client // reasoning model
 	Executor   *llm.Client // executor model
 	Workspace  string
-	AlertID    string
+	TriggerID  string
 	Intent     gates.Intent
 	SkillCards map[string]string // phase 2: resolved architect/coder guidance
 

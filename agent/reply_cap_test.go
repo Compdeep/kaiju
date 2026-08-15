@@ -121,14 +121,11 @@ func TestCompleteHeavy_CapsAgainstTheModel(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	limits := limitsFor("anthropic/claude-sonnet-5", 200000, 8192)
 	a := &Agent{
-		llm: llm.NewClient(srv.URL, "", "anthropic/claude-sonnet-5"),
-		cfg: Config{ModelConfig: ModelConfig{Limits: limitsFor("anthropic/claude-sonnet-5", 200000, 8192)}},
+		llm: llm.NewClient(srv.URL, "", "anthropic/claude-sonnet-5").Limits(limits),
+		cfg: Config{ModelConfig: ModelConfig{Limits: limits}},
 	}
-	// New does this for an agent built the supported way. A hand-built one has
-	// to, or its clients send every request exactly as written — which is what
-	// TestNewGivesEveryClientTheCatalog holds New to.
-	a.limitEveryClient()
 
 	_, err := a.completeHeavy(context.Background(), reqOf(64000, 400))
 	if err != nil {
@@ -167,10 +164,10 @@ func TestCompleteHeavy_UnknownModelSendsTheOriginalCap(t *testing.T) {
 
 // Config.Limits is only worth anything if it reaches the clients that send.
 //
-// The catalog lives on Config and the sizing lives on the client, so something
-// has to join them. New does it, once, for every client the agent holds — and
-// if it stops, every call in the engine is sized against nothing again with
-// nothing to say so.
+// The catalog lives on Config and the sizing lives on the client, so the client
+// is built with it — every construction in this package says .Limits(cfg.Limits)
+// in the expression that makes the client. If one stops, its calls are sized
+// against nothing and nothing else says so.
 func TestNewGivesEveryClientTheCatalog(t *testing.T) {
 	asked := map[string]bool{}
 	a, err := New(Config{

@@ -147,3 +147,26 @@ func TestCapReply_UsesTheRequestsModelOverTheClients(t *testing.T) {
 		t.Fatalf("MaxTokens = %d, want 512 — the limits of the model actually being called", req.MaxTokens)
 	}
 }
+
+// A caller that has to tell the model its budget needs the number before the
+// request goes out. Asking must not change the request, and sending must apply
+// the same answer — otherwise the number stated and the number enforced differ,
+// which is worse than saying nothing.
+func TestReplyCapAnswersWithoutChangingTheRequest(t *testing.T) {
+	c := clientFor("openai/gpt-4.1", limitsOf(128000, 512))
+	req := reqOf(4096, 100)
+
+	got := c.ReplyCap(req)
+	if got != 512 {
+		t.Errorf("ReplyCap = %d, want 512", got)
+	}
+	if req.MaxTokens != 4096 {
+		t.Errorf("asking changed the request: MaxTokens = %d, want it untouched", req.MaxTokens)
+	}
+
+	c.capReply(req)
+	if req.MaxTokens != got {
+		t.Errorf("sending applied %d where asking said %d; a stated budget must be "+
+			"the one the provider stops at", req.MaxTokens, got)
+	}
+}

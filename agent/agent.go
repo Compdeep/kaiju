@@ -360,6 +360,11 @@ func New(cfg Config) (*Agent, error) {
 	// Wire the handlers the application supplied, so the agent is
 	// fully formed when New returns rather than after a dozen further calls.
 	a.applyHandlers(cfg)
+
+	// Every client this agent holds sizes its replies against the model that
+	// answers them. One place, because a client built without it is a client
+	// whose calls are sized against nothing and nobody notices.
+	a.limitEveryClient()
 	return a, nil
 }
 
@@ -995,6 +1000,7 @@ func (a *Agent) GateInfo() (rateLimit, maxTurns, clearance int, lockdown bool) {
  */
 func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
 	a.llm = llm.NewClientWithProvider(provider, endpoint, apiKey, model)
+	a.limitEveryClient()
 	a.cfg.LLMEndpoint = endpoint
 	a.cfg.LLMAPIKey = apiKey
 	a.cfg.LLMModel = model
@@ -1010,6 +1016,7 @@ func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
  */
 func (a *Agent) SetExecutorClient(provider, endpoint, apiKey, model string) {
 	a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model)
+	a.limitEveryClient()
 }
 
 /*

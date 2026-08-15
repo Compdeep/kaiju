@@ -135,7 +135,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	})
 
 	trace := LLMTrace{
-		TriggerID: trigger.ID,
+		RunID:     runIDFrom(ctx),
 		NodeID:    rNode.ID,
 		NodeType:  "reflector",
 		Tag:       rNode.Tag,
@@ -324,12 +324,12 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	})
 
 	trace := LLMTrace{
-		TriggerID: trigger.ID,
-		NodeID:    rNode.ID,
-		NodeType:  "interjection",
-		Tag:       rNode.Tag,
-		Model:     "executor",
-		Started:   started,
+		RunID:    runIDFrom(ctx),
+		NodeID:   rNode.ID,
+		NodeType: "interjection",
+		Tag:      rNode.Tag,
+		Model:    "executor",
+		Started:  started,
 		Input: map[string]string{
 			"operator_message": humanMsg,
 			"intent":           resolvedIntent.String(),

@@ -178,7 +178,9 @@ func TestTwoRunsOfOneCauseGetTwoIdentities(t *testing.T) {
 	trigger := Trigger{Type: "alert", ID: "a-4"}
 
 	for range 2 {
-		g, _, cleanup := a.setupDAGPipeline(trigger)
+		// The run id is made where the run begins and handed to the graph, so
+		// this stands in for that caller.
+		g, _, cleanup := a.setupDAGPipeline(trigger, newRunID(trigger.ID))
 		a.recordRun(trigger, time.Now(), g, nil, gates.Intent(1), Conclusion{Outcome: "v", Status: "completed"})
 		cleanup()
 	}
@@ -224,11 +226,15 @@ func TestAnActionNamesTheRunThatTookIt(t *testing.T) {
 	if got := actionRunID(g, "a-6"); got != "a-6-123" {
 		t.Errorf("actionRunID = %q, want the run", got)
 	}
-	if got := actionRunID(nil, "a-6"); got != "a-6" {
-		t.Errorf("with no run, actionRunID = %q, want the cause as a fallback", got)
+	// Outside a run the answer is nothing, not the caller's reference.
+	// Answering with the reference grouped two runs' actions under one id,
+	// which for a state-changing call is the difference between "this ran once"
+	// and "this ran twice".
+	if got := actionRunID(nil, "a-6"); got != "" {
+		t.Errorf("with no run, actionRunID = %q, want nothing", got)
 	}
-	if got := actionRunID(NewGraph(), "a-6"); got != "a-6" {
-		t.Errorf("with an unstamped graph, actionRunID = %q, want the cause", got)
+	if got := actionRunID(NewGraph(), "a-6"); got != "" {
+		t.Errorf("with an unstamped graph, actionRunID = %q, want nothing", got)
 	}
 }
 

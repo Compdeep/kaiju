@@ -137,11 +137,11 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	})
 
 	traceObs := LLMTrace{
-		TriggerID: trigger.ID,
-		NodeID:    obsID,
-		NodeType:  "observer",
-		Tag:       "observer_" + completedNode.Tag,
-		Started:   startedObs,
+		RunID:    runIDFrom(ctx),
+		NodeID:   obsID,
+		NodeType: "observer",
+		Tag:      "observer_" + completedNode.Tag,
+		Started:  startedObs,
 		Input: map[string]string{
 			"completed_node":     completedNode.ID,
 			"completed_node_tag": completedNode.Tag,

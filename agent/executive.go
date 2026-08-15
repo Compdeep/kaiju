@@ -728,11 +728,11 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	})
 
 	traceN := LLMTrace{
-		TriggerID: trigger.ID,
-		NodeID:    "executive",
-		NodeType:  "executive_native",
-		Tag:       "plan",
-		Started:   startedN,
+		RunID:    runIDFrom(ctx),
+		NodeID:   "executive",
+		NodeType: "executive_native",
+		Tag:      "plan",
+		Started:  startedN,
 		Input: map[string]string{
 			"dag_mode": dagMode,
 			"intent":   intent,

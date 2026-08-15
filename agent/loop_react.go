@@ -46,6 +46,8 @@ func (a *Agent) systemPrompt(cards []string) string {
 func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
 	ctx = a.tagTokens(ctx, trigger)
 	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))
+	// This loop builds no graph, so its run id lives only on the context.
+	ctx = withRunID(ctx, newRunID(trigger.ID))
 	log.Printf("[react] sync run: type=%s id=%s source=%s",
 		trigger.Type, trigger.ID, trigger.Source)
 
@@ -253,9 +255,9 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 	// Gate: rate limit
 	if err := a.gate.CheckRateLimit(); err != nil {
 		a.gate.Audit(gates.AuditEntry{
-			Tool:      toolName,
-			TriggerID: triggerID,
-			Error:     err.Error(),
+			Tool:  toolName,
+			RunID: runIDFrom(ctx),
+			Error: err.Error(),
 		})
 		return "", err
 	}
@@ -280,11 +282,11 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 	}
 	if err := a.gate.CheckTriadWithScope(intent, toolName, impact, scopeCap); err != nil {
 		a.gate.Audit(gates.AuditEntry{
-			Tool:      toolName,
-			TriggerID: triggerID,
-			Error:     err.Error(),
-			Intent:    int(intent),
-			Impact:    impact,
+			Tool:   toolName,
+			RunID:  runIDFrom(ctx),
+			Error:  err.Error(),
+			Intent: int(intent),
+			Impact: impact,
 		})
 		return "", err
 	}
@@ -297,11 +299,11 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 		}
 		if err := a.checkClearance(ctx, toolName, params, username); err != nil {
 			a.gate.Audit(gates.AuditEntry{
-				Tool:      toolName,
-				TriggerID: triggerID,
-				Error:     err.Error(),
-				Intent:    int(intent),
-				Impact:    impact,
+				Tool:   toolName,
+				RunID:  runIDFrom(ctx),
+				Error:  err.Error(),
+				Intent: int(intent),
+				Impact: impact,
 			})
 			return "", err
 		}
@@ -312,11 +314,11 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 
 	// Audit
 	entry := gates.AuditEntry{
-		Tool:      toolName,
-		Params:    params,
-		TriggerID: triggerID,
-		Intent:    int(intent),
-		Impact:    impact,
+		Tool:   toolName,
+		Params: params,
+		RunID:  runIDFrom(ctx),
+		Intent: int(intent),
+		Impact: impact,
 	}
 	if err != nil {
 		entry.Error = err.Error()

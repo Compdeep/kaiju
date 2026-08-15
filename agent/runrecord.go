@@ -121,18 +121,27 @@ func newRunID(correlationID string) string {
 }
 
 /*
- * actionRunID returns the run an action belongs to.
- * desc: Falls back to the correlation id when there is no graph — a tool call
- *       made outside a run still records something to group by.
+ * actionRunID returns the run an action belongs to, or empty outside one.
+ * desc: A run stamps its graph before any node fires, so this answers from the
+ *       graph in every case a dispatched tool call reaches. Outside a run it
+ *       answers with nothing rather than with the caller's reference.
  * param: graph - the run, or nil.
- * param: correlationID - the fallback.
- * return: the run identifier.
+ * param: triggerID - unused, kept so the call site reads as a choice between
+ *        the two identifiers rather than a bare field access.
+ * return: the run identifier, or empty.
  */
 func actionRunID(graph *Graph, triggerID string) string {
 	if graph != nil && graph.RunID != "" {
 		return graph.RunID
 	}
-	return triggerID
+	// Empty, not the caller's reference. Falling back to it grouped two runs'
+	// actions under one id — which for a state-changing call is the difference
+	// between "this ran once" and "this ran twice", and is the fault this pair
+	// of identifiers exists to keep apart.
+	//
+	// Every run stamps its graph before any node fires, so this is reached only
+	// by a call made outside a run.
+	return ""
 }
 
 // Writing to the application's store.

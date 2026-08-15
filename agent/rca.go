@@ -381,12 +381,12 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 	})
 
 	trace := LLMTrace{
-		TriggerID: trigger.ID,
-		NodeID:    sNode.ID,
-		NodeType:  "holmes",
-		Tag:       sNode.Tag,
-		Model:     "reasoning",
-		Started:   started,
+		RunID:    runIDFrom(ctx),
+		NodeID:   sNode.ID,
+		NodeType: "holmes",
+		Tag:      sNode.Tag,
+		Model:    "reasoning",
+		Started:  started,
 		Input: map[string]string{
 			"iter":    fmt.Sprintf("%d/%d", state.Iter, state.MaxIter),
 			"problem": Text.TruncateLog(state.Problem, 200),

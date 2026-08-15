@@ -358,11 +358,11 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 	})
 
 	traceArch := LLMTrace{
-		TriggerID: graphAlertID(graph),
-		NodeID:    tag,
-		NodeType:  "compute_architect",
-		Tag:       tag,
-		Started:   startedArch,
+		RunID:    runIDFrom(ctx),
+		NodeID:   tag,
+		NodeType: "compute_architect",
+		Tag:      tag,
+		Started:  startedArch,
 		Input: map[string]string{
 			"goal":  goal,
 			"query": query,
@@ -706,11 +706,11 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	resp, err := client.Complete(ctx, coderReq)
 
 	traceCode := LLMTrace{
-		TriggerID: graphAlertID(graph),
-		NodeID:    tag,
-		NodeType:  "compute_coder",
-		Tag:       tag,
-		Started:   startedCode,
+		RunID:    runIDFrom(ctx),
+		NodeID:   tag,
+		NodeType: "compute_coder",
+		Tag:      tag,
+		Started:  startedCode,
 		Input: map[string]string{
 			"goal":          goal,
 			"blueprint_ref": blueprintRef,

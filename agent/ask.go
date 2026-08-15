@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 )
@@ -105,7 +106,11 @@ func (a *Agent) lane(ctx context.Context, l Lane) (*llm.Client, string) {
  * return: the provider's response.
  */
 func (a *Agent) ask(ctx context.Context, l Lane, req *llm.ChatRequest) (*llm.ChatResponse, error) {
-	return a.prepare(ctx, l, req).Complete(ctx, req)
+	c := a.prepare(ctx, l, req)
+	started := time.Now()
+	resp, err := c.Complete(ctx, req)
+	a.writeTrace(ctx, req, resp, err, started)
+	return resp, err
 }
 
 /*
@@ -149,7 +154,12 @@ func (a *Agent) askStream(ctx context.Context, l Lane, req *llm.ChatRequest,
 	onChunk func(chunk, kind string)) (string, error) {
 
 	c := a.prepare(ctx, l, req)
-	return c.CompleteStream(ctx, req, onChunk)
+	started := time.Now()
+	text, err := c.CompleteStream(ctx, req, onChunk)
+	// A streamed reply carries no response to read, so the trace records what
+	// was asked and what came back as text.
+	a.writeTrace(ctx, req, streamedResponse(text), err, started)
+	return text, err
 }
 
 /*
@@ -163,7 +173,10 @@ func (a *Agent) askStreamResp(ctx context.Context, l Lane, req *llm.ChatRequest,
 	onChunk func(chunk, kind string)) (*llm.ChatResponse, error) {
 
 	c := a.prepare(ctx, l, req)
-	return c.CompleteStreamResp(ctx, req, onChunk)
+	started := time.Now()
+	resp, err := c.CompleteStreamResp(ctx, req, onChunk)
+	a.writeTrace(ctx, req, resp, err, started)
+	return resp, err
 }
 
 /*
@@ -250,4 +263,14 @@ func stateBudget(req *llm.ChatRequest, cap int) {
 			budgetMarker, cap)
 		return
 	}
+}
+
+// streamedResponse wraps assembled stream text as a response, so a streamed
+// call traces the same shape as any other. Token counts are absent because a
+// stream does not report them.
+func streamedResponse(text string) *llm.ChatResponse {
+	if text == "" {
+		return nil
+	}
+	return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.Message{Content: text}}}}
 }

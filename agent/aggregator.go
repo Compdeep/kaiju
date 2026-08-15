@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -61,8 +60,16 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 	if aggMaxTokens < 8192 {
 		aggMaxTokens = 8192
 	}
-	started := time.Now()
-	raw, err := a.askStream(ctx, l, &llm.ChatRequest{
+	aggID := TraceID{
+		NodeID:   "aggregator",
+		NodeType: "aggregator",
+		Tag:      "synthesize",
+		Input:    map[string]string{"intent": intentStr},
+	}
+	if gateCtx != nil {
+		aggID.GateReturned = gateCtx.Sources
+	}
+	raw, err := a.askStream(withTrace(ctx, aggID), l, &llm.ChatRequest{
 		Messages:    messages,
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   aggMaxTokens,
@@ -74,36 +81,12 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
 	})
 
-	trace := LLMTrace{
-		RunID:    runIDFrom(ctx),
-		NodeID:   "aggregator",
-		NodeType: "aggregator",
-		Tag:      "synthesize",
-		Started:  started,
-		Input: map[string]string{
-			"intent": intentStr,
-		},
-		System:    ComposeSystemPrompt(a.soulPrompt, rolePrompt),
-		User:      userPrompt,
-		LatencyMS: time.Since(started).Milliseconds(),
-	}
-	if gateCtx != nil {
-		trace.GateReturned = gateCtx.Sources
-	}
-
 	if err != nil {
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
 		return "", nil, fmt.Errorf("aggregator LLM call: %w", err)
 	}
 	if raw == "" {
-		trace.Err = "empty response"
-		WriteLLMTrace(trace)
 		return "", nil, fmt.Errorf("aggregator LLM returned empty response")
 	}
-
-	trace.Output = raw
-	WriteLLMTrace(trace)
 
 	log.Printf("[dag] aggregator output: %s", Text.TruncateLog(raw, 300))
 

@@ -80,7 +80,17 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 	}
 
 	log.Printf("[dag] debugger calling reasoning model for %s", mpNode.Tag)
-	started := time.Now()
+
+	id := TraceID{
+		NodeID:   mpNode.ID,
+		NodeType: "debugger",
+		Tag:      mpNode.Tag,
+		Input:    map[string]string{"problem": fmt.Sprintf("%v", mpNode.Params["problem"])},
+	}
+	if gateCtx != nil {
+		id.GateSummary, id.GateReturned = gateCtx.Summary, gateCtx.Sources
+	}
+	ctx = withTrace(ctx, id)
 
 	resp, err := a.completeHeavyChecked(ctx, &llm.ChatRequest{
 		Messages:    messages,
@@ -90,45 +100,16 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 		MaxTokens:   4096,
 	})
 
-	// Build trace entry for the debug log.
-	trace := LLMTrace{
-		RunID:    runIDFrom(ctx),
-		NodeID:   mpNode.ID,
-		NodeType: "debugger",
-		Tag:      mpNode.Tag,
-		Model:    "reasoning",
-		Started:  started,
-		Input: map[string]string{
-			"problem": fmt.Sprintf("%v", mpNode.Params["problem"]),
-		},
-		System:    sysPrompt,
-		User:      userPrompt,
-		LatencyMS: time.Since(started).Milliseconds(),
-	}
-	if gateCtx != nil {
-		trace.GateSummary = gateCtx.Summary
-		trace.GateReturned = gateCtx.Sources
-	}
-
 	if err != nil {
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
 		ch <- nodeCompletion{NodeID: mpNode.ID, Err: fmt.Errorf("debugger LLM: %w", err)}
 		return
 	}
 
 	raw, err := extractToolArgs(resp)
 	if err != nil {
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
 		ch <- nodeCompletion{NodeID: mpNode.ID, Err: fmt.Errorf("debugger: %w", err)}
 		return
 	}
-	trace.Output = raw
-	trace.TokensIn = resp.Usage.PromptTokens
-	trace.TokensOut = resp.Usage.CompletionTokens
-	WriteLLMTrace(trace)
-
 	log.Printf("[dag] debugger output: %s", Text.TruncateLog(raw, 300))
 
 	// Write debug blueprint to disk for observability (session-scoped).

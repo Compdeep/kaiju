@@ -44,6 +44,38 @@ func runIDFrom(ctx context.Context) string {
 	return id
 }
 
+// The trigger, on the context for the same reason.
+//
+// A tool rule is handed the trigger so it can judge a call against what started
+// the run. The DAG reads it off the graph, which the ReAct loop does not have —
+// so that loop would have handed every rule a nil trigger, which ToolCallRequest
+// documents as meaning the call was made outside a run. It was not.
+
+type triggerKey struct{}
+
+// withTrigger stamps what started a run on its context. Called once, beside
+// withRunID.
+func withTrigger(ctx context.Context, t *Trigger) context.Context {
+	if t == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, triggerKey{}, t)
+}
+
+// triggerFrom returns what started this run, preferring the graph because that
+// is where the DAG keeps it, and falling back to the context for a run that
+// builds no graph. Nil outside a run.
+func triggerFrom(ctx context.Context, g *Graph) *Trigger {
+	if t := triggerOf(g); t != nil {
+		return t
+	}
+	if ctx == nil {
+		return nil
+	}
+	t, _ := ctx.Value(triggerKey{}).(*Trigger)
+	return t
+}
+
 // RunIDFrom returns the run a context belongs to, for an application writing
 // its own stage.
 //

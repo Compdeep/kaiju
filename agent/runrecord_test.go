@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -223,18 +224,38 @@ func TestAnActionNamesTheRunThatTookIt(t *testing.T) {
 	g := NewGraph()
 	g.RunID = "a-6-123"
 
-	if got := actionRunID(g, "a-6"); got != "a-6-123" {
+	ctx := context.Background()
+
+	if got := actionRunID(ctx, g, "a-6"); got != "a-6-123" {
 		t.Errorf("actionRunID = %q, want the run", got)
 	}
 	// Outside a run the answer is nothing, not the caller's reference.
 	// Answering with the reference grouped two runs' actions under one id,
 	// which for a state-changing call is the difference between "this ran once"
 	// and "this ran twice".
-	if got := actionRunID(nil, "a-6"); got != "" {
+	if got := actionRunID(ctx, nil, "a-6"); got != "" {
 		t.Errorf("with no run, actionRunID = %q, want nothing", got)
 	}
-	if got := actionRunID(NewGraph(), "a-6"); got != "" {
+	if got := actionRunID(ctx, NewGraph(), "a-6"); got != "" {
 		t.Errorf("with an unstamped graph, actionRunID = %q, want nothing", got)
+	}
+}
+
+// The ReAct loop builds no graph and stamps its run on the context instead.
+// Without the fallback its audit lines and its actions are filed under nothing,
+// which is the same loss the graph case above exists to prevent.
+func TestAnActionNamesTheRunWhenThereIsNoGraph(t *testing.T) {
+	ctx := withRunID(context.Background(), "a-7-456")
+
+	if got := actionRunID(ctx, nil, "a-7"); got != "a-7-456" {
+		t.Errorf("actionRunID = %q, want the run from the context", got)
+	}
+	// The graph still wins where there is one, because that is where a
+	// dispatched call reads it.
+	g := NewGraph()
+	g.RunID = "a-8-789"
+	if got := actionRunID(ctx, g, "a-7"); got != "a-8-789" {
+		t.Errorf("actionRunID = %q, want the graph's run", got)
 	}
 }
 
@@ -281,7 +302,8 @@ func TestTwoRunsOfOneReferenceAreDistinguishable(t *testing.T) {
 	if first.RunID == second.RunID {
 		t.Fatalf("two runs of ref-1 share a run id: %q", first.RunID)
 	}
-	if actionRunID(first, "ref-1") == actionRunID(second, "ref-1") {
+	ctx := context.Background()
+	if actionRunID(ctx, first, "ref-1") == actionRunID(ctx, second, "ref-1") {
 		t.Error("an action from each run groups under the same id")
 	}
 	for _, g := range []*Graph{first, second} {

@@ -48,6 +48,9 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))
 	// This loop builds no graph, so its run id lives only on the context.
 	ctx = withRunID(ctx, newRunID(trigger.ID))
+	// And what started it, for the same reason: a tool rule reads the trigger
+	// off the graph, and there is no graph here.
+	ctx = withTrigger(ctx, &trigger)
 	log.Printf("[react] sync run: type=%s id=%s source=%s",
 		trigger.Type, trigger.ID, trigger.Source)
 
@@ -225,44 +228,31 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 }
 
 /*
- * executeToolCall runs a single tool call through the IGX gate pipeline.
- * desc: Performs scope check, tool lookup, rate limit check, parameter parsing,
- *       IGX triad check, optional external clearance check, execution, audit,
- *       and result truncation.
- * param: ctx - context for execution.
- * param: tc - the LLM tool call to execute.
+ * executeToolCall runs one of the model's tool calls.
+ * desc: The gate pipeline, the execution and the audit are executeToolNode's,
+ *       which is where the DAG runs a step too. This loop had its own copy of
+ *       all three and had fallen behind it: the typed path was missing, so a
+ *       tool returning a ToolMessage never took it; the application's own rule
+ *       was never asked at all; rank-0 tools were throttled where the DAG
+ *       exempts them; and the audit line carried the run but not the caller's
+ *       reference.
+ *
+ *       What is left here is what is this loop's own. Turning the model's
+ *       arguments into a parameter map, because only this path receives them as
+ *       JSON text. And fitting the result to a chat message, because that is
+ *       what a result becomes here — where a node's result is data the graph
+ *       passes on, which is why executeToolNode leaves a structured envelope
+ *       whole.
+ * param: ctx - the run's context, carrying the run id and the trigger.
+ * param: tc - the tool call the model made.
  * param: triggerID - the caller's own id for this run.
  * param: intent - the IGX intent level.
  * param: scope - resolved tool access scope (nil for full access).
- * return: result string and error.
+ * return: the result the model reads, and any error.
  */
 func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 	triggerID string, intent gates.Intent, scope *ResolvedScope) (string, error) {
 
-	toolName := tc.Function.Name
-
-	// Scope check: reject tools not in scope (wildcard "*" allows all)
-	if scope != nil && !scope.AllowedTools["*"] && !scope.AllowedTools[toolName] {
-		return "", fmt.Errorf("gate: %s not in user scope", toolName)
-	}
-
-	// Look up tool
-	skill, ok := a.registry.Get(toolName)
-	if !ok {
-		return "", fmt.Errorf("unknown tool: %s", toolName)
-	}
-
-	// Gate: rate limit
-	if err := a.gate.CheckRateLimit(); err != nil {
-		a.gate.Audit(gates.AuditEntry{
-			Tool:  toolName,
-			RunID: runIDFrom(ctx),
-			Error: err.Error(),
-		})
-		return "", err
-	}
-
-	// Parse parameters
 	var params map[string]any
 	if tc.Function.Arguments != "" {
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &params); err != nil {
@@ -270,75 +260,22 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 		}
 	}
 
-	// Resolve the tool's effective impact via the intent registry.
-	impact := a.intentRegistry.ResolveToolIntent(toolName, skill, params)
-
-	// Gate: IGX triad check with scope — impact <= min(intent, clearance, scope_cap)
-	scopeCap := -1
-	if scope != nil {
-		if cap, ok := scope.MaxImpact[toolName]; ok {
-			scopeCap = cap
-		}
-	}
-	if err := a.gate.CheckTriadWithScope(intent, toolName, impact, scopeCap); err != nil {
-		a.gate.Audit(gates.AuditEntry{
-			Tool:   toolName,
-			RunID:  runIDFrom(ctx),
-			Error:  err.Error(),
-			Intent: int(intent),
-			Impact: impact,
-		})
-		return "", err
-	}
-
-	// Clearance: check external authorization endpoint
-	if a.clearanceCheck != nil {
-		username := ""
-		if scope != nil {
-			username = scope.Username
-		}
-		if err := a.checkClearance(ctx, toolName, params, username); err != nil {
-			a.gate.Audit(gates.AuditEntry{
-				Tool:   toolName,
-				RunID:  runIDFrom(ctx),
-				Error:  err.Error(),
-				Intent: int(intent),
-				Impact: impact,
-			})
-			return "", err
-		}
-	}
-
-	// Execute
-	result, err := skill.Execute(ctx, params)
-
-	// Audit
-	entry := gates.AuditEntry{
-		Tool:   toolName,
-		Params: params,
-		RunID:  runIDFrom(ctx),
-		Intent: int(intent),
-		Impact: impact,
-	}
-	if err != nil {
-		entry.Error = err.Error()
-	} else {
-		entry.Result = Text.TruncateLog(result, 500)
-	}
-	a.gate.Audit(entry)
-
+	// No node, no graph, no budget: this loop builds none of them. The trigger a
+	// tool rule needs travels on the context instead — see withTrigger.
+	result, _, err := a.executeToolNode(ctx, nil, nil, nil,
+		tc.Function.Name, params, triggerID, intent, scope)
 	if err != nil {
 		return "", err
 	}
 
-	// Truncate large results. Head+tail keeps both the start (context) and
-	// end (error lines, tracebacks) — head-only truncation was dropping the
-	// diagnostic part.
+	// executeToolNode leaves a structured envelope at full length because the
+	// scheduler unmarshals it for graft instructions. Nothing unmarshals it here
+	// — it goes to the model as a chat message — so it is fitted to the cap like
+	// any other result. truncateToolResult shrinks the longest string inside a
+	// JSON object rather than splicing bytes, so the envelope stays readable.
 	if len(result) > maxToolResultLen {
-		result = Text.HeadTail(result, maxToolResultLen*2/3, maxToolResultLen/3,
-			"\n... (middle truncated at 4KB cap; use start_line, grep, or tail to read the missing portion) ...\n")
+		result = truncateToolResult(result, maxToolResultLen, Text.HeadTail)
 	}
-
 	return result, nil
 }
 

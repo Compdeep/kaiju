@@ -211,7 +211,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		// A refusal is the call's result rather than an error, so the model reads
 		// why and does something else.
 		if allow, reason := a.allowTool(ctx, ToolCallRequest{
-			Trigger: triggerOf(graph),
+			Trigger: triggerFrom(ctx, graph),
 			Graph:   graph,
 			Tool:    n.ToolName,
 			Params:  n.Params,
@@ -545,7 +545,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			a.gate.Audit(gates.AuditEntry{
 				Tool:      toolName,
 				TriggerID: triggerID,
-				RunID:     actionRunID(graph, triggerID),
+				RunID:     actionRunID(ctx, graph, triggerID),
 				Error:     err.Error(),
 			})
 			return "", nil, err
@@ -568,7 +568,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		a.gate.Audit(gates.AuditEntry{
 			Tool:      toolName,
 			TriggerID: triggerID,
-			RunID:     actionRunID(graph, triggerID),
+			RunID:     actionRunID(ctx, graph, triggerID),
 			Error:     err.Error(),
 			Intent:    int(intent),
 			Impact:    impact,
@@ -582,7 +582,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			a.gate.Audit(gates.AuditEntry{
 				Tool:      toolName,
 				TriggerID: triggerID,
-				RunID:     actionRunID(graph, triggerID),
+				RunID:     actionRunID(ctx, graph, triggerID),
 				Error:     err.Error(),
 				Intent:    int(intent),
 				Impact:    impact,
@@ -598,7 +598,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// Target is left empty on purpose: reaching here means the call runs on this
 	// machine, whatever the node happens to name.
 	if allow, reason := a.allowTool(ctx, ToolCallRequest{
-		Trigger: triggerOf(graph),
+		Trigger: triggerFrom(ctx, graph),
 		Graph:   graph,
 		Tool:    toolName,
 		Params:  params,
@@ -667,7 +667,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		Tool:      toolName,
 		Params:    params,
 		TriggerID: triggerID,
-		RunID:     actionRunID(graph, triggerID),
+		RunID:     actionRunID(ctx, graph, triggerID),
 		Intent:    int(intent),
 		Impact:    impact,
 	}
@@ -693,7 +693,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			ActionType: toolName,
 			Params:     paramsJSON,
 			Result:     Text.TruncateLog(result, 500),
-			RunID:      actionRunID(graph, triggerID),
+			RunID:      actionRunID(ctx, graph, triggerID),
 			Intent:     int(intent),
 			Impact:     impact,
 		})

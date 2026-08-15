@@ -57,7 +57,7 @@ parse.
 
 | lane | model | stages |
 |---|---|---|
-| `Heavy` | reasoning | planner, Holmes, microplanner, compute architect |
+| `Heavy` | reasoning | planner, Holmes, microplanner, compute architect and coder |
 | `Light` | executor | preflight, reflector, observer, context curator, plan validator |
 | `Route` | pinned small model, else `Light` | the one decision made first: conversation or work |
 | `Answer` | pinned answer model, else `Heavy` | the aggregator, and chat |
@@ -161,9 +161,10 @@ not parse. It writes a short second entry naming the same node, landing under
 the call it is about. The log is a file, appended to and never rewritten, so
 amending the first entry is not open to us.
 
-Two stages still build their own. The planner's trace spans its shorter-plan
-retry, so one trace covers two calls; compute's coder holds a bare
-`*llm.Client` and never reaches a lane.
+**`retracing(ctx, tag)` is for a stage that calls the model more than once.**
+The planner makes four calls — the plan, then asking for a shorter one, one
+that parses, and one that names real tools — and entries that read the same are
+entries nobody can tell apart. Each retry is re-tagged with why it ran.
 
 ## What is not here
 

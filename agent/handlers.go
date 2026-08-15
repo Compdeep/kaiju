@@ -43,6 +43,9 @@ func (a *Agent) applyHandlers(cfg Config) {
 	if cfg.AllowTool != nil {
 		a.allowToolFn = cfg.AllowTool
 	}
+	if cfg.Audit != nil {
+		a.auditFn = cfg.Audit
+	}
 	if cfg.Clearance != nil {
 		a.clearanceCheck = cfg.Clearance
 	}

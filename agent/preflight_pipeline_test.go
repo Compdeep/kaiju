@@ -60,7 +60,7 @@ func drivePreflight(t *testing.T, a *Agent, trigger Trigger) (*Graph, string, *T
 		a.intentRegistry = NewIntentRegistry()
 	}
 
-	graph, _, cleanup := a.setupDAGPipeline(trigger)
+	graph, _, cleanup := a.setupDAGPipeline(trigger, newRunID(trigger.ID))
 	t.Cleanup(cleanup)
 
 	b := NewBudget(100, 100, 100, 100, time.Minute)
@@ -171,7 +171,7 @@ func TestPipelineDoesNothingWhenTheClassifierIsOff(t *testing.T) {
 	a.intentRegistry = NewIntentRegistry()
 	a.cfg.ClassifierEnabled = false
 
-	graph, _, cleanup := a.setupDAGPipeline(chatTrigger("hello"))
+	graph, _, cleanup := a.setupDAGPipeline(chatTrigger("hello"), "run-test-2")
 	t.Cleanup(cleanup)
 	_, _ = a.runPlanAndSchedule(context.Background(), chatTrigger("hello"), graph, NewBudget(100, 100, 100, 100, time.Minute))
 

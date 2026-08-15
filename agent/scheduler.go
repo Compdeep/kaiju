@@ -47,12 +47,14 @@ import (
  *       sets up the observer channel for live event streaming, registers
  *       the graph with the agent for SSE subscribers, and returns a cleanup
  *       function that must be deferred.
- * param: trigger - the run's trigger, whose id seeds the run id.
+ * param: trigger - the run's trigger.
+ * param: runID - the identity stamped on the run's context, so the graph and
+ *        every trace written before it existed agree.
  * return: graph, budget, and cleanup function.
  */
-func (a *Agent) setupDAGPipeline(trigger Trigger) (*Graph, *Budget, func()) {
+func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget, func()) {
 	graph := NewGraph()
-	graph.RunID = newRunID(trigger.ID)
+	graph.RunID = runID
 	budget := NewBudget(
 		a.cfg.MaxNodes,
 		a.cfg.MaxPerSkill,
@@ -1948,6 +1950,12 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// Carry the per-request model selection so every heavy/light lane call in
 	// this run routes to the host-chosen provider (see model_route.go).
 	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))
+	// The run's identity, before admission and before the model calls that
+	// route and classify — all of which write traces and had nothing to name
+	// them after. setupDAGPipeline takes this same id rather than making its
+	// own, so the graph and the traces agree.
+	runID := newRunID(trigger.ID)
+	ctx = withRunID(ctx, runID)
 	startTime := time.Now()
 
 	// Run admission before any work or model call, and before the branch below,
@@ -1982,7 +1990,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	markRunStart(a.cfg.MetadataDir, trigger.SessionID)
 	rotateServiceLogs(a.cfg.Workspace)
 
-	graph, budget, cleanup := a.setupDAGPipeline(trigger)
+	graph, budget, cleanup := a.setupDAGPipeline(trigger, runID)
 	defer cleanup()
 
 	// No hard wall clock — the kernel's heartbeat module manages soft timeouts.

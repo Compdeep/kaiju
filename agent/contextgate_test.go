@@ -429,7 +429,7 @@ func TestWriteLLMTrace_Disabled_NoOp(t *testing.T) {
 	t.Setenv("KAIJU_PROMPT_DEBUG", "")
 	// Without env var, no file should be written.
 	WriteLLMTrace(LLMTrace{
-		TriggerID: "test-alert",
+		RunID: "test-alert",
 		NodeID:    "n1",
 		NodeType:  "test",
 		System:    "sys",
@@ -448,7 +448,7 @@ func TestWriteLLMTrace_Enabled_WritesFile(t *testing.T) {
 	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 
 	WriteLLMTrace(LLMTrace{
-		TriggerID: triggerID,
+		RunID: triggerID,
 		NodeID:    "n1",
 		NodeType:  "test_node",
 		Tag:       "test_tag",
@@ -493,8 +493,8 @@ func TestWriteLLMTrace_AppendsAcrossCalls(t *testing.T) {
 	triggerID := fmt.Sprintf("test-append-%d", time.Now().UnixNano())
 	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 
-	WriteLLMTrace(LLMTrace{TriggerID: triggerID, NodeID: "n1", NodeType: "first", User: "first call"})
-	WriteLLMTrace(LLMTrace{TriggerID: triggerID, NodeID: "n2", NodeType: "second", User: "second call"})
+	WriteLLMTrace(LLMTrace{RunID: triggerID, NodeID: "n1", NodeType: "first", User: "first call"})
+	WriteLLMTrace(LLMTrace{RunID: triggerID, NodeID: "n2", NodeType: "second", User: "second call"})
 
 	data, err := os.ReadFile(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 	if err != nil {
@@ -515,7 +515,7 @@ func TestWriteLLMTrace_Error_RecordsError(t *testing.T) {
 	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 
 	WriteLLMTrace(LLMTrace{
-		TriggerID: triggerID, NodeID: "n1", NodeType: "test",
+		RunID: triggerID, NodeID: "n1", NodeType: "test",
 		System: "sys", User: "usr",
 		Err: "LLM call timed out after 30s",
 	})

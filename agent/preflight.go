@@ -102,7 +102,7 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 		return "agent"
 	}
 	started := time.Now()
-	trace := LLMTrace{TriggerID: triggerID, NodeType: "preflight", Tag: "route", Started: started, System: prompt.Route, User: query}
+	trace := LLMTrace{RunID: runIDFrom(ctx), NodeType: "preflight", Tag: "route", Started: started, System: prompt.Route, User: query}
 	// Give the router just enough context to interpret a terse follow-up, then the
 	// current message. See routeContext for what's included (summary + last turn).
 	msgs := []llm.Message{{Role: "system", Content: prompt.Route}}
@@ -233,12 +233,12 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 
 	started := time.Now()
 	trace := LLMTrace{
-		TriggerID: triggerID,
-		NodeType:  "preflight",
-		Tag:       "classify",
-		Started:   started,
-		System:    sysPrompt,
-		User:      query,
+		RunID:    runIDFrom(ctx),
+		NodeType: "preflight",
+		Tag:      "classify",
+		Started:  started,
+		System:   sysPrompt,
+		User:     query,
 	}
 
 	resp, err := a.completeLight(ctx, &llm.ChatRequest{

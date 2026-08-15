@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -122,26 +123,26 @@ func newRunID(correlationID string) string {
 
 /*
  * actionRunID returns the run an action belongs to, or empty outside one.
- * desc: A run stamps its graph before any node fires, so this answers from the
- *       graph in every case a dispatched tool call reaches. Outside a run it
- *       answers with nothing rather than with the caller's reference.
+ * desc: The graph first, because a run stamps it before any node fires and it
+ *       is what every dispatched call has. Then the context, for the ReAct
+ *       loop, which builds no graph and stamps its run there instead — without
+ *       this its audit lines and its actions would be filed under nothing.
+ *
+ *       Never the caller's reference. Falling back to it grouped two runs'
+ *       actions under one id, which for a state-changing call is the difference
+ *       between "this ran once" and "this ran twice", and is the fault this
+ *       pair of identifiers exists to keep apart.
+ * param: ctx - the run's context.
  * param: graph - the run, or nil.
  * param: triggerID - unused, kept so the call site reads as a choice between
  *        the two identifiers rather than a bare field access.
  * return: the run identifier, or empty.
  */
-func actionRunID(graph *Graph, triggerID string) string {
+func actionRunID(ctx context.Context, graph *Graph, triggerID string) string {
 	if graph != nil && graph.RunID != "" {
 		return graph.RunID
 	}
-	// Empty, not the caller's reference. Falling back to it grouped two runs'
-	// actions under one id — which for a state-changing call is the difference
-	// between "this ran once" and "this ran twice", and is the fault this pair
-	// of identifiers exists to keep apart.
-	//
-	// Every run stamps its graph before any node fires, so this is reached only
-	// by a call made outside a run.
-	return ""
+	return runIDFrom(ctx)
 }
 
 // Writing to the application's store.

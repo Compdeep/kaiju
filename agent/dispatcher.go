@@ -105,6 +105,52 @@ func (st *toolThrottle) waitThrottle(ctx context.Context, toolName string, coold
  * param: intent - the IGX intent level.
  * param: scope - resolved tool access scope (nil for full access).
  */
+/*
+ * finish is how a step ends, wherever it ran.
+ * desc: A step runs here or on another machine, and the two paths were kept
+ *       level with each other by hand. The remote one has been found short four
+ *       times now — the scope, clearance and AllowTool checks; the envelope it
+ *       did not parse; a target with no executor falling through to local
+ *       execution; and the display hint, which the local path attached and it
+ *       did not, so a panel never appeared for a step that ran elsewhere.
+ *
+ *       Each was fixed where it was found, and nothing stopped the next one. So
+ *       everything a completion carries beyond its four fields is assembled
+ *       here, once, and neither path can be given something the other is not.
+ *
+ *       It returns the completion rather than sending it. The send has to stay
+ *       at the call site: the panic guard sends one completion unconditionally,
+ *       which is only correct while nothing runs after a send, and
+ *       TestNodeCompletionsAreTerminal holds that property by reading the sends
+ *       where they are written.
+ * param: n - the node that ran. Its Actions gain the tool's display hint.
+ * param: result - what the tool returned, empty on failure.
+ * param: body - the typed body, nil for a tool that returned a string.
+ * param: err - why it failed, nil on success.
+ * return: the completion to send.
+ */
+func (a *Agent) finish(n *Node, result string, body NodeBody, err error) nodeCompletion {
+	// A hint is derived from the tool as this machine has it, so a step that ran
+	// elsewhere gets one only when the same tool is registered here too. That is
+	// the honest limit: without the tool there is nothing to ask.
+	if err == nil {
+		if skill, ok := a.registry.Get(n.ToolName); ok {
+			if hint := toolapi.GetDisplayHint(skill, n.Params, result); hint != nil {
+				n.Actions = append(n.Actions, NodeAction{
+					Type:    "panel_show",
+					Plugin:  hint.Plugin,
+					Title:   hint.Title,
+					Path:    hint.Path,
+					Content: hint.Content,
+					Mime:    hint.Mime,
+					Line:    hint.Line,
+				})
+			}
+		}
+	}
+	return nodeCompletion{NodeID: n.ID, Result: result, Body: body, Err: err}
+}
+
 func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	budget *Budget, ch chan<- nodeCompletion, triggerID string,
 	throttle *toolThrottle, intent gates.Intent, scope *ResolvedScope) {
@@ -135,7 +181,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// chain handles that case.
 	if err := substituteTemplates(n, graph); err != nil {
 		log.Printf("[dag] node %s template substitution failed: %v", n.ID, err)
-		ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf("dependency injection failed: %w", err)}
+		ch <- a.finish(n, "", nil, fmt.Errorf("dependency injection failed: %w", err))
 		return
 	}
 
@@ -144,7 +190,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// class where the planner invents params like bash(cwd: ...).
 	if skill, ok := a.registry.Get(n.ToolName); ok {
 		if err := validateDirectParams(skill, n.Params); err != nil {
-			ch <- nodeCompletion{NodeID: n.ID, Err: err}
+			ch <- a.finish(n, "", nil, err)
 			return
 		}
 	}
@@ -161,8 +207,8 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// and the run should say that rather than work around it.
 	if n.Type == NodeTool && n.Target != "" && n.Target != a.cfg.NodeID && a.remoteExec == nil {
 		log.Printf("[dag] node %s: step is for %s and no remote executor is configured", n.ID, Text.TruncateLog(n.Target, 12))
-		ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf(
-			"step is for %q and this agent has no remote executor, so it was not run", n.Target)}
+		unreachable := fmt.Errorf("step is for %q and this agent has no remote executor, so it was not run", n.Target)
+		ch <- a.finish(n, "", nil, unreachable)
 		return
 	}
 
@@ -216,18 +262,18 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 
 		if err := scopeAllows(n.ToolName, scope); err != nil {
 			auditRemote("", err)
-			ch <- nodeCompletion{NodeID: n.ID, Err: err}
+			ch <- a.finish(n, "", nil, err)
 			return
 		}
 		if err := a.validateTarget(n.Target); err != nil {
 			log.Printf("[dag] node %s: invalid target %q: %v", n.ID, n.Target, err)
 			auditRemote("", err)
-			ch <- nodeCompletion{NodeID: n.ID, Err: fmt.Errorf("invalid target %q: %w", n.Target, err)}
+			ch <- a.finish(n, "", nil, fmt.Errorf("invalid target %q: %w", n.Target, err))
 			return
 		}
 		if err := a.checkClearance(ctx, n.ToolName, n.Params, usernameOf(scope)); err != nil {
 			auditRemote("", err)
-			ch <- nodeCompletion{NodeID: n.ID, Err: err}
+			ch <- a.finish(n, "", nil, err)
 			return
 		}
 		// Asked last here as it is below, and after the target check for the same
@@ -242,7 +288,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			Params:  n.Params,
 			Target:  n.Target,
 		}); !allow {
-			ch <- nodeCompletion{NodeID: n.ID, Result: reason}
+			ch <- a.finish(n, reason, nil, nil)
 			return
 		}
 		log.Printf("[dag] remote exec %s (%s) -> %s", n.ID, n.ToolName, Text.TruncateLog(n.Target, 12))
@@ -270,7 +316,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			err = fmt.Errorf("step on %q failed: %w", n.Target, err)
 		}
 		auditRemote(result, err)
-		ch <- nodeCompletion{NodeID: n.ID, Result: result, Body: body, Err: err}
+		ch <- a.finish(n, result, body, err)
 		return
 	}
 
@@ -288,31 +334,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	}
 
 	result, body, err := a.executeToolNode(ctx, n, graph, budget, n.ToolName, n.Params, triggerID, intent, scope)
-
-	// Attach tool actions to the node before completion so they're
-	// included in the node event when SetResult emits it.
-	if err == nil {
-		if skill, ok := a.registry.Get(n.ToolName); ok {
-			if hint := toolapi.GetDisplayHint(skill, n.Params, result); hint != nil {
-				n.Actions = append(n.Actions, NodeAction{
-					Type:    "panel_show",
-					Plugin:  hint.Plugin,
-					Title:   hint.Title,
-					Path:    hint.Path,
-					Content: hint.Content,
-					Mime:    hint.Mime,
-					Line:    hint.Line,
-				})
-			}
-		}
-	}
-
-	ch <- nodeCompletion{
-		NodeID: n.ID,
-		Result: result,
-		Body:   body,
-		Err:    err,
-	}
+	ch <- a.finish(n, result, body, err)
 }
 
 /*

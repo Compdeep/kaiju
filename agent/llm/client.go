@@ -193,6 +193,29 @@ type Client struct {
 	apiKey   string
 	model    string
 	http     *http.Client
+	limits   ModelLimits
+}
+
+// ModelLimits reports what a model can take in and give back, in tokens. Zero
+// for either means the caller does not know, not that the limit is zero.
+type ModelLimits func(model string) (contextTokens, maxOutputTokens int)
+
+/*
+ * Limits tells a client what its models can do.
+ * desc: With it, every call this client makes sizes its reply against the model
+ *       that will answer. Without it — the default — every request goes exactly
+ *       as its caller wrote it.
+ *
+ *       Set on the client rather than at each call site because a caller that
+ *       has to remember is a caller that forgets: nine of eighteen call sites
+ *       sized their reply and nine did not, including the one asking for the
+ *       largest reply in the engine.
+ * param: fn - the lookup, or nil to leave requests alone.
+ * return: the client, so this reads as part of construction.
+ */
+func (c *Client) Limits(fn ModelLimits) *Client {
+	c.limits = fn
+	return c
 }
 
 // NewClient creates a Client targeting an OpenAI-compatible endpoint.
@@ -264,6 +287,7 @@ func (c *Client) setAuthHeaders(req *http.Request) {
 // Complete sends a chat completion request and returns the response.
 // Routes to the appropriate provider backend.
 func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
+	c.capReply(req)
 	var resp *ChatResponse
 	var err error
 	if c.provider == ProviderAnthropic {
@@ -330,6 +354,7 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 // delta, returning the full accumulated text. Thin wrapper over
 // CompleteStreamResp for callers that only need the text.
 func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (string, error) {
+	c.capReply(req)
 	resp, err := c.CompleteStreamResp(ctx, req, onChunk)
 	if err != nil {
 		return "", err
@@ -349,6 +374,7 @@ func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk f
 // shaped exactly like Complete's, so callers can treat streamed and non-streamed
 // turns identically.
 func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (*ChatResponse, error) {
+	c.capReply(req)
 	resp, err := c.completeStreamResp(ctx, req, onChunk)
 	// One emit covering every return path in the implementation below,
 	// including the early transport and HTTP failures.

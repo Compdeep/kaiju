@@ -90,11 +90,9 @@ func (a *Agent) lane(ctx context.Context, l Lane) (*llm.Client, string) {
 
 /*
  * ask sends one completion through a lane.
- * desc: Four steps, in this order and only in this order: resolve the lane,
- *       stamp its model on the request, size the reply against that model, and
- *       send. The sizing has to come last because it measures the prompt, and
- *       the model has to be stamped before the sizing because the limits are
- *       looked up by model id.
+ * desc: Resolve the lane, stamp its model on the request, send. The client
+ *       sizes the reply against that model as it sends, which is why the model
+ *       has to be stamped first.
  *
  *       Everything that applies to every model call belongs here. That is the
  *       point of it: a step added here is added for every stage at once, which
@@ -173,6 +171,9 @@ func (a *Agent) askStreamResp(ctx context.Context, l Lane, req *llm.ChatRequest,
  *       to one of them by hand is a step three of them do not get. That is the
  *       fault this whole door exists to remove, so it must not be reintroduced
  *       inside it.
+ *
+ *       Sizing the reply is not here: it is the client's, applied on every send
+ *       whoever makes it, so a tool holding a bare client gets it too.
  * param: ctx, l, req - as ask.
  * return: the client to send with.
  */
@@ -181,7 +182,6 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 	if model != "" {
 		req.Model = model
 	}
-	a.capReply(resolvedModel(req.Model, c), req)
 
 	// Images ride the context so they re-attach on every heavy call this turn,
 	// staying visible across follow-ups. Heavy only, as before: the model check

@@ -216,7 +216,6 @@ func (a *Agent) OneShot(ctx context.Context, provider, model string, messages []
 		Temperature: temperature,
 		MaxTokens:   maxTokens,
 	}
-	a.capReply(resolvedModel(model, client), oneShot)
 	resp, err := client.Complete(ctx, oneShot)
 	if err != nil {
 		return "", 0, err

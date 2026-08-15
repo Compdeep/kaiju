@@ -2,77 +2,16 @@ package agent
 
 import (
 	"context"
-	"log"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 )
 
-// Sizing a reply against the model rather than against a constant.
+// The planner's reply budget.
 //
-// Every call site picks a max_tokens for its own reply — 16 for the router, 256
-// for preflight, 16384 for the compute architect. The model never sees that
-// number; it is where the provider stops generating. So a number chosen without
-// reference to the model is wrong in both directions: too high and the provider
-// rejects the request, too low and a reply that had to be parsed arrives cut in
-// half.
-//
-// capReply keeps each site's choice and only corrects it where the model says
-// it cannot be met. Config.Limits supplies the numbers; without it nothing here
-// changes any call.
-
-// replyFloor is the smallest cap capReply will settle on. A prompt that nearly
-// fills the window would otherwise compute a cap of a few tokens, which fails
-// in a way that looks like the model refusing to answer.
-const replyFloor = 256
-
-// promptHeadroom covers what the estimate cannot see — tool schemas, the
-// provider's own framing — so a reply sized against the remaining window does
-// not run into the end of it.
-const promptHeadroom = 2000
-
-/*
- * capReply lowers a request's reply cap to what the model can actually produce.
- * desc: Two ceilings apply. The model's published maximum reply is the first.
- *       The room left in its context window after the prompt is the second,
- *       estimated at four characters per token, the same rate the context gate
- *       budgets in. The lower of the two wins, and the result is never raised
- *       above what the caller asked for — a site that wants a short reply keeps
- *       getting one.
- *
- *       Nothing happens when Config.Limits is unset, when the model is unknown
- *       to it, or when the request names no model, so an application that never
- *       supplies a catalog is unaffected.
- * param: model - the resolved model id for this call; empty skips the check.
- * param: req - the request, whose MaxTokens is lowered in place.
- */
-func (a *Agent) capReply(model string, req *llm.ChatRequest) {
-	if a.cfg.Limits == nil || model == "" || req == nil || req.MaxTokens <= 0 {
-		return
-	}
-	contextTokens, maxOutput := a.cfg.Limits(model)
-	if contextTokens == 0 && maxOutput == 0 {
-		return
-	}
-
-	ceiling := req.MaxTokens
-	if maxOutput > 0 && maxOutput < ceiling {
-		ceiling = maxOutput
-	}
-	if contextTokens > 0 {
-		if room := contextTokens - promptTokens(req.Messages) - promptHeadroom; room < ceiling {
-			ceiling = room
-		}
-	}
-	if ceiling < replyFloor {
-		ceiling = replyFloor
-	}
-	if ceiling >= req.MaxTokens {
-		return
-	}
-	log.Printf("[llm] %s: reply cap %d → %d (window %d, max reply %d, prompt ~%d)",
-		model, req.MaxTokens, ceiling, contextTokens, maxOutput, promptTokens(req.Messages))
-	req.MaxTokens = ceiling
-}
+// Sizing a reply against the model is the client's own business now — see
+// llm.Client.Limits, which caps every send. What is left here is the one budget
+// this package computes rather than picks: the planner is told it may write up
+// to MaxNodes steps, so its cap has to fit that many.
 
 // stepTokens is what one planned step costs to write, measured from the two
 // worked examples in the EXECUTIVE prompt section: 108 and 142 characters, so

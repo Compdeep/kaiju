@@ -33,106 +33,9 @@ func reqOf(maxTokens, promptChars int) *llm.ChatRequest {
 	}
 }
 
-// ── capReply: the safe defaults ───────────────────────────────────────────────
+// ── planMaxTokens ────────────────────────────────────────────────────────────
 
-func TestCapReply_NoCatalogLeavesEveryRequestAlone(t *testing.T) {
-	a := &Agent{}
-	req := reqOf(4096, 100)
-	a.capReply("openai/gpt-4.1", req)
-	if req.MaxTokens != 4096 {
-		t.Fatalf("want 4096 untouched, got %d", req.MaxTokens)
-	}
-}
-
-func TestCapReply_ModelMissingFromTheCatalogLeavesRequestAlone(t *testing.T) {
-	a := &Agent{cfg: Config{ModelConfig: ModelConfig{Limits: limitsFor("openai/gpt-4.1", 1047576, 32768)}}}
-	req := reqOf(16384, 100)
-	a.capReply("selfhosted/qwen3-32b", req)
-	if req.MaxTokens != 16384 {
-		t.Fatalf("an unknown model must keep its cap, got %d", req.MaxTokens)
-	}
-}
-
-func TestCapReply_UnnamedModelLeavesRequestAlone(t *testing.T) {
-	a := &Agent{cfg: Config{ModelConfig: ModelConfig{Limits: limitsOf(8000, 1000)}}}
-	req := reqOf(4096, 100)
-	a.capReply("", req)
-	if req.MaxTokens != 4096 {
-		t.Fatalf("no model name means no opinion, got %d", req.MaxTokens)
-	}
-}
-
-func TestCapReply_HalfKnownLimitsUseTheHalfThatIsKnown(t *testing.T) {
-	// A catalog entry with a window and no published maximum reply.
-	a := &Agent{cfg: Config{ModelConfig: ModelConfig{Limits: limitsOf(8000, 0)}}}
-	req := reqOf(6000, 4000) // 8000 - 1000 prompt - 2000 headroom = 5000 of room
-	a.capReply("some/model", req)
-	if req.MaxTokens != 5000 {
-		t.Fatalf("want 5000 from the window alone, got %d", req.MaxTokens)
-	}
-
-	// And the reverse: a maximum reply with no window.
-	b := &Agent{cfg: Config{ModelConfig: ModelConfig{Limits: limitsOf(0, 2048)}}}
-	req2 := reqOf(6000, 4000)
-	b.capReply("some/model", req2)
-	if req2.MaxTokens != 2048 {
-		t.Fatalf("want 2048 from the maximum reply alone, got %d", req2.MaxTokens)
-	}
-}
-
-func TestCapReply_ZeroOrNegativeCapIsNotTouched(t *testing.T) {
-	a := &Agent{cfg: Config{ModelConfig: ModelConfig{Limits: limitsOf(8000, 1000)}}}
-	req := &llm.ChatRequest{MaxTokens: 0}
-	a.capReply("some/model", req)
-	if req.MaxTokens != 0 {
-		t.Fatalf("a request that set no cap must keep none, got %d", req.MaxTokens)
-	}
-}
-
-// ── capReply: the two ceilings ────────────────────────────────────────────────
-
-func TestCapReply_LowersToTheModelsMaximumReply(t *testing.T) {
-	a := &Agent{cfg: Config{ModelConfig: ModelConfig{Limits: limitsOf(200000, 8192)}}}
-	req := reqOf(16384, 100)
-	a.capReply("anthropic/claude-sonnet-5", req)
-	if req.MaxTokens != 8192 {
-		t.Fatalf("want 8192, got %d", req.MaxTokens)
-	}
-}
-
-func TestCapReply_NeverRaisesWhatTheCallerAskedFor(t *testing.T) {
-	a := &Agent{cfg: Config{ModelConfig: ModelConfig{Limits: limitsOf(200000, 64000)}}}
-	req := reqOf(16, 100) // the router lane wants a tiny reply
-	a.capReply("anthropic/claude-haiku-4.5", req)
-	if req.MaxTokens != 16 {
-		t.Fatalf("want 16 kept, got %d", req.MaxTokens)
-	}
-}
-
-func TestCapReply_WindowBeatsMaxOutputWhenTighter(t *testing.T) {
-	// 32k window, ~5k-token prompt: 32000-5000-2000 = 25000 of room, so the
-	// model's 16k maximum reply is the binding limit.
-	a := &Agent{cfg: Config{ModelConfig: ModelConfig{Limits: limitsOf(32000, 16000)}}}
-	req := reqOf(20000, 20000)
-	a.capReply("some/small-window", req)
-	if req.MaxTokens != 16000 {
-		t.Fatalf("want 16000, got %d", req.MaxTokens)
-	}
-}
-
-func TestCapReply_MaxOutputBeatsWindowWhenTighter(t *testing.T) {
-	// 32k window, ~30k-token prompt: 0 of room, so the floor applies rather
-	// than the model's 16k maximum reply.
-	a := &Agent{cfg: Config{ModelConfig: ModelConfig{Limits: limitsOf(32000, 16000)}}}
-	req := reqOf(8192, 120000)
-	a.capReply("some/small-window", req)
-	if req.MaxTokens != replyFloor {
-		t.Fatalf("want the floor %d, got %d", replyFloor, req.MaxTokens)
-	}
-}
-
-// ── planMaxTokens ─────────────────────────────────────────────────────────────
-
+// planAgent is an agent configured for one question: how big may a plan be.
 func planAgent(maxNodes, maxTokens int, limits ModelLimits) *Agent {
 	return &Agent{
 		llm: llm.NewClient("http://example.invalid", "", "some/model"),
@@ -222,6 +125,11 @@ func TestCompleteHeavy_CapsAgainstTheModel(t *testing.T) {
 		llm: llm.NewClient(srv.URL, "", "anthropic/claude-sonnet-5"),
 		cfg: Config{ModelConfig: ModelConfig{Limits: limitsFor("anthropic/claude-sonnet-5", 200000, 8192)}},
 	}
+	// New does this for an agent built the supported way. A hand-built one has
+	// to, or its clients send every request exactly as written — which is what
+	// TestNewGivesEveryClientTheCatalog holds New to.
+	a.limitEveryClient()
+
 	_, err := a.completeHeavy(context.Background(), reqOf(64000, 400))
 	if err != nil {
 		t.Fatalf("call failed: %v", err)
@@ -254,5 +162,53 @@ func TestCompleteHeavy_UnknownModelSendsTheOriginalCap(t *testing.T) {
 	}
 	if seen.MaxTokens != 16384 {
 		t.Fatalf("an unknown model must reach the wire uncapped, got %d", seen.MaxTokens)
+	}
+}
+
+// Config.Limits is only worth anything if it reaches the clients that send.
+//
+// The catalog lives on Config and the sizing lives on the client, so something
+// has to join them. New does it, once, for every client the agent holds — and
+// if it stops, every call in the engine is sized against nothing again with
+// nothing to say so.
+func TestNewGivesEveryClientTheCatalog(t *testing.T) {
+	asked := map[string]bool{}
+	a, err := New(Config{
+		ModelConfig: ModelConfig{
+			LLMEndpoint:   "http://example.invalid",
+			LLMModel:      "reasoning/model",
+			ExecutorModel: "executor/model",
+			MaxTokens:     4096,
+			Limits: func(m string) (int, int) {
+				asked[m] = true
+				return 128000, 512
+			},
+		},
+		PathConfig: PathConfig{DataDir: t.TempDir(), Workspace: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Sizing a request on each client asks the catalog, which is the observable
+	// proof that the client holds it.
+	for name, c := range map[string]*llm.Client{"reasoning": a.llm, "executor": a.executor} {
+		if c == nil {
+			continue
+		}
+		req := &llm.ChatRequest{
+			Messages:  []llm.Message{{Role: "user", Content: "hello"}},
+			MaxTokens: 4096,
+		}
+		if _, err := c.Complete(context.Background(), req); err == nil {
+			t.Logf("%s client reached its endpoint, which this test does not need", name)
+		}
+		if req.MaxTokens != 512 {
+			t.Errorf("the %s client sent max_tokens %d; it has no catalog, so every "+
+				"call it makes is sized against nothing", name, req.MaxTokens)
+		}
+	}
+	if len(asked) == 0 {
+		t.Error("no client asked the catalog anything")
 	}
 }

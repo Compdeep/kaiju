@@ -144,7 +144,6 @@ func (a *Agent) coverageEdge(ctx context.Context, graph *Graph, evidence string)
 				Temperature: 0.2,
 				MaxTokens:   700,
 			}
-			a.capReply(resolvedModel(model, client), covReq)
 			resp, err := client.Complete(ctx, covReq)
 			if err == nil && resp != nil && len(resp.Choices) > 0 && strings.TrimSpace(resp.Choices[0].Message.Content) != "" {
 				out = "## Coverage — what the evidence can and can't back\n" + strings.TrimSpace(resp.Choices[0].Message.Content)

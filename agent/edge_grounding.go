@@ -142,7 +142,6 @@ func (a *Agent) groundingEdge(ctx context.Context, graph *Graph, request string)
 		Temperature: 0.2,
 		MaxTokens:   600,
 	}
-	a.capReply(resolvedModel(model, client), grdReq)
 	resp, err := client.Complete(ctx, grdReq)
 	if err != nil || resp == nil || len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
 		return "## Grounding — read what you already found\n\n" + structural // fail open

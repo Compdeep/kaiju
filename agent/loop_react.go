@@ -35,13 +35,13 @@ func (a *Agent) systemPrompt(cards []string) string {
 
 /*
  * RunReActSync runs the ReAct loop synchronously and returns a SyncResult.
- * desc: Runs the ReAct tool loop synchronously and returns the verdict.
+ * desc: Runs the ReAct tool loop synchronously and returns the outcome.
  *       Used by the API when mode=react. Goes through the same pipeline as DAG
  *       (IGX gate, scope checks, audit, tool execution) but with sequential
  *       reason-act-observe dispatch instead of parallel DAG execution.
  * param: ctx - context for the investigation.
  * param: trigger - the investigation trigger.
- * return: SyncResult with verdict, or error.
+ * return: SyncResult with outcome, or error.
  */
 func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
 	ctx = a.tagTokens(ctx, trigger)
@@ -66,10 +66,10 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	log.Printf("[react] sees %d tools (%d callable, %d guidance-only)", len(relevant), len(toolDefs), len(relevant)-len(toolDefs))
 
 	if len(toolDefs) == 0 {
-		verdict := "No tools available."
+		outcome := "No tools available."
 		a.recordRun(trigger, startTime, nil, nil, trigger.Intent(),
-			Conclusion{Verdict: verdict, Status: "failed"})
-		return &SyncResult{Verdict: verdict}, nil
+			Conclusion{Outcome: outcome, Status: "failed"})
+		return &SyncResult{Outcome: outcome}, nil
 	}
 
 	// IGX: derive intent. Auto falls back to the registry's default rank.
@@ -78,7 +78,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 		intent = gates.Intent(a.intentRegistry.DefaultRank())
 	}
 
-	var verdict string
+	var outcome string
 	totalToolCalls := 0
 	totalLLMCalls := 0
 
@@ -103,7 +103,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 		})
 		if err != nil {
 			a.recordRun(trigger, startTime, nil, nil, intent, Conclusion{
-				Verdict:  fmt.Sprintf("react LLM error turn %d: %v", turn, err),
+				Outcome:  fmt.Sprintf("react LLM error turn %d: %v", turn, err),
 				Status:   "failed",
 				Nodes:    totalToolCalls,
 				LLMCalls: totalLLMCalls,
@@ -120,10 +120,10 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 		assistantMsg := choice.Message
 		messages = append(messages, assistantMsg)
 
-		// Stream text content as verdict chunks
+		// Stream text content as outcome chunks
 		if assistantMsg.Content != "" {
-			a.broadcastDAGEvent(nil, DAGEvent{Type: "verdict", Text: assistantMsg.Content, SessionID: trigger.SessionID})
-			verdict = assistantMsg.Content
+			a.broadcastDAGEvent(nil, DAGEvent{Type: "outcome", Text: assistantMsg.Content, SessionID: trigger.SessionID})
+			outcome = assistantMsg.Content
 		}
 
 		if choice.FinishReason == "stop" || choice.FinishReason == "length" {
@@ -209,14 +209,14 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 		elapsed.Round(time.Millisecond), trigger.AlertID, totalToolCalls, totalLLMCalls)
 
 	a.recordRun(trigger, startTime, nil, nil, intent, Conclusion{
-		Verdict:  verdict,
+		Outcome:  outcome,
 		Status:   "completed",
 		Nodes:    totalToolCalls,
 		LLMCalls: totalLLMCalls,
 	})
 
 	return &SyncResult{
-		Verdict:  verdict,
+		Outcome:  outcome,
 		Nodes:    totalToolCalls,
 		LLMCalls: totalLLMCalls,
 	}, nil

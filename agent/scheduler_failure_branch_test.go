@@ -74,25 +74,25 @@ func TestRejectedCredentialsStopTheRun(t *testing.T) {
 		t.Error("pending work is not skipped, so the run continues against credentials " +
 			"already known to be refused")
 	}
-	if !strings.Contains(branch, "reflectionVerdict =") {
-		t.Error("no verdict is set, so the run ends with nothing said about why")
+	if !strings.Contains(branch, "reflectionOutcome =") {
+		t.Error("no outcome is set, so the run ends with nothing said about why")
 	}
 }
 
-// The verdict names the cause. Whoever reads it has to know it is the key and
+// The outcome names the cause. Whoever reads it has to know it is the key and
 // not the question.
 func TestTheCredentialsVerdictSaysWhatIsWrong(t *testing.T) {
 	branch := failureBranch(t)
-	start := strings.Index(branch, "reflectionVerdict = \"")
+	start := strings.Index(branch, "reflectionOutcome = \"")
 	if start < 0 {
-		t.Skip("no verdict to read; TestRejectedCredentialsStopTheRun covers that")
+		t.Skip("no outcome to read; TestRejectedCredentialsStopTheRun covers that")
 	}
-	rest := branch[start+len("reflectionVerdict = \""):]
-	verdict := rest[:strings.Index(rest, "\"")]
+	rest := branch[start+len("reflectionOutcome = \""):]
+	outcome := rest[:strings.Index(rest, "\"")]
 
 	for _, word := range []string{"credential", "key"} {
-		if !strings.Contains(strings.ToLower(verdict), word) {
-			t.Errorf("the verdict does not mention %q: %q", word, verdict)
+		if !strings.Contains(strings.ToLower(outcome), word) {
+			t.Errorf("the outcome does not mention %q: %q", word, outcome)
 		}
 	}
 }

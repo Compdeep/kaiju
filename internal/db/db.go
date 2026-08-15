@@ -143,7 +143,7 @@ func (d *DB) migrate() error {
 			llm_calls       INTEGER NOT NULL DEFAULT 0,
 			reflection_count INTEGER NOT NULL DEFAULT 0,
 			replan_count    INTEGER NOT NULL DEFAULT 0,
-			verdict         TEXT NOT NULL DEFAULT '',
+			outcome         TEXT NOT NULL DEFAULT '',
 			status          TEXT NOT NULL DEFAULT ''
 		)`,
 
@@ -219,6 +219,14 @@ func (d *DB) migrate() error {
 		`ALTER TABLE messages ADD COLUMN dag_trace TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE scopes ADD COLUMN cap TEXT NOT NULL DEFAULT '{}'`,
 		`ALTER TABLE intents ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`,
+		// runs.verdict became runs.outcome. A database created before the
+		// rename has the old column and CREATE TABLE IF NOT EXISTS will not
+		// touch it, so the insert would fail on a column that is not there.
+		// Both statements are attempted and both are allowed to fail: on a new
+		// database the rename finds nothing, on an old one the add finds the
+		// column already present.
+		`ALTER TABLE runs RENAME COLUMN verdict TO outcome`,
+		`ALTER TABLE runs ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, m := range alterMigrations {
 		d.conn.Exec(m) // ignore duplicate column errors

@@ -12,7 +12,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
-// runAggregatorWithClient synthesizes the final verdict. model is the routed
+// runAggregatorWithClient synthesizes the final outcome. model is the routed
 // model id for client; when non-empty it overrides the client's default so a
 // selected provider gets its own model (empty ⇒ client default applies).
 func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, client *llm.Client, model string, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
@@ -66,7 +66,7 @@ func (a *Agent) runAggregatorWithClient(ctx context.Context, trigger Trigger, gr
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   aggMaxTokens,
 	}, func(chunk, kind string) {
-		evType := "verdict"
+		evType := "outcome"
 		if kind == "reasoning" {
 			evType = "reasoning"
 		}

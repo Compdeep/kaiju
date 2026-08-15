@@ -56,7 +56,7 @@ type ActionInfo struct {
 
 // ExecuteResponse is returned from POST /api/v1/execute.
 type ExecuteResponse struct {
-	Verdict    string       `json:"verdict"`
+	Outcome    string       `json:"outcome"`
 	Actions    []ActionInfo `json:"actions,omitempty"` // recommended follow-up actions (caller decides)
 	Gaps       []string     `json:"gaps,omitempty"`    // capability gaps (missing tools)
 	DAGID      string       `json:"dag_id,omitempty"`

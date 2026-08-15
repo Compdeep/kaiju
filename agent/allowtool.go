@@ -15,7 +15,7 @@ import (
 // An application has rules of its own. One example: a tool that opens an
 // incident may be called by a person asking for one, and may not be called
 // during an automatic investigation, because there the incident is opened from
-// the finished verdict instead. That rule needs to know what an incident is,
+// the finished outcome instead. That rule needs to know what an incident is,
 // which this package does not.
 //
 // It cannot be done by leaving the tool out of the plan, either. Tools are

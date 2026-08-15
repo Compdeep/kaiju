@@ -14,7 +14,7 @@
 //     - Stores the user's incoming message
 //
 //  2. Chat output (after the aggregator runs, also in api.go)
-//     - Stores the assistant's verdict as the next message
+//     - Stores the assistant's outcome as the next message
 //     - Optionally extracts new semantic / episodic facts
 //
 // The agent's EXECUTION LAYER must never query or write memory:
@@ -163,7 +163,7 @@ func (m *Manager) LoadHistory(ctx context.Context, sessionID string, maxMessages
 			continue
 		}
 		// Truncate history messages to avoid flooding the executive with
-		// full aggregator verdicts and long user messages from prior turns.
+		// full aggregator outcomes and long user messages from prior turns.
 		content := dm.Content
 		switch dm.Role {
 		case "assistant":

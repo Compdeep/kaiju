@@ -80,7 +80,7 @@ type AnswerRequest struct {
 // AnswerResult is what the application concluded.
 type AnswerResult struct {
 	// Text is the answer as a person would read it. It is what the caller of
-	// RunDAGSync receives as SyncResult.Verdict, what is broadcast, and what is
+	// RunDAGSync receives as SyncResult.Outcome, what is broadcast, and what is
 	// recorded — so an application returning a structured result should still
 	// render a readable form here.
 	Text string
@@ -97,11 +97,15 @@ type AnswerResult struct {
 	// not execute them, exactly as with the built-in aggregator's.
 	Actions []ActuatorAction
 
-	// Severity and Category are the application's own labels for what the run
-	// concluded. They are written to the run record and nowhere else; the engine
-	// attaches no meaning to either value and never reads them back.
-	Severity string
-	Category string
+	// Labels are the application's own labels for what the run concluded. They
+	// are written to the run record and nowhere else; this package attaches no
+	// meaning to any key or value and never reads one back.
+	//
+	// A map rather than named fields. It was Severity and Category, which named
+	// what one product happened to label a run with and left every other
+	// application putting its own idea into a field called Severity. Nothing
+	// here ever read either one, so there was nothing for the names to earn.
+	Labels map[string]string
 
 	// Data is the structured result, carried back to the caller on
 	// SyncResult.Data and never interpreted. An application casts it back to its
@@ -151,7 +155,7 @@ func (a *Agent) writeAnswer(ctx context.Context, req AnswerRequest) (resOut *Ans
 		// An answer nobody can read is a bug in the application, not a reason to
 		// fail the run — the evidence is gathered and the structured result may
 		// still be usable. Say so once, plainly, and carry on.
-		log.Printf("[dag] the supplied answer has no text; the caller will see an empty verdict")
+		log.Printf("[dag] the supplied answer has no text; the caller will see an empty outcome")
 	}
 	return res, true, nil
 }

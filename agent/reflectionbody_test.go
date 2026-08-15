@@ -10,17 +10,17 @@ import (
 
 // Phase 1a. Unlike phase 0 this changes behaviour, and the change is a repair.
 //
-// conclude stored ref.Verdict alone — prose, not JSON. nodeSummary parses a
+// conclude stored ref.Outcome alone — prose, not JSON. nodeSummary parses a
 // reflection node's Result as JSON to build the "decision: reason" trace line,
 // so that parse failed and conclude nodes lost their line. continue and
 // investigate stored the raw JSON and kept theirs, so the same node type
 // behaved differently depending on the branch taken.
 
 const concludeJSON = `{"decision":"conclude","reason":"credential dump confirmed on two hosts",` +
-	`"summary":"malicious","verdict":"Confirmed credential theft.","aggregate":false}`
+	`"summary":"malicious","outcome":"Confirmed credential theft.","aggregate":false}`
 
 // TestReflectionBodyKeepsTheWholeReflection: everything the reflector decided
-// survives, not just the verdict.
+// survives, not just the outcome.
 func TestReflectionBodyKeepsTheWholeReflection(t *testing.T) {
 	ref, err := parseReflectionOutput(concludeJSON)
 	if err != nil {
@@ -38,8 +38,8 @@ func TestReflectionBodyKeepsTheWholeReflection(t *testing.T) {
 	if b.Out.Aggregate == nil || *b.Out.Aggregate {
 		t.Errorf("Aggregate = %v, want a non-nil false — this was dropped entirely before", b.Out.Aggregate)
 	}
-	if b.Out.Verdict == "" {
-		t.Error("Verdict empty — it must still be reachable")
+	if b.Out.Outcome == "" {
+		t.Error("Outcome empty — it must still be reachable")
 	}
 }
 
@@ -86,8 +86,8 @@ func TestConcludeRestoresTheTraceLine(t *testing.T) {
 		t.Fatalf("parseReflectionOutput: %v", err)
 	}
 
-	// The old way: the verdict alone, which is prose and does not parse as JSON.
-	old := &Node{Type: NodeReflection, Result: ref.Verdict}
+	// The old way: the outcome alone, which is prose and does not parse as JSON.
+	old := &Node{Type: NodeReflection, Result: ref.Outcome}
 	if s := nodeSummary(old); strings.HasPrefix(s, "conclude:") {
 		t.Fatalf("precondition failed: the old form already produced a decision line (%q), "+
 			"so this test cannot show the repair", s)
@@ -142,10 +142,10 @@ func TestSchedulerStoresTheWholeReflection(t *testing.T) {
 		t.Fatalf("read scheduler.go: %v", err)
 	}
 
-	// The flatten: storing the verdict alone as a reflection node's result.
-	flatten := regexp.MustCompile(`SetResult\([^)]*ref\.Verdict`)
+	// The flatten: storing the outcome alone as a reflection node's result.
+	flatten := regexp.MustCompile(`SetResult\([^)]*ref\.Outcome`)
 	if loc := flatten.Find(src); loc != nil {
-		t.Errorf("scheduler stores ref.Verdict alone again (%q) — decision, reason and "+
+		t.Errorf("scheduler stores ref.Outcome alone again (%q) — decision, reason and "+
 			"aggregate are dropped and the conclude trace line breaks", loc)
 	}
 

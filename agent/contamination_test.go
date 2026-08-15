@@ -73,7 +73,7 @@ var foreignWords = []string{
 // uses them for its own purposes and a check that fires on correct code is a
 // check somebody switches off:
 //
-//	verdict       219 occurrences. Answer.Verdict and Conclusion.Verdict are
+//	outcome       219 occurrences. Answer.Outcome and Conclusion.Outcome are
 //	              this engine's, documented as the application's conclusion
 //	              carried through. It belongs with Severity and Category in the
 //	              decision recorded as L6, not on this list.

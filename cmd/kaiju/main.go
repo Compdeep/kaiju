@@ -928,11 +928,11 @@ func runServe() {
 				}
 
 				result, err := ag.Kernel().SubmitSync(ctx, trigger)
-				verdictText := ""
+				outcomeText := ""
 				if err != nil {
-					verdictText = fmt.Sprintf("[error] %v", err)
+					outcomeText = fmt.Sprintf("[error] %v", err)
 				} else {
-					verdictText = result.Verdict
+					outcomeText = result.Outcome
 				}
 
 				ch, ok := chanReg.Get(msg.ChannelID)
@@ -941,7 +941,7 @@ func runServe() {
 						ChannelID:   msg.ChannelID,
 						SessionID:   msg.SessionID,
 						RecipientID: msg.SenderID,
-						Text:        verdictText,
+						Text:        outcomeText,
 					})
 				}
 			}(msg)
@@ -1017,7 +1017,7 @@ func runOnce(query string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println(result.Verdict)
+	fmt.Println(result.Outcome)
 }
 
 func mustJSON(v any) json.RawMessage {

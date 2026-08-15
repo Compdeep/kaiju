@@ -70,7 +70,7 @@ func TestARunPlansExecutesAndAnswers(t *testing.T) {
 		}},
 		"plan": plan(step("process_list", "procs", nil)),
 		"submit_decision": {Args: map[string]any{
-			"decision": "conclude", "summary": "two processes", "verdict": "two processes are running",
+			"decision": "conclude", "summary": "two processes", "outcome": "two processes are running",
 		}},
 	})
 	a := agentOnStub(t, model, tool)
@@ -85,8 +85,8 @@ func TestARunPlansExecutesAndAnswers(t *testing.T) {
 		t.Errorf("the planned tool ran %d times, want once. Stages called: %v",
 			tool.calls, model.functionsCalled())
 	}
-	if res == nil || res.Verdict == "" {
-		t.Errorf("the run produced no verdict. Stages called: %v", model.functionsCalled())
+	if res == nil || res.Outcome == "" {
+		t.Errorf("the run produced no outcome. Stages called: %v", model.functionsCalled())
 	}
 }
 
@@ -102,7 +102,7 @@ func TestPreflightRunsAndItsIntentReachesTheRun(t *testing.T) {
 			"mode": "agent", "intent": "observe", "skills": []string{},
 		}},
 		"plan":            plan(step("process_list", "procs", nil)),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "verdict": "done"}},
+		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, tool)
 
@@ -131,7 +131,7 @@ func TestOneStepReadsTheOutputOfTheStepBefore(t *testing.T) {
 			step("process_list", "procs", nil),
 			step("get_process", "detail", map[string]any{"count": "${step.0.count}"}),
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "verdict": "done"}},
+		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, first, second)
 
@@ -163,7 +163,7 @@ func TestAStepNamingAToolThatIsNotThereIsDropped(t *testing.T) {
 			step("process_list", "procs", nil),
 			step("no_such_tool", "invented", nil),
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "verdict": "done"}},
+		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, tool)
 
@@ -190,7 +190,7 @@ func TestAReflectionThatContinuesRunsAgain(t *testing.T) {
 	})
 	model.answerNth("submit_decision",
 		stubReply{Args: map[string]any{"decision": "continue", "summary": "keep going"}},
-		stubReply{Args: map[string]any{"decision": "conclude", "verdict": "done"}},
+		stubReply{Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	)
 	a := agentOnStub(t, model, tool)
 
@@ -214,7 +214,7 @@ func TestThePlannerIsToldWhatItHasAndWhatWasAsked(t *testing.T) {
 	model := newStubModel(t, map[string]stubReply{
 		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
 		"plan":             plan(step("process_list", "procs", nil)),
-		"submit_decision":  {Args: map[string]any{"decision": "conclude", "verdict": "done"}},
+		"submit_decision":  {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, tool)
 
@@ -254,7 +254,7 @@ func TestAStepThatDependsOnSomethingItNeverReadsIsRejected(t *testing.T) {
 				"depends_on": []int{0},
 			},
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "verdict": "done"}},
+		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, first, second)
 

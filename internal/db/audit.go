@@ -117,19 +117,19 @@ func (d *DB) QueryAuditByUser(username string, limit int) ([]AuditEntry, error) 
  * param: llmCalls - total LLM API calls made
  * param: reflectionCount - number of reflection cycles performed
  * param: replanCount - number of replan cycles performed
- * param: verdict - final verdict or conclusion
+ * param: outcome - final outcome or conclusion
  * param: status - completion status (e.g. "completed", "failed")
  * return: error on insertion failure, nil on success
  */
 func (d *DB) InsertInvestigation(id, nodeID, triggerType string, startedAt, completedAt, durationMs int64,
-	intent, dagMode string, nodesCount, llmCalls, reflectionCount, replanCount int, verdict, status string) error {
+	intent, dagMode string, nodesCount, llmCalls, reflectionCount, replanCount int, outcome, status string) error {
 	_, err := d.conn.Exec(
 		`INSERT OR REPLACE INTO investigations
 		 (id, node_id, trigger_type, started_at, completed_at, duration_ms, intent, dag_mode,
-		  nodes_count, llm_calls, reflection_count, replan_count, verdict, status)
+		  nodes_count, llm_calls, reflection_count, replan_count, outcome, status)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, nodeID, triggerType, startedAt, completedAt, durationMs, intent, dagMode,
-		nodesCount, llmCalls, reflectionCount, replanCount, verdict, status,
+		nodesCount, llmCalls, reflectionCount, replanCount, outcome, status,
 	)
 	return err
 }

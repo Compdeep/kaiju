@@ -16,7 +16,7 @@ import (
 /*
  * reflectionOutput is the structured response from a reflection checkpoint.
  * desc: Contains the reflection decision (continue/replan/conclude), optional
- *       verdict text, and the `next` move handed to the executive on replan.
+ *       outcome text, and the `next` move handed to the executive on replan.
  *       A stray "investigate" (removed decision) is coerced to "replan".
  */
 type reflectionOutput struct {
@@ -25,8 +25,8 @@ type reflectionOutput struct {
 	Summary    string          `json:"summary"`             // status description
 	Problem    string          `json:"problem,omitempty"`   // only for investigate: what's wrong (passed to Holmes)
 	Next       string          `json:"next,omitempty"`      // only for replan: the concrete next step the executive should plan (steps succeeded and revealed more work)
-	RawVerdict json.RawMessage `json:"verdict"`             // only for conclude — may be string or object
-	Verdict    string          `json:"-"`                   // parsed from RawVerdict
+	RawOutcome json.RawMessage `json:"outcome"`             // only for conclude — may be string or object
+	Outcome    string          `json:"-"`                   // parsed from RawOutcome
 	Reason     string          `json:"reason"`              // backward compat — used as Summary fallback
 	Aggregate  *bool           `json:"aggregate,omitempty"` // only for conclude
 }
@@ -34,7 +34,7 @@ type reflectionOutput struct {
 /*
  * ReflectionBody is the typed output of a reflection (or interjection) node.
  * desc: Carries the full parsed decision so no field is lost at storage. This
- *       is the fix for the old conclude path, which stored only the verdict
+ *       is the fix for the old conclude path, which stored only the outcome
  *       string and dropped Decision/Next/Summary/Aggregate from the node. Raw
  *       holds the reflector's original tool-call JSON for faithful rendering
  *       (Evidence) and template access (Field), matching pre-refactor behavior.
@@ -50,7 +50,7 @@ func (b ReflectionBody) Field(path string) (any, bool) { return RawText(b.Raw).F
 
 // Evidence returns the reflector's raw JSON — the same text the pre-refactor
 // continue/replan paths stored, now also carried on conclude so decision, next,
-// summary and aggregate survive rather than collapsing to the verdict alone.
+// summary and aggregate survive rather than collapsing to the outcome alone.
 func (b ReflectionBody) Evidence() string {
 	if b.Raw != "" {
 		return b.Raw
@@ -103,7 +103,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// Coverage edge on the conclude path: the reflector often writes the final
 	// answer directly, bypassing the aggregator. Give it the SAME content-specific
 	// LLM reframe (asked-vs-backed against the evidence + the gaps) the aggregator
-	// gets, so a conclude verdict reports gaps honestly instead of fabricating.
+	// gets, so a conclude outcome reports gaps honestly instead of fabricating.
 	// Gated on gaps — clean gathering pays nothing.
 	framed := a.FrameCoverage(ctx, graph, NewStagePrompts(sysPrompt, userPrompt))
 
@@ -368,10 +368,10 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 
 /*
  * parseReflectionOutput extracts the reflection decision from LLM output.
- * desc: Strips code fences, parses JSON, normalizes the verdict field
+ * desc: Strips code fences, parses JSON, normalizes the outcome field
  *       (which may be a string or object), and validates the decision.
- *       Falls back to using reason as verdict if decision is "conclude"
- *       but verdict is empty.
+ *       Falls back to using reason as outcome if decision is "conclude"
+ *       but outcome is empty.
  * param: raw - the raw LLM output string.
  * return: parsed reflectionOutput pointer, or error if JSON is invalid.
  */
@@ -419,17 +419,17 @@ func parseReflectionOutput(raw string) (*reflectionOutput, error) {
 		output.Summary = output.Reason
 	}
 
-	// Parse verdict for conclude
-	if len(output.RawVerdict) > 0 {
+	// Parse outcome for conclude
+	if len(output.RawOutcome) > 0 {
 		var s string
-		if json.Unmarshal(output.RawVerdict, &s) == nil {
-			output.Verdict = s
+		if json.Unmarshal(output.RawOutcome, &s) == nil {
+			output.Outcome = s
 		} else {
-			output.Verdict = string(output.RawVerdict)
+			output.Outcome = string(output.RawOutcome)
 		}
 	}
-	if output.Decision == "conclude" && output.Verdict == "" {
-		output.Verdict = output.Summary
+	if output.Decision == "conclude" && output.Outcome == "" {
+		output.Outcome = output.Summary
 	}
 
 	return &output, nil

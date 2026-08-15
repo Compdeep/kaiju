@@ -27,7 +27,7 @@ func replyServer(t *testing.T, finish, content string) *httptest.Server {
 }
 
 func TestCompleteChecked_TruncatedReplyIsAnError(t *testing.T) {
-	srv := replyServer(t, "length", `{"verdicts":[{"id":"a-1","verdict":"supp`)
+	srv := replyServer(t, "length", `{"verdicts":[{"id":"a-1","outcome":"supp`)
 	defer srv.Close()
 	c := NewClient(srv.URL, "", "some/model")
 

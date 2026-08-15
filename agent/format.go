@@ -2,7 +2,7 @@ package agent
 
 // FormatRule returns the channel-aware prompt fragment describing what the
 // target rendering surface can display. Insert it into any system prompt that
-// produces user-facing FREE text (aggregator, reflector verdicts, chat-mode
+// produces user-facing FREE text (aggregator, reflector outcomes, chat-mode
 // direct replies). The CLI channel has no markdown renderer — fenced code
 // blocks and tables land as literal characters in the terminal — so we tell
 // the model to emit plain text instead.

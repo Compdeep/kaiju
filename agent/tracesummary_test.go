@@ -34,7 +34,7 @@ func traceLine(t *testing.T, n *Node, set func(g *Graph, id string)) string {
 }
 
 // TestTraceUsesTheReflectionDecision: a concluded reflection shows its decision
-// and reason rather than the verdict prose it used to store.
+// and reason rather than the outcome prose it used to store.
 func TestTraceUsesTheReflectionDecision(t *testing.T) {
 	ref, err := parseReflectionOutput(concludeJSON)
 	if err != nil {

@@ -195,7 +195,7 @@ type Capabilities struct {
 	Refine RefineFunc
 
 	// Answer writes a finished run's final answer, for an application whose
-	// result is a structured verdict rather than text for a person to read. Nil
+	// result is a structured outcome rather than text for a person to read. Nil
 	// leaves every answer to the built-in aggregator, and so does returning
 	// nothing for a particular run.
 	Answer AnswerFunc

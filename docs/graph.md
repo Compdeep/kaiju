@@ -109,7 +109,7 @@ Nodes can be grafted onto the Graph at runtime — the architect grafts coder/ba
 
 `internal/agent/preflight.go`. Two separable jobs run at the front of every interactive investigation.
 
-**Stage 1 — routeQuery (the cheap first pass).** `routeQuery` fires the `ROUTE` prompt (`prompt.Route`) as a tiny forced `route()` tool call: `ToolChoice: "required"`, `Temperature: 0.0`, `MaxTokens: 16`, on the dedicated route lane (falls back to the executor/light lane). It classifies the *latest* message into one mode and nothing else:
+**Stage 1 — routeQuery (the cheap first pass).** `routeQuery` fires the `ROUTE` prompt (`prompt.Route`) as a tiny forced `route()` tool call: `ToolChoice: "required"`, `Temperature: 0.0`, `MaxTokens: 16`, on the dedicated route lane (falls back to the executor/light lane — see [model-calls.md](model-calls.md)). It classifies the *latest* message into one mode and nothing else:
 
 ```
 mode: "chat" | "meta" | "investigate"

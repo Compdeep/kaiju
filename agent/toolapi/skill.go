@@ -47,7 +47,9 @@ type Tool interface {
 
 	/*
 	 * Impact returns the IGX impact tier for the given params.
-	 * desc: Classifies the tool invocation's side-effect severity so the gate can enforce policy
+	 * desc: States how far this call reaches — observe, affect, control — so the
+	 *       gate can decide whether the caller's intent covers it. Impact is the
+	 *       word this package uses for the idea everywhere else.
 	 * param: params - the parameters that will be passed to Execute
 	 * return: impact tier integer (0, 1, or 2; the intent registry maps
 	 *         these to ranks on the configured ladder)
@@ -273,7 +275,7 @@ type Targeted interface {
 // InteractiveOnly is an optional interface a tool implements to say it only
 // makes sense when somebody is there to see the result.
 //
-// Some tools exist to be asked for. Raising a ticket, opening an incident,
+// Some tools exist to be asked for. Approving a change, signing something off,
 // escalating to a person: each records a human's judgement, and a run with
 // nobody watching has none to record. Offering them to an unattended run
 // invites a model to manufacture the judgement itself.

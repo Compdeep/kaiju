@@ -145,6 +145,14 @@ func actionRunID(ctx context.Context, graph *Graph, triggerID string) string {
 	return runIDFrom(ctx)
 }
 
+// AuditFunc receives one gate decision, for an application keeping its own
+// record of them.
+//
+// The entry is gates.AuditEntry unchanged — the same value the engine writes to
+// its own file, passed on rather than translated, so an application reads the
+// fields this package documents rather than a second shape of them.
+type AuditFunc func(gates.AuditEntry)
+
 // Writing to the application's store.
 //
 // The store is the application's code and it is called at the end of a run, when

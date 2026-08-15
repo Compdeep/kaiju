@@ -52,6 +52,34 @@ func traceIDFrom(ctx context.Context) (TraceID, bool) {
 }
 
 /*
+ * traceFault records that a reply the door already traced was unusable.
+ * desc: The door writes its trace when the call returns, so it cannot know what
+ *       the stage then made of the reply — a forced tool call that carried no
+ *       arguments, or arguments that would not parse. Those are the failures a
+ *       person reads the trace to find, and on the route stage they are recorded
+ *       nowhere else.
+ *
+ *       It writes a second, short entry naming the same node, which lands
+ *       directly under the call it is about. Amending the first is not open to
+ *       us: the log is a file, appended to and never rewritten.
+ * param: ctx - carries the run and the stage, as at the call.
+ * param: why - what was wrong with the reply.
+ */
+func traceFault(ctx context.Context, why string) {
+	id, named := traceIDFrom(ctx)
+	if !named {
+		return
+	}
+	WriteLLMTrace(LLMTrace{
+		RunID:    runIDFrom(ctx),
+		NodeID:   id.NodeID,
+		NodeType: id.NodeType,
+		Tag:      id.Tag,
+		Err:      why,
+	})
+}
+
+/*
  * writeTrace records one model call, if the caller said which stage it is.
  * desc: Called by the door on every send, so no stage can forget it and no
  *       stage repeats the seven fields the door already has. The reply is taken

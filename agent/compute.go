@@ -345,7 +345,15 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 
 	systemPrompt := ComposeSystemPrompt(a.soulPrompt, buildComputeArchitectPrompt(architectGuidance))
 
-	startedArch := time.Now()
+	ctx = withTrace(ctx, TraceID{
+		NodeID:   tag,
+		NodeType: "compute_architect",
+		Tag:      tag,
+		Input: map[string]string{
+			"goal":  goal,
+			"query": query,
+		},
+	})
 	resp, err := a.completeHeavyChecked(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: systemPrompt},
@@ -357,37 +365,15 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 		MaxTokens:   8192,
 	})
 
-	traceArch := LLMTrace{
-		RunID:    runIDFrom(ctx),
-		NodeID:   tag,
-		NodeType: "compute_architect",
-		Tag:      tag,
-		Started:  startedArch,
-		Input: map[string]string{
-			"goal":  goal,
-			"query": query,
-		},
-		System:    systemPrompt,
-		User:      userPrompt,
-		LatencyMS: time.Since(startedArch).Milliseconds(),
-	}
-
 	if err != nil {
-		traceArch.Err = err.Error()
-		WriteLLMTrace(traceArch)
 		return "", fmt.Errorf("compute plan LLM: %w", err)
 	}
 
 	raw, err := extractToolArgs(resp)
 	if err != nil {
-		traceArch.Err = err.Error()
-		WriteLLMTrace(traceArch)
+		traceFault(ctx, err.Error())
 		return "", fmt.Errorf("compute plan: %w", err)
 	}
-	traceArch.Output = raw
-	traceArch.TokensIn = resp.Usage.PromptTokens
-	traceArch.TokensOut = resp.Usage.CompletionTokens
-	WriteLLMTrace(traceArch)
 
 	// Parse the structured blueprint output
 	var planOutput computePlanOutput

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -101,13 +100,12 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 		log.Printf("[route] deterministic → agent (asks about live plugin/tool inventory)")
 		return "agent"
 	}
-	started := time.Now()
-	trace := LLMTrace{RunID: runIDFrom(ctx), NodeType: "preflight", Tag: "route", Started: started, System: prompt.Route, User: query}
 	// Give the router just enough context to interpret a terse follow-up, then the
 	// current message. See routeContext for what's included (summary + last turn).
 	msgs := []llm.Message{{Role: "system", Content: prompt.Route}}
 	msgs = append(msgs, routeContext(history)...)
 	msgs = append(msgs, llm.Message{Role: "user", Content: query})
+	ctx = withTrace(ctx, TraceID{NodeType: "preflight", Tag: "route"})
 	resp, err := a.completeRoute(ctx, &llm.ChatRequest{
 		Messages:    msgs,
 		Tools:       []llm.ToolDef{routeToolDef()},
@@ -123,28 +121,21 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	// balk to "investigate" wrongly forced those turns onto the agent path — where
 	// the (also aligned) planner then refused. Failing toward the cheap, safe
 	// conversational lane keeps the user's selected chat model in play.
-	trace.LatencyMS = time.Since(started).Milliseconds()
 	if err != nil {
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
 		return "chat"
 	}
 	raw, err := extractToolArgs(resp)
 	if err != nil {
-		trace.Err = "no tool args returned"
-		WriteLLMTrace(trace)
+		traceFault(ctx, "no tool args returned")
 		return "chat"
 	}
-	trace.Output = raw
 	var out struct {
 		Mode string `json:"mode"`
 	}
 	if err := ParseLLMJSON(raw, &out); err != nil {
-		trace.Err = "parse failed: " + err.Error()
-		WriteLLMTrace(trace)
+		traceFault(ctx, "parse failed: "+err.Error())
 		return "chat"
 	}
-	WriteLLMTrace(trace)
 	switch out.Mode {
 	case "chat", "agent":
 		return out.Mode
@@ -231,16 +222,7 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 	}
 	log.Printf("[dag] preflight: query=%q, history=%d turns (last assistant injected as context)", query, len(history))
 
-	started := time.Now()
-	trace := LLMTrace{
-		RunID:    runIDFrom(ctx),
-		NodeType: "preflight",
-		Tag:      "classify",
-		Started:  started,
-		System:   sysPrompt,
-		User:     query,
-	}
-
+	ctx = withTrace(ctx, TraceID{NodeType: "preflight", Tag: "classify"})
 	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages:    msgs,
 		Tools:       []llm.ToolDef{preflightToolDef()},
@@ -248,31 +230,24 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 		Temperature: 0.0,
 		MaxTokens:   256,
 	})
-	trace.LatencyMS = time.Since(started).Milliseconds()
 	if err != nil {
 		log.Printf("[dag] preflight failed, using defaults: %v", err)
-		trace.Err = err.Error()
-		WriteLLMTrace(trace)
 		return defaultPreflight()
 	}
 
 	raw, err := extractToolArgs(resp)
 	if err != nil {
 		log.Printf("[dag] preflight returned no choices, using defaults")
-		trace.Err = "no tool args returned"
-		WriteLLMTrace(trace)
+		traceFault(ctx, "no tool args returned")
 		return defaultPreflight()
 	}
-	trace.Output = raw
 	var out preflightRaw
 	if err := ParseLLMJSON(raw, &out); err != nil {
 		log.Printf("[dag] preflight parse failed (%v), using defaults", err)
-		trace.Err = "parse failed: " + err.Error()
-		WriteLLMTrace(trace)
+		traceFault(ctx, "parse failed: "+err.Error())
 		return defaultPreflight()
 	}
 
-	WriteLLMTrace(trace)
 	return a.validatePreflight(&out)
 }
 

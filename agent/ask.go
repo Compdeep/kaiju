@@ -105,23 +105,7 @@ func (a *Agent) lane(ctx context.Context, l Lane) (*llm.Client, string) {
  * return: the provider's response.
  */
 func (a *Agent) ask(ctx context.Context, l Lane, req *llm.ChatRequest) (*llm.ChatResponse, error) {
-	c, model := a.lane(ctx, l)
-	if model != "" {
-		req.Model = model
-	}
-	a.capReply(resolvedModel(req.Model, c), req)
-
-	// Images ride the context so they re-attach on every heavy call this turn,
-	// staying visible across follow-ups. Heavy only, as before: the model check
-	// would make this safe on any lane, but widening it is a behaviour change
-	// and belongs with the stage that moves the remaining callers here.
-	if l == Heavy {
-		if imgs := visionImagesFrom(ctx); len(imgs) > 0 && IsVisionModel(req.Model) {
-			llm.AttachImages(req.Messages, imgs)
-		}
-	}
-
-	return c.Complete(ctx, req)
+	return a.prepare(ctx, l, req).Complete(ctx, req)
 }
 
 /*
@@ -146,4 +130,67 @@ func (a *Agent) askParsed(ctx context.Context, l Lane, req *llm.ChatRequest) (*l
 		return resp, llm.TruncationError(req.MaxTokens)
 	}
 	return resp, nil
+}
+
+/*
+ * askStream sends one completion through a lane and streams the reply.
+ * desc: The same four steps as ask, and the same reason for their order. The
+ *       chunks arrive through onChunk as they come; the assembled text is
+ *       returned at the end.
+ *
+ *       Streaming has no truncation check. finish_reason arrives in the final
+ *       frame and a stage that streams is showing text to a person as it
+ *       lands — by the time the cut is known, the short answer has already been
+ *       read, and there is nothing to fail.
+ * param: as ask, plus onChunk, called for each chunk with its kind.
+ * return: the assembled reply.
+ */
+func (a *Agent) askStream(ctx context.Context, l Lane, req *llm.ChatRequest,
+	onChunk func(chunk, kind string)) (string, error) {
+
+	c := a.prepare(ctx, l, req)
+	return c.CompleteStream(ctx, req, onChunk)
+}
+
+/*
+ * askStreamResp is askStream for a caller that needs the whole response.
+ * desc: Same call, but the provider's response comes back rather than only the
+ *       assembled text — token counts, finish reason, tool calls.
+ * param: as askStream.
+ * return: the response.
+ */
+func (a *Agent) askStreamResp(ctx context.Context, l Lane, req *llm.ChatRequest,
+	onChunk func(chunk, kind string)) (*llm.ChatResponse, error) {
+
+	c := a.prepare(ctx, l, req)
+	return c.CompleteStreamResp(ctx, req, onChunk)
+}
+
+/*
+ * prepare is everything the door does to a request before it is sent.
+ * desc: Split out because four ways of sending share it — completion,
+ *       completion-that-parses, and the two streaming forms — and a step added
+ *       to one of them by hand is a step three of them do not get. That is the
+ *       fault this whole door exists to remove, so it must not be reintroduced
+ *       inside it.
+ * param: ctx, l, req - as ask.
+ * return: the client to send with.
+ */
+func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.Client {
+	c, model := a.lane(ctx, l)
+	if model != "" {
+		req.Model = model
+	}
+	a.capReply(resolvedModel(req.Model, c), req)
+
+	// Images ride the context so they re-attach on every heavy call this turn,
+	// staying visible across follow-ups. Heavy only, as before: the model check
+	// would make this safe on any lane, but widening it is a behaviour change
+	// and belongs with the stage that moves the remaining callers here.
+	if l == Heavy {
+		if imgs := visionImagesFrom(ctx); len(imgs) > 0 && IsVisionModel(req.Model) {
+			llm.AttachImages(req.Messages, imgs)
+		}
+	}
+	return c
 }

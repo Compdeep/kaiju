@@ -27,7 +27,7 @@ func TestReflectionBodyKeepsTheWholeReflection(t *testing.T) {
 		t.Fatalf("parseReflectionOutput: %v", err)
 	}
 
-	b := ReflectionBody{Out: *ref, Raw: concludeJSON}
+	b := newReflectionBody(*ref, concludeJSON)
 
 	if b.Out.Decision != "conclude" {
 		t.Errorf("Decision = %q", b.Out.Decision)
@@ -46,7 +46,7 @@ func TestReflectionBodyKeepsTheWholeReflection(t *testing.T) {
 // TestReflectionBodyEvidenceIsTheRawJSON: Evidence is what lands on Node.Result,
 // and downstream readers expect the reflector's JSON there.
 func TestReflectionBodyEvidenceIsTheRawJSON(t *testing.T) {
-	b := ReflectionBody{Raw: concludeJSON}
+	b := newReflectionBody(reflectionOutput{}, concludeJSON)
 	if b.Evidence() != concludeJSON {
 		t.Errorf("Evidence() = %q, want the raw JSON", b.Evidence())
 	}
@@ -96,7 +96,7 @@ func TestConcludeRestoresTheTraceLine(t *testing.T) {
 	// The new way, through the graph so SetBody's rendering is what gets read.
 	g := NewGraph()
 	id := g.AddNode(&Node{Type: NodeReflection})
-	g.SetBody(id, ReflectionBody{Out: *ref, Raw: concludeJSON})
+	g.SetBody(id, newReflectionBody(*ref, concludeJSON))
 
 	got := nodeSummary(g.Get(id))
 	if !strings.HasPrefix(got, "conclude:") {
@@ -110,7 +110,7 @@ func TestConcludeRestoresTheTraceLine(t *testing.T) {
 // TestReflectionBodyFieldReadsTheRawJSON: template references against a
 // reflection node behave as they did when it stored a plain string.
 func TestReflectionBodyFieldReadsTheRawJSON(t *testing.T) {
-	b := ReflectionBody{Raw: concludeJSON}
+	b := newReflectionBody(reflectionOutput{}, concludeJSON)
 
 	got, ok := b.Field("decision")
 	if !ok || got != "conclude" {
@@ -150,7 +150,7 @@ func TestSchedulerStoresTheWholeReflection(t *testing.T) {
 	}
 
 	// All three reflection branches carry the whole struct.
-	if got := strings.Count(string(src), "ReflectionBody{Out: *ref, Raw: comp.Result}"); got != 3 {
+	if got := strings.Count(string(src), "newReflectionBody(*ref, comp.Result)"); got != 3 {
 		t.Errorf("found %d ReflectionBody stores, want 3 (continue, conclude, investigate)", got)
 	}
 }

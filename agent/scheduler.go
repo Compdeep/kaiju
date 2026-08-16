@@ -1175,7 +1175,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 					switch ref.Decision {
 					case "continue":
-						graph.SetBody(comp.NodeID, ReflectionBody{Out: *ref, Raw: comp.Result})
+						graph.SetBody(comp.NodeID, newReflectionBody(*ref, comp.Result))
 						budget.ResetBatchCounters()
 						investigationCount = 0 // reset — if previous investigation worked, next reflection starts fresh
 						log.Printf("[dag] reflection: continue (%s), batch counters reset", ref.Reason)
@@ -1196,7 +1196,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// This is the growth path that mirrors investigate's REPAIR path —
 						// but with a diagnosis of SUCCESS ("here's what to do next") rather
 						// than failure. The failure pipeline is untouched.
-						graph.SetBody(comp.NodeID, ReflectionBody{Out: *ref, Raw: comp.Result})
+						graph.SetBody(comp.NodeID, newReflectionBody(*ref, comp.Result))
 						budget.ResetBatchCounters()
 
 						next := ref.Next
@@ -1292,7 +1292,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// Store the whole reflection (not just the outcome) so
 						// Decision/Next/Summary/Aggregate survive on the node. The
 						// outcome still surfaces via reflectionOutcome below.
-						graph.SetBody(comp.NodeID, ReflectionBody{Out: *ref, Raw: comp.Result})
+						graph.SetBody(comp.NodeID, newReflectionBody(*ref, comp.Result))
 						graph.SkipAllPending()
 						reflectionConcluded = true
 						reflectionOutcome = ref.Outcome

@@ -221,8 +221,10 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if c.agent != nil {
 			c.agent.SetChatModel(c.cfg.Chat.Provider, c.cfg.Chat.Model)
-			c.agent.SetChatTools(c.cfg.Chat.Tools)
-			log.Printf("[config] chat updated: provider=%s model=%s tools=%v", c.cfg.Chat.Provider, c.cfg.Chat.Model, c.cfg.Chat.Tools)
+			// c.cfg.Chat.Tools is kept and served back, and no longer pushed at
+			// the agent: nothing there read it. A request carries its own
+			// chat_tools, which is what the chat lane uses.
+			log.Printf("[config] chat updated: provider=%s model=%s", c.cfg.Chat.Provider, c.cfg.Chat.Model)
 		}
 	}
 

@@ -30,25 +30,23 @@ var embeddedPrompts string
 // prompts.md so they are never empty even before Load runs, and optionally
 // overridden by Load from dataDir/prompts.md.
 var (
-	Soul          string
-	Route         string
-	Preflight     string
-	Executive     string
-	Aggregator    string
-	Holmes        string
-	Microplanner  string
-	Observer      string
-	Reflector     string
-	Interjection  string
-	Classifier    string
-	Curator       string
-	Chat          string
-	Vision        string
-	React         string
-	CoverageGen   string
-	CoverageHook  string
-	GroundingGen  string
-	GroundingHook string
+	Soul         string
+	Route        string
+	Preflight    string
+	Executive    string
+	Reframe      string
+	ReframeHook  string
+	Aggregator   string
+	Holmes       string
+	Microplanner string
+	Observer     string
+	Reflector    string
+	Interjection string
+	Classifier   string
+	Curator      string
+	Chat         string
+	Vision       string
+	React        string
 )
 
 // sectionOrder is the canonical list of required section names, in a stable
@@ -59,6 +57,8 @@ var sectionOrder = []string{
 	"PREFLIGHT",
 	"EXECUTIVE",
 	"AGGREGATOR",
+	"REFRAME",
+	"REFRAME_HOOK",
 	"HOLMES",
 	"MICROPLANNER",
 	"OBSERVER",
@@ -69,33 +69,27 @@ var sectionOrder = []string{
 	"CHAT",
 	"VISION",
 	"REACT",
-	"COVERAGE_GEN",
-	"COVERAGE_HOOK",
-	"GROUNDING_GEN",
-	"GROUNDING_HOOK",
 }
 
 // targets maps each required section name to the package var it fills.
 var targets = map[string]*string{
-	"SOUL":           &Soul,
-	"ROUTE":          &Route,
-	"PREFLIGHT":      &Preflight,
-	"EXECUTIVE":      &Executive,
-	"AGGREGATOR":     &Aggregator,
-	"HOLMES":         &Holmes,
-	"MICROPLANNER":   &Microplanner,
-	"OBSERVER":       &Observer,
-	"REFLECTOR":      &Reflector,
-	"INTERJECTION":   &Interjection,
-	"CLASSIFIER":     &Classifier,
-	"CURATOR":        &Curator,
-	"CHAT":           &Chat,
-	"VISION":         &Vision,
-	"REACT":          &React,
-	"COVERAGE_GEN":   &CoverageGen,
-	"COVERAGE_HOOK":  &CoverageHook,
-	"GROUNDING_GEN":  &GroundingGen,
-	"GROUNDING_HOOK": &GroundingHook,
+	"SOUL":         &Soul,
+	"ROUTE":        &Route,
+	"PREFLIGHT":    &Preflight,
+	"EXECUTIVE":    &Executive,
+	"AGGREGATOR":   &Aggregator,
+	"REFRAME":      &Reframe,
+	"REFRAME_HOOK": &ReframeHook,
+	"HOLMES":       &Holmes,
+	"MICROPLANNER": &Microplanner,
+	"OBSERVER":     &Observer,
+	"REFLECTOR":    &Reflector,
+	"INTERJECTION": &Interjection,
+	"CLASSIFIER":   &Classifier,
+	"CURATOR":      &Curator,
+	"CHAT":         &Chat,
+	"VISION":       &Vision,
+	"REACT":        &React,
 }
 
 func init() {

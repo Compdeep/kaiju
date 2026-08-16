@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1579,4 +1580,45 @@ func depsMatch(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// Two questions the scheduler asks about how much a run actually gathered,
+// before it chooses how to write the answer.
+
+// runFanout counts how many tool nodes actually resolved — a structural proxy for
+// how complex the run turned out to be, independent of the preflight's guess. A
+// query that fanned out to many gather steps earned a real synthesis even if
+// preflight underestimated it.
+func (a *Agent) runFanout(graph *Graph) int {
+	if graph == nil {
+		return 0
+	}
+	return len(graph.ResolvedByType(NodeTool))
+}
+
+// hasUsableEvidence reports whether any resolved tool node returned a successful
+// (ok) result. A run that gathered nothing usable has nothing to synthesize — the
+// reflector's honest "couldn't get the data" outcome is the right answer, not an
+// aggregator pass over emptiness.
+func (a *Agent) hasUsableEvidence(graph *Graph) bool {
+	if graph == nil {
+		return false
+	}
+	for _, n := range graph.ResolvedByType(NodeTool) {
+		tb, ok := n.Body.(toolMessageBody)
+		if !ok {
+			continue
+		}
+		switch tb.Envelope().Status {
+		case toolapi.StatusOK, toolapi.StatusUnclassified:
+			// Unclassified counts. The tool ran and returned something readable;
+			// all that is missing is its own word on whether that counts as a
+			// finding. Excluding it would tell decideAutoAggMode there is nothing
+			// to aggregate on a run whose evidence came entirely from tools that
+			// do not declare an outcome — which, until the tools are migrated, is
+			// most of them.
+			return true
+		}
+	}
+	return false
 }

@@ -467,9 +467,7 @@
     <h3>Edges — why it doesn't make things up</h3>
     <p class="sub" style="margin-bottom:6px">An "edge" is a gated reframe on the hand-off between steps: a small amount of code collects the structural facts (which gather steps came back empty, which URLs a search actually returned), and a short LLM pass frames them so the next step treats absence as absence.</p>
     <div class="cg">
-      <div class="cstep e-gate"><div class="cn"><span class="b">·</span> Coverage</div><div class="cd">Frames empty or failed gather steps for the aggregator, so a request whose evidence didn't materialise gets an honest "not found", not an invented answer.</div><div class="cw">coverageEdge</div></div>
       <div class="conn"><div class="ln"></div><div class="tip"></div></div>
-      <div class="cstep e-gate"><div class="cn"><span class="b">·</span> Grounding</div><div class="cd">Lists the only URLs a real search returned, so a replan re-searches those instead of hallucinating new links to fetch.</div><div class="cw">groundingEdge</div></div>
       <div class="conn"><div class="ln"></div><div class="tip"></div></div>
       <div class="cstep e-gate"><div class="cn"><span class="b">·</span> Conclusion floor</div><div class="cd">Blocks a "conclude" while a structural precondition is unmet — concluding without reading the sources it found — and grafts remediation instead.</div><div class="cw">conclusionFloor</div></div>
     </div>

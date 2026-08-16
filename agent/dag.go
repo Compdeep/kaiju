@@ -1418,103 +1418,6 @@ type nodeCompletion struct {
 	TokensOut int
 }
 
-// ─── Graph queries ──────────────────────────────────────────────────────────
-//
-// Read-only views over the node set, used by callers that need to reason about
-// a run as a whole rather than one node: what resolved, how much of it is
-// usable, which siblings share a parent. They live here rather than in an
-// embedding application because Graph's node map is unexported, so nothing
-// outside this package can walk it.
-/*
- * SiblingResults returns resolved results from nodes that share the same
- * dependency set as the given node (i.e. siblings in the plan).
- * desc: Used by the micro-planner to see peer results for context when
- *       repairing a failed node.
- * param: nodeID - the node whose siblings to find.
- * return: map of label to result string for each resolved sibling.
- */
-func (g *Graph) SiblingResults(nodeID string) map[string]string {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	target, ok := g.nodes[nodeID]
-	if !ok {
-		return nil
-	}
-
-	results := make(map[string]string)
-	for _, n := range g.nodes {
-		if n.ID == nodeID || n.State != StateResolved {
-			continue
-		}
-		if depsMatch(n.DependsOn, target.DependsOn) {
-			label := n.ToolName
-			if n.Tag != "" {
-				label = n.Tag
-			}
-			results[label] = n.Result
-		}
-	}
-	return results
-}
-
-/*
- * AllResults returns all completed tool node results keyed by tag or tool name.
- * desc: Includes both resolved results and failed node errors so the aggregator
- *       can report what succeeded and what was blocked.
- * return: map of label to result/error string for all terminal tool/actuator nodes.
- */
-func (g *Graph) AllResults() map[string]string {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	results := make(map[string]string)
-	for _, n := range g.nodes {
-		if n.Type != NodeTool && n.Type != NodeCompute && n.Type != NodeActuator {
-			continue
-		}
-		if n.State == StateResolved {
-			// include result as normal
-		} else if n.State == StateFailed && n.Error != nil {
-			label := formatNodeLabel(n)
-			results[label+" (FAILED)"] = "ERROR: " + n.Error.Error()
-			continue
-		} else {
-			continue
-		}
-		label := formatNodeLabel(n)
-		if _, exists := results[label]; exists {
-			label = fmt.Sprintf("%s (%s)", label, n.ID)
-		}
-		results[label] = Text.TruncateEvidence(n.Result)
-	}
-	return results
-}
-
-/*
- * SiblingComputeIDs returns the IDs of all compute nodes spawned by the same
- * parent as the given node. Used so coder-result execute/service nodes can
- * depend on all sibling coders, not just their own.
- */
-func (g *Graph) SiblingComputeIDs(nodeID string) []string {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	n, ok := g.nodes[nodeID]
-	if !ok || n.SpawnedBy == "" {
-		return []string{nodeID}
-	}
-	var ids []string
-	for _, sib := range g.nodes {
-		if sib.SpawnedBy == n.SpawnedBy && sib.Type == NodeCompute {
-			ids = append(ids, sib.ID)
-		}
-	}
-	if len(ids) == 0 {
-		return []string{nodeID}
-	}
-	return ids
-}
-
 // EvidenceStats summarises how much usable evidence the investigation's TOOLS
 // gathered: how many terminal tool nodes ran, how many failed, and how many
 // resolved with a non-empty result. The outcome gate uses this to refuse a
@@ -1557,29 +1460,6 @@ func (g *Graph) HasComputeWork() bool {
 		}
 	}
 	return false
-}
-
-/*
- * depsMatch returns true if both slices contain the same elements (order-independent).
- * desc: Set equality check on string slices used for sibling detection.
- * param: a - first slice of dependency IDs.
- * param: b - second slice of dependency IDs.
- * return: true if the slices contain the same elements.
- */
-func depsMatch(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	set := make(map[string]struct{}, len(a))
-	for _, v := range a {
-		set[v] = struct{}{}
-	}
-	for _, v := range b {
-		if _, ok := set[v]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 // Two questions the scheduler asks about how much a run actually gathered,

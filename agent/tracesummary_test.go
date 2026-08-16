@@ -42,7 +42,7 @@ func TestTraceUsesTheReflectionDecision(t *testing.T) {
 	}
 
 	got := traceLine(t, &Node{Type: NodeReflection}, func(g *Graph, id string) {
-		g.SetBody(id, ReflectionBody{Out: *ref, Raw: concludeJSON})
+		g.SetBody(id, newReflectionBody(*ref, concludeJSON))
 	})
 
 	if !strings.HasPrefix(got, "conclude:") {

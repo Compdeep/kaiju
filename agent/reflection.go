@@ -40,17 +40,23 @@ type reflectionOutput struct {
  *       (Evidence) and template access (Field), matching pre-refactor behavior.
  */
 type ReflectionBody struct {
+	RawBacked
 	Out reflectionOutput
-	Raw string
 }
 
-// Field resolves ${node.<id>.<path>} against the reflector's raw JSON, matching
-// the legacy RawText behavior.
-func (b ReflectionBody) Field(path string) (any, bool) { return RawText(b.Raw).Field(path) }
+// newReflectionBody keeps the whole reflection: the decision and its reasons,
+// and the raw tool-call JSON behind them.
+func newReflectionBody(out reflectionOutput, raw string) ReflectionBody {
+	return ReflectionBody{RawBacked: RawBacked{Raw: raw}, Out: out}
+}
 
 // Evidence returns the reflector's raw JSON — the same text the pre-refactor
 // continue/replan paths stored, now also carried on conclude so decision, next,
 // summary and aggregate survive rather than collapsing to the outcome alone.
+//
+// Overrides the embedded RawBacked, which returns Raw unchanged. A reflection
+// that produced no raw JSON still has a summary worth showing, and returning
+// empty there would blank the trace line.
 func (b ReflectionBody) Evidence() string {
 	if b.Raw != "" {
 		return b.Raw

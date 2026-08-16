@@ -8,7 +8,7 @@ import (
 
 func TestReflectionBody(t *testing.T) {
 	raw := `{"decision":"conclude","summary":"done","reason":"answered"}`
-	b := ReflectionBody{Out: reflectionOutput{Decision: "conclude", Summary: "done", Reason: "answered"}, Raw: raw}
+	b := newReflectionBody(reflectionOutput{Decision: "conclude", Summary: "done", Reason: "answered"}, raw)
 	if b.Evidence() != raw {
 		t.Fatalf("ReflectionBody.Evidence should be the raw JSON so no field is lost")
 	}

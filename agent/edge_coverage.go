@@ -24,6 +24,29 @@ type toolGap struct {
 	Detail string
 }
 
+/*
+ * line renders one gap for a prompt.
+ * desc: The planner's label when there is one, otherwise the tool that ran.
+ *       Falling back to the type printed the same word twice — "text (text)" —
+ *       which says nothing about which step it was.
+ *
+ *       A method rather than a line at each edge. It was written twice,
+ *       character for character, and only one copy got the Tool fallback: the
+ *       label this removed from the coverage prompt went on appearing in the
+ *       grounding one for three commits.
+ * return: the "- <label> (<type>): <detail>" line, with its newline.
+ */
+func (g toolGap) line() string {
+	label := g.Tag
+	if label == "" {
+		label = g.Tool
+	}
+	if label == "" {
+		label = g.Type
+	}
+	return fmt.Sprintf("- %s (%s): %s\n", label, g.Type, strings.TrimSpace(g.Detail))
+}
+
 // collectGaps is the CODE half of the coverage edge: it reads the ToolMessage
 // envelope Status signals (empty/error) and failed nodes off the graph — the
 // structural shape of what ran, with no interpretation of meaning. This is what
@@ -46,7 +69,7 @@ func (a *Agent) collectGaps(graph *Graph) []toolGap {
 			// The tool ran and returned something; it did not say whether that
 			// something was a finding. Stating it is honest — the alternative is
 			// silence, which reads to every consumer as "this one was fine".
-			gaps = append(gaps, toolGap{Tag: n.Tag, Type: env.Type,
+			gaps = append(gaps, toolGap{Tag: n.Tag, Tool: n.ToolName, Type: env.Type,
 				Detail: "the tool did not report whether it found anything; read its output directly"})
 		}
 	}
@@ -121,17 +144,7 @@ func (a *Agent) coverageEdge(ctx context.Context, graph *Graph, evidence string)
 	if len(gaps) > 0 {
 		var gb strings.Builder
 		for _, g := range gaps {
-			// The planner's label when there is one, otherwise the tool that
-			// ran. Falling back to the type printed the same word twice —
-			// "text (text)" — which says nothing about which step it was.
-			label := g.Tag
-			if label == "" {
-				label = g.Tool
-			}
-			if label == "" {
-				label = g.Type
-			}
-			gb.WriteString(fmt.Sprintf("- %s (%s): %s\n", label, g.Type, strings.TrimSpace(g.Detail)))
+			gb.WriteString(g.line())
 		}
 		structural := "These gathering steps returned nothing usable — treat what they were meant to retrieve as unavailable, and do not fabricate to fill them:\n" + gb.String()
 

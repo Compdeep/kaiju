@@ -166,3 +166,26 @@ func TestReframe_TheFactsNameNoKindOfValue(t *testing.T) {
 		}
 	}
 }
+
+// A step the planner gave no label to is named once, not twice.
+//
+// "search_telemetry (search_telemetry)" reads as a label and a tool and is one
+// word said twice — the same fault the gap line had, in a new place.
+func TestReframe_AStepWithNoLabelIsNamedOnce(t *testing.T) {
+	a := reframeAgent(t)
+	g := NewGraph()
+	withStep(g, "", "search_telemetry", toolapi.ToolEmpty("search", "nothing matched"))
+	withStep(g, "look for logins", "bash", toolapi.ToolOK("text", "root", nil))
+
+	facts := a.factsOf(g)
+	joined := strings.Join(facts.Produced, "\n")
+	if strings.Contains(joined, "search_telemetry (search_telemetry)") {
+		t.Errorf("the tool is named twice:\n%s", joined)
+	}
+	if !strings.Contains(joined, "- search_telemetry: returned nothing") {
+		t.Errorf("the unlabelled step is not named plainly:\n%s", joined)
+	}
+	if !strings.Contains(joined, "- look for logins (bash): produced a result") {
+		t.Errorf("a labelled step should carry both:\n%s", joined)
+	}
+}

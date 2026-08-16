@@ -362,3 +362,25 @@ func TestExtractBlueprint_Garbage(t *testing.T) {
 		t.Errorf("expected empty for garbage, got: %q", got)
 	}
 }
+
+// The code a compute step wrote is run under the timeout configured for it.
+//
+// It was not. The step that runs it set no timeout, so the shell's own 60s
+// applied and an operator raising tools.compute.timeout_sec got no change and
+// no warning — both applications default that setting to 120.
+func TestGeneratedCodeRunsUnderTheConfiguredTimeout(t *testing.T) {
+	body := funcBody(t, readSource(t, "scheduler.go"), "runPlanAndSchedule")
+	i := strings.Index(body, `Tag:       computeNodes[i].Tag + "_exec"`)
+	if i < 0 {
+		t.Fatal("the node that runs generated code is no longer built here; this test names the wrong place")
+	}
+	// The parameters are assembled just above the node literal.
+	window := body[max(0, i-1200):i]
+	if !strings.Contains(window, "a.cfg.ComputeTimeout") {
+		t.Errorf("the step that runs generated code does not read ComputeTimeout, so the "+
+			"setting is parsed, carried, and ignored:\n%s", window)
+	}
+	if !strings.Contains(window, `"timeout_sec"`) {
+		t.Error("ComputeTimeout is read and not passed to the step as timeout_sec")
+	}
+}

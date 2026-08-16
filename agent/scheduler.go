@@ -1663,10 +1663,24 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 									if execCmd == svcCmd {
 										log.Printf("[dag] skipping execute node for %s — same command declared as service", computeNodes[i].Tag)
 									} else if budget.TrySpawnNode("bash", false) {
+										// This is the step ComputeTimeout is about: the
+										// code compute just wrote, being run. It set no
+										// timeout, so bash's own 60s applied and an
+										// operator raising tools.compute.timeout_sec got
+										// no change and no warning — both applications
+										// default that setting to 120.
+										//
+										// Left unset when the setting is, so bash's
+										// default still applies rather than a zero being
+										// passed as "no time at all".
+										execParams := map[string]any{"command": execCmd}
+										if secs := int(a.cfg.ComputeTimeout.Seconds()); secs > 0 {
+											execParams["timeout_sec"] = secs
+										}
 										execNode := &Node{
 											Type:      NodeTool,
 											ToolName:  "bash",
-											Params:    map[string]any{"command": execCmd},
+											Params:    execParams,
 											DependsOn: append([]string{}, allCoderIDs...),
 											SpawnedBy: comp.NodeID,
 											Tag:       computeNodes[i].Tag + "_exec",

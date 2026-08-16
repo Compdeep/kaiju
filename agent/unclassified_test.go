@@ -70,22 +70,6 @@ func TestUnclassified_IsNotOkAndNotEmpty(t *testing.T) {
 	}
 }
 
-// It reaches the model as a stated fact rather than as silence.
-func TestUnclassified_IsReportedToTheCoverageStatement(t *testing.T) {
-	a := &Agent{}
-	g := NewGraph()
-	id := g.AddNode(&Node{Type: NodeTool, Tag: "hashcheck", ToolName: "lookup_hash"})
-	g.SetBody(id, unclassifiedBody("No results found in MalwareBazaar."))
-
-	gaps := a.collectGaps(g)
-	if len(gaps) != 1 {
-		t.Fatalf("want the undeclared outcome reported, got %d entries", len(gaps))
-	}
-	if gaps[0].Tag != "hashcheck" || !strings.Contains(gaps[0].Detail, "did not report") {
-		t.Fatalf("gap = %+v, want it to name the tool and say the outcome was not declared", gaps[0])
-	}
-}
-
 // And it counts as evidence: a run whose tools all decline to declare an
 // outcome has still gathered something, and must not be treated as having
 // gathered nothing.
@@ -100,15 +84,12 @@ func TestUnclassified_CountsAsUsableEvidence(t *testing.T) {
 	}
 }
 
-func TestEmptyAndError_StillCountAsGapsAndNotAsEvidence(t *testing.T) {
+func TestEmptyIsNotUsableEvidence(t *testing.T) {
 	a := &Agent{}
 	g := NewGraph()
 	e := g.AddNode(&Node{Type: NodeTool, Tag: "procs", ToolName: "list_processes"})
 	g.SetBody(e, toolMessageBody{msg: toolapi.ToolEmpty("listing", "no processes matched")})
 
-	if gaps := a.collectGaps(g); len(gaps) != 1 || gaps[0].Detail != "no processes matched" {
-		t.Fatalf("empty must still be reported with its own detail, got %+v", gaps)
-	}
 	if a.hasUsableEvidence(g) {
 		t.Error("an empty result is not usable evidence on its own")
 	}

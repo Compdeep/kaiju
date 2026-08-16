@@ -89,108 +89,40 @@ func TestWebFetch_LargePageArrivesWhole(t *testing.T) {
 	}
 }
 
-// An empty file has to reach the coverage statement, which is the reason for
-// reporting it as empty rather than ok. Checked through FrameCoverage, the same
-// call an application makes, rather than through the unexported collector.
-func TestFileRead_EmptyFileReachesTheCoverageStatement(t *testing.T) {
+// An empty file says so in its envelope, and a file with content does not.
+//
+// These used to go on to check that the empty one reached the coverage
+// statement a later stage was given. That statement is gone — see the commit
+// that removed the coverage and grounding edges — so what is left is the
+// envelope, which is what every consumer reads.
+func TestFileRead_AnEmptyFileSaysSo(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "app.conf"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	g, msg := typedResult(t, tools.NewFileRead(dir), map[string]any{"path": "app.conf"})
+	_, msg := typedResult(t, tools.NewFileRead(dir), map[string]any{"path": "app.conf"})
 	if msg.Status != toolapi.StatusEmpty {
 		t.Fatalf("status = %q, want empty", msg.Status)
 	}
-
-	a := &agent.Agent{}
-	// The coverage statement is prepended to the stage's user prompt; the role
-	// prompt only gains the hook telling the model what to do with it.
-	framed := a.FrameCoverage(context.Background(), g, agent.NewStagePrompts("role", "user"))
-	if !strings.Contains(framed.User, "app.conf") {
-		t.Fatalf("the coverage statement should name the empty file, got:\n%s", framed.User)
-	}
 }
 
-// A file with content is not a gap, so the same call must stay silent about it.
-func TestFileRead_ContentIsNotReportedAsAGap(t *testing.T) {
+func TestFileRead_ContentIsNotEmpty(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "app.conf"), []byte("listen = 8080\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	g, msg := typedResult(t, tools.NewFileRead(dir), map[string]any{"path": "app.conf"})
+	_, msg := typedResult(t, tools.NewFileRead(dir), map[string]any{"path": "app.conf"})
 	if msg.Status != toolapi.StatusOK || !strings.Contains(msg.Content, "8080") {
 		t.Fatalf("envelope = status %q content %q", msg.Status, msg.Content)
 	}
-
-	a := &agent.Agent{}
-	framed := a.FrameCoverage(context.Background(), g, agent.NewStagePrompts("role", "user"))
-	if strings.Contains(framed.User, "app.conf") {
-		t.Fatalf("a file that had content is not a gap, got:\n%s", framed.User)
-	}
 }
 
-// web_search's envelope is what the grounding edge reads to tell a URL a real
-// search returned from one the model recalled. It matches on kind "search",
-// status ok, and a results list in the payload, so the migration has to preserve
-// all three.
-//
-// The edge only speaks when something else in the run came back empty — with
-// nothing missing there is no reason to press the model about where a URL came
-// from. So the run here has a search that worked and a read that found nothing,
-// which is when it matters.
-func TestWebSearch_ResultsReachTheGroundingEdge(t *testing.T) {
-	results := []map[string]string{
-		{"title": "First", "url": "https://example.test/one", "snippet": "a"},
-		{"title": "Second", "url": "https://example.test/two", "snippet": "b"},
-	}
-	g := agent.NewGraph()
-	found := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "search", ToolName: "web_search"})
-	g.SetBody(found, agent.NewToolBody(
-		toolapi.ToolOK("search", "", map[string]any{"query": "q", "results": results})))
-
-	missing := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "readconf", ToolName: "file_read"})
-	g.SetBody(missing, agent.NewToolBody(toolapi.ToolEmpty("text", "the file is empty: app.conf")))
-
-	// The engine reads which fields are handles from the tool's own output
-	// schema, so web_search has to be registered for its url field to be seen.
-	// A tool that is not registered declares nothing, which is the behaviour
-	// rather than a limitation of the test.
-	a := newTestAgent(t)
-	_ = a.Registry().Register(tools.NewWebSearch())
-
-	framed := a.FrameGrounding(context.Background(), g, agent.NewStagePrompts("role", "user"))
-	for _, want := range []string{"https://example.test/one", "https://example.test/two"} {
-		if !strings.Contains(framed.User, want) {
-			t.Errorf("the grounding edge should list %s as searched but unread, got:\n%s", want, framed.User)
-		}
-	}
-}
-
-// A search that found nothing is both a coverage gap and the case the grounding
-// edge exists for: there is no real URL yet, so the next move is to search
-// again rather than to name one from memory.
-func TestWebSearch_NoResultsIsAGapAndBlocksCitation(t *testing.T) {
-	g := agent.NewGraph()
-	id := g.AddNode(&agent.Node{Type: agent.NodeTool, Tag: "search", ToolName: "web_search"})
-	g.SetBody(id, agent.NewToolBody(toolapi.ToolEmpty("search", "no reachable results for this query")))
-
-	a := &agent.Agent{}
-	covered := a.FrameCoverage(context.Background(), g, agent.NewStagePrompts("role", "user"))
-	if !strings.Contains(covered.User, "no reachable results") {
-		t.Errorf("an empty search should be a coverage gap, got:\n%s", covered.User)
-	}
-	grounded := a.FrameGrounding(context.Background(), g, agent.NewStagePrompts("role", "user"))
-	if !strings.Contains(grounded.User, "No URL has come from a real search") {
-		t.Errorf("with no grounded URL the edge should say so, got:\n%s", grounded.User)
-	}
-}
-
-// sysinfo always succeeds and carries its whole result in the payload, so the
-// fields have to stay addressable and it must never look like a gap.
-func TestSysinfo_FieldsResolveAndItIsNotAGap(t *testing.T) {
-	g, msg := typedResult(t, tools.NewSysinfo("/tmp/ws"), map[string]any{})
+// sysinfo carries its whole result in the payload, so the fields have to stay
+// addressable by a later step.
+func TestSysinfo_FieldsResolve(t *testing.T) {
+	_, msg := typedResult(t, tools.NewSysinfo("/tmp/ws"), map[string]any{})
 
 	if msg.Status != toolapi.StatusOK || msg.Content != "" {
 		t.Fatalf("envelope = status %q content %q — the payload is the readable form here", msg.Status, msg.Content)
@@ -203,11 +135,6 @@ func TestSysinfo_FieldsResolveAndItIsNotAGap(t *testing.T) {
 	}
 	if v, ok := body.Field("cwd"); !ok || v != "/tmp/ws" {
 		t.Errorf("${step.N.cwd} = (%v, %v), want the workspace", v, ok)
-	}
-
-	a := &agent.Agent{}
-	if framed := a.FrameCoverage(context.Background(), g, agent.NewStagePrompts("role", "user")); framed.User != "user" {
-		t.Errorf("sysinfo always succeeds and is never a gap, got:\n%s", framed.User)
 	}
 }
 

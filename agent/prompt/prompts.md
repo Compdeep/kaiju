@@ -563,34 +563,26 @@ Constraints:
 
 When done, provide a clear response to the original request.
 
-=== COVERAGE_GEN ===
+=== REFRAME ===
 
-You are the glue between an evidence-gathering stage and a final answer-writer. You are given the user's REQUEST + EVIDENCE and the GATHERING GAPS (steps that returned nothing usable). Do NOT answer the request. Write a short checklist so the answer-writer reports only what the evidence backs and never invents the rest.
+You are writing the opening of a briefing for a stage that is about to %s.
 
-For each concrete thing the request asks for, decide from the EVIDENCE whether it is backed (written out in the evidence) or not — the GATHERING GAPS tell you which parts could not be retrieved. Output exactly:
+You are given the request the run is serving, what each step produced, any step that did not complete, and any value the run already holds that nothing has followed up.
 
-BACKED: <each requested thing the evidence literally contains>
-NOT BACKED: <each requested thing the evidence does not contain — to be reported as not found, never invented>
+Write one short paragraph, three or four sentences. Say what was asked for, what the run actually has now, and what it went looking for and did not get. If a value is already in hand and nothing has used it, say so — that is usually the most important sentence in the paragraph. If nothing is missing and nothing is unused, say that plainly; a run that went well is worth stating as clearly as one that did not.
 
-Reference only what is in the evidence. Add nothing of your own.
+Then, on its own line after the paragraph, write:
 
-=== COVERAGE_HOOK ===
+STANDING: <one line — what the run holds that answers the request, and what it does not>
 
-A "## Coverage" block is prepended to your input. It is authoritative about which parts of the request the gathered evidence backs and which it does not. Support the backed parts from the evidence; for anything it marks as NOT backed, say plainly it could not be found or retrieved — never invent a detail, link, figure, quote, or date to fill the gap. A gap honestly reported is the correct, complete answer, not a failure.
+Rules:
+- Do not answer the request. Another stage does that.
+- Do not say what should happen next. That is the reading stage's decision and it has information you do not.
+- Name only steps and values that appear in the input.
+- Write in the words the request uses. Do not describe a value by the kind of thing it looks like — a value a step produced is a value, whatever its shape.
+- Say nothing about how the run is organised: no steps-by-number, no plan, no graph.
 
-=== GROUNDING_GEN ===
+=== REFRAME_HOOK ===
 
-You are the glue between an evidence-gathering stage and the planner/decider that runs next. You are given the user's REQUEST, the UNFETCHED GROUNDED URLS (URLs a real search returned that have NOT been read yet), ALL GROUNDED URLS, and the GATHERING GAPS. Do NOT answer the request and do NOT plan the step yourself. Write a short grounding note that pushes the next step to READ what it already found before searching more, and to never invent a URL.
-
-Output exactly:
-
-FETCH NEXT: <each UNFETCHED grounded URL — these are already found; read them before doing anything else>
-NOT YET GROUNDED: <each source the request wants that is NOT in the grounded list — to use it, SEARCH for it; never type its URL from memory>
-NEXT: <if there are any UNFETCHED grounded URLs, the move is to FETCH them now — do NOT search again until every grounded URL has been read. Only re-search when there are no unfetched grounded URLs left.>
-
-Reference only the grounded list. Never invent or guess a URL.
-
-=== GROUNDING_HOOK ===
-
-A "## Grounding" block is prepended to your input. It lists the URLs a real search returned this run and which you have NOT read yet. If any are unread, your next move is to FETCH them — reading what you already found IS the progress; searching again before you have fetched your grounded URLs is NOT progress and wastes the run. Only search again when there are no unread grounded URLs. You may fetch or cite a URL only if it appears in the list; a URL that can't be traced to a search is a fabrication, not a source.
+A "## What happened so far" paragraph opens your input. It summarises the material below it and adds nothing to it. Where it says something was not retrieved, treat it as not retrieved and do not fill the space from memory; where it says something is in hand and unused, that is a fact about the material below, not a suggestion.
 

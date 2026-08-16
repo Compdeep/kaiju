@@ -100,20 +100,14 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// self-regulate. Empty for reflection sites that don't set it.
 	budgetLine, _ := rNode.Params["budget"].(string)
 	userPrompt := a.assembleReflectorPrompt(graph, gateCtx, trigger, budgetLine)
-	// Coverage edge on the conclude path: the reflector often writes the final
-	// answer directly, bypassing the aggregator. Give it the SAME content-specific
-	// LLM reframe (asked-vs-backed against the evidence + the gaps) the aggregator
-	// gets, so a conclude outcome reports gaps honestly instead of fabricating.
-	// Gated on gaps — clean gathering pays nothing.
-	framed := a.FrameCoverage(ctx, graph, NewStagePrompts(sysPrompt, userPrompt))
 
-	// Grounding edge on the gather→reflect hand-off: when a search came back empty
-	// or a step failed, list the ONLY URLs a real search actually returned, so the
-	// reflector replans a re-search instead of naming sources from memory (which the
-	// executive then materialises as invented, mostly-404 URLs). Gated on gaps.
-	framed = a.FrameGrounding(ctx, graph, framed)
-	sysPrompt, userPrompt = framed.Role, framed.User
-
+	// What the run has done so far, in the words of the request rather than as
+	// a list of steps. The reader below is choosing between more work and
+	// stopping, and the thing it most needs told is what is already in hand and
+	// unused — see edge_reframe.go.
+	sysPrompt, userPrompt = WithReframe(sysPrompt, userPrompt,
+		a.EdgeReFrame(ctx, graph, a.formatTrigger(trigger),
+			"decide whether this run should do more work or stop and answer"))
 	messages := []llm.Message{
 		{Role: "system", Content: sysPrompt},
 		{Role: "user", Content: userPrompt},

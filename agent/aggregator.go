@@ -40,12 +40,12 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 	}
 	rolePrompt := fmt.Sprintf(prompt.Aggregator, aggGuidance, a.FormatRule(), intentStr)
 
-	// Coverage edge (graph → aggregator): when gathering left gaps — tool steps
-	// that came back empty or failed — frame them so absence is explicit and the
-	// aggregator doesn't fabricate to fill the shape of the request. Gated: no
-	// gaps → no edge, no cost.
-	framed := a.FrameCoverage(ctx, graph, NewStagePrompts(rolePrompt, userPrompt))
-	rolePrompt, userPrompt = framed.Role, framed.User
+	// The same account of the run the reflector gets, written for a stage that
+	// is writing rather than deciding: what the evidence holds, and what it was
+	// asked for and does not.
+	rolePrompt, userPrompt = WithReframe(rolePrompt, userPrompt,
+		a.EdgeReFrame(ctx, graph, userPrompt,
+			"write the final answer a person will read"))
 
 	messages := BuildMessagesWithHistory(
 		ComposeSystemPrompt(a.soulPrompt, rolePrompt),

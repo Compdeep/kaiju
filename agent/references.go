@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -309,4 +311,62 @@ func renderPath(path []string) string {
 		parts = append(parts, p)
 	}
 	return strings.Join(parts, ".")
+}
+
+// conclusionFloor is the generic hook the scheduler consults before it lets a
+// reflection CONCLUDE. A "floor" is a hard, structural precondition that — while
+// unmet — blocks conclusion and returns remediation steps to run first. The
+// scheduler stays domain-agnostic: it grafts whatever steps come back and loops
+// once, knowing nothing about what they are. ALL domain knowledge lives here.
+//
+// Today one floor fires: a run that surfaced handles on things it could retrieve
+// — URLs from a search, ids from a listing — and retrieved none of them. Its
+// answer would rest on what the handles were listed beside rather than on what
+// they lead to.
+//
+// The remediation is built from what the producing tool declared: the reference
+// annotation names the tool that follows a handle and the parameter it goes in,
+// so no tool is named here. A handle whose producer declared no follow-up is
+// still reported by the coverage edge; it just cannot be acted on automatically.
+// Self-limiting — a run that surfaced no handles has no floor to clear.
+func (a *Agent) conclusionFloor(graph *Graph, maxSteps int) (steps []PlanStep, label string) {
+	all := a.collectReferences(graph)
+	unresolved := a.unresolvedReferences(graph)
+	if len(all) == 0 || len(unresolved) != len(all) {
+		return nil, "" // nothing surfaced, or something was already followed
+	}
+	found := len(unresolved)
+	if maxSteps > 0 && len(unresolved) > maxSteps {
+		unresolved = unresolved[:maxSteps]
+	}
+	for i, r := range unresolved {
+		if r.Tool == "" || r.Param == "" {
+			continue // declared as a handle, but not how to follow it
+		}
+		// The name is written by hand in the producing tool's output schema and
+		// nothing checks it. Here it stops being a description and becomes a
+		// call, so here is where a wrong one costs something: the run would be
+		// blocked from concluding, then fail on a step naming a tool that does
+		// not exist. Enbarr shipped one — search_telemetry named
+		// get_process_detail, which is the Go type, where the tool is
+		// get_process.
+		//
+		// Skipped rather than substituted. The handle stays in the outstanding
+		// list either way, so the run is still told it was never followed; what
+		// it does not get is a step it cannot run.
+		if _, ok := a.registry.Get(r.Tool); !ok {
+			log.Printf("[grounding] %s says %q resolves its handles, and no such tool is registered — "+
+				"nothing planned for %q", r.Tag, r.Tool, Text.TruncateLog(r.Value, 40))
+			continue
+		}
+		steps = append(steps, PlanStep{
+			Tool:   r.Tool,
+			Tag:    fmt.Sprintf("grounding_retrieve_%d", i+1),
+			Params: map[string]any{r.Param: r.Value},
+		})
+	}
+	if len(steps) > 0 {
+		return steps, fmt.Sprintf("grounding: %d references surfaced, none retrieved — retrieving %d before concluding", found, len(steps))
+	}
+	return nil, ""
 }

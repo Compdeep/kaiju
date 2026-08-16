@@ -60,6 +60,13 @@ func (textNS) TailTruncate(s string, n int) string {
 }
 
 /*
+ * TruncateEvidence caps ONE step's contribution to the evidence a prompt
+ * carries — not the whole of it. A run with twenty steps sends twenty of these.
+ *
+ * The third of four caps between a tool and the model; see maxToolResultLen for
+ * the order. For a tool that returns a typed envelope this is the FIRST one to
+ * cut on the DAG path, because the dispatch cap skips those.
+ *
  * TruncateEvidence caps a result string for LLM synthesis input.
  * desc: Truncates to 8000 chars with a synthesis-specific suffix. Full results are preserved on the Node.
  *       8000 (not 2048) so a multi-result web_search keeps ALL its URLs — a tight

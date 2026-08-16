@@ -579,6 +579,11 @@ type EmbedRequest struct {
 // EmbedResponse is the response from POST /v1/embeddings.
 type EmbedResponse struct {
 	Data []EmbedData `json:"data"`
+
+	// Usage is what the call cost. An embeddings endpoint reports only the
+	// input side — there is no completion — so CompletionTokens is always zero
+	// and TotalTokens equals PromptTokens.
+	Usage Usage `json:"usage"`
 }
 
 // EmbedData is a single embedding result.
@@ -630,6 +635,17 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float64, error)
 	if err := json.Unmarshal(data, &embedResp); err != nil {
 		return nil, fmt.Errorf("parse embed response: %w", err)
 	}
+
+	// Counted here for the same reason Complete counts at its own return: this
+	// is the one place every embedding call passes through, and the ctx carries
+	// the tags set upstream. Without it the spend is invisible to
+	// tokens.Snapshot, which is what a dashboard reads — so an operator sees
+	// every chat call and none of these, while a run that ranks tools against
+	// a request embeds that request and every tool description.
+	//
+	// Not emitted to the CallObserver. That takes a chat request and a chat
+	// response, and an embedding is neither — see observer.go.
+	tokens.AddSplit(ctx, embedResp.Usage.PromptTokens, embedResp.Usage.CompletionTokens)
 
 	// Sort by index and extract vectors
 	vectors := make([][]float64, len(texts))

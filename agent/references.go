@@ -79,12 +79,12 @@ func (a *Agent) collectReferences(graph *Graph) []reference {
 			continue
 		}
 		for _, path := range referencePaths(schema) {
+			tool, param := splitResolver(path.resolvedBy)
 			for _, v := range valuesAtPath(env.Data, path.path) {
 				if v == "" || seen[v] {
 					continue
 				}
 				seen[v] = true
-				tool, param := splitResolver(path.resolvedBy)
 				out = append(out, reference{Value: v, Tool: tool, Param: param, Tag: n.Tag})
 			}
 		}

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -67,6 +68,22 @@ func (a *Agent) conclusionFloor(graph *Graph, maxSteps int) (steps []PlanStep, l
 	for i, r := range unresolved {
 		if r.Tool == "" || r.Param == "" {
 			continue // declared as a handle, but not how to follow it
+		}
+		// The name is written by hand in the producing tool's output schema and
+		// nothing checks it. Here it stops being a description and becomes a
+		// call, so here is where a wrong one costs something: the run would be
+		// blocked from concluding, then fail on a step naming a tool that does
+		// not exist. Enbarr shipped one — search_telemetry named
+		// get_process_detail, which is the Go type, where the tool is
+		// get_process.
+		//
+		// Skipped rather than substituted. The handle stays in the outstanding
+		// list either way, so the run is still told it was never followed; what
+		// it does not get is a step it cannot run.
+		if _, ok := a.registry.Get(r.Tool); !ok {
+			log.Printf("[grounding] %s says %q resolves its handles, and no such tool is registered — "+
+				"nothing planned for %q", r.Tag, r.Tool, Text.TruncateLog(r.Value, 40))
+			continue
 		}
 		steps = append(steps, PlanStep{
 			Tool:   r.Tool,

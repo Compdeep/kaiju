@@ -49,6 +49,13 @@ This directory holds the detailed reference docs behind that overview.
 - **[router-model-bench.md](router-model-bench.md)** — the benchmark behind the
   route-model default.
 
+## Embedding
+
+Building an application on the engine: what you construct, what you implement,
+and where your own logic goes — [embedding.md](embedding.md). Covers the
+minimal working agent, writing a tool, the fourteen handlers and what each nil
+costs, and why a handler is a function while a setting is a value.
+
 ## Config & operations
 - **[config.md](config.md)** — the full configuration reference.
 - **[service.md](service.md)** — the `service` process-manager tool and its

@@ -334,3 +334,120 @@ func TestATruncatedProseAnswerIsStillAnAnswer(t *testing.T) {
 		t.Error("a cut prose answer should still reach the caller — short beats nothing")
 	}
 }
+
+// ── when a run has to change course, or runs out of allowance ────────────────
+//
+// Every test above ends with the reflector saying conclude, so two branches of
+// the scheduler never execute during testing: replan, where the executive is
+// asked again and new steps are grafted mid-run, and the refusals that fire
+// when a run has spent its allowance. Break either and every test above still
+// passes.
+//
+// Both are reachable from this harness. The reflector's answer is scripted, and
+// the run's limits are the caller's to set.
+
+// A reflector that says replan gets the executive asked again, and what it
+// plans is run.
+//
+// The growth path: a batch succeeded and revealed the next move. Nothing here
+// failed — which is why no test reached it, and why the branch is easy to break
+// without noticing.
+func TestAReflectionThatReplansGrowsTheRun(t *testing.T) {
+	first := &countingTool{name: "process_list"}
+	second := &countingTool{name: "net_info"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+	})
+	// Two plans: the first is what the run starts with, the second is what the
+	// executive answers when the replan asks it again.
+	model.answerNth("plan",
+		plan(step("process_list", "procs", nil)),
+		plan(step("net_info", "ports", nil)),
+	)
+	model.answerNth("submit_decision",
+		stubReply{Args: map[string]any{"decision": "replan", "summary": "found the process, now the ports", "next": "look at the ports"}},
+		stubReply{Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+	)
+	a := agentOnStub(t, model, first, second)
+
+	if _, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"what is running?"}`),
+	}); err != nil {
+		t.Fatalf("the run failed: %v (stages: %v)", err, model.functionsCalled())
+	}
+
+	if n := model.callsTo("plan"); n < 2 {
+		t.Errorf("the executive was asked %d times; a replan asks it again", n)
+	}
+	if second.calls == 0 {
+		t.Errorf("the step the replan planned never ran; stages called: %v", model.functionsCalled())
+	}
+}
+
+// The run cannot grow for ever. Past the cap a replan concludes instead, on
+// what it has.
+func TestReplanningStopsAtItsCap(t *testing.T) {
+	tool := &countingTool{name: "process_list"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+		"plan":             plan(step("process_list", "procs", nil)),
+		// Always replan: without a cap this never ends.
+		"submit_decision": {Args: map[string]any{
+			"decision": "replan", "summary": "again", "next": "and again", "outcome": "what I have",
+		}},
+	})
+	a := agentOnStubWith(t, model, DAGConfig{
+		DAGEnabled: true, MaxNodes: 40, MaxLLMCalls: 40, MaxReplans: 2,
+	}, tool)
+
+	res, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"look"}`),
+	})
+	if err != nil {
+		t.Fatalf("the run failed: %v (stages: %v)", err, model.functionsCalled())
+	}
+	if res == nil || res.Outcome == "" {
+		t.Fatal("a run that hit the replan cap produced no outcome")
+	}
+	// Two replans, so the executive is asked at most three times: once to start
+	// and once per replan. A run that never stopped growing would exceed this.
+	if n := model.callsTo("plan"); n > 3 {
+		t.Errorf("the executive was asked %d times with a cap of 2 replans", n)
+	}
+}
+
+// A run that has spent its allowance stops rather than asking for more.
+//
+// The scheduler refuses to spawn and concludes on what it has. Nothing in the
+// suite reached this, so a refusal that stopped refusing would have been
+// invisible.
+func TestARunThatSpendsItsAllowanceConcludesOnWhatItHas(t *testing.T) {
+	tool := &countingTool{name: "process_list"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+		"plan":             plan(step("process_list", "procs", nil)),
+		"submit_decision": {Args: map[string]any{
+			"decision": "replan", "summary": "more", "next": "more", "outcome": "what I have",
+		}},
+	})
+	// Five model calls is route, classify, plan, reflect — and then one left,
+	// which is not enough: the branch requires more than two remaining before
+	// it will ask the executive again. Measured rather than chosen: at six the
+	// replan proceeds and this run asks the executive twice.
+	a := agentOnStubWith(t, model, DAGConfig{
+		DAGEnabled: true, MaxNodes: 20, MaxLLMCalls: 5, MaxReplans: 5,
+	}, tool)
+
+	res, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"look"}`),
+	})
+	if err != nil {
+		t.Fatalf("the run failed: %v (stages: %v)", err, model.functionsCalled())
+	}
+	if res == nil || res.Outcome == "" {
+		t.Fatal("a run that ran out of allowance produced no outcome")
+	}
+	if n := model.callsTo("plan"); n > 1 {
+		t.Errorf("the executive was asked %d times by a run with no allowance to replan", n)
+	}
+}

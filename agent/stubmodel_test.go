@@ -237,6 +237,13 @@ func (s *stubModel) functionsCalled() []string {
 // and the dispatcher are the real ones.
 func agentOnStub(t *testing.T, s *stubModel, tools ...toolapi.Tool) *Agent {
 	t.Helper()
+	return agentOnStubWith(t, s, DAGConfig{DAGEnabled: true, MaxNodes: 20, MaxLLMCalls: 20}, tools...)
+}
+
+// agentOnStubWith is agentOnStub with the run's limits chosen by the caller —
+// for the tests that drive what happens when a limit is reached.
+func agentOnStubWith(t *testing.T, s *stubModel, dag DAGConfig, tools ...toolapi.Tool) *Agent {
+	t.Helper()
 	d := t.TempDir()
 	a, err := New(Config{
 		ModelConfig: ModelConfig{
@@ -244,7 +251,7 @@ func agentOnStub(t *testing.T, s *stubModel, tools ...toolapi.Tool) *Agent {
 		},
 		PathConfig:     PathConfig{Workspace: d, DataDir: d, MetadataDir: d},
 		IdentityConfig: IdentityConfig{NodeID: "this-node"},
-		DAGConfig:      DAGConfig{DAGEnabled: true, MaxNodes: 20, MaxLLMCalls: 20},
+		DAGConfig:      dag,
 		RoutingConfig:  RoutingConfig{ClassifierEnabled: true},
 	})
 	if err != nil {

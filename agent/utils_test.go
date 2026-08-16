@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Several runs start at once on a busy node, and each rotates the service logs
@@ -67,5 +68,52 @@ func TestRotationIsAvailableAgainAfterwards(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(logs, "two.log.prev")); err != nil {
 		t.Errorf("the second rotation did not happen: %v", err)
+	}
+}
+
+// A run that arrives while another is rotating waits for it.
+//
+// It used to return immediately, and then read the directory while the first
+// run was still part-way through moving it — a log the first had not reached
+// yet is the previous run's output, in the run rotation exists to give fresh
+// output to.
+//
+// Held exactly rather than by timing: the test takes the lock itself, so the
+// call under test cannot proceed until the test lets it.
+func TestASecondRotationWaitsForTheFirst(t *testing.T) {
+	dir := t.TempDir()
+	logs := filepath.Join(dir, ".services")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logs, "web.log"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rotating.Lock() // stand in for a run that is part-way through
+
+	done := make(chan struct{})
+	go func() {
+		rotateServiceLogs(dir)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("the second rotation returned while another was still holding the directory")
+	case <-time.After(50 * time.Millisecond):
+		// Still waiting, which is the point.
+	}
+
+	rotating.Unlock()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second rotation never returned after the first released")
+	}
+
+	if _, err := os.Stat(filepath.Join(logs, "web.log.prev")); err != nil {
+		t.Errorf("it waited and then did not rotate: %v", err)
 	}
 }

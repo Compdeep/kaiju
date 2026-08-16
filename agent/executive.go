@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -170,50 +171,71 @@ type PlanStep struct {
 	Gap    string `json:"gap,omitempty"` // capability gap: what's needed but unavailable
 }
 
-// UnmarshalJSON tolerates LLMs that still emit a legacy `param_refs`
-// field (the old DI shape) by lifting any string-typed entries into
-// Params under the same key — letting the new `${step.N.field}`
-// template path handle them. Object-typed entries are dropped with a
-// warning since the new format requires placeholders to be strings.
-func (s *PlanStep) UnmarshalJSON(data []byte) error {
-	type raw struct {
-		Type      string                     `json:"type,omitempty"`
-		Tool      string                     `json:"tool"`
-		Params    map[string]any             `json:"params"`
-		ParamRefs map[string]json.RawMessage `json:"param_refs,omitempty"` // legacy — see below
-		DependsOn FlexInts                   `json:"depends_on"`
-		Tag       string                     `json:"tag"`
-		Target    string                     `json:"target,omitempty"`
-		Gap       string                     `json:"gap,omitempty"`
+// planStepFields is every JSON name a step may carry: PlanStep's own, read off
+// its tags, plus the legacy param_refs this decoder still accepts.
+//
+// Read rather than listed. A hand-written list is a third place that has to
+// agree with the struct, and the point of this decoder is that it no longer has
+// a second.
+var planStepFields = func() map[string]bool {
+	names := map[string]bool{"param_refs": true}
+	t := reflect.TypeOf(PlanStep{})
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			names[name] = true
+		}
 	}
-	var r raw
-	if err := json.Unmarshal(data, &r); err != nil {
+	return names
+}()
+
+/*
+ * UnmarshalJSON decodes one plan step.
+ * desc: It decodes into PlanStep itself, through a local type that has the same
+ *       fields and none of its methods — which is what stops the decoder
+ *       calling itself. It used to declare a second struct listing every field
+ *       by hand and copy them across one at a time, and a field added to
+ *       PlanStep and not to that copy was dropped with no error. Target is how
+ *       that was found: a plan named the machine to run on and the step arrived
+ *       without one.
+ *
+ *       It also tolerates a model that still emits the legacy param_refs field,
+ *       lifting string entries into Params under the same key so the
+ *       ${step.N.field} path handles them. Object entries are the wrong-format
+ *       error that path replaced, so they are named and dropped.
+ * param: data - the step as the model wrote it.
+ * return: an error only when the step itself will not decode.
+ */
+func (s *PlanStep) UnmarshalJSON(data []byte) error {
+	// Same fields, no methods, so json does not re-enter this one.
+	type planStep PlanStep
+	var step planStep
+	if err := json.Unmarshal(data, &step); err != nil {
 		return err
 	}
-	s.Type = r.Type
-	s.Tool = r.Tool
-	s.Params = r.Params
-	s.DependsOn = r.DependsOn
-	s.Tag = r.Tag
-	s.Target = r.Target
-	s.Gap = r.Gap
+	*s = PlanStep(step)
 	if s.Params == nil {
 		s.Params = make(map[string]any)
 	}
-	// Legacy compatibility — if the LLM still emits param_refs, only
-	// accept string values (which would be ${step.N.field} templates)
-	// and lift them into params. Object-shaped entries are the wrong-
-	// format error this whole refactor was meant to eliminate; warn
-	// and drop them.
-	for k, v := range r.ParamRefs {
-		var asStr string
-		if err := json.Unmarshal(v, &asStr); err == nil {
-			s.Params[k] = asStr
-			log.Printf("[dag] plan: lifted legacy string param_ref %q → params (use template inline next time)", k)
-			continue
-		}
-		log.Printf("[dag] plan: dropping legacy object param_ref %q (use ${step.N.field} string templates)", k)
+
+	// param_refs is read separately because it is not a field of PlanStep and
+	// is not becoming one — it is a shape this decoder accepts and translates,
+	// not a shape a step has.
+	var legacy struct {
+		ParamRefs map[string]json.RawMessage `json:"param_refs,omitempty"`
 	}
+	if err := json.Unmarshal(data, &legacy); err == nil {
+		for k, v := range legacy.ParamRefs {
+			var asStr string
+			if err := json.Unmarshal(v, &asStr); err == nil {
+				s.Params[k] = asStr
+				log.Printf("[dag] plan: lifted legacy string param_ref %q → params (use template inline next time)", k)
+				continue
+			}
+			log.Printf("[dag] plan: dropping legacy object param_ref %q (use ${step.N.field} string templates)", k)
+		}
+	}
+
 	// Anything else the model invented is dropped by the decode above, and a
 	// silent drop in plan parsing is how a step loses its wiring and still
 	// runs. Name what went missing.
@@ -221,12 +243,8 @@ func (s *PlanStep) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &seen); err != nil {
 		return nil // the step decoded; a second parse failing changes nothing
 	}
-	known := map[string]bool{
-		"type": true, "tool": true, "params": true, "param_refs": true,
-		"depends_on": true, "tag": true, "target": true, "gap": true,
-	}
 	for key := range seen {
-		if !known[key] {
+		if !planStepFields[key] {
 			log.Printf("[plan:warn] step %q (tag=%q) emitted unknown field %q — dropped",
 				s.Tool, s.Tag, key)
 		}

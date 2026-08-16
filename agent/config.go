@@ -166,8 +166,11 @@ type RoutingConfig struct {
 // ComputeConfig governs compute nodes — steps that run generated code rather
 // than call a tool.
 type ComputeConfig struct {
-	ComputeTimeout time.Duration // max code execution time for compute nodes (default 120s)
-	DisableCoding  bool          // when true, deep compute (architect/codebase building) is refused; shallow analytical compute still works
+	// ComputeTimeout bounds one run of the code a compute step wrote — the step
+	// that executes it, not the model call that produced it. Zero leaves the
+	// shell's own default, which is 60s.
+	ComputeTimeout time.Duration
+	DisableCoding  bool // when true, deep compute (architect/codebase building) is refused; shallow analytical compute still works
 }
 
 // Handlers are the application's functions, which this package calls at fixed

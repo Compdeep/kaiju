@@ -1933,6 +1933,13 @@ type SyncResult struct {
 	Gaps     []string // capability gaps declared by the planner
 	Nodes    int      // total DAG nodes executed
 	LLMCalls int      // total LLM round-trips
+
+	// RunID is this run, not the caller's reference: one reference can produce
+	// several runs. Here because a caller that records something after a run —
+	// a finding, a note, a row of its own — has no other way to say which run
+	// produced it. The caller's own context does not carry it; the run stamps
+	// it on its own.
+	RunID string
 	// Trace is the final DAG node snapshot (the same JSON shape the browser
 	// streams and renders), serialized so the caller can persist it against the
 	// assistant message. Server-authoritative: the trace is saved by the process
@@ -2188,6 +2195,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		Nodes:    graph.NodeCount(),
 		LLMCalls: int(budget.LLMCount()),
 		Trace:    traceJSON,
+		RunID:    runID,
 	}, nil
 }
 

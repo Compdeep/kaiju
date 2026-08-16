@@ -21,6 +21,16 @@ func reframeAgent(t *testing.T) *Agent {
 	return &Agent{registry: reg}
 }
 
+// outcomesOf reads the step-outcome source the way the gate does.
+func outcomesOf(t *testing.T, a *Agent, g *Graph) string {
+	t.Helper()
+	got, err := (&stepOutcomesSource{}).Load(g, nil, a, nil)
+	if err != nil {
+		t.Fatalf("step outcomes: %v", err)
+	}
+	return got
+}
+
 func withStep(g *Graph, tag, tool string, msg toolapi.ToolMessage) {
 	id := g.AddNode(&Node{Type: NodeTool, Tag: tag, ToolName: tool})
 	g.SetBody(id, toolMessageBody{msg: msg})
@@ -38,11 +48,7 @@ func TestReframe_EachOutcomeIsNamed(t *testing.T) {
 	withStep(g, "read", "file_read", toolapi.ToolOK("text", "listen = 8080", nil))
 	withStep(g, "check", "lookup_hash", toolapi.ToolMessage{Type: "text", Status: toolapi.StatusUnclassified})
 
-	facts := a.factsOf(g)
-	if len(facts.Produced) != 3 {
-		t.Fatalf("got %d steps, want 3: %v", len(facts.Produced), facts.Produced)
-	}
-	joined := strings.Join(facts.Produced, "\n")
+	joined := outcomesOf(t, a, g)
 	for _, want := range []string{
 		"look (web_search): returned nothing — no results for that query",
 		"read (file_read): produced a result",
@@ -62,13 +68,9 @@ func TestReframe_AFailedStepCarriesItsReason(t *testing.T) {
 	id := g.AddNode(&Node{Type: NodeTool, Tag: "reach", ToolName: "http_get"})
 	g.SetError(id, errors.New("dial tcp: i/o timeout"))
 
-	facts := a.factsOf(g)
-	if len(facts.Failed) != 1 {
-		t.Fatalf("got %d failures, want 1: %v", len(facts.Failed), facts.Failed)
-	}
-	if !strings.Contains(facts.Failed[0], "reach (http_get): failed") ||
-		!strings.Contains(facts.Failed[0], "dial tcp") {
-		t.Errorf("failure line = %q; it names neither the step nor why", facts.Failed[0])
+	got := outcomesOf(t, a, g)
+	if !strings.Contains(got, "reach (http_get): failed") || !strings.Contains(got, "dial tcp") {
+		t.Errorf("the failure names neither the step nor why:\n%s", got)
 	}
 }
 
@@ -79,12 +81,9 @@ func TestReframe_AValueInHandAndUnusedIsListed(t *testing.T) {
 	g := NewGraph()
 	producedNode(g, "lister", payloadWith("a-handle"))
 
-	facts := a.factsOf(g)
-	if len(facts.Unfollowed) != 1 {
-		t.Fatalf("got %d unfollowed, want 1: %v", len(facts.Unfollowed), facts.Unfollowed)
-	}
-	if !strings.Contains(facts.Unfollowed[0], "a-handle") {
-		t.Errorf("unfollowed line = %q, want the value itself", facts.Unfollowed[0])
+	got := outcomesOf(t, a, g)
+	if !strings.Contains(got, "ALREADY IN HAND, NOT YET FOLLOWED UP:\n- a-handle") {
+		t.Errorf("the value in hand is not listed as unused:\n%s", got)
 	}
 }
 
@@ -177,8 +176,7 @@ func TestReframe_AStepWithNoLabelIsNamedOnce(t *testing.T) {
 	withStep(g, "", "search_telemetry", toolapi.ToolEmpty("search", "nothing matched"))
 	withStep(g, "look for logins", "bash", toolapi.ToolOK("text", "root", nil))
 
-	facts := a.factsOf(g)
-	joined := strings.Join(facts.Produced, "\n")
+	joined := outcomesOf(t, a, g)
 	if strings.Contains(joined, "search_telemetry (search_telemetry)") {
 		t.Errorf("the tool is named twice:\n%s", joined)
 	}

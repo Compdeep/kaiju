@@ -80,10 +80,6 @@ func (a *Agent) factsOf(graph *Graph) runFacts {
 	}
 
 	for _, n := range graph.ResolvedByType(NodeTool) {
-		label := n.Tag
-		if label == "" {
-			label = n.ToolName
-		}
 		outcome := "produced a result"
 		if tb, ok := n.Body.(toolMessageBody); ok {
 			env := tb.Envelope()
@@ -102,19 +98,15 @@ func (a *Agent) factsOf(graph *Graph) runFacts {
 				outcome = "returned something but did not say whether it found anything"
 			}
 		}
-		f.Produced = append(f.Produced, fmt.Sprintf("- %s (%s): %s", label, n.ToolName, outcome))
+		f.Produced = append(f.Produced, "- "+stepLabel(n)+": "+outcome)
 	}
 
 	for _, n := range graph.FailedNodes() {
-		label := n.Tag
-		if label == "" {
-			label = n.ToolName
-		}
 		reason := ""
 		if n.Error != nil {
 			reason = " — " + n.Error.Error()
 		}
-		f.Failed = append(f.Failed, fmt.Sprintf("- %s (%s): failed%s", label, n.ToolName, reason))
+		f.Failed = append(f.Failed, "- "+stepLabel(n)+": failed"+reason)
 	}
 
 	for _, r := range a.unresolvedReferences(graph) {
@@ -127,6 +119,17 @@ func (a *Agent) factsOf(graph *Graph) runFacts {
 	}
 
 	return f
+}
+
+// stepLabel names a step: the planner's label and the tool that ran, or just
+// the tool when the planner set no label. Printing both when they are the same
+// word gives "search_telemetry (search_telemetry)", which reads as two facts
+// and is one.
+func stepLabel(n *Node) string {
+	if n.Tag == "" || n.Tag == n.ToolName {
+		return n.ToolName
+	}
+	return fmt.Sprintf("%s (%s)", n.Tag, n.ToolName)
 }
 
 // text renders the facts for the model.

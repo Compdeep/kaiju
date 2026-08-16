@@ -178,3 +178,55 @@ func TestCollectGaps_SkipsNonEnvelopeAndNilGraph(t *testing.T) {
 		t.Fatalf("a non-envelope tool body must be skipped, got %+v", gaps)
 	}
 }
+
+// One rendering for a gap, and both edges use it.
+//
+// The label line was written twice, character for character, in
+// edge_coverage.go and edge_grounding.go. Only one copy got the Tool fallback,
+// so the "text (text)" label removed from the coverage prompt went on appearing
+// in the grounding one. Found three times, fixed once.
+
+func TestAGapNamesTheStepOrTheToolBeforeItsType(t *testing.T) {
+	cases := []struct {
+		name string
+		gap  toolGap
+		want string
+	}{
+		{"the planner's label wins", toolGap{Tag: "look for logins", Tool: "bash", Type: "text", Detail: "d"},
+			"- look for logins (text): d\n"},
+		{"no label falls back to the tool", toolGap{Tool: "bash", Type: "text", Detail: "d"},
+			"- bash (text): d\n"},
+		{"neither leaves the type, said once", toolGap{Type: "text", Detail: "d"},
+			"- text (text): d\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.gap.line(); got != c.want {
+				t.Errorf("line() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// The unclassified branch had n.ToolName in scope and did not use it, so a
+// result the tool declined to classify was labelled by its envelope type — the
+// "text (text)" line the fallback exists to prevent.
+func TestAnUnclassifiedResultNamesItsTool(t *testing.T) {
+	graph := NewGraph()
+	id := graph.AddNode(&Node{Type: NodeTool, ToolName: "check_persistence"})
+	graph.SetBody(id, toolMessageBody{msg: toolapi.ToolMessage{
+		Type:   "text",
+		Status: toolapi.StatusUnclassified,
+	}})
+
+	gaps := (&Agent{}).collectGaps(graph)
+	if len(gaps) != 1 {
+		t.Fatalf("collectGaps returned %d gaps, want 1", len(gaps))
+	}
+	if gaps[0].Tool != "check_persistence" {
+		t.Errorf("Tool = %q; an unclassified result does not say which tool ran", gaps[0].Tool)
+	}
+	if got := gaps[0].line(); strings.HasPrefix(got, "- text (text)") {
+		t.Errorf("line() = %q — the label is the type said twice, which names no step", got)
+	}
+}

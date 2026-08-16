@@ -128,11 +128,7 @@ func (a *Agent) groundingEdge(ctx context.Context, graph *Graph, request string)
 	}
 	var gapb strings.Builder
 	for _, g := range gaps {
-		label := g.Tag
-		if label == "" {
-			label = g.Type
-		}
-		gapb.WriteString(fmt.Sprintf("- %s (%s): %s\n", label, g.Type, strings.TrimSpace(g.Detail)))
+		gapb.WriteString(g.line())
 	}
 	user := fmt.Sprintf("REQUEST:\n%s\n\nUNFETCHED GROUNDED URLS (found by a search, not yet read):\n%s\n\nALL GROUNDED URLS:\n%s\n\nGATHERING GAPS:\n%s",
 		Text.TruncateEvidence(request), unfetchedList, groundedList, gapb.String())

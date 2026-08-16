@@ -133,9 +133,24 @@ func (a *Agent) finish(n *Node, result string, body NodeBody, err error) nodeCom
 	// A hint is derived from the tool as this machine has it, so a step that ran
 	// elsewhere gets one only when the same tool is registered here too. That is
 	// the honest limit: without the tool there is nothing to ask.
+	//
+	// And a hint that names a PATH is only meaningful where the file is. The
+	// panel opens it on the machine running the dashboard, so a path from a
+	// step that ran elsewhere shows nothing — or, worse, shows this machine's
+	// file of that name as though it were the other machine's. A hint carrying
+	// inline content makes no such assumption and travels.
+	//
+	// This is the one thing the two paths do differently, and it is written
+	// here rather than by one of them quietly not doing it.
 	if err == nil {
 		if skill, ok := a.registry.Get(n.ToolName); ok {
-			if hint := toolapi.GetDisplayHint(skill, n.Params, result); hint != nil {
+			hint := toolapi.GetDisplayHint(skill, n.Params, result)
+			if hint != nil && hint.Path != "" && a.remoteFor(n) {
+				log.Printf("[dag] node %s ran on %s; its panel names a path on that machine, so it is not shown here",
+					n.ID, Text.TruncateLog(n.Target, 12))
+				hint = nil
+			}
+			if hint != nil {
 				n.Actions = append(n.Actions, NodeAction{
 					Type:    "panel_show",
 					Plugin:  hint.Plugin,

@@ -24,12 +24,18 @@ import (
 // Each was fixed where it was found, and nothing stopped the next one. These
 // hold the shape rather than the individual fixes.
 
-// panelTool returns a display hint, which is the thing the remote path used to
-// drop on the floor.
+// Two kinds of display hint, because the difference between them is the one
+// thing the local and remote paths are allowed to do differently.
+//
+// A hint naming a PATH is only meaningful where the file is: the panel opens it
+// on the machine running the dashboard. A hint carrying inline CONTENT already
+// holds what it shows and travels.
+
+// panelTool names a path — what file_write does.
 type panelTool struct{ runs int }
 
 func (p *panelTool) Name() string              { return "counter" }
-func (p *panelTool) Description() string       { return "returns a panel hint" }
+func (p *panelTool) Description() string       { return "returns a panel hint naming a path" }
 func (p *panelTool) Impact(map[string]any) int { return toolapi.ImpactObserve }
 func (p *panelTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{}}`)
@@ -40,6 +46,13 @@ func (p *panelTool) Execute(context.Context, map[string]any) (string, error) {
 }
 func (p *panelTool) DisplayHint(map[string]any, string) *toolapi.DisplayHint {
 	return &toolapi.DisplayHint{Plugin: "code", Title: "counter output", Path: "/tmp/x", Line: 3}
+}
+
+// inlineTool carries its content — what panel_push does.
+type inlineTool struct{ panelTool }
+
+func (i *inlineTool) DisplayHint(map[string]any, string) *toolapi.DisplayHint {
+	return &toolapi.DisplayHint{Plugin: "markdown", Title: "counter output", Content: "# ran"}
 }
 
 // fireWith runs one node through the dispatcher with the given scope and
@@ -60,34 +73,43 @@ func fireWith(t *testing.T, a *Agent, n *Node) (nodeCompletion, *Node) {
 	}
 }
 
-// The local path attached the tool's display hint and the remote path did not,
-// so the frontend showed a panel for a file read here and nothing for the same
-// read on another machine.
-func TestAStepThatRanElsewhereStillCarriesItsPanel(t *testing.T) {
-	tool := &panelTool{}
+// A step that ran elsewhere carries the panel it can carry.
+//
+// Inline content travels: it holds what it shows. A path does not, and showing
+// it would open this machine's file of that name as though it were the other
+// machine's — which is worse than showing nothing, because it looks right.
+func TestAPanelTravelsOnlyWhenItCarriesWhatItShows(t *testing.T) {
+	cases := []struct {
+		name string
+		tool toolapi.Tool
+		want int
+	}{
+		{"a path, on another machine", &panelTool{}, 0},
+		{"inline content, on another machine", &inlineTool{}, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := agentWith(t, c.tool)
+			a.remoteExec = okExec{}
 
-	local, localNode := fireWith(t, agentWith(t, tool), &Node{Type: NodeTool, ToolName: "counter"})
-	if local.Err != nil {
-		t.Fatalf("the local step failed: %v", local.Err)
+			got, n := fireWith(t, a, &Node{Type: NodeTool, ToolName: "counter", Target: "machine-b"})
+			if got.Err != nil {
+				t.Fatalf("the step failed: %v", got.Err)
+			}
+			if len(n.Actions) != c.want {
+				t.Errorf("the step attached %d panels, want %d", len(n.Actions), c.want)
+			}
+		})
 	}
-	if len(localNode.Actions) != 1 {
-		t.Fatalf("the local step attached %d actions, want 1 — the test's premise is wrong", len(localNode.Actions))
-	}
+}
 
-	remoteAgent := agentWith(t, tool)
-	remoteAgent.remoteExec = okExec{}
-	remote, remoteNode := fireWith(t, remoteAgent, &Node{Type: NodeTool, ToolName: "counter", Target: "machine-b"})
-	if remote.Err != nil {
-		t.Fatalf("the remote step failed: %v", remote.Err)
-	}
-
-	if len(remoteNode.Actions) != len(localNode.Actions) {
-		t.Fatalf("a step that ran on machine-b carries %d actions and the same step here carries %d",
-			len(remoteNode.Actions), len(localNode.Actions))
-	}
-	if remoteNode.Actions[0].Title != localNode.Actions[0].Title {
-		t.Errorf("the panels differ: remote %q, local %q",
-			remoteNode.Actions[0].Title, localNode.Actions[0].Title)
+// Here, both kinds show: the file is on this machine, so its path resolves.
+func TestAStepThatRanHereCarriesEitherPanel(t *testing.T) {
+	for _, tool := range []toolapi.Tool{&panelTool{}, &inlineTool{}} {
+		_, n := fireWith(t, agentWith(t, tool), &Node{Type: NodeTool, ToolName: "counter"})
+		if len(n.Actions) != 1 {
+			t.Errorf("%T attached %d panels for a step that ran here, want 1", tool, len(n.Actions))
+		}
 	}
 }
 

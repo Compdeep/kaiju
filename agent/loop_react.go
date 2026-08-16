@@ -13,8 +13,6 @@ import (
 	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
-const maxToolResultLen = 4096
-
 /*
  * systemPrompt returns the base system prompt for the ReAct loop.
  * desc: Composes the soul prompt with role description, ReAct role prompt,

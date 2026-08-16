@@ -251,6 +251,10 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 		case strings.TrimSpace(decoded) == "":
 			out, err = marshalFetchResult(fetchResult{Status: status, Format: format, Note: "downloaded a document with no extractable text (likely scanned or image-only)"})
 		default:
+			// This tool's own cap on a decoded document, and the first of four
+			// between here and the model — see agent.maxToolResultLen for the
+			// rest. Raising it usually changes nothing, because a later one
+			// cuts first.
 			if len(decoded) > 16000 {
 				decoded = decoded[:16000] + "\n… (truncated)"
 			}
@@ -359,6 +363,8 @@ func marshalFetchResult(r fetchResult) (toolapi.ToolMessage, error) {
  * return: JSON {status, content} with body truncated to 8KB
  */
 func (w *WebFetch) formatRaw(status string, body []byte) (toolapi.ToolMessage, error) {
+	// This tool's own cap on a raw body. The first of four — see
+	// agent.maxToolResultLen for where the others cut.
 	s := string(body)
 	if len(s) > 8192 {
 		s = s[:8192] + "\n... (truncated)"
@@ -394,6 +400,8 @@ func primaryContent(ctx context.Context, rawURL string) (string, bool) {
 func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, body []byte) (toolapi.ToolMessage, error) {
 	// An enabled reader plugin is the primary reader.
 	if txt, ok := primaryContent(ctx, rawURL); ok {
+		// This tool's own cap on a reader plugin's markdown. The first of four
+		// — see agent.maxToolResultLen for where the others cut.
 		if len(txt) > 12000 {
 			txt = txt[:12000] + "\n... (truncated)"
 		}

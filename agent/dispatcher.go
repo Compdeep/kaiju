@@ -722,7 +722,9 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		if msg, err = tx.ExecuteTyped(ctx, params); err == nil {
 			body = toolMessageBody{msg: msg}
 			result = msg.JSON()
-			isContextual = true // structured envelope — exempt from truncation
+			// Exempt from the dispatch cap. Every typed tool reaches this, not
+			// only the one it was written for — see maxToolResultLen.
+			isContextual = true
 		}
 	} else {
 		result, err = skill.Execute(ctx, params)
@@ -770,17 +772,19 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		return "", nil, err
 	}
 
-	// Truncate large results for normal tools. Contextual tools (compute)
-	// return structured pipeline data that the scheduler unmarshals for
-	// graft instructions — truncating would corrupt the JSON and silently
-	// break the graft.
+	// The second of the four caps — see maxToolResultLen for the other three
+	// and the order they apply in.
 	//
-	// truncateToolResult keeps JSON envelopes valid by shrinking the
-	// longest string field inside rather than byte-splicing. For non-JSON
-	// output it falls back to head+tail (unchanged from before). Byte-
-	// splicing a web_fetch JSON used to corrupt the envelope so downstream
-	// ${node.X.field} substitution couldn't parse it — this fixes that
-	// without giving up the LLM-friendly truncation behaviour.
+	// isContextual is set by the typed branch above, so this skips every tool
+	// implementing TypedExecutor, not only compute. It was written for compute,
+	// whose envelope the scheduler unmarshals for graft instructions and which
+	// truncation would corrupt; it now exempts every typed tool, and the next
+	// thing to cut such a result is TruncateEvidence at synthesis.
+	//
+	// truncateToolResult keeps JSON envelopes valid by shrinking the longest
+	// string field inside rather than byte-splicing. Byte-splicing a web_fetch
+	// envelope used to corrupt it, so a downstream ${node.X.field} could not
+	// parse what it referenced.
 	if !isContextual && len(result) > maxToolResultLen {
 		result = truncateToolResult(result, maxToolResultLen, Text.HeadTail)
 	}

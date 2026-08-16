@@ -172,6 +172,40 @@ func hasNonEmptyTaskFiles(params map[string]any) bool {
 	return false
 }
 
+// What bounds a tool result, and where.
+//
+// Four caps sit between a tool and the model, and they are applied in this
+// order. The number below is only the second of them, and for most tools it
+// does not apply at all.
+//
+//  1. The TOOL's own cap, inside its Execute. web_fetch cuts a document at
+//     16000 characters, a reader plugin's markdown at 12000, a raw body at
+//
+//  8192. These bound what goes into the envelope and are the only ones a
+//     tool author controls.
+//
+//  2. maxToolResultLen, below, applied by this function when a step finishes.
+//     It bounds ONE step's result. On the ReAct path it applies to every tool.
+//     On the DAG path it applies only to a tool that returned a plain string:
+//     a tool implementing TypedExecutor takes the typed branch, which sets
+//     isContextual and skips this — see dispatcher.go.
+//
+//  3. Text.TruncateEvidence, 8000, applied when results are assembled into a
+//     prompt. It bounds ONE step's contribution to the evidence, not the
+//     whole. A run with twenty steps sends twenty of these.
+//
+//  4. Text.TruncateLog, 500, on the audit line and the log. That one is a
+//     record of what happened and never reaches a model.
+//
+// So a tool author raising its own cap from 8192 usually sees no change: for a
+// typed tool the next thing to cut is 8000 at synthesis, and for a string tool
+// it is 4096 here. Neither is in the tool's file.
+//
+// maxToolResultLen lives here rather than in loop_react.go, where it was
+// declared, because the DAG read the ReAct loop's constant — one execution
+// mode's number governing the other, with nothing saying so.
+const maxToolResultLen = 4096
+
 // truncateToolResult caps an oversized tool Result while preserving
 // JSON structure when the Result is itself JSON. Byte-splicing (old
 // HeadTail) corrupts JSON by cutting mid-string — a downstream

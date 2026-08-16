@@ -322,3 +322,39 @@ func errorsIs(err, target error) bool {
 	}
 	return false
 }
+
+// The dispatch cap is one of four, and which one binds depends on the path.
+//
+// It was declared in loop_react.go and read by the DAG, so one execution mode's
+// number governed the other with nothing saying so. These hold the two facts a
+// reader needs: where it applies, and where it does not.
+
+func TestTheDispatchCapSkipsATypedResult(t *testing.T) {
+	big := `{"type":"text","status":"ok","content":"` + strings.Repeat("x", maxToolResultLen*2) + `"}`
+
+	// The typed branch marks a result contextual, and the cap is skipped.
+	if got := truncateToolResult(big, maxToolResultLen, Text.HeadTail); len(got) >= len(big) {
+		t.Fatalf("truncateToolResult returned %d bytes for %d in — the test's premise is wrong", len(got), len(big))
+	}
+
+	// And what the dispatcher does with it is the condition, not the function:
+	// a contextual result never reaches truncateToolResult at all. That is read
+	// from the source, because the branch is inside fireNode's tail.
+	body := funcBody(t, readSource(t, "dispatcher.go"), "executeToolNode")
+	if !strings.Contains(body, "if !isContextual && len(result) > maxToolResultLen") {
+		t.Error("the dispatch cap no longer skips contextual results, or the condition moved — " +
+			"the comment at maxToolResultLen describes this line and would now be wrong")
+	}
+}
+
+// A cap that lives with the function enforcing it, rather than in one of the
+// two callers. Reading the ReAct loop's constant from the DAG is the fault this
+// closes, and a grep is the only thing that can hold it.
+func TestTheDispatchCapIsNotDeclaredInAnExecutionPath(t *testing.T) {
+	for _, f := range []string{"loop_react.go", "dispatcher.go"} {
+		if strings.Contains(readSource(t, f), "maxToolResultLen = ") {
+			t.Errorf("%s declares maxToolResultLen; it belongs with truncateToolResult, "+
+				"which applies it for both paths", f)
+		}
+	}
+}

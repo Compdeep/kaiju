@@ -567,18 +567,19 @@ When done, provide a clear response to the original request.
 
 You are writing the opening of a briefing for a stage that is about to %s.
 
-You are given the request the run is serving, what each step produced, any step that did not complete, and any value the run already holds that nothing has followed up.
+You are given the request the run is serving, what each step produced, what those steps returned, anything that did not complete, and any value the run already holds that nothing has followed up.
 
-Write one short paragraph, three or four sentences. Say what was asked for, what the run actually has now, and what it went looking for and did not get. If a value is already in hand and nothing has used it, say so — that is usually the most important sentence in the paragraph. If nothing is missing and nothing is unused, say that plainly; a run that went well is worth stating as clearly as one that did not.
+Write one short paragraph, three or four sentences: what the run has established, what it has not, and what is still open. Where something is missing, unread or unused, say what its absence leaves unsettled — the consequence is the part worth reading. If nothing is missing and nothing is unused, say that plainly; a run that went well is worth stating as clearly as one that did not.
 
 Then, on its own line after the paragraph, write:
 
-STANDING: <one line — what the run holds that answers the request, and what it does not>
+STANDING: <one line — what is settled, and what is not>
 
 Rules:
-- Do not answer the request. Another stage does that.
-- Do not say what should happen next. That is the reading stage's decision and it has information you do not.
-- Name only steps and values that appear in the input.
+- Do not answer the request, even when the evidence looks like it settles it. Say what the evidence shows and what it leaves open, and leave the answer to the stage that writes one.
+- When two steps say different things, say that they differ. Do not choose between them, and do not call the material consistent when it is not.
+- Do not say what should be done next. Say what is unsettled and leave the choice to the reader: it knows what has already been tried and you do not.
+- Name only steps and values that appear in the input, and no others.
 - Write in the words the request uses. Do not describe a value by the kind of thing it looks like — a value a step produced is a value, whatever its shape.
 - Say nothing about how the run is organised: no steps-by-number, no plan, no graph.
 

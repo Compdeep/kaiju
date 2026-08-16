@@ -39,47 +39,33 @@ import (
 // succeeded — and a run that gathered ten results and read none of them is
 // exactly that run.
 
-// runFacts is what happened, with nothing decided about it.
-//
-// Assembled by code and handed to the model as text. No judgement here: a step
-// that returned nothing is recorded as having returned nothing, not as a
-// problem, because whether it is a problem depends on the request.
-type runFacts struct {
-	// Produced is one line per resolved tool step: what it was and how it
-	// ended.
-	Produced []string
-	// Failed is one line per step that did not complete.
-	Failed []string
-	// Unfollowed is one line per value the run holds that no later step used.
-	Unfollowed []string
-}
+// stepOutcomesSource is how each step ended, and what the run holds and has not
+// used. Registered on every gate — see contextgate.go.
+type stepOutcomesSource struct{}
 
-// empty reports whether the run has produced nothing at all to describe.
-func (f runFacts) empty() bool {
-	return len(f.Produced) == 0 && len(f.Failed) == 0 && len(f.Unfollowed) == 0
-}
+func (s *stepOutcomesSource) Name() string { return SourceStepOutcomes }
 
 /*
- * factsOf reads a run and returns what happened.
- * desc: Four outcomes per step, taken off the ToolMessage envelope, because the
- *       three that are not failures are invisible everywhere else. A stage
- *       reading the graph's own summary sees "resolved" for a search that
- *       returned nothing, a read of an empty file, and a tool that declined to
- *       say whether it found anything.
+ * Load renders one line per step and one per unused value.
+ * desc: Four outcomes, read off the ToolMessage envelope, because three of them
+ *       are invisible everywhere else: the graph counts a search that returned
+ *       nothing as resolved, and the node returns list failures and successes
+ *       with nothing between.
  *
  *       A step whose body is not an envelope — a tool that returns a plain
  *       string — is recorded as having produced a result, which is all that can
  *       honestly be said about it.
- * param: graph - the run so far.
- * return: the facts, empty when nothing has resolved.
+ * param: g - the run so far.
+ * param: a - the agent, for the registry the unused values are read against.
+ * return: the text, empty when nothing has resolved and nothing has failed.
  */
-func (a *Agent) factsOf(graph *Graph) runFacts {
-	var f runFacts
-	if graph == nil {
-		return f
+func (s *stepOutcomesSource) Load(g *Graph, _ *Trigger, a *Agent, _ map[string]any) (string, error) {
+	if g == nil {
+		return "", nil
 	}
+	var produced, failed, unused []string
 
-	for _, n := range graph.ResolvedByType(NodeTool) {
+	for _, n := range g.ResolvedByType(NodeTool) {
 		outcome := "produced a result"
 		if tb, ok := n.Body.(toolMessageBody); ok {
 			env := tb.Envelope()
@@ -98,27 +84,49 @@ func (a *Agent) factsOf(graph *Graph) runFacts {
 				outcome = "returned something but did not say whether it found anything"
 			}
 		}
-		f.Produced = append(f.Produced, "- "+stepLabel(n)+": "+outcome)
+		produced = append(produced, "- "+stepLabel(n)+": "+outcome)
 	}
 
-	for _, n := range graph.FailedNodes() {
+	for _, n := range g.FailedNodes() {
 		reason := ""
 		if n.Error != nil {
 			reason = " — " + n.Error.Error()
 		}
-		f.Failed = append(f.Failed, "- "+stepLabel(n)+": failed"+reason)
+		failed = append(failed, "- "+stepLabel(n)+": failed"+reason)
 	}
 
-	for _, r := range a.unresolvedReferences(graph) {
-		from := r.Tag
-		if from == "" {
-			from = "an earlier step"
+	if a != nil {
+		for _, r := range a.unresolvedReferences(g) {
+			from := r.Tag
+			if from == "" {
+				from = "an earlier step"
+			}
+			unused = append(unused, fmt.Sprintf("- %s (from %s)", Text.TruncateLog(r.Value, 200), from))
 		}
-		f.Unfollowed = append(f.Unfollowed,
-			fmt.Sprintf("- %s (from %s)", Text.TruncateLog(r.Value, 200), from))
 	}
 
-	return f
+	if len(produced) == 0 && len(failed) == 0 {
+		return "", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("HOW EACH STEP ENDED:\n")
+	if len(produced) == 0 {
+		sb.WriteString("(no step has produced anything yet)\n")
+	} else {
+		sb.WriteString(strings.Join(produced, "\n") + "\n")
+	}
+	if len(failed) > 0 {
+		sb.WriteString("\nSTEPS THAT DID NOT COMPLETE:\n")
+		sb.WriteString(strings.Join(failed, "\n") + "\n")
+	}
+	sb.WriteString("\nALREADY IN HAND, NOT YET FOLLOWED UP:\n")
+	if len(unused) == 0 {
+		sb.WriteString("(nothing)\n")
+	} else {
+		sb.WriteString(strings.Join(unused, "\n") + "\n")
+	}
+	return sb.String(), nil
 }
 
 // stepLabel names a step: the planner's label and the tool that ran, or just
@@ -132,37 +140,14 @@ func stepLabel(n *Node) string {
 	return fmt.Sprintf("%s (%s)", n.Tag, n.ToolName)
 }
 
-// text renders the facts for the model.
-func (f runFacts) text(request string) string {
-	var sb strings.Builder
-	sb.WriteString("REQUEST:\n")
-	sb.WriteString(strings.TrimSpace(request))
-	sb.WriteString("\n\nWHAT EACH STEP PRODUCED:\n")
-	if len(f.Produced) == 0 {
-		sb.WriteString("(no step has produced anything yet)\n")
-	} else {
-		sb.WriteString(strings.Join(f.Produced, "\n") + "\n")
-	}
-	if len(f.Failed) > 0 {
-		sb.WriteString("\nSTEPS THAT DID NOT COMPLETE:\n")
-		sb.WriteString(strings.Join(f.Failed, "\n") + "\n")
-	}
-	sb.WriteString("\nALREADY IN HAND, NOT YET FOLLOWED UP:\n")
-	if len(f.Unfollowed) == 0 {
-		sb.WriteString("(nothing)\n")
-	} else {
-		sb.WriteString(strings.Join(f.Unfollowed, "\n") + "\n")
-	}
-	return sb.String()
-}
-
 /*
  * EdgeReFrame describes what a run has done so far, for the stage about to act
  * on it.
- * desc: One model call. Code assembles the facts; the model writes them as a
- *       short situation in the terms the request used, which is the part no
- *       list can do — a list of steps says nothing about whether the request
- *       has been answered.
+ * desc: One gate call for the material, one model call to write it. The gate
+ *       assembles the request's evidence, how each step ended, and the timeline
+ *       — in that order of priority, under a budget, so a single long tool
+ *       result cannot crowd out the rest. Trimming is the gate's and it says
+ *       when it trims.
  *
  *       Three stages read one of these and each does something different with
  *       it: one chooses whether to keep working, one writes the answer, one
@@ -171,47 +156,110 @@ func (f runFacts) text(request string) string {
  *       with a slot rather than three prompts, because three prompts written
  *       days apart is how the two edges this replaces came to disagree.
  *
- *       Fails open, in both directions: with no model it returns the facts as
- *       assembled, and if the call fails it returns them too. A stage always
- *       gets something, and never gets nothing because a reframe could not be
- *       written.
+ *       Nothing here names a kind of value. The material says a step produced
+ *       something or did not; whether that something is a link, a process id or
+ *       an advisory is read off the evidence by the model, and written in the
+ *       words the request used. The edge this replaces hard-coded one
+ *       application's answer to that question into the engine.
+ *
+ *       Fails open at every step: no gate, no model, or a failed call, and the
+ *       stage still gets the material. A stage never loses its account of the
+ *       run because the wording could not be written.
  * param: ctx - the run's context.
  * param: graph - the run so far.
  * param: request - what was asked, as the calling stage renders it.
  * param: reader - what the reading stage is about to do, as a verb phrase
  *        completing "a stage that is about to …".
- * return: the block to prepend, or "" when the run has produced nothing to
- *         describe.
+ * return: the block to prepend, or "" when nothing has run.
  */
 func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request, reader string) string {
-	facts := a.factsOf(graph)
-	if facts.empty() {
+	material := a.reframeMaterial(ctx, graph, request)
+	if material == "" {
 		return "" // nothing has run; there is no situation to describe
 	}
-	user := facts.text(request)
 
-	client, model := a.lightLane(ctx)
-	if client == nil {
-		return reframeHeading + "\n\n" + user
+	// Only to ask whether a model is configured at all. Which model, and the
+	// size of the reply, are the door's to settle.
+	if client, _ := a.lightLane(ctx); client == nil {
+		return reframeHeading + "\n\n" + material
 	}
 
-	sys := fmt.Sprintf(prompt.Reframe, reader)
-	resp, err := a.askParsed(withTrace(ctx, TraceID{
+	// ask, not askParsed. This writes prose, and a paragraph that ran into the
+	// cap is short rather than unusable — reporting that as an error would throw
+	// away a good paragraph and fall back to the bare material.
+	resp, err := a.ask(withTrace(ctx, TraceID{
 		NodeType: "reframe",
 		Tag:      "reframe",
 		Input:    map[string]string{"reader": reader},
 	}), Light, &llm.ChatRequest{
-		Model:       model,
-		Messages:    []llm.Message{{Role: "system", Content: sys}, {Role: "user", Content: user}},
+		Messages: []llm.Message{
+			{Role: "system", Content: fmt.Sprintf(prompt.Reframe, reader)},
+			{Role: "user", Content: material},
+		},
 		Temperature: 0.2,
 		MaxTokens:   400,
 	})
 	if err != nil || resp == nil || len(resp.Choices) == 0 ||
 		strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
-		log.Printf("[reframe] no reframe written, passing the facts through: %v", err)
-		return reframeHeading + "\n\n" + user
+		log.Printf("[reframe] no reframe written, passing the material through: %v", err)
+		return reframeHeading + "\n\n" + material
 	}
 	return reframeHeading + "\n\n" + strings.TrimSpace(resp.Choices[0].Message.Content)
+}
+
+/*
+ * reframeMaterial gathers what the model is asked to describe.
+ * desc: Through the gate, in priority order and under a budget: how each step
+ *       ended first, because it is what the evidence does not say; then the
+ *       evidence itself, because a reframe with no content can only report that
+ *       a step "produced a result" and hedge about what; then the timeline.
+ *
+ *       A graph with no gate still yields the outcomes, read directly. That is
+ *       the case a caller assembling a graph by hand is in.
+ * param: ctx, graph, request - as EdgeReFrame.
+ * return: the material, empty when no step has ended.
+ */
+func (a *Agent) reframeMaterial(ctx context.Context, graph *Graph, request string) string {
+	outcomes := ""
+	if graph != nil && graph.Context != nil {
+		resp, err := graph.Context.Get(ctx, ContextRequest{
+			ReturnSources: Sources(
+				StepOutcomes(),
+				NodeReturns("all"),
+				Worklog(20, "all"),
+			),
+			MaxBudget:       6000,
+			OmitCurrentTime: true,
+		})
+		if err == nil {
+			var sb strings.Builder
+			for _, name := range []string{SourceStepOutcomes, SourceNodeReturns, SourceWorklog} {
+				if v := strings.TrimSpace(resp.Sources[name]); v != "" {
+					if name == SourceNodeReturns {
+						sb.WriteString("WHAT THE STEPS RETURNED:\n")
+					}
+					if name == SourceWorklog {
+						sb.WriteString("WHAT HAS BEEN DONE ALREADY:\n")
+					}
+					sb.WriteString(v + "\n\n")
+				}
+			}
+			outcomes = sb.String()
+		} else {
+			log.Printf("[reframe] the gate could not assemble the run: %v", err)
+		}
+	}
+	if outcomes == "" {
+		// No gate, or it gave nothing back. The outcomes alone still describe a
+		// run, and they are the half nothing else carries.
+		s := &stepOutcomesSource{}
+		v, _ := s.Load(graph, nil, a, nil)
+		outcomes = strings.TrimSpace(v)
+	}
+	if strings.TrimSpace(outcomes) == "" {
+		return ""
+	}
+	return "REQUEST:\n" + strings.TrimSpace(request) + "\n\n" + strings.TrimSpace(outcomes)
 }
 
 // reframeHeading opens the block. The reading stage's own prompt names it, so

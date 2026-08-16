@@ -53,7 +53,7 @@ func TestNewContextGate_RegistersAllSources(t *testing.T) {
 		SourceBlueprint, SourceWorklog, SourceNodeReturns, SourceWorkspaceTree,
 		SourceServiceState, SourceHistory, SourceSkillGuidance,
 		SourceWorkspaceDeep, SourceFunctionMap, SourceExistingBlueprints,
-		SourceToolIndex,
+		SourceToolIndex, SourceStepOutcomes,
 	}
 	if len(gate.sources) != len(expected) {
 		t.Fatalf("expected %d sources, got %d", len(expected), len(gate.sources))

@@ -155,6 +155,7 @@ func (g *ContextGate) registerDefaultSources() {
 	g.sources[SourceFunctionMap] = &functionMapSource{}
 	g.sources[SourceExistingBlueprints] = &existingBlueprintsSource{}
 	g.sources[SourceToolIndex] = &toolIndexSource{}
+	g.sources[SourceStepOutcomes] = &stepOutcomesSource{}
 }
 
 // Source name constants. Use these in SourceSpec rather than string literals
@@ -177,6 +178,7 @@ const (
 	SourceFunctionMap        = "function_map"
 	SourceExistingBlueprints = "existing_blueprints"
 	SourceToolIndex          = "tool_index"
+	SourceStepOutcomes       = "step_outcomes"
 )
 
 // ── Per-source filter / focus convention ────────────────────────────────────
@@ -673,6 +675,20 @@ func Worklog(lines int, filter string) SourceSpec {
 
 // NodeReturns returns a spec for previously-executed node results.
 // filter: "all"|"failures".
+/*
+ * StepOutcomes selects how each step ended, and what the run holds unused.
+ * desc: The one thing no other source carries. NodeReturns gives failures and
+ *       successes with nothing between them, so a step that ran, returned, and
+ *       produced nothing usable reads as a success — a search with no results,
+ *       a read of an empty file, a tool that declined to say whether it found
+ *       anything. Weight 2: smaller than the evidence and more important than
+ *       the timeline, because it is what the evidence does not say.
+ * return: the spec.
+ */
+func StepOutcomes() SourceSpec {
+	return SourceSpec{Name: SourceStepOutcomes, Weight: 2}
+}
+
 func NodeReturns(filter string) SourceSpec {
 	// Weight 3: node results (the real URLs + evidence the next frame plans from)
 	// take the lion's share of a shared budget; the worklog is secondary.

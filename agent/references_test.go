@@ -310,3 +310,65 @@ func TestChainHints_ToolWithoutParam(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// ── a resolver naming a tool that is not there ───────────────────────────────
+//
+// The name in an annotation is written by hand in a tool's output schema and
+// nothing checked it. It does not sit inert: conclusionFloor builds a real step
+// from it, so the engine plans a call to a tool that does not exist and the run
+// fails on a step nobody asked for. Enbarr shipped exactly that —
+// search_telemetry named get_process_detail, which is the Go type, where the
+// tool is get_process.
+
+// collectReferences reports what the schema says, unchecked. The name only
+// stops being a description at conclusionFloor, which is where it is checked.
+func TestReferences_AnAbsentResolverIsStillReadFromTheSchema(t *testing.T) {
+	a := refAgent("lister", listSchema("get_process_detail.pid"))
+	g := NewGraph()
+	producedNode(g, "lister", payloadWith("4021"))
+
+	refs := a.collectReferences(g)
+	if len(refs) != 1 || refs[0].Tool != "get_process_detail" {
+		t.Fatalf("references = %+v; this reads the schema and does not judge it", refs)
+	}
+	if len(a.unresolvedReferences(g)) != 1 {
+		t.Error("the handle is not outstanding, and nothing followed it")
+	}
+}
+
+// And nothing is planned for it, which is the failure that was actually
+// reachable — a step calling a tool that does not exist.
+func TestReferences_NoStepIsPlannedForAnAbsentTool(t *testing.T) {
+	a := refAgent("lister", listSchema("get_process_detail.pid"))
+	g := NewGraph()
+	producedNode(g, "lister", payloadWith("4021"))
+
+	steps, label := a.conclusionFloor(g, 5)
+	if len(steps) != 0 {
+		t.Errorf("planned %d steps: %+v — the first calls a tool that is not registered", len(steps), steps)
+	}
+	if label != "" {
+		t.Errorf("label = %q, want none when nothing can be planned", label)
+	}
+}
+
+// A correct name is untouched, or the check above would pass by dropping
+// everything.
+func TestReferences_AResolverNamingARegisteredToolIsKept(t *testing.T) {
+	reg := toolapi.NewRegistry()
+	reg.Replace(&fakeTool{name: "lister", params: json.RawMessage(`{}`), output: listSchema("reader.path")}, "builtin")
+	reg.Replace(&fakeTool{name: "reader", params: json.RawMessage(`{}`)}, "builtin")
+	a := &Agent{registry: reg}
+
+	g := NewGraph()
+	producedNode(g, "lister", payloadWith("a"))
+
+	refs := a.collectReferences(g)
+	if len(refs) != 1 || refs[0].Tool != "reader" || refs[0].Param != "path" {
+		t.Fatalf("references = %+v, want the handle resolved by reader.path", refs)
+	}
+	steps, _ := a.conclusionFloor(g, 5)
+	if len(steps) != 1 || steps[0].Tool != "reader" {
+		t.Fatalf("planned %+v, want one step calling reader", steps)
+	}
+}

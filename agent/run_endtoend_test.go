@@ -451,3 +451,49 @@ func TestARunThatSpendsItsAllowanceConcludesOnWhatItHas(t *testing.T) {
 		t.Errorf("the executive was asked %d times by a run with no allowance to replan", n)
 	}
 }
+
+// A tool's context carries the run it is part of.
+//
+// An application recording something a tool found — a row of its own, keyed to
+// the work that produced it — has no other way to know which run that was. The
+// caller's context does not carry it; the run stamps it on its own at the first
+// line, and a tool receives that one.
+func TestAToolSeesTheRunItIsPartOf(t *testing.T) {
+	tool := &runAwareTool{}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+		"plan":             plan(step("process_list", "procs", nil)),
+		"submit_decision":  {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+	})
+	a := agentOnStub(t, model, tool)
+
+	res, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", ID: "ref-1", Data: json.RawMessage(`{"query":"look"}`),
+	})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if tool.sawRun == "" {
+		t.Fatal("a tool's context does not carry the run, so nothing it writes can name one")
+	}
+	if !strings.HasPrefix(tool.sawRun, "ref-1-") {
+		t.Errorf("the tool saw %q, which does not belong to this trigger", tool.sawRun)
+	}
+	// And the caller is told the same run, so what it records afterwards agrees
+	// with what the tools recorded during.
+	if res.RunID != tool.sawRun {
+		t.Errorf("the tool saw run %q and the caller was told %q", tool.sawRun, res.RunID)
+	}
+}
+
+// runAwareTool records the run its context named.
+type runAwareTool struct{ sawRun string }
+
+func (r *runAwareTool) Name() string                { return "process_list" }
+func (r *runAwareTool) Description() string         { return "for the end-to-end tests" }
+func (r *runAwareTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
+func (r *runAwareTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (r *runAwareTool) Execute(ctx context.Context, _ map[string]any) (string, error) {
+	r.sawRun = RunIDFrom(ctx)
+	return toolapi.ToolOK("listing", "2 processes", map[string]any{"count": 2}).JSON(), nil
+}

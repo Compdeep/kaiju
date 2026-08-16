@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
@@ -378,23 +378,30 @@ func readWorklog(workspace, sessionID string, maxLines int) string {
  *         - OK/resolved: 200 chars (just confirmation)
  */
 // rotating is held while one run is renaming the service logs. A second run
-// starting at the same moment skips rather than waits: the point of the rotation
-// is that the log files are fresh, and the first run is already making them so.
-// Both doing it renames the same files twice, and the second set of renames
-// either fails or moves a file the first one just moved.
-var rotating atomic.Bool
+// starting at the same moment waits for it.
+//
+// It used to skip, on the reasoning that the first run is already making the
+// logs fresh so there is nothing for the second to do. That is right about the
+// work and wrong about the guarantee: the second run returned while the first
+// was still part-way through the directory, and then read a log the first had
+// not moved yet — the previous run's output, in the run that rotation exists to
+// give fresh output to.
+//
+// Waiting costs a directory read and a few renames. The second run then finds
+// nothing left ending in .log and returns, which is the "nothing to do" the
+// skip was reaching for, arrived at after the work rather than instead of it.
+var rotating sync.Mutex
 
 // rotateServiceLogs rotates all service log files at the start of an investigation.
 // Old logs go to .prev so they're available for reference but don't pollute
 // the current run's diagnosis. Called once per investigation, not per service start.
 //
-// Several runs start at once on a busy node, so this returns immediately when
-// another run is already rotating — see `rotating` above.
+// Several runs start at once on a busy node, so this waits for one already
+// rotating rather than returning while the directory is half moved — see
+// `rotating` above. When it returns, the logs are rotated.
 func rotateServiceLogs(workspace string) {
-	if !rotating.CompareAndSwap(false, true) {
-		return
-	}
-	defer rotating.Store(false)
+	rotating.Lock()
+	defer rotating.Unlock()
 
 	logsDir := filepath.Join(workspace, ".services")
 	entries, err := os.ReadDir(logsDir)
@@ -406,7 +413,9 @@ func rotateServiceLogs(workspace string) {
 			continue
 		}
 		name := e.Name()
-		if strings.HasSuffix(name, ".log") && !strings.HasSuffix(name, ".prev.log") {
+		// An already-rotated file is x.log.prev, which does not end in .log, so
+		// the one check covers it.
+		if strings.HasSuffix(name, ".log") {
 			src := filepath.Join(logsDir, name)
 			dst := src + ".prev"
 			os.Rename(src, dst)

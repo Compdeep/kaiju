@@ -207,7 +207,6 @@ type Agent struct {
 	// Chat lane default — direct completion, no planner/tools. Empty ⇒ reasoning.
 	chatProvider  string
 	chatModel     string
-	chatTools     []string
 	routeProvider string
 	routeModel    string
 	// Answer lane default — the model that writes the FINAL answer (aggregator +
@@ -225,8 +224,7 @@ type Agent struct {
 	embedStore        *EmbeddingStore // nil if embeddings disabled
 	embedClient       *llm.Client     // nil if embeddings disabled
 
-	soulPrompt    string // from SOUL.md → BOOT.md body → default
-	skillWatcher  *skillmd.Watcher
+	soulPrompt    string                      // from SOUL.md → BOOT.md body → default
 	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
 	// environment is Config.Environment: the application's description of the
 	// surroundings a run happens in, appended to planning and reflection
@@ -845,13 +843,6 @@ func (a *Agent) ChatModel() (provider, model string) {
 	return a.chatProvider, a.chatModel
 }
 
-// SetChatTools sets the default chat-lane tool allowlist, used when a request
-// sends no chat_tools of its own.
-func (a *Agent) SetChatTools(tools []string) { a.chatTools = tools }
-
-// ChatTools returns the default chat-lane tool allowlist.
-func (a *Agent) ChatTools() []string { return a.chatTools }
-
 // SetRouteModel pins the model that makes the routing decision (empty ⇒ the
 // executor lane). Live-applied so the config API/CLI can change it at runtime.
 func (a *Agent) SetRouteModel(provider, model string) {
@@ -930,7 +921,6 @@ func (a *Agent) InitSkills(ctx context.Context, extraDirs []string, pollSec int)
 			w.SetManaged(s)
 		}
 	}
-	a.skillWatcher = w
 	go w.Start(ctx)
 
 	if len(loaded) > 0 {
@@ -947,19 +937,6 @@ func (a *Agent) InitSkills(ctx context.Context, extraDirs []string, pollSec int)
  */
 func (a *Agent) ToolsInfo() []toolapi.ToolInfo {
 	return a.registry.ListInfo()
-}
-
-/*
- * SetToolEnabled turns a tool on or off (dashboard).
- * desc: For an application whose tools run only where the agent runs. It can
- *       never grant remote reach: on means local. An application that dispatches
- *       work onto other machines wants SetToolReach instead.
- * param: name - the tool name.
- * param: enabled - true to enable, false to disable.
- * return: error if the tool is not found.
- */
-func (a *Agent) SetToolEnabled(name string, enabled bool) error {
-	return a.registry.SetEnabled(name, enabled)
 }
 
 /*

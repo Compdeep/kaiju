@@ -22,9 +22,6 @@ import "github.com/Compdeep/kaiju/agent/llm"
 func (a *Agent) applyHandlers(cfg Config) {
 	a.applyModels(cfg)
 
-	if len(cfg.ChatTools) > 0 {
-		a.chatTools = cfg.ChatTools
-	}
 	if cfg.TokenCategory != nil {
 		a.tokenCategoryFn = cfg.TokenCategory
 	}

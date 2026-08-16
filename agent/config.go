@@ -78,9 +78,6 @@ type ModelConfig struct {
 	RouteProvider, RouteModel   string
 	AnswerProvider, AnswerModel string
 
-	// ChatTools limits which tools the chat lane may use. Empty means all.
-	ChatTools []string
-
 	// Limits reports a model's published token limits, so a call can size its
 	// reply cap against the model rather than against a constant. Nil switches
 	// the mechanism off and every call keeps the cap it already had; the same
@@ -198,8 +195,8 @@ type ComputeConfig struct {
 //
 // These were a dozen Set* methods called after New, which meant a caller had
 // to know they existed, which were required, and in what order. Anything
-// genuinely settable while running stayed a method — see SetToolEnabled,
-// SetClearance and SetDAGEnabled.
+// genuinely settable while running stayed a method — see SetClearance and
+// SetToolReach.
 type Handlers struct {
 	// Unattended reports whether a run has nobody watching it, which decides
 	// whether it may ask a question or use tools that record a person's

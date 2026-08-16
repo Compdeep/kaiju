@@ -5,10 +5,19 @@ import (
 	"sync"
 )
 
-// CallObserver is notified after every LLM call this package makes, whether it
-// succeeded or failed. It exists so an embedding application can record calls —
-// prompt logging, tracing, cost attribution, replay capture — without this
-// package knowing what is done with them.
+// CallObserver is notified after every CHAT call this package makes, whether it
+// succeeded or failed — Complete and CompleteStreamResp, which is every stage
+// of a run. It exists so an embedding application can record calls — prompt
+// logging, tracing, replay capture — without this package knowing what is done
+// with them.
+//
+// Embed does not notify it, and the omission is deliberate. The two arguments
+// below are a chat request and a chat response, and an embedding is neither:
+// there is no conversation to log and no reply to record, so firing this would
+// hand an application an empty request and an empty response, telling it a call
+// happened and nothing about it. What an embedding costs is counted rather than
+// observed — Embed reports its tokens through the tokens package, which is
+// where a dashboard reads spend.
 //
 // "Call" means one request/response pair, not one conversation: a single
 // investigation makes many, and each fires the observer once.

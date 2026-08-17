@@ -36,7 +36,7 @@ func TestTheSuppliedAnswerIsUsed(t *testing.T) {
 // nothing, so this package needs no rule of its own about which runs are whose.
 func TestReturningNothingLeavesTheRunToTheBuiltInAggregator(t *testing.T) {
 	a := &Agent{answer: func(_ context.Context, req AnswerRequest) (*AnswerResult, error) {
-		if req.Trigger.Type != "alert" {
+		if req.Trigger.Type != "event" {
 			return nil, nil
 		}
 		return &AnswerResult{Text: "outcome"}, nil
@@ -45,7 +45,7 @@ func TestReturningNothingLeavesTheRunToTheBuiltInAggregator(t *testing.T) {
 	if _, ok, _ := a.writeAnswer(context.Background(), AnswerRequest{Trigger: Trigger{Type: "chat_query"}}); ok {
 		t.Error("a declined run was reported as answered")
 	}
-	if _, ok, _ := a.writeAnswer(context.Background(), AnswerRequest{Trigger: Trigger{Type: "alert"}}); !ok {
+	if _, ok, _ := a.writeAnswer(context.Background(), AnswerRequest{Trigger: Trigger{Type: "event"}}); !ok {
 		t.Error("an accepted run was reported as declined")
 	}
 }
@@ -85,7 +85,7 @@ func TestAFailedAnswerFailsTheRun(t *testing.T) {
 // still be usable.
 func TestAnAnswerWithNoTextStillCounts(t *testing.T) {
 	a := &Agent{answer: func(_ context.Context, _ AnswerRequest) (*AnswerResult, error) {
-		return &AnswerResult{Data: map[string]any{"severity": "high"}}, nil
+		return &AnswerResult{Data: map[string]any{"rating": "high"}}, nil
 	}}
 
 	res, ok, err := a.writeAnswer(context.Background(), AnswerRequest{})
@@ -139,17 +139,17 @@ func TestTheStructuredResultReachesTheCaller(t *testing.T) {
 func TestTheAnswerIsHandedThePromptAndTheDoctrine(t *testing.T) {
 	var seen AnswerRequest
 	a := &Agent{
-		skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", "## Core Principles\nsay what you cannot see\n\n## Aggregator Guidance\nrate it honestly")},
+		skillGuidance: map[string]*skillmd.SkillMD{"review": guidanceSkill("review", "## Core Principles\nsay what you cannot see\n\n## Aggregator Guidance\nrate it honestly")},
 		answer: func(_ context.Context, req AnswerRequest) (*AnswerResult, error) {
 			seen = req
 			return &AnswerResult{Text: "done"}, nil
 		},
 	}
 	g := NewGraph()
-	g.ActiveCards = []string{"triage"}
+	g.ActiveCards = []string{"review"}
 
 	if _, ok, err := a.writeAnswer(context.Background(), AnswerRequest{
-		Trigger: Trigger{Type: "alert", ID: "a-1"}, Graph: g,
+		Trigger: Trigger{Type: "event", ID: "a-1"}, Graph: g,
 		Evidence: &ContextResponse{Sources: map[string]string{"node_returns": "web-1 is unreachable"}},
 	}); !ok || err != nil {
 		t.Fatalf("writeAnswer = %v, %v", ok, err)
@@ -158,7 +158,7 @@ func TestTheAnswerIsHandedThePromptAndTheDoctrine(t *testing.T) {
 	if seen.Prompt == "" {
 		t.Error("the assembled prompt was not handed over")
 	}
-	if len(seen.Guidance) != 1 || seen.Guidance[0].Key != "triage" {
+	if len(seen.Guidance) != 1 || seen.Guidance[0].Key != "review" {
 		t.Fatalf("the run's doctrine was not handed over: %+v", seen.Guidance)
 	}
 	// Whole body, not one extracted section: an application choosing a different
@@ -175,10 +175,10 @@ func TestTheAnswerIsHandedThePromptAndTheDoctrine(t *testing.T) {
 // be handed nothing, with no sign that anything was missing.
 func TestTheDoctrineComesFromBothRegistries(t *testing.T) {
 	a := &Agent{
-		skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", "CARD"), "response": guidanceSkill("response", "SKILL")},
+		skillGuidance: map[string]*skillmd.SkillMD{"review": guidanceSkill("review", "CARD"), "response": guidanceSkill("response", "SKILL")},
 	}
 	g := NewGraph()
-	g.ActiveCards = []string{"triage", "response", "never_registered"}
+	g.ActiveCards = []string{"review", "response", "never_registered"}
 
 	got := a.runGuidance(g)
 
@@ -238,10 +238,10 @@ func TestTheRecordFallsBackToTheAnswer(t *testing.T) {
 // was supposed to have.
 func TestGuidanceIsReachableFromOutside(t *testing.T) {
 	a := &Agent{
-		skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", "CARD"), "response": guidanceSkill("response", "SKILL")},
+		skillGuidance: map[string]*skillmd.SkillMD{"review": guidanceSkill("review", "CARD"), "response": guidanceSkill("response", "SKILL")},
 	}
 
-	got := a.Guidance([]string{"response", "triage", "never_registered"})
+	got := a.Guidance([]string{"response", "review", "never_registered"})
 
 	if len(got) != 2 {
 		t.Fatalf("resolved %d of 2 registered keys: %+v", len(got), got)
@@ -249,11 +249,11 @@ func TestGuidanceIsReachableFromOutside(t *testing.T) {
 	if got[0].Body != "SKILL" || got[1].Body != "CARD" {
 		t.Errorf("wrong bodies, or not in the order asked for: %+v", got)
 	}
-	if len((&Agent{}).Guidance([]string{"triage"})) != 0 {
+	if len((&Agent{}).Guidance([]string{"review"})) != 0 {
 		t.Error("an agent with nothing registered returned something")
 	}
 	var nilAgent *Agent
-	if nilAgent.Guidance([]string{"triage"}) != nil {
+	if nilAgent.Guidance([]string{"review"}) != nil {
 		t.Error("a nil agent returned something")
 	}
 }

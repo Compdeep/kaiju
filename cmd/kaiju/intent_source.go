@@ -32,9 +32,7 @@ func (s intentSource) ListIntents() ([]agent.Intent, error) {
 		out = append(out, agent.Intent{
 			Name:              r.Name,
 			Rank:              r.Rank,
-			Description:       r.Description,
 			PromptDescription: r.PromptDescription,
-			IsBuiltin:         r.IsBuiltin,
 			IsDefault:         r.IsDefault,
 		})
 	}

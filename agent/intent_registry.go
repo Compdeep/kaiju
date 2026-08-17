@@ -13,14 +13,19 @@ import (
 // the wording shown to a model when it is offered the choice.
 //
 // Declared here rather than taken from a store type, so the registry can be
-// filled from any store an application has. The fields are the whole of what
-// this package reads.
+// filled from any store an application has. The four fields are the whole of what
+// this package reads: the name and rank are the intent, PromptDescription is what
+// a model is shown, IsDefault picks the working level.
+//
+// There were two more. Description and IsBuiltin were copied in by every
+// application and read by nothing here — Description because an application shows
+// it in its own interface, IsBuiltin because an application protects its seeded
+// rows from editing. Both are decisions about a store this package never sees, so
+// they belong on the application's own row and not on this one.
 type Intent struct {
 	Name              string `json:"name"`
 	Rank              int    `json:"rank"`
-	Description       string `json:"description"`
 	PromptDescription string `json:"prompt_description"`
-	IsBuiltin         bool   `json:"is_builtin"`
 	IsDefault         bool   `json:"is_default"`
 }
 

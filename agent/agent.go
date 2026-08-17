@@ -821,6 +821,10 @@ func (a *Agent) SetDAGEnabled(enabled bool) {
 
 // SetVisionModel sets the default vision lane (provider name + model id). Empty
 // model disables the dedicated lane.
+//
+// Callable at run time because builtin_vision.go reads it when image_read runs,
+// so an operator changing the vision model changes the next image a run opens
+// rather than the next process.
 func (a *Agent) SetVisionModel(provider, model string) {
 	a.visionProvider = provider
 	a.visionModel = model
@@ -833,6 +837,9 @@ func (a *Agent) VisionModel() (provider, model string) {
 
 // SetChatModel sets the default chat lane (provider, model). Empty model ⇒ the
 // chat lane uses the reasoning model.
+//
+// Callable at run time because resolveChat reads it per request, so a change
+// lands on the next message rather than needing the service restarted.
 func (a *Agent) SetChatModel(provider, model string) {
 	a.chatProvider = provider
 	a.chatModel = model
@@ -858,7 +865,10 @@ func (a *Agent) RouteModel() (provider, model string) {
 // SetAnswerModel pins the model that writes the FINAL answer — the aggregator
 // (investigate path) and the chat lane. Empty ⇒ the heavy/reasoning lane. This is
 // the model a user perceives as "the AI"; it does open-ended generation, not tool
-// calls, so a thinking model is fine here. Live-applied.
+// calls, so a thinking model is fine here.
+//
+// Callable at run time because model_route.go reads it on every answer-lane
+// call, so a change reaches a run already under way.
 func (a *Agent) SetAnswerModel(provider, model string) {
 	a.answerProvider = provider
 	a.answerModel = model
@@ -948,6 +958,12 @@ func (a *Agent) ToolsInfo() []toolapi.ToolInfo {
  * param: name - the tool name.
  * param: reach - the desired reach.
  * return: error if the tool is not found.
+ *
+ * Callable at run time because reach is consulted on every lookup — Get
+ * requires ReachLocal, GetForRemote requires ReachEverywhere — so withdrawing
+ * a tool takes effect on the next call rather than the next restart. That is
+ * the point of it: an operator narrowing what a machine will do for strangers
+ * is not waiting for a restart to be obeyed.
  */
 func (a *Agent) SetToolReach(name string, reach toolapi.Reach) error {
 	return a.registry.SetReach(name, reach)
@@ -970,6 +986,10 @@ func (a *Agent) GateInfo() (rateLimit, maxTurns, clearance int, lockdown bool) {
  * param: endpoint - the API endpoint URL.
  * param: apiKey - the API key.
  * param: model - the model identifier.
+ *
+ * Callable at run time because model_route.go resolves the heavy lane through
+ * this client on every call, so a re-pointed endpoint takes effect on work
+ * already going.
  */
 func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
 	a.llm = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits)
@@ -985,6 +1005,9 @@ func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
  * param: endpoint - the API endpoint URL.
  * param: apiKey - the API key.
  * param: model - the model identifier.
+ *
+ * Callable at run time because model_route.go resolves the light lane through
+ * this client on every call, and dispatcher.go hands it to compute steps.
  */
 func (a *Agent) SetExecutorClient(provider, endpoint, apiKey, model string) {
 	a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits)
@@ -1004,6 +1027,10 @@ func (a *Agent) ExecutorClient() *llm.Client {
  * desc: Configures the agent to validate tool calls against an external
  *       authorization endpoint before execution.
  * param: cc - the ClearanceChecker implementation.
+ *
+ * Callable at run time because clearance.go asks it on every gated tool call,
+ * which is what lets an operator put a checker in front of a running agent
+ * rather than restarting to gain one.
  */
 func (a *Agent) SetClearanceChecker(cc ClearanceChecker) {
 	a.clearanceCheck = cc

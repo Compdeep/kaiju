@@ -80,7 +80,7 @@ func TestWebFetch_RejectsNonHTTPSchemes(t *testing.T) {
 	cases := []string{
 		"file:///etc/passwd",
 		"ftp://example.com",
-		"javascript:alert(1)",
+		"javascript:alert(1)", // foreign-word-ok: the attack string this filter must reject, verbatim
 		"example.com",
 		"",
 	}
@@ -295,9 +295,9 @@ func TestWebFetch_POSTSendsBody(t *testing.T) {
 // ── HTML stripping helpers ───────────────────────────────────────────────
 
 func TestStripHTML_RemovesScriptAndStyle(t *testing.T) {
-	in := `<html><script>alert(1)</script><style>.x{}</style><p>visible</p></html>`
+	in := `<html><script>alert(1)</script><style>.x{}</style><p>visible</p></html>` // foreign-word-ok: JavaScript's own function, in the markup being stripped
 	got := stripHTML(in)
-	if strings.Contains(got, "alert") {
+	if strings.Contains(got, "alert") { // foreign-word-ok: checking the script above is gone
 		t.Errorf("script content should be stripped, got: %s", got)
 	}
 	if strings.Contains(got, ".x{}") {

@@ -60,7 +60,7 @@ func TestTheBuiltInWordingClaimsNothingAboutThePayload(t *testing.T) {
 		Data:   json.RawMessage(`{"k":"v"}`),
 	})
 
-	for _, word := range []string{"Alert", "alert", "Investigate", "threat", "incident"} {
+	for _, word := range []string{"Alert", "alert", "Investigate", "threat", "incident"} { // foreign-word-ok: the list the wording must not contain, so the test has to write it
 		if strings.Contains(got, word) {
 			t.Errorf("the built-in wording says %q, which is one product's word for what a run is about:\n%s", word, got)
 		}

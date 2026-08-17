@@ -80,7 +80,7 @@ func TestExecuteTypedReturnsTheBody(t *testing.T) {
 	a := agentWithTool(t, stub)
 
 	result, body, err := a.executeToolNode(context.Background(), nil, nil, nil,
-		"typed_stub", map[string]any{}, "alert-1", gates.Intent(0), nil)
+		"typed_stub", map[string]any{}, "run-1", gates.Intent(0), nil)
 	if err != nil {
 		t.Fatalf("executeToolNode: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestExecuteTypedPropagatesFailure(t *testing.T) {
 	a := agentWithTool(t, &typedStub{err: sentinel})
 
 	_, body, err := a.executeToolNode(context.Background(), nil, nil, nil,
-		"typed_stub", map[string]any{}, "alert-1", gates.Intent(0), nil)
+		"typed_stub", map[string]any{}, "run-1", gates.Intent(0), nil)
 
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("err = %v, want the tool's error", err)
@@ -132,17 +132,17 @@ func TestExecuteTypedPropagatesFailure(t *testing.T) {
 // TestPlainToolIsUnchanged is the compatibility claim: a tool that has not opted
 // in gets a nil body, so the scheduler handles it exactly as before.
 func TestPlainToolIsUnchanged(t *testing.T) {
-	a := agentWithTool(t, &plainStub{out: `{"text":"3 alerts","count":3}`})
+	a := agentWithTool(t, &plainStub{out: `{"text":"3 records","count":3}`})
 
 	result, body, err := a.executeToolNode(context.Background(), nil, nil, nil,
-		"plain_stub", map[string]any{}, "alert-1", gates.Intent(0), nil)
+		"plain_stub", map[string]any{}, "run-1", gates.Intent(0), nil)
 	if err != nil {
 		t.Fatalf("executeToolNode: %v", err)
 	}
 	if body != nil {
 		t.Errorf("body = %v, want nil for a tool that returns a plain string", body)
 	}
-	if result != `{"text":"3 alerts","count":3}` {
+	if result != `{"text":"3 records","count":3}` {
 		t.Errorf("result = %q, want the tool's output verbatim", result)
 	}
 }

@@ -9,13 +9,13 @@ import (
 // An application refuses a call the engine allowed, and the model is told why.
 func TestARefusalReachesTheModelAsAReason(t *testing.T) {
 	a := &Agent{allowToolFn: func(_ context.Context, req ToolCallRequest) (bool, string) {
-		if req.Tool == "create_incident" {
-			return false, "incidents open from the finished outcome, not this tool"
+		if req.Tool == "open_case" {
+			return false, "a case opens from the finished outcome, not this tool"
 		}
 		return true, ""
 	}}
 
-	allow, reason := a.allowTool(context.Background(), ToolCallRequest{Tool: "create_incident"})
+	allow, reason := a.allowTool(context.Background(), ToolCallRequest{Tool: "open_case"})
 	if allow {
 		t.Fatal("the call was allowed")
 	}
@@ -46,12 +46,12 @@ func TestNoRuleAllowsEverything(t *testing.T) {
 func TestASilentRefusalStillSaysSomething(t *testing.T) {
 	a := &Agent{allowToolFn: func(context.Context, ToolCallRequest) (bool, string) { return false, "" }}
 
-	allow, reason := a.allowTool(context.Background(), ToolCallRequest{Tool: "create_incident"})
+	allow, reason := a.allowTool(context.Background(), ToolCallRequest{Tool: "open_case"})
 
 	if allow {
 		t.Fatal("the call was allowed")
 	}
-	if !strings.Contains(reason, "create_incident") {
+	if !strings.Contains(reason, "open_case") {
 		t.Errorf("reason = %q, want something naming the tool", reason)
 	}
 }
@@ -67,7 +67,7 @@ func TestTheRuleMayFillInAMissingParameter(t *testing.T) {
 	}}
 
 	params := map[string]any{"title": "something"}
-	if allow, _ := a.allowTool(context.Background(), ToolCallRequest{Tool: "create_incident", Params: params}); !allow {
+	if allow, _ := a.allowTool(context.Background(), ToolCallRequest{Tool: "open_case", Params: params}); !allow {
 		t.Fatal("the call was refused")
 	}
 	if params["fingerprint"] != "abc123" {
@@ -86,8 +86,8 @@ func TestTriggerOfReportsUnknownAsNil(t *testing.T) {
 		t.Error("a graph with no context gate should be unknown")
 	}
 	g := NewGraph()
-	g.Context = NewContextGate(g, &Trigger{Type: "alert"}, nil)
-	if got := triggerOf(g); got == nil || got.Type != "alert" {
+	g.Context = NewContextGate(g, &Trigger{Type: "event"}, nil)
+	if got := triggerOf(g); got == nil || got.Type != "event" {
 		t.Errorf("triggerOf = %v, want the run's trigger", got)
 	}
 }

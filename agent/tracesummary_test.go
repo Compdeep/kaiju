@@ -96,8 +96,8 @@ func TestTraceUnchangedForUnmigratedProducers(t *testing.T) {
 		node   *Node
 		result string
 	}{
-		{"tool returning JSON with a message", &Node{Type: NodeTool, ToolName: "get_alerts"}, `{"message":"3 alerts found","count":3}`},
-		{"tool returning prose", &Node{Type: NodeTool, ToolName: "get_alerts"}, "first line\nsecond line"},
+		{"tool returning JSON with a message", &Node{Type: NodeTool, ToolName: "list_records"}, `{"message":"3 records found","count":3}`},
+		{"tool returning prose", &Node{Type: NodeTool, ToolName: "list_records"}, "first line\nsecond line"},
 		{"a verify node", &Node{Type: NodeTool, Tag: "verify_fix"}, "the fix holds"},
 		{"an observer node", &Node{Type: NodeObserver}, `{"decision":"continue","reason":"looks fine"}`},
 		{"an interjection node", &Node{Type: NodeInterjection}, `{"action":"steer","reason":"user asked"}`},

@@ -126,7 +126,7 @@ func TestOfficeExtract_LegacyRejected(t *testing.T) {
 	}
 }
 
-// A document that opens and holds no text is a finding, not a blank success.
+// A document that opens and holds no text is something to report, not a blank success.
 // It used to say so in a sentence the model had to read and believe.
 func TestOfficeExtract_NoTextIsEmpty(t *testing.T) {
 	dir := t.TempDir()

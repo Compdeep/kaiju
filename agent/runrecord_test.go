@@ -22,7 +22,7 @@ func TestRecordRunWritesTheOutcome(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
 
-	a.recordRun(Trigger{Type: "alert", ID: "a-1"}, time.Now().Add(-time.Second),
+	a.recordRun(Trigger{Type: "event", ID: "a-1"}, time.Now().Add(-time.Second),
 		nil, nil, gates.Intent(1), Conclusion{Outcome: "budget_exhausted_before_aggregator", Status: "failed"})
 
 	if len(st.runs) != 1 {
@@ -113,7 +113,7 @@ func TestAdmissionIsAskedBeforeTheModeIsChosen(t *testing.T) {
 	}
 }
 
-// An application that writes its own answer labels it — a severity, a category —
+// An application that writes its own answer labels it — a rating, a category —
 // and those labels are the reason its run record is worth reading. They reach
 // the store untouched, or the record says only that something happened.
 func TestRecordRunCarriesTheApplicationsLabels(t *testing.T) {
@@ -149,7 +149,7 @@ func TestRunRecordCarriesTheTriggersRouting(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "host-1"}}}
 
-	a.recordRun(Trigger{Type: "alert", ID: "a-3", Source: "host-7", Target: "host-9"},
+	a.recordRun(Trigger{Type: "event", ID: "a-3", Source: "host-7", Target: "host-9"},
 		time.Now(), nil, nil, gates.Intent(1), Conclusion{Outcome: "v", Status: "completed"})
 
 	if len(st.runs) != 1 {
@@ -176,7 +176,7 @@ func TestRunRecordCarriesTheTriggersRouting(t *testing.T) {
 func TestTwoRunsOfOneCauseGetTwoIdentities(t *testing.T) {
 	st := &recordingStore{}
 	a := &Agent{eventStore: st, cfg: Config{IdentityConfig: IdentityConfig{NodeID: "n1"}}}
-	trigger := Trigger{Type: "alert", ID: "a-4"}
+	trigger := Trigger{Type: "event", ID: "a-4"}
 
 	for range 2 {
 		// The run id is made where the run begins and handed to the graph, so

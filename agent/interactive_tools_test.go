@@ -8,7 +8,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// Some tools exist to be asked for — raising a ticket, opening an incident,
+// Some tools exist to be asked for — raising a ticket, opening a case,
 // escalating to a person. Each records a human's judgement, and a run with
 // nobody watching has none to record. Offering them to an unattended run
 // invites a model to manufacture the judgement itself.
@@ -31,7 +31,7 @@ func (*humanTool) RequiresHuman() bool { return true }
 func agentWithTools(t *testing.T) *Agent {
 	t.Helper()
 	reg := toolapi.NewRegistry()
-	if err := reg.Register(&plainTool{name: "get_alerts"}); err != nil {
+	if err := reg.Register(&plainTool{name: "list_records"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	if err := reg.Register(&humanTool{plainTool{name: "raise_ticket"}}); err != nil {
@@ -54,7 +54,7 @@ func TestInteractiveToolsAreOfferedWhenSomeoneIsThere(t *testing.T) {
 	if !has(got, "raise_ticket") {
 		t.Errorf("a human-only tool was withheld from an attended run: %v", got)
 	}
-	if !has(got, "get_alerts") {
+	if !has(got, "list_records") {
 		t.Errorf("an ordinary tool went missing: %v", got)
 	}
 }
@@ -65,7 +65,7 @@ func TestInteractiveToolsAreWithheldFromUnattendedRuns(t *testing.T) {
 	if has(got, "raise_ticket") {
 		t.Errorf("a human-only tool was offered to an unattended run: %v", got)
 	}
-	if !has(got, "get_alerts") {
+	if !has(got, "list_records") {
 		t.Errorf("an ordinary tool was withheld from an unattended run: %v", got)
 	}
 }

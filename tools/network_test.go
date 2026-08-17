@@ -11,7 +11,7 @@ import (
 
 // "ports" is what this host is listening on. "connections" is what it is
 // talking to — every socket in any state, with the process holding it. They are
-// not interchangeable: a beacon holds an established outbound connection and
+// not interchangeable: a process calling out holds an established outbound connection and
 // listens on nothing, so a scan that only lists listeners cannot see it.
 func TestNetInfo_ConnectionsSeesMoreThanListeners(t *testing.T) {
 	if runtime.GOOS != "linux" {

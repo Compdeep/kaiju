@@ -25,11 +25,11 @@ func TestApplicationCodeThatPanicsDoesNotEndTheRun(t *testing.T) {
 
 	t.Run("a crashed tool rule refuses, because it has not said yes", func(t *testing.T) {
 		a := &Agent{allowToolFn: func(context.Context, ToolCallRequest) (bool, string) { boom(); return true, "" }}
-		allow, reason := a.allowTool(context.Background(), ToolCallRequest{Tool: "create_incident"})
+		allow, reason := a.allowTool(context.Background(), ToolCallRequest{Tool: "open_case"})
 		if allow {
 			t.Error("a rule that crashed allowed a state-changing call")
 		}
-		if !strings.Contains(reason, "create_incident") {
+		if !strings.Contains(reason, "open_case") {
 			t.Errorf("reason = %q; the model is told nothing", reason)
 		}
 	})
@@ -64,22 +64,22 @@ func TestApplicationCodeThatPanicsDoesNotEndTheRun(t *testing.T) {
 
 	t.Run("a crashed target check rejects the target", func(t *testing.T) {
 		a := &Agent{targetValid: func(string) error { boom(); return nil }}
-		if err := a.validateTarget("peer-1"); err == nil {
-			t.Error("a check that crashed approved a target for a connection")
+		if err := a.validateTarget("host-1"); err == nil {
+			t.Error("a check that crashed approved a target for a call")
 		}
 	})
 
 	t.Run("a crashed machine lister falls back to the run's target", func(t *testing.T) {
 		a := &Agent{targetLister: func(Trigger) []string { boom(); return nil }}
-		got := a.runTargets(Trigger{Target: "peer-2"})
-		if len(got) != 1 || got[0] != "peer-2" {
+		got := a.runTargets(Trigger{Target: "host-2"})
+		if len(got) != 1 || got[0] != "host-2" {
 			t.Errorf("runTargets = %v, want the run's own target", got)
 		}
 	})
 
 	t.Run("crashed wording uses the built-in wording", func(t *testing.T) {
 		a := &Agent{describeTrigger: func(Trigger) string { boom(); return "" }}
-		if got := a.formatTrigger(Trigger{Type: "alert", ID: "a-1"}); got == "" {
+		if got := a.formatTrigger(Trigger{Type: "event", ID: "a-1"}); got == "" {
 			t.Error("every reasoning stage would read nothing")
 		}
 	})

@@ -35,7 +35,7 @@ func TestRefineNilLeavesPreflightAlone(t *testing.T) {
 func TestRefineCorrectsTheResult(t *testing.T) {
 	a := &Agent{refine: func(_ context.Context, pf *PreflightResult, _ *Trigger) (*PreflightResult, string, error) {
 		out := *pf
-		out.Skills = []string{"fleet"}
+		out.Skills = []string{"ops"}
 		return &out, "", nil
 	}}
 
@@ -43,7 +43,7 @@ func TestRefineCorrectsTheResult(t *testing.T) {
 	if reply != "" {
 		t.Fatalf("reply = %q, want none", reply)
 	}
-	if len(got.Skills) != 1 || got.Skills[0] != "fleet" {
+	if len(got.Skills) != 1 || got.Skills[0] != "ops" {
 		t.Errorf("skills = %v, want the refinement's", got.Skills)
 	}
 }
@@ -67,7 +67,7 @@ func TestRefineCanAskInsteadOfPlanning(t *testing.T) {
 func TestRefineFailureDoesNotStopTheRun(t *testing.T) {
 	pf := &PreflightResult{Mode: "agent"}
 	a := &Agent{refine: func(context.Context, *PreflightResult, *Trigger) (*PreflightResult, string, error) {
-		return nil, "", errors.New("the fleet store is unreachable")
+		return nil, "", errors.New("the host store is unreachable")
 	}}
 
 	got, reply := a.refinePreflight(context.Background(), pf, &Trigger{})
@@ -112,7 +112,7 @@ func TestRefineRunsBeforeThePlanner(t *testing.T) {
 func TestRefinePanicKeepsPreflightsAnswer(t *testing.T) {
 	pf := &PreflightResult{Mode: "agent"}
 	a := &Agent{refine: func(context.Context, *PreflightResult, *Trigger) (*PreflightResult, string, error) {
-		panic("the fleet store exploded")
+		panic("the host store exploded")
 	}}
 
 	got, reply := a.refinePreflight(context.Background(), pf, &Trigger{})

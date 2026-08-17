@@ -15,7 +15,7 @@ func TestTokenCategoryDefaultsToTheLaneSplit(t *testing.T) {
 	a := &Agent{}
 	for typ, want := range map[string]string{
 		"chat_query": "chat", "api_query": "chat",
-		"alert": "background", "scheduled": "background", "": "background",
+		"event": "background", "scheduled": "background", "": "background",
 	} {
 		if got := a.tokenCategory(Trigger{Type: typ}); got != want {
 			t.Errorf("%q → %q, want %q", typ, got, want)
@@ -26,19 +26,19 @@ func TestTokenCategoryDefaultsToTheLaneSplit(t *testing.T) {
 func TestTokenCategoryUsesTheApplicationsBuckets(t *testing.T) {
 	a := &Agent{tokenCategoryFn: func(t Trigger) string {
 		switch t.Type {
-		case "alert":
+		case "event":
 			return "investigations"
-		case "fleet_sweep":
-			return "fleet"
+		case "sweep":
+			return "sweeps"
 		}
 		return ""
 	}}
 
-	if got := a.tokenCategory(Trigger{Type: "alert"}); got != "investigations" {
-		t.Errorf("alert → %q, want the application's bucket", got)
+	if got := a.tokenCategory(Trigger{Type: "event"}); got != "investigations" {
+		t.Errorf("event → %q, want the application's bucket", got)
 	}
-	if got := a.tokenCategory(Trigger{Type: "fleet_sweep"}); got != "fleet" {
-		t.Errorf("fleet_sweep → %q, want the application's bucket", got)
+	if got := a.tokenCategory(Trigger{Type: "sweep"}); got != "sweeps" {
+		t.Errorf("sweep → %q, want the application's bucket", got)
 	}
 	// An empty answer falls back rather than counting spend against "".
 	if got := a.tokenCategory(Trigger{Type: "chat_query"}); got != "chat" {

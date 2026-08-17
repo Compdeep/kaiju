@@ -8,8 +8,8 @@ import (
 
 // An application's own kind of work, opaque to this package.
 type ticketCause struct {
-	ID       string
-	Severity string
+	ID     string
+	Rating string
 }
 
 func TestDescribeTriggerRendersTheApplicationsOwnWork(t *testing.T) {
@@ -18,10 +18,10 @@ func TestDescribeTriggerRendersTheApplicationsOwnWork(t *testing.T) {
 		if !ok {
 			return ""
 		}
-		return "## Ticket " + c.ID + " (" + c.Severity + ")"
+		return "## Ticket " + c.ID + " (" + c.Rating + ")"
 	}}
 
-	got := a.formatTrigger(Trigger{Type: "ticket", Cause: &ticketCause{ID: "T-9", Severity: "high"}})
+	got := a.formatTrigger(Trigger{Type: "ticket", Cause: &ticketCause{ID: "T-9", Rating: "high"}})
 	if !strings.Contains(got, "Ticket T-9") {
 		t.Fatalf("the application's rendering did not reach the planner: %q", got)
 	}
@@ -48,9 +48,9 @@ func TestUnrecognisedCauseFallsThroughToDefault(t *testing.T) {
 
 // The built-in wording is what every application without a DescribeTrigger
 // gets, so it must say only what this package knows: a run started, something
-// caused it, here is what came with it. It used to say "## Alert", "Alert ID"
-// and "Investigate this alert", which told every model driven by this loop that
-// its input was a security alert.
+// caused it, here is what came with it. Its headings and its instruction used
+// to name one kind of payload, which told every model driven by this loop what
+// its input was.
 func TestTheBuiltInWordingClaimsNothingAboutThePayload(t *testing.T) {
 	a := &Agent{}
 	got := a.formatTrigger(Trigger{
@@ -87,7 +87,7 @@ func TestNoCallbackIsUnchangedBehaviour(t *testing.T) {
 
 // Cause is carried untouched — this package must never interpret it.
 func TestCauseIsCarriedUnmodified(t *testing.T) {
-	original := &ticketCause{ID: "T-1", Severity: "low"}
+	original := &ticketCause{ID: "T-1", Rating: "low"}
 	var seen any
 	a := &Agent{describeTrigger: func(tr Trigger) string {
 		seen = tr.Cause

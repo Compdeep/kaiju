@@ -126,11 +126,11 @@ func TestReferences_AnnotationWithoutParamStillMarks(t *testing.T) {
 func TestReferences_EmptyAnnotationStillMarks(t *testing.T) {
 	a := refAgent("lister", toolapi.EnvelopeSchema(`{"type":"object","properties":{"id":{"type":"string","x-reference":""}}}`))
 	g := NewGraph()
-	producedNode(g, "lister", map[string]any{"id": "alert-7"})
+	producedNode(g, "lister", map[string]any{"id": "item-7"})
 
 	refs := a.collectReferences(g)
-	if len(refs) != 1 || refs[0].Value != "alert-7" || refs[0].Tool != "" {
-		t.Fatalf("got %+v, want alert-7 marked with no resolver", refs)
+	if len(refs) != 1 || refs[0].Value != "item-7" || refs[0].Tool != "" {
+		t.Fatalf("got %+v, want item-7 marked with no resolver", refs)
 	}
 }
 
@@ -157,12 +157,12 @@ func TestReferences_AnnotatedFieldMissingFromPayload(t *testing.T) {
 
 // A marked field that is not inside an array — an id at the top of a payload.
 func TestReferences_TopLevelFieldIsFound(t *testing.T) {
-	a := refAgent("opener", toolapi.EnvelopeSchema(`{"type":"object","properties":{"incident_id":{"type":"string","x-reference":"investigate.id"}}}`))
+	a := refAgent("opener", toolapi.EnvelopeSchema(`{"type":"object","properties":{"record_id":{"type":"string","x-reference":"investigate.id"}}}`))
 	g := NewGraph()
-	producedNode(g, "opener", map[string]any{"incident_id": "inc-42"})
+	producedNode(g, "opener", map[string]any{"record_id": "rec-42"})
 
 	refs := a.collectReferences(g)
-	if len(refs) != 1 || refs[0].Value != "inc-42" || refs[0].Tool != "investigate" {
+	if len(refs) != 1 || refs[0].Value != "rec-42" || refs[0].Tool != "investigate" {
 		t.Fatalf("got %+v, want inc-42 resolved by investigate", refs)
 	}
 }
@@ -214,15 +214,15 @@ func (errFailedForTest) Error() string { return "failed" }
 
 // ── the short-identifier collision ───────────────────────────────────────────
 
-// A handle whose value is short and common — "self" as a peer id — must not be
+// A handle whose value is short and common — "self" as a host id — must not be
 // counted as followed because some unrelated step happened to be called with
 // the same string. The first version matched the value against every parameter
 // in the run and got this wrong.
 func TestReferences_ShortHandleIsNotFollowedByAnUnrelatedStep(t *testing.T) {
-	a := refAgent("fleet_view", toolapi.EnvelopeSchema(
-		`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`))
+	a := refAgent("list_hosts", toolapi.EnvelopeSchema(
+		`{"type":"object","properties":{"hosts":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`))
 	g := NewGraph()
-	producedNode(g, "fleet_view", map[string]any{"peers": []map[string]any{{"id": "self"}, {"id": "peer-2"}}})
+	producedNode(g, "list_hosts", map[string]any{"hosts": []map[string]any{{"id": "self"}, {"id": "host-2"}}})
 
 	// An unrelated step that happens to target "self". Nothing inspected the
 	// host the listing surfaced.
@@ -231,22 +231,22 @@ func TestReferences_ShortHandleIsNotFollowedByAnUnrelatedStep(t *testing.T) {
 
 	unresolved := a.unresolvedReferences(g)
 	if len(unresolved) != 2 {
-		t.Fatalf("got %+v, want both peers outstanding — get_system_logs is not what follows a peer id", unresolved)
+		t.Fatalf("got %+v, want both hosts outstanding — get_system_logs is not what follows a host id", unresolved)
 	}
 }
 
 // The same handle, followed by the tool its producer actually named.
 func TestReferences_ShortHandleIsFollowedByTheDeclaredTool(t *testing.T) {
-	a := refAgent("fleet_view", toolapi.EnvelopeSchema(
-		`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`))
+	a := refAgent("list_hosts", toolapi.EnvelopeSchema(
+		`{"type":"object","properties":{"hosts":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`))
 	g := NewGraph()
-	producedNode(g, "fleet_view", map[string]any{"peers": []map[string]any{{"id": "self"}, {"id": "peer-2"}}})
+	producedNode(g, "list_hosts", map[string]any{"hosts": []map[string]any{{"id": "self"}, {"id": "host-2"}}})
 	g.AddNode(&Node{Type: NodeTool, Tag: "look", ToolName: "inspect_host",
 		Params: map[string]any{"target": "self"}})
 
 	unresolved := a.unresolvedReferences(g)
-	if len(unresolved) != 1 || unresolved[0].Value != "peer-2" {
-		t.Fatalf("got %+v, want only peer-2 outstanding", unresolved)
+	if len(unresolved) != 1 || unresolved[0].Value != "host-2" {
+		t.Fatalf("got %+v, want only host-2 outstanding", unresolved)
 	}
 }
 
@@ -279,12 +279,12 @@ func TestChainHints_GeneratedFromTheDeclaration(t *testing.T) {
 	}
 }
 
-// Nothing in the engine is web-shaped: the same code run against a fleet tool
-// produces the fleet sentence.
+// Nothing in the engine is web-shaped: the same code run against a tool that
+// lists machines produces the machine sentence.
 func TestChainHints_CarryNoVocabularyOfTheirOwn(t *testing.T) {
-	schema := toolapi.EnvelopeSchema(`{"type":"object","properties":{"peers":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`)
+	schema := toolapi.EnvelopeSchema(`{"type":"object","properties":{"hosts":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"inspect_host.target"}}}}}}`)
 	got := chainHints(schema)
-	if len(got) != 1 || got[0] != "${step.N.peers.0.id} into inspect_host(target)" {
+	if len(got) != 1 || got[0] != "${step.N.hosts.0.id} into inspect_host(target)" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -316,9 +316,9 @@ func TestChainHints_ToolWithoutParam(t *testing.T) {
 // The name in an annotation is written by hand in a tool's output schema and
 // nothing checked it. It does not sit inert: conclusionFloor builds a real step
 // from it, so the engine plans a call to a tool that does not exist and the run
-// fails on a step nobody asked for. Enbarr shipped exactly that —
-// search_telemetry named get_process_detail, which is the Go type, where the
-// tool is get_process.
+// fails on a step nobody asked for. One shipped application did exactly that: a
+// tool wrote its reference as get_process_detail, which is the Go type, where
+// the tool is get_process.
 
 // collectReferences reports what the schema says, unchecked. The name only
 // stops being a description at conclusionFloor, which is where it is checked.

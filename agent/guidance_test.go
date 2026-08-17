@@ -13,16 +13,16 @@ import (
 // this stage reads, and "## Core Principles", which every stage gets — so a
 // principle is written once in the card rather than repeated under each heading.
 func TestGuidanceSectionTakesCorePrinciplesAndTheStagesOwn(t *testing.T) {
-	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", ""+
+	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"review": guidanceSkill("review", ""+
 		"## Core Principles\n\nsay what you cannot see\n\n"+
 		"## Aggregator Guidance\n\nrate it honestly\n\n"+
 		"## Classifier Guidance\n\nsuppress signed vendor noise\n")}}
 
-	got := a.GuidanceSection([]string{"triage"}, "## Aggregator Guidance", "aggregator doctrine")
+	got := a.GuidanceSection([]string{"review"}, "## Aggregator Guidance", "aggregator doctrine")
 
 	for _, want := range []string{
 		"## Skill Guidance (authoritative — apply these principles)",
-		"### triage — aggregator doctrine",
+		"### review — aggregator doctrine",
 		"say what you cannot see",
 		"rate it honestly",
 	} {
@@ -38,12 +38,12 @@ func TestGuidanceSectionTakesCorePrinciplesAndTheStagesOwn(t *testing.T) {
 // The same card renders differently for a different stage, which is why the
 // heading and the label are arguments rather than fixed.
 func TestOneCardServesTwoStages(t *testing.T) {
-	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", ""+
+	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"review": guidanceSkill("review", ""+
 		"## Aggregator Guidance\n\nrate it honestly\n\n"+
 		"## Classifier Guidance\n\nsuppress signed vendor noise\n")}}
 
-	agg := a.GuidanceSection([]string{"triage"}, "## Aggregator Guidance", "aggregator doctrine")
-	cls := a.GuidanceSection([]string{"triage"}, "## Classifier Guidance", "classifier doctrine")
+	agg := a.GuidanceSection([]string{"review"}, "## Aggregator Guidance", "aggregator doctrine")
+	cls := a.GuidanceSection([]string{"review"}, "## Classifier Guidance", "classifier doctrine")
 
 	if !strings.Contains(agg, "rate it honestly") || strings.Contains(agg, "suppress signed") {
 		t.Errorf("aggregator got the wrong section:\n%s", agg)
@@ -51,7 +51,7 @@ func TestOneCardServesTwoStages(t *testing.T) {
 	if !strings.Contains(cls, "suppress signed") || strings.Contains(cls, "rate it honestly") {
 		t.Errorf("classifier got the wrong section:\n%s", cls)
 	}
-	if !strings.Contains(cls, "### triage — classifier doctrine") {
+	if !strings.Contains(cls, "### review — classifier doctrine") {
 		t.Errorf("the entry is not labelled for this stage:\n%s", cls)
 	}
 }
@@ -61,10 +61,10 @@ func TestOneCardServesTwoStages(t *testing.T) {
 // skills got a prompt with no domain text and nothing said so.
 func TestGuidanceSectionReadsBothRegistries(t *testing.T) {
 	a := &Agent{
-		skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", "## Aggregator Guidance\n\nfrom a card\n"), "response": guidanceSkill("response", "## Aggregator Guidance\n\nfrom a skill\n")},
+		skillGuidance: map[string]*skillmd.SkillMD{"review": guidanceSkill("review", "## Aggregator Guidance\n\nfrom a card\n"), "response": guidanceSkill("response", "## Aggregator Guidance\n\nfrom a skill\n")},
 	}
 
-	got := a.GuidanceSection([]string{"triage", "response"}, "## Aggregator Guidance", "aggregator doctrine")
+	got := a.GuidanceSection([]string{"review", "response"}, "## Aggregator Guidance", "aggregator doctrine")
 
 	if !strings.Contains(got, "from a card") || !strings.Contains(got, "from a skill") {
 		t.Errorf("one of the two registries was skipped:\n%s", got)
@@ -77,11 +77,11 @@ func TestGuidanceSectionReadsBothRegistries(t *testing.T) {
 // Nothing to say produces nothing at all. A heading with an empty body under it
 // tells the model doctrine applies when none does.
 func TestGuidanceSectionIsSilentWithNothingToSay(t *testing.T) {
-	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", "## Planner Guidance\n\nelsewhere\n")}}
+	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"review": guidanceSkill("review", "## Planner Guidance\n\nelsewhere\n")}}
 
 	for _, got := range []string{
 		a.GuidanceSection(nil, "## Aggregator Guidance", "aggregator doctrine"),
-		a.GuidanceSection([]string{"triage"}, "## Aggregator Guidance", "aggregator doctrine"),
+		a.GuidanceSection([]string{"review"}, "## Aggregator Guidance", "aggregator doctrine"),
 		a.GuidanceSection([]string{"never_registered"}, "## Aggregator Guidance", "aggregator doctrine"),
 	} {
 		if got != "" {
@@ -94,11 +94,11 @@ func TestGuidanceSectionIsSilentWithNothingToSay(t *testing.T) {
 // the stages produced when they built it themselves. Moving where a prompt comes
 // from is not licence to change what it says.
 func TestTheGateProducesTheSameGuidanceTextAsBefore(t *testing.T) {
-	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", ""+
+	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"review": guidanceSkill("review", ""+
 		"## Core Principles\n\nsay what you cannot see\n\n"+
 		"## Aggregator Guidance\n\nrate it honestly\n")}}
 	g := NewGraph()
-	g.ActiveCards = []string{"triage"}
+	g.ActiveCards = []string{"review"}
 	g.Context = NewContextGate(g, &Trigger{}, a)
 
 	direct := a.GuidanceSection(g.ActiveCards, "## Aggregator Guidance", "aggregator doctrine")
@@ -124,11 +124,11 @@ func TestTheGateProducesTheSameGuidanceTextAsBefore(t *testing.T) {
 // The terser layout the compute and investigation stages already use is
 // untouched: no preamble, no label, no principles.
 func TestThePlainLayoutIsUnchanged(t *testing.T) {
-	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"triage": guidanceSkill("triage", ""+
+	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"review": guidanceSkill("review", ""+
 		"## Core Principles\n\nsay what you cannot see\n\n"+
 		"## Debug Guidance\n\nread the stack first\n")}}
 	g := NewGraph()
-	g.ActiveCards = []string{"triage"}
+	g.ActiveCards = []string{"review"}
 	g.Context = NewContextGate(g, &Trigger{}, a)
 
 	resp, err := g.Context.Get(context.Background(), ContextRequest{
@@ -140,7 +140,7 @@ func TestThePlainLayoutIsUnchanged(t *testing.T) {
 	}
 	got := resp.Sources[SourceSkillGuidance]
 
-	if !strings.Contains(got, "### triage") || !strings.Contains(got, "#### Debug Guidance") {
+	if !strings.Contains(got, "### review") || !strings.Contains(got, "#### Debug Guidance") {
 		t.Errorf("the plain layout changed:\n%s", got)
 	}
 	if strings.Contains(got, "authoritative") || strings.Contains(got, "say what you cannot see") {

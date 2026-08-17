@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -185,5 +187,35 @@ func TestReframe_AStepWithNoLabelIsNamedOnce(t *testing.T) {
 	}
 	if !strings.Contains(joined, "- look for logins (bash): produced a result") {
 		t.Errorf("a labelled step should carry both:\n%s", joined)
+	}
+}
+
+// Every stage that acts on a run is told what the run did.
+//
+// A stage that stops applying it still answers — it just answers on evidence
+// that never arrived, with nothing to say so. Nothing else fails, so this pins
+// the call sites. Both stages sit behind a model call and cannot be run from
+// here, so the source is what is read; matched loosely on whitespace so gofmt
+// realignment is not a false alarm.
+//
+// The pair this replaced had the same test, in stageprompts_test.go, and it was
+// deleted along with them.
+func TestEveryStageThatActsOnARunIsToldWhatItDid(t *testing.T) {
+	for _, c := range []struct{ file, stage, why string }{
+		{"aggregator.go", "the aggregator",
+			"it writes the final answer, and an answer written on absent evidence has nothing to say so"},
+		{"reflection.go", "the reflector",
+			"it decides whether to do more work, and often writes the answer directly"},
+	} {
+		src, err := os.ReadFile(c.file)
+		if err != nil {
+			t.Fatalf("read %s: %v", c.file, err)
+		}
+		if !regexp.MustCompile(`EdgeReFrame\(ctx,\s*graph,`).Match(src) {
+			t.Errorf("%s no longer asks what the run did — %s", c.stage, c.why)
+		}
+		if !regexp.MustCompile(`WithReframe\(`).Match(src) {
+			t.Errorf("%s builds the block and does not apply it, so nothing tells it how to read one", c.stage)
+		}
 	}
 }

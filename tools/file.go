@@ -151,10 +151,10 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 		return toolapi.ToolMessage{}, fmt.Errorf("file_read: %w", err)
 	}
 
-	// An empty file is a finding, not a blank result. Reported as empty so the
-	// coverage statement can say the file had nothing in it, rather than the
-	// model inferring content from a silent gap. Distinct from a missing file,
-	// which fails the open above and fails the node.
+	// An empty file is something to report, not nothing to report. Reported as
+	// empty so the coverage statement can say the file had nothing in it, rather
+	// than the model inferring content from a silent gap. Distinct from a missing
+	// file, which fails the open above and fails the node.
 	if total == 0 {
 		return toolapi.ToolEmpty("text", "the file is empty: "+path), nil
 	}

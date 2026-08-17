@@ -1936,7 +1936,7 @@ type SyncResult struct {
 
 	// RunID is this run, not the caller's reference: one reference can produce
 	// several runs. Here because a caller that records something after a run —
-	// a finding, a note, a row of its own — has no other way to say which run
+	// a record, a note, a row of its own — has no other way to say which run
 	// produced it. The caller's own context does not carry it; the run stamps
 	// it on its own.
 	RunID string

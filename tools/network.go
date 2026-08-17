@@ -322,7 +322,7 @@ func netConnections(ctx context.Context, host string, port int) (toolapi.ToolMes
 		count++
 	}
 
-	// Nothing matched is a finding about the host, not a failed listing.
+	// Nothing matched is something known about the host, not a failed listing.
 	if count == 0 {
 		if host != "" || portStr != "" {
 			return toolapi.ToolEmpty("net", fmt.Sprintf("no connection matches host=%q port=%q", host, portStr)), nil

@@ -21,6 +21,17 @@ import (
 //
 // Everything has a working zero value. An application that supplies only a
 // model and a data directory gets a functioning agent.
+//
+// A field marked "Set at run time: X" is also reachable after New, through that
+// method on *Agent. Those are the fields something reads while a run is going,
+// so an operator changing one on a live service does not have to restart. Every
+// other field is read once, at construction, and there is no third way in: New
+// takes this struct by value, so changing your own copy afterwards reaches
+// nothing.
+//
+// Two setters have no field here, because they configure something this struct
+// does not hold: SetToolReach changes a tool's reach in the registry, and
+// SetClearanceChecker installs the checker asked on every gated call.
 
 /*
  * Config holds agent configuration.
@@ -48,6 +59,8 @@ type Config struct {
 type ModelConfig struct {
 	// LLMProvider names the provider for the main model ("openai",
 	// "anthropic", "openrouter"). Empty defaults to openai.
+	//
+	// Set at run time: SetLLMClient, with the three fields below.
 	LLMProvider string
 	LLMEndpoint string
 	LLMAPIKey   string
@@ -67,15 +80,21 @@ type ModelConfig struct {
 	// The executor is the cheaper lane used for reflection, observation and
 	// micro-planning. Empty fields fall back to the main model, so it can be
 	// configured partially or not at all.
+	//
+	// Set at run time: SetExecutorClient, with the three fields below.
 	ExecutorProvider string
 	ExecutorEndpoint string
 	ExecutorAPIKey   string
 	ExecutorModel    string
 
 	// Per-lane model choices. Empty leaves that lane on the main model.
+	// Set at run time: SetVisionModel.
 	VisionProvider, VisionModel string
-	ChatProvider, ChatModel     string
-	RouteProvider, RouteModel   string
+	// Set at run time: SetChatModel.
+	ChatProvider, ChatModel string
+	// Set at run time: SetRouteModel.
+	RouteProvider, RouteModel string
+	// Set at run time: SetAnswerModel.
 	AnswerProvider, AnswerModel string
 
 	// Limits reports a model's published token limits, so a call can size its
@@ -116,14 +135,18 @@ type PathConfig struct {
 // "Node" here means a machine, not a step in a plan — the one place in this
 // package where the word carries the other meaning. See O4 in the design notes.
 type IdentityConfig struct {
-	NodeID        string
-	NodeRole      string // "node" or "coordinator"
-	NodeClearance int    // IGX clearance (0 = default 1)
+	NodeID   string
+	NodeRole string // "node" or "coordinator"
+	// NodeClearance is the IGX clearance ceiling (0 = default 1).
+	//
+	// Set at run time: SetClearance.
+	NodeClearance int
 }
 
 // DAGConfig governs the optimistic parallel execution engine: how large a plan
 // may get, how many times it may reconsider, and when it is cut off.
 type DAGConfig struct {
+	// Set at run time: SetDAGEnabled.
 	DAGEnabled bool
 	DAGMode    string // "reflect", "nReflect", "orchestrator" (default: "orchestrator")
 
@@ -138,9 +161,13 @@ type DAGConfig struct {
 	MaxReplans        int // max EXPAND replan cycles (successful batch → executive plans next steps) before forcing conclude (default: 3)
 	MaxHolmesIters    int // max ReAct iterations per Holmes investigation (default: 5)
 
-	ExecutionMode               string // "interactive" (chat allowed) or "autonomous" (always investigate)
-	DAGWallClock                time.Duration
-	MaxConcurrentInvestigations int // scheduler worker-pool size; 0 => defaultConcurrency (1). Raise once per-principal fairness lands.
+	ExecutionMode string // "interactive" (chat allowed) or "autonomous" (always investigate)
+	DAGWallClock  time.Duration
+	// MaxConcurrentInvestigations is the scheduler worker-pool size; 0 =>
+	// defaultConcurrency (1). Raise once per-principal fairness lands.
+	//
+	// Set at run time: SetConcurrency, which resizes the live pool.
+	MaxConcurrentInvestigations int
 }
 
 // RoutingConfig decides which skills a query reaches, and what the agent is

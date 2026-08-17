@@ -82,3 +82,76 @@ func onAgent(fn *ast.FuncDecl) bool {
 	id, ok := star.X.(*ast.Ident)
 	return ok && id.Name == "Agent"
 }
+
+// The Config field a setter writes says the setter exists.
+//
+// A setter is a second door onto a field Config already fills, and the two are
+// written in different files. A reader looking at Config cannot otherwise tell
+// which values can still be changed after New and which are fixed for the life
+// of the agent — and there is no way to find out by trying, because New takes
+// Config by value, so setting a field on your own copy afterwards fails
+// silently.
+//
+// So every setter that has a Config field behind it is named on that field, and
+// this holds the two together: a setter renamed or removed leaves a note
+// pointing at nothing, and that fails here.
+func TestEverySetterIsNamedOnTheFieldItWrites(t *testing.T) {
+	cfg := readSource(t, "config.go")
+
+	// The two that configure something Config does not hold. Both are stated in
+	// the file's own commentary rather than on a field, since there is no field.
+	elsewhere := map[string]bool{
+		"SetToolReach":        true, // a tool's reach, in the registry
+		"SetClearanceChecker": true, // the checker asked on every gated call
+	}
+
+	f, err := parser.ParseFile(token.NewFileSet(), "agent.go", readSource(t, "agent.go"), parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parsing agent.go: %v", err)
+	}
+
+	named := 0
+	for _, d := range f.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if !ok || !strings.HasPrefix(fn.Name.Name, "Set") || !onAgent(fn) {
+			continue
+		}
+		if elsewhere[fn.Name.Name] {
+			if strings.Contains(cfg, "Set at run time: "+fn.Name.Name) {
+				t.Errorf("%s is listed as having no Config field, and config.go names it on one", fn.Name.Name)
+			}
+			continue
+		}
+		if !strings.Contains(cfg, "Set at run time: "+fn.Name.Name) {
+			t.Errorf("no field in config.go says %q sets it. Either name it on the "+
+				"field it writes, or add it to the two that configure something "+
+				"Config does not hold", fn.Name.Name)
+			continue
+		}
+		named++
+	}
+
+	// And no note may name a setter that is gone.
+	for _, line := range strings.Split(cfg, "\n") {
+		i := strings.Index(line, "Set at run time: ")
+		if i < 0 {
+			continue
+		}
+		name := strings.FieldsFunc(line[i+len("Set at run time: "):], func(r rune) bool {
+			return r == ',' || r == '.' || r == ' '
+		})
+		// The convention sentence at the top of config.go names the shape
+		// ("Set at run time: X"), not a method.
+		if len(name) == 0 || !strings.HasPrefix(name[0], "Set") {
+			continue
+		}
+		if !strings.Contains(readSource(t, "agent.go"), "func (a *Agent) "+name[0]+"(") {
+			t.Errorf("config.go says %q sets a field, and no such method exists", name[0])
+		}
+	}
+
+	if named == 0 {
+		t.Fatal("no setter was found named on a Config field, so this test is looking in the wrong place")
+	}
+	t.Logf("%d setters named on the field they write", named)
+}

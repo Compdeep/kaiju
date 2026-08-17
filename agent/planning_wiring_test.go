@@ -131,8 +131,8 @@ func TestBundledSkills_WriteNoResolvablePlaceholder(t *testing.T) {
 	}
 
 	// The engine's own pattern is what this test reads with, so if that pattern
-	// ever stops matching, this passes by finding nothing. skill_creator carries
-	// the rule and names the shape, so there is always at least one to find.
+	// ever stops matching, this passes by matching nothing. skill_creator carries
+	// the rule and names the shape, so there is always at least one to match.
 	if found == 0 {
 		t.Error("no placeholder-shaped text found in any card, so either skill_creator " +
 			"stopped stating the rule or templatePattern no longer matches it")

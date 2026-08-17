@@ -1,6 +1,10 @@
 BINARY=kaiju
-VERSION?=0.3.0
-LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION)"
+# The engine's number comes from the VERSION file, not from this line. See
+# VERSIONING.md. COMMIT is which build of that release this is, and carries
+# -dirty when the checkout held edits nobody committed.
+VERSION?=$(shell tr -d '[:space:]' < VERSION)
+COMMIT?=$(shell git describe --always --dirty 2>/dev/null || echo unknown)
+LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION)+$(COMMIT)"
 
 .PHONY: build build-linux build-darwin build-windows clean test web
 

@@ -78,3 +78,63 @@ func TestBundledSkills_DoNotBanStepWiring(t *testing.T) {
 		}
 	}
 }
+
+// No bundled skill writes a placeholder the planner would resolve.
+//
+// A card describes what each step needs; the planner decides how to wire it and
+// injects one step's output into another. A card that writes ${step.0.url}
+// itself is guessing at a step number it cannot know, and the guess is wrong as
+// soon as the planner orders the steps differently — the reference resolves to
+// another step's output, or to nothing, and the step runs on the wrong input
+// with no error.
+//
+// skill_creator states the rule and has to name the shape to forbid it, which is
+// why this cannot be a plain search for "${step." — that search fails on the
+// sentence carrying the rule. What separates them is whether the reference could
+// resolve: templates.go matches ${step.<anything>} and ${node.<anything>}, so
+// ${step.N.field} and ${node.<id>.field} — N and <id> being stand-ins, not
+// values — never resolve to anything, and a card may write those.
+func TestBundledSkills_WriteNoResolvablePlaceholder(t *testing.T) {
+	files, err := filepath.Glob("../skills/bundled/*/SKILL.md")
+	if err != nil {
+		t.Fatalf("glob skills: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("no bundled skills found at ../skills/bundled/*/SKILL.md — fix the test path")
+	}
+
+	// The spellings that name the shape without being one. Anything else the
+	// engine's own pattern matches is a reference that would resolve.
+	standIns := map[string]bool{
+		"${step.N.field}":    true,
+		"${node.<id>.field}": true,
+		"${step.N.output}":   true,
+	}
+
+	found := 0
+	for _, path := range files {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		card := filepath.Base(filepath.Dir(path)) + "/SKILL.md"
+		for _, ref := range templatePattern.FindAllString(string(b), -1) {
+			found++
+			if standIns[ref] {
+				continue
+			}
+			t.Errorf("%s writes %s, which the planner would resolve. A card says what "+
+				"a step needs; the planner decides which step supplies it, so a "+
+				"number written here is a guess that breaks when the plan is ordered "+
+				"differently", card, ref)
+		}
+	}
+
+	// The engine's own pattern is what this test reads with, so if that pattern
+	// ever stops matching, this passes by finding nothing. skill_creator carries
+	// the rule and names the shape, so there is always at least one to find.
+	if found == 0 {
+		t.Error("no placeholder-shaped text found in any card, so either skill_creator " +
+			"stopped stating the rule or templatePattern no longer matches it")
+	}
+}

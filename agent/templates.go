@@ -1,4 +1,4 @@
-// Finding template references in plan parameters.
+// Locating template references in plan parameters.
 //
 // A step's parameters may embed ${node.<id>.<path>} or ${step.<n>.<path>} to
 // inject an earlier step's output. This answers one question about them: which

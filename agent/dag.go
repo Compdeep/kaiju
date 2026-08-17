@@ -1492,8 +1492,8 @@ func (a *Agent) hasUsableEvidence(graph *Graph) bool {
 		switch tb.Envelope().Status {
 		case toolapi.StatusOK, toolapi.StatusUnclassified:
 			// Unclassified counts. The tool ran and returned something readable;
-			// all that is missing is its own word on whether that counts as a
-			// finding. Excluding it would tell decideAutoAggMode there is nothing
+			// all that is missing is its own word on whether that counts as
+			// evidence. Excluding it would tell decideAutoAggMode there is nothing
 			// to aggregate on a run whose evidence came entirely from tools that
 			// do not declare an outcome — which, until the tools are migrated, is
 			// most of them.

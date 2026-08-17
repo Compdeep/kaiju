@@ -217,7 +217,7 @@ func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.
 			map[string]any{"output": output, "action": action}), nil
 	}
 	// git status on a clean tree, git log with no matches: the command worked
-	// and there is nothing to report. That is a finding, not a blank success.
+	// and the answer is "none". That is a result, not a blank success.
 	if strings.TrimSpace(output) == "" {
 		return toolapi.ToolEmpty("command", "git "+action+" produced no output"), nil
 	}

@@ -343,7 +343,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 func parseReflectionOutput(raw string) (*reflectionOutput, error) {
 	var output reflectionOutput
 	if err := ParseLLMJSON(raw, &output); err != nil || output.Decision == "" {
-		// Try finding a JSON object containing "decision" in the raw output
+		// Try locating a JSON object containing "decision" in the raw output
 		if idx := strings.Index(raw, `"decision"`); idx >= 0 {
 			for i := idx; i >= 0; i-- {
 				if raw[i] == '{' {

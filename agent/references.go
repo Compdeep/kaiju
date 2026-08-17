@@ -9,7 +9,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// Finding what a run referenced and never resolved, without knowing the domain.
+// Which values a run referenced and never resolved, without knowing the domain.
 //
 // Some tool output is a fact and some of it is a handle on something else: a
 // search result's URL, a record id, a machine name. A handle a run surfaced and never

@@ -15,9 +15,12 @@ import (
 // "Core" is one word for three different things, and it is worth separating
 // them before reading the list below.
 //
-//	REQUIRED   bash, service. The scheduler grafts nodes with these names —
-//	           an exec step after a compute run, a health check after a build.
-//	           Without them those steps fail at dispatch with "unknown tool".
+//	REQUIRED   bash, service — and agent.GraftedToolNames() is the list, held
+//	           to the scheduler's own source by a test rather than to this
+//	           comment. The scheduler grafts nodes with these names: an exec
+//	           step after a compute run, a health check after a build. Without
+//	           them those steps fail at dispatch with "unknown tool", inside a
+//	           run, long after registration.
 //	EXPECTED   file_read, file_write, file_list, process_list, sysinfo,
 //	           net_info, web_fetch, web_search. Nothing breaks without them,
 //	           but a planner with no way to read a file or search the web is a

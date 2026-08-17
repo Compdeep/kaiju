@@ -2,8 +2,11 @@ BINARY=kaiju
 # The engine's number comes from the VERSION file, not from this line. See
 # VERSIONING.md. COMMIT is which build of that release this is, and carries
 # -dirty when the checkout held edits nobody committed.
-VERSION?=$(shell tr -d '[:space:]' < VERSION)
+VERSION?=$(shell tr -d '[:space:]' < VERSION 2>/dev/null)
 COMMIT?=$(shell git describe --always --dirty 2>/dev/null || echo unknown)
+ifeq ($(strip $(VERSION)),)
+$(error VERSION is empty or the VERSION file is missing — a binary stamped "+$(COMMIT)" says nothing about which release it is)
+endif
 LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION)+$(COMMIT)"
 
 .PHONY: build build-linux build-darwin build-windows clean test web

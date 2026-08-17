@@ -497,3 +497,75 @@ func (r *runAwareTool) Execute(ctx context.Context, _ map[string]any) (string, e
 	r.sawRun = RunIDFrom(ctx)
 	return toolapi.ToolOK("listing", "2 processes", map[string]any{"count": 2}).JSON(), nil
 }
+
+// pointerTool returns a value it declares another tool follows.
+//
+// The declaration is the whole point: it is what conclusionFloor read before
+// b7325fd, and what the reframe still reads to tell a stage what the run is
+// holding.
+type pointerTool struct {
+	name, follower string
+	calls          int
+}
+
+func (p *pointerTool) Name() string                { return p.name }
+func (p *pointerTool) Description() string         { return "returns ids another tool reads" }
+func (p *pointerTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
+func (p *pointerTool) RequiresTarget() bool        { return false }
+func (p *pointerTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (p *pointerTool) Execute(context.Context, map[string]any) (string, error) {
+	p.calls++
+	return toolapi.ToolOK("listing", "2 rows",
+		map[string]any{"rows": []map[string]any{{"id": "row-1"}, {"id": "row-2"}}}).JSON(), nil
+}
+func (p *pointerTool) OutputSchema() json.RawMessage {
+	return toolapi.EnvelopeSchema(`{"type":"object","properties":{"rows":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string","x-reference":"` + p.follower + `.id"}}}}}}`)
+}
+
+// A CONCLUDE ends the run, even holding values nothing followed.
+//
+// Until b7325fd it did not. The scheduler read the reflector's decision, saw
+// that the run held values a tool had declared as followable and that none had
+// been followed, rewrote the decision to "continue", and grafted a step per
+// value. The run answered on the second reflection instead of the first.
+//
+// That is gone, and this is what says so: one listing that surfaces two ids, one
+// reader registered so the ids could have been followed, one CONCLUDE. The reader
+// must never run — nothing planned it — and the run must answer once.
+//
+// The reader is registered deliberately. An unregistered one was skipped by the
+// old code too, so a run without it would pass either way and prove nothing.
+func TestAConcludeEndsTheRunEvenWithValuesNothingFollowed(t *testing.T) {
+	lister := &pointerTool{name: "list_rows", follower: "read_row"}
+	reader := &countingTool{name: "read_row"}
+
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+		"plan":             plan(step("list_rows", "rows", nil)),
+		"submit_decision":  {Args: map[string]any{"decision": "conclude", "outcome": "two rows"}},
+		"submit_summary":   {Args: map[string]any{"summary": "there are two rows"}},
+	})
+	a := agentOnStub(t, model, lister, reader)
+
+	res, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"how many rows"}`),
+	})
+	if err != nil {
+		t.Fatalf("the run failed: %v (stages: %v)", err, model.functionsCalled())
+	}
+
+	if lister.calls != 1 {
+		t.Fatalf("the listing ran %d times, so this run says nothing about what it surfaced", lister.calls)
+	}
+	if reader.calls != 0 {
+		t.Errorf("read_row ran %d time(s). Nothing planned it, so something followed the "+
+			"ids on the run's behalf — which is what was removed", reader.calls)
+	}
+	if n := model.callsTo("submit_decision"); n != 1 {
+		t.Errorf("the reflector was asked %d times, want once — a second ask means its "+
+			"first answer was discarded", n)
+	}
+	if res == nil || res.Outcome == "" {
+		t.Error("the run concluded and produced no answer")
+	}
+}

@@ -41,14 +41,14 @@ func TestAdmitPassesTheTriggerAndKeepsTheReason(t *testing.T) {
 		return false, "licence expired on 2026-07-01"
 	}}
 
-	ok, reason := a.admit(Trigger{Type: "alert", ID: "a-1"})
+	ok, reason := a.admit(Trigger{Type: "event", ID: "a-1"})
 	if ok {
 		t.Fatal("the run was admitted despite the check refusing it")
 	}
 	if reason != "licence expired on 2026-07-01" {
 		t.Errorf("reason = %q, want the application's own wording", reason)
 	}
-	if seen.Type != "alert" || seen.ID != "a-1" {
+	if seen.Type != "event" || seen.ID != "a-1" {
 		t.Errorf("the check was not given the trigger: %+v", seen)
 	}
 }

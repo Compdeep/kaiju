@@ -69,8 +69,8 @@ func TestToolMessageBody_FieldEnvelopeNames(t *testing.T) {
 	if v, ok := b.Field("type"); !ok || v != "listing" {
 		t.Fatalf("Field(type) = %v,%v want listing", v, ok)
 	}
-	e := tmBody(toolapi.ToolEmpty("listing", "no incident matches status open"))
-	if v, ok := e.Field("detail"); !ok || v != "no incident matches status open" {
+	e := tmBody(toolapi.ToolEmpty("listing", "no case matches status open"))
+	if v, ok := e.Field("detail"); !ok || v != "no case matches status open" {
 		t.Fatalf("Field(detail) = %v,%v want the reason", v, ok)
 	}
 	// Where both have the name the payload wins, in either form: web_fetch's

@@ -81,8 +81,8 @@ func TestLiveReframe(t *testing.T) {
 			build: func(g *Graph) {
 				withStep(g, "find advisories", "web_search",
 					toolapi.ToolOK("search", "", map[string]any{"results": []map[string]any{
-						{"url": "https://example.test/cve-2026-1", "title": "parser overflow"},
-						{"url": "https://example.test/cve-2026-2", "title": "parser panic"},
+						{"url": "https://example.test/advisory-2026-1", "title": "parser overflow"},
+						{"url": "https://example.test/advisory-2026-2", "title": "parser panic"},
 					}}))
 			},
 		},
@@ -148,8 +148,8 @@ func TestLiveReframeHarderCases(t *testing.T) {
 			build: func(g *Graph) {
 				withStep(g, "find advisories", "web_search",
 					toolapi.ToolOK("search", "", map[string]any{"results": []map[string]any{
-						{"url": "https://example.test/cve-2026-1", "title": "parser overflow — patched in 4.2"},
-						{"url": "https://example.test/cve-2026-2", "title": "parser panic"},
+						{"url": "https://example.test/advisory-2026-1", "title": "parser overflow — patched in 4.2"},
+						{"url": "https://example.test/advisory-2026-2", "title": "parser panic"},
 					}}))
 			},
 		},

@@ -28,7 +28,7 @@ func newTestContextGate(t *testing.T) (*ContextGate, *Graph, *Trigger, string) {
 	graph.Preflight = &PreflightResult{ComputeMode: "deep"}
 	trigger := &Trigger{
 		Type:      "chat_query",
-		ID:        "test-alert",
+		ID:        "test-run",
 		SessionID: "test-session",
 	}
 	agent := &Agent{
@@ -427,14 +427,14 @@ func TestWriteLLMTrace_Disabled_NoOp(t *testing.T) {
 	t.Setenv("KAIJU_PROMPT_DEBUG", "")
 	// Without env var, no file should be written.
 	WriteLLMTrace(LLMTrace{
-		RunID:    "test-alert",
+		RunID:    "test-run",
 		NodeID:   "n1",
 		NodeType: "test",
 		System:   "sys",
 		User:     "usr",
 		Output:   "out",
 	})
-	if _, err := os.Stat(filepath.Join("/tmp/kaiju-prompts", "test-alert.log")); err == nil {
+	if _, err := os.Stat(filepath.Join("/tmp/kaiju-prompts", "test-run.log")); err == nil {
 		// File may exist from prior runs. Just confirm we didn't write to dir.
 	}
 	_ = dir
@@ -442,7 +442,7 @@ func TestWriteLLMTrace_Disabled_NoOp(t *testing.T) {
 
 func TestWriteLLMTrace_Enabled_WritesFile(t *testing.T) {
 	t.Setenv("KAIJU_PROMPT_DEBUG", "1")
-	triggerID := fmt.Sprintf("test-alert-%d", time.Now().UnixNano())
+	triggerID := fmt.Sprintf("test-run-%d", time.Now().UnixNano())
 	defer os.Remove(filepath.Join("/tmp/kaiju-prompts", triggerID+".log"))
 
 	WriteLLMTrace(LLMTrace{

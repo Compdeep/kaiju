@@ -21,10 +21,10 @@ func guidanceSkill(name, body string) *skillmd.SkillMD {
 func TestReActComposesTheRunsGuidance(t *testing.T) {
 	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{
 		"system_operations": guidanceSkill("system_operations", "OPS BODY"),
-		"incident_response": guidanceSkill("incident_response", "RESPONSE BODY"),
+		"case_response":     guidanceSkill("case_response", "RESPONSE BODY"),
 	}}
 
-	got := a.composeGuidance([]string{"system_operations", "incident_response"})
+	got := a.composeGuidance([]string{"system_operations", "case_response"})
 
 	if !strings.Contains(got, "OPS BODY") || !strings.Contains(got, "RESPONSE BODY") {
 		t.Errorf("guidance is missing from the composition:\n%s", got)
@@ -54,10 +54,10 @@ func TestComposeGuidanceIgnoresUnknownKeys(t *testing.T) {
 // The ReAct system prompt is assembled behind an LLM call, so this pins the call
 // site: it must go through the shared resolution, not into one registry.
 func TestReActSystemPromptCarriesTheGuidance(t *testing.T) {
-	skill := guidanceSkill("incident_response", "SKILL BODY")
-	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"incident_response": skill}}
+	skill := guidanceSkill("case_response", "SKILL BODY")
+	a := &Agent{skillGuidance: map[string]*skillmd.SkillMD{"case_response": skill}}
 
-	if got := a.systemPrompt([]string{"incident_response"}); !strings.Contains(got, "SKILL BODY") {
+	if got := a.systemPrompt([]string{"case_response"}); !strings.Contains(got, "SKILL BODY") {
 		t.Errorf("the ReAct system prompt carries no guidance:\n%s", got)
 	}
 	if got := a.systemPrompt(nil); strings.Contains(got, "SKILL BODY") {

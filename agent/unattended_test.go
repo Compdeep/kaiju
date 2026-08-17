@@ -28,10 +28,10 @@ func TestUnattendedDefaultsToExecutionMode(t *testing.T) {
 func TestUnattendedUsesTheApplicationsAnswer(t *testing.T) {
 	// An application whose own kind of work is unattended, without the field.
 	a := &Agent{isUnattended: func(t Trigger) bool {
-		return t.ExecutionMode == "autonomous" || t.Type == "alert"
+		return t.ExecutionMode == "autonomous" || t.Type == "event"
 	}}
 
-	if !a.unattended(Trigger{Type: "alert"}) {
+	if !a.unattended(Trigger{Type: "event"}) {
 		t.Error("the application's answer was not used")
 	}
 	if !a.unattended(Trigger{ExecutionMode: "autonomous"}) {
@@ -43,25 +43,25 @@ func TestUnattendedUsesTheApplicationsAnswer(t *testing.T) {
 }
 
 // TestUnattendedReachesTheToolFilter: the answer has to arrive where it
-// matters. Supplying it and finding the tool list unchanged would be the
+// matters. Supplying it and seeing the tool list unchanged would be the
 // failure that looks like success.
 func TestUnattendedReachesTheToolFilter(t *testing.T) {
 	reg := toolapi.NewRegistry()
-	if err := reg.Register(&plainTool{name: "get_alerts"}); err != nil {
+	if err := reg.Register(&plainTool{name: "list_records"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	if err := reg.Register(&humanTool{plainTool{name: "raise_ticket"}}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	a := &Agent{registry: reg, isUnattended: func(t Trigger) bool { return t.Type == "alert" }}
+	a := &Agent{registry: reg, isUnattended: func(t Trigger) bool { return t.Type == "event" }}
 
 	// No ExecutionMode at all — only the application's answer marks this
 	// unattended, so the default would have offered the tool.
-	got := a.relevantTools(context.Background(), Trigger{Type: "alert"})
+	got := a.relevantTools(context.Background(), Trigger{Type: "event"})
 	if has(got, "raise_ticket") {
 		t.Errorf("the application said nobody is watching and the tool was offered anyway: %v", got)
 	}
-	if !has(got, "get_alerts") {
+	if !has(got, "list_records") {
 		t.Errorf("an ordinary tool was withheld: %v", got)
 	}
 }

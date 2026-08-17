@@ -48,14 +48,14 @@ func TestScheduler_ReservesLaneForChat(t *testing.T) {
 	s.Start(ctx)
 
 	// First background job runs on one worker.
-	s.Submit(Trigger{ID: "bgA"}, PriorityBackground, "alert:bgA")
+	s.Submit(Trigger{ID: "bgA"}, PriorityBackground, "event:bgA")
 	if got := <-started; got != "bgA" {
 		t.Fatalf("expected bgA to start, got %s", got)
 	}
 
 	// Second background job is held back even though a worker is idle — that
 	// worker is reserved for chat.
-	s.Submit(Trigger{ID: "bgB"}, PriorityBackground, "alert:bgB")
+	s.Submit(Trigger{ID: "bgB"}, PriorityBackground, "event:bgB")
 	select {
 	case got := <-started:
 		t.Fatalf("bgB started, but the second worker should be reserved for chat: %s", got)

@@ -78,7 +78,7 @@ func TestFileRead_EmitsTextEnvelope(t *testing.T) {
 	}
 }
 
-// An empty file is a finding. It used to come back as ok with nothing in it,
+// An empty file is something to report. It used to come back as ok with nothing in it,
 // which reads to every consumer as a successful read and tells the coverage
 // statement nothing.
 func TestFileRead_EmptyFileIsReportedAsEmpty(t *testing.T) {

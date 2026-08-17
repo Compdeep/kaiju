@@ -16,20 +16,20 @@ func TestApplyRunTarget(t *testing.T) {
 	if err := reg.Register(&nodeStub{}); err != nil {
 		t.Fatalf("register node: %v", err)
 	}
-	if err := reg.Register(&fleetStub{}); err != nil {
-		t.Fatalf("register fleet: %v", err)
+	if err := reg.Register(&untargetedStub{}); err != nil {
+		t.Fatalf("register the untargeted tool: %v", err)
 	}
 
 	steps := []PlanStep{
-		{Tool: "node_stub"},                     // needs-target, no target → default
-		{Tool: "node_stub", Target: "explicit"}, // needs-target, has target → kept
-		{Tool: "fleet_stub", Target: "stripme"}, // no-target, has target → stripped
-		{Tool: "unknown_tool"},                  // not in registry → untouched
+		{Tool: "node_stub"},                          // needs-target, no target → default
+		{Tool: "node_stub", Target: "explicit"},      // needs-target, has target → kept
+		{Tool: "untargeted_stub", Target: "stripme"}, // no-target, has target → stripped
+		{Tool: "unknown_tool"},                       // not in registry → untouched
 	}
-	applyRunTarget(steps, "peer-9", reg)
+	applyRunTarget(steps, "host-9", reg)
 
-	if steps[0].Target != "peer-9" {
-		t.Errorf("needs-target, no target → %q, want peer-9", steps[0].Target)
+	if steps[0].Target != "host-9" {
+		t.Errorf("needs-target, no target → %q, want host-9", steps[0].Target)
 	}
 	if steps[1].Target != "explicit" {
 		t.Errorf("needs-target explicit target overwritten → %q, want explicit", steps[1].Target)
@@ -70,13 +70,13 @@ func (*nodeStub) Execute(_ context.Context, _ map[string]any) (string, error) {
 	return "", nil
 }
 
-type fleetStub struct{}
+type untargetedStub struct{}
 
-func (*fleetStub) Name() string                { return "fleet_stub" }
-func (*fleetStub) Description() string         { return "needs no machine" }
-func (*fleetStub) RequiresTarget() bool        { return false }
-func (*fleetStub) Impact(map[string]any) int   { return 0 }
-func (*fleetStub) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
-func (*fleetStub) Execute(_ context.Context, _ map[string]any) (string, error) {
+func (*untargetedStub) Name() string                { return "untargeted_stub" }
+func (*untargetedStub) Description() string         { return "needs no machine" }
+func (*untargetedStub) RequiresTarget() bool        { return false }
+func (*untargetedStub) Impact(map[string]any) int   { return 0 }
+func (*untargetedStub) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
+func (*untargetedStub) Execute(_ context.Context, _ map[string]any) (string, error) {
 	return "", nil
 }

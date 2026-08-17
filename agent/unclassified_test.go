@@ -16,7 +16,7 @@ func unclassifiedBody(text string) toolMessageBody {
 // envelope, or the consolidation changed behaviour it was meant to preserve.
 
 func TestUnclassified_EvidenceIsTheTextUnchanged(t *testing.T) {
-	const prose = "## Hash: abc\nNo results found in MalwareBazaar."
+	const prose = "## Hash: abc\nNo results found in the lookup service."
 	if got := unclassifiedBody(prose).Evidence(); got != prose {
 		t.Fatalf("Evidence() = %q, want the producer's text unchanged", got)
 	}

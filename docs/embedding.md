@@ -139,7 +139,8 @@ which is how you persist what happened.
 
 ## Setters — configuration, arriving late
 
-Fourteen methods on `*Agent` change a value after construction.
+Eleven methods on `*Agent` change a value after construction, and three more do
+work rather than set a value.
 
 **A handler and a setter are not two versions of one thing.** A handler takes an
 argument and the answer depends on it — `AllowTool(ctx, req)` cannot be
@@ -159,9 +160,26 @@ already running — which is what a dashboard settings change needs.
 
 **If you are embedding, prefer `Config`.** Reach for a setter only when an
 operator changes something on a running service and it must take effect without
-a restart. Nine of them are read during a run, so a change lands on work already
-going: `SetConcurrency` resizes the worker pool live; `SetToolReach` and
-`SetClearance` are read per tool call.
+a restart. Every setter that survives says in its own doc comment what reads it
+during a run, and the `Config` field it writes says which setter reaches it:
+
+```go
+    // Set at run time: SetAnswerModel.
+    AnswerProvider, AnswerModel string
+```
+
+So you can answer "can this still be changed after `New`" from the field itself,
+which matters because there is no way to find out by trying: `New` takes `Config`
+by value, so setting a field on your own copy afterwards fails silently.
+
+Nine of the eleven have a field behind them. `SetToolReach` and
+`SetClearanceChecker` are the two that do not — the first changes a tool's reach
+in the registry, the second installs the checker asked on every gated call, and
+neither is something `Config` holds.
+
+Two guards keep the two files together: a setter whose comment cannot say what
+reads it mid-run fails the build, and so does a note naming a setter that no
+longer exists.
 
 **Three do work rather than set a value**, take a context, and are called before
 the agent starts: `InitSkills` loads skill files, `InitEmbeddings` builds the

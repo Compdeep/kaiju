@@ -320,9 +320,7 @@ func (s dbIntents) ListIntents() ([]Intent, error) {
 		out = append(out, Intent{
 			Name:              r.Name,
 			Rank:              r.Rank,
-			Description:       r.Description,
 			PromptDescription: r.PromptDescription,
-			IsBuiltin:         r.IsBuiltin,
 			IsDefault:         r.IsDefault,
 		})
 	}

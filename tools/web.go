@@ -602,7 +602,7 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 func (w *WebFetch) generalSummary(ctx context.Context, content, sentinel string) string {
 	resp, err := w.executor.Complete(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: "Summarize the key facts, figures, and findings on this web page. Use ONLY what is present in the user message; do not draw on outside knowledge. Reply with " + sentinel + " only if the page has no substantive content at all."},
+			{Role: "system", Content: "Summarize the key facts, figures, and findings on this web page. Use ONLY what is present in the user message; do not draw on outside knowledge. Reply with " + sentinel + " only if the page has no substantive content at all."}, // foreign-word-ok: model-facing text; what a model is asked for is not reworded to satisfy a vocabulary check
 			{Role: "user", Content: content},
 		},
 		Temperature: 0.2,

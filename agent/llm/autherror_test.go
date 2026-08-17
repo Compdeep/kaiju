@@ -30,7 +30,7 @@ func TestIsAuthFailure(t *testing.T) {
 		"context deadline exceeded",
 		"HTTP 500 internal server error",
 		"HTTP 429 rate limit exceeded",
-		"connection reset by peer",
+		"connection reset by peer", // foreign-word-ok: the operating system's own error text, not ours to rename
 		"EOF",
 		"model is overloaded, please retry",
 		"",

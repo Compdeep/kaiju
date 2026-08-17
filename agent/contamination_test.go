@@ -151,11 +151,30 @@ func TestNoContaminationFromTheEmbeddingApplication(t *testing.T) {
 		}
 		for i, line := range strings.Split(string(data), "\n") {
 			seen := map[string]bool{}
+			var found []string
 			for _, w := range componentsOf(line) {
 				if !forbidden[w] || seen[w] {
 					continue
 				}
 				seen[w] = true
+				found = append(found, w)
+			}
+
+			reason, exempt := exemptionOn(line)
+			switch {
+			case exempt && reason == "":
+				t.Errorf("%s:%d carries %s with no reason after it. A reason is the "+
+					"whole mechanism: without one this is a way to switch the check "+
+					"off quietly", path, i+1, exemptMarker)
+			case exempt && len(found) == 0:
+				t.Errorf("%s:%d is exempt and names none of the words. Either the line "+
+					"changed and the exemption should go, or it was never needed:\n    %s",
+					path, i+1, strings.TrimSpace(line))
+			case exempt:
+				continue // named for a reason that is written down
+			}
+
+			for _, w := range found {
 				t.Errorf("%s:%d names %q, which is an application's word and not this "+
 					"engine's:\n    %s", path, i+1, w, strings.TrimSpace(line))
 			}
@@ -165,6 +184,32 @@ func TestNoContaminationFromTheEmbeddingApplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
+}
+
+// A line that has to name one of these words.
+//
+// Some do. A test that proves the engine never says "alert" has to write the
+// word to check for its absence. An operating system's own error text is not
+// ours to rename. An attack string in a URL filter's test is the attack. The
+// words are right in those places and the check is right everywhere else, so the
+// exemption is per line and it is written on the line, where a reader meets it —
+// not in a list at the top of this file that drifts as lines move.
+//
+//	Messages: []llm.Message{{Role: "system", Content: "…"}}, // foreign-word-ok: model-facing text
+//
+// Two things fail rather than pass: a marker with no reason after it, and a
+// marker on a line that names none of the words. The first is the check being
+// switched off quietly; the second is an exemption outliving what it excused.
+const exemptMarker = "// foreign-word-ok:"
+
+// exemptionOn returns the reason written on a line, and whether the line carries
+// a marker at all.
+func exemptionOn(line string) (string, bool) {
+	i := strings.Index(line, exemptMarker)
+	if i < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(line[i+len(exemptMarker):]), true
 }
 
 // moduleRoot walks up from the package directory to the directory holding

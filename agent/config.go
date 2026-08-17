@@ -156,8 +156,14 @@ type RoutingConfig struct {
 	AlwaysInclude     []string
 	ClassifierEnabled bool // enable per-query skill card classification (extra LLM call)
 
+	// CustomSystemPrompt is prepended to every system prompt the agent sends.
+	//
+	// There is no path field beside it. An application that keeps a BOOT.md
+	// calls ParseBootMD with its own path and then ApplyToConfig, which puts the
+	// file's body here and its other settings on the rest of this Config. A path
+	// field would be a second place to say where the file lives, and nothing in
+	// the engine would open it.
 	CustomSystemPrompt string
-	BootMDPath         string
 }
 
 // ComputeConfig governs compute nodes — steps that run generated code rather

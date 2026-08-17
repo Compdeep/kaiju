@@ -16,7 +16,7 @@ import (
 /*
  * systemPrompt returns the base system prompt for the ReAct loop.
  * desc: Composes the soul prompt with role description, ReAct role prompt,
- *       skill card context, and fleet section. Active skill cards are
+ *       skill card context, and the environment section. Active skill cards are
  *       passed in per-run (the caller owns them), not read off the Agent.
  * param: cards - active skill card keys for this run (may be nil).
  * return: the fully composed system prompt string.
@@ -338,10 +338,10 @@ func defaultFormatTrigger(t Trigger) string {
 
 	var sb strings.Builder
 	// The built-in wording says what this package knows and no more: a run
-	// started, something caused it, here is what came with it. It used to say
-	// "## Alert", "**Alert ID:**" and "Investigate this alert", which told every
-	// model driven by this loop that its input was a security alert — the one
-	// place this package asserted what the payload means.
+	// started, something caused it, here is what came with it. Its headings and
+	// its instruction used to name one kind of payload, which told every model
+	// driven by this loop what its input was — the one place this package
+	// asserted what the payload means.
 	//
 	// An application that knows better supplies Config.DescribeTrigger, which
 	// formatTrigger asks first and which this only backs up.

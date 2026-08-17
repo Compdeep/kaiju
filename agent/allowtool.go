@@ -12,11 +12,11 @@ import (
 // rate limit. Those are rules about authority, and they are the same whatever
 // the application does.
 //
-// An application has rules of its own. One example: a tool that opens an
-// incident may be called by a person asking for one, and may not be called
-// during an automatic investigation, because there the incident is opened from
-// the finished outcome instead. That rule needs to know what an incident is,
-// which this package does not.
+// An application has rules of its own. One example: a tool that opens a case
+// for a person to act on may be called when a person asked for one, and must not
+// be called during an unattended run, where the case is opened from the finished
+// outcome instead. That rule needs to know what the case means, which this
+// package does not.
 //
 // It cannot be done by leaving the tool out of the plan, either. Tools are
 // filtered when the plan is written, but the reflector, the observer and the

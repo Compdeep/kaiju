@@ -13,8 +13,8 @@ import (
 // When the graph is finished, runAggregator reads the evidence and
 // writes a free-text answer for a person to read. That is the right shape for a
 // question typed into a chat box, and the wrong shape for a run whose result is
-// consumed by code — a severity and a confidence that decide whether an incident
-// is raised, a set of indicators another system matches against.
+// consumed by code — a rating and a confidence that decide whether something is
+// escalated, a set of values another system matches against.
 //
 // An application that needs the second shape has to write that answer itself: it
 // owns the output type, the schema it forces the model to fill, and the wording
@@ -101,9 +101,9 @@ type AnswerResult struct {
 	// are written to the run record and nowhere else; this package attaches no
 	// meaning to any key or value and never reads one back.
 	//
-	// A map rather than named fields. It was Severity and Category, which named
-	// what one product happened to label a run with and left every other
-	// application putting its own idea into a field called Severity. Nothing
+	// A map rather than named fields. It was two named fields, taken from what
+	// one product happened to label a run with, which left every other
+	// application putting a different idea into a name that did not fit. Nothing
 	// here ever read either one, so there was nothing for the names to earn.
 	Labels map[string]string
 

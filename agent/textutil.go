@@ -1,6 +1,9 @@
 package agent
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 /*
  * textNS provides namespaced text utility functions.
@@ -56,14 +59,14 @@ func (textNS) TailTruncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return "...(earlier output truncated)\n" + s[len(s)-n:]
+	return "...(earlier output truncated to the last " + strconv.Itoa(n) + " chars)\n" + s[len(s)-n:]
 }
 
 /*
  * TruncateEvidence caps ONE step's contribution to the evidence a prompt
  * carries — not the whole of it. A run with twenty steps sends twenty of these.
  *
- * The third of four caps between a tool and the model; see maxToolResultLen for
+ * The third of five caps between a tool and the model; see maxToolResultLen for
  * the order. For a tool that returns a typed envelope this is the FIRST one to
  * cut on the DAG path, because the dispatch cap skips those.
  *
@@ -74,6 +77,10 @@ func (textNS) TailTruncate(s string, n int) string {
  * param: s - the evidence string to truncate
  * return: the original or truncated string
  */
+// evidenceTruncMarker says which cap cut, so a reader of a prompt can tell this
+// one from the dispatch cap, a tool's own cap, and the gate's budget.
+const evidenceTruncMarker = "\n\n...(middle truncated by the 8000-char evidence cap)...\n\n"
+
 func (textNS) TruncateEvidence(s string) string {
 	const maxLen = 8000
 	if len(s) <= maxLen {
@@ -83,7 +90,10 @@ func (textNS) TruncateEvidence(s string) string {
 	// Avoids cutting mid-JSON or mid-sentence.
 	headLen := maxLen * 2 / 3
 	tailLen := maxLen / 3
-	return s[:headLen] + "\n\n... (middle truncated) ...\n\n" + s[len(s)-tailLen:]
+	// The marker names which cap cut, following gateTruncMarker's precedent.
+	// Anyone who reads a prompt and sees a cut needs to know which of the five
+	// made it. Raising a tool's own cap changes nothing when this one is next.
+	return s[:headLen] + evidenceTruncMarker + s[len(s)-tailLen:]
 }
 
 /*

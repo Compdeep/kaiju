@@ -174,7 +174,7 @@ func hasNonEmptyTaskFiles(params map[string]any) bool {
 
 // What bounds a tool result, and where.
 //
-// Four caps sit between a tool and the model, and they are applied in this
+// Five caps sit between a tool and the model, and they are applied in this
 // order. The number below is only the second of them, and for most tools it
 // does not apply at all.
 //
@@ -194,12 +194,22 @@ func hasNonEmptyTaskFiles(params map[string]any) bool {
 //     prompt. It bounds ONE step's contribution to the evidence, not the
 //     whole. A run with twenty steps sends twenty of these.
 //
-//  4. Text.TruncateLog, 500, on the audit line and the log. That one is a
+//  4. The context gate's budget, defaultMaxBudget 32000 unless a caller sets
+//     MaxBudget. This one bounds the WHOLE prompt rather than one step, and it
+//     trims by source priority — so it can cut a source the three above left
+//     alone, or drop it entirely when what is left would be under gateMinChunk.
+//     Its marker names itself; see gateTruncMarker in contextgate.go.
+//
+//  5. Text.TruncateLog, 500, on the audit line and the log. That one is a
 //     record of what happened and never reaches a model.
+//
+// Each marker names the cap that made it, so a cut in a prompt can be traced to
+// the number that caused it rather than guessed at.
 //
 // So a tool author raising its own cap from 8192 usually sees no change: for a
 // typed tool the next thing to cut is 8000 at synthesis, and for a string tool
-// it is 4096 here. Neither is in the tool's file.
+// it is 4096 here. Neither is in the tool's file, and both are ahead of the
+// gate's 32000, which is about the whole prompt rather than this result.
 //
 // maxToolResultLen lives here rather than in loop_react.go, where it was
 // declared, because the DAG read the ReAct loop's constant — one execution

@@ -772,7 +772,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		return "", nil, err
 	}
 
-	// The second of the four caps — see maxToolResultLen for the other three
+	// The second of the five caps — see maxToolResultLen for the other four
 	// and the order they apply in.
 	//
 	// isContextual is set by the typed branch above, so this skips every tool

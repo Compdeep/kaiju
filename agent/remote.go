@@ -15,7 +15,7 @@ import (
 //
 // Everything that gives the idea meaning stays outside:
 //
-//   - what a target NAME is (a host, a peer id, a queue, a device serial)
+//   - what a target NAME is (a host, a node id, a queue, a device serial)
 //   - how to REACH one (ssh, http, a p2p transport, a message bus)
 //   - how one is CHOSEN (the planner-side logic that decides which machine a
 //     step belongs on)

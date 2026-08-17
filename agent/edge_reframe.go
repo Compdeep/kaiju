@@ -131,8 +131,7 @@ func (s *stepOutcomesSource) Load(g *Graph, _ *Trigger, a *Agent, _ map[string]a
 
 // stepLabel names a step: the planner's label and the tool that ran, or just
 // the tool when the planner set no label. Printing both when they are the same
-// word gives "search_telemetry (search_telemetry)", which reads as two facts
-// and is one.
+// word gives "file_read (file_read)", which reads as two facts and is one.
 func stepLabel(n *Node) string {
 	if n.Tag == "" || n.Tag == n.ToolName {
 		return n.ToolName

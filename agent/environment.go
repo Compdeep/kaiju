@@ -8,9 +8,9 @@ import "log"
 // attaches no meaning to. Seven prompt-building sites read it through
 // environmentSection, so one crash would take every stage with it.
 //
-// It replaced a FleetContextProvider, whose vocabulary — fleet, peer, threat,
-// campaign indicator — belonged to one product rather than to an engine other
-// products build on. That provider stayed in the tree, unreachable, for the
+// It replaced a provider whose name and whose four field names belonged to one
+// product rather than to an engine other products build on. That provider
+// stayed in the tree, unreachable, for the
 // rest of the migration; it is gone now and this is all that is left of it.
 
 /*

@@ -89,8 +89,8 @@ func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, bu
 type Conclusion struct {
 	// Outcome is the answer, or the reason there is none.
 	Outcome string
-	// Severity and Category are the application's labels for the answer, empty
-	// unless it supplied an Answer handler. Passed through untouched.
+	// Labels are the application's own labels for the answer, empty unless it
+	// supplied an Answer handler. Passed through untouched.
 	Labels map[string]string
 	// Status is "completed", "failed", "timeout" or "not_admitted".
 	Status string

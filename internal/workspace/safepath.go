@@ -23,7 +23,7 @@ var AllowedZones = []string{"project", "media", "canvas", "blueprints", "uploads
 //
 // This is the last line of defense against the planner/coder writing to the
 // agent's own infrastructure. Prompt-level rules alone have proven
-// insufficient — see the cmd/kaiju/main.go incident 2026-04-18.
+// insufficient — a coder step overwrote cmd/kaiju/main.go on 2026-04-18.
 func SafeJoin(workspace, relPath string) (string, error) {
 	if filepath.IsAbs(relPath) {
 		return "", fmt.Errorf("absolute paths are not allowed (got %q) — use a workspace-relative path under %v", relPath, AllowedZones)

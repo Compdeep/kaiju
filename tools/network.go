@@ -259,8 +259,8 @@ var _ toolapi.Outputter = (*NetInfo)(nil)
 // Distinct from "ports", which is ss -tlnp — listening sockets only. That
 // answers "what can reach this host". This answers "what is this host talking
 // to", which is the question asked of a machine suspected of being compromised,
-// and the two are not interchangeable: a beacon holds an established outbound
-// connection and listens on nothing.
+// and the two are not interchangeable: a process calling out holds an
+// established outbound connection and listens on nothing.
 //
 // host and port filter the rows by substring, so a step that found a suspicious
 // address can ask what is talking to it without reading the whole table.

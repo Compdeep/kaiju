@@ -213,7 +213,7 @@ func scaleReplanCap(base int, steps []PlanStep) int {
 }
 
 func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *Graph, budget *Budget) (*scheduleOutcome, error) {
-	// Inject data directory override into context for retrieval tools (relay/gateway paths)
+	// Inject data directory override into context for retrieval tools (forwarded runs)
 	if trigger.DataDir != "" {
 		ctx = toolapi.WithDataDir(ctx, trigger.DataDir)
 	}

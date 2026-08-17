@@ -277,8 +277,8 @@ func collectParamStrings(v any, into map[string]bool) {
  *       wrong.
  *
  *       Nothing is named here. The sentence is fixed and every noun in it comes
- *       from the tool: run against a fleet tool it reads
- *       "${step.N.peers.0.id} into inspect_host(target)".
+ *       from the tool: run against a tool that lists machines it reads
+ *       "${step.N.hosts.0.id} into inspect_host(target)".
  * param: schema - the tool's declared output schema.
  * return: one line per handle, empty when the tool declares none.
  */
@@ -347,8 +347,8 @@ func (a *Agent) conclusionFloor(graph *Graph, maxSteps int) (steps []PlanStep, l
 		// nothing checks it. Here it stops being a description and becomes a
 		// call, so here is where a wrong one costs something: the run would be
 		// blocked from concluding, then fail on a step naming a tool that does
-		// not exist. Enbarr shipped one — search_telemetry named
-		// get_process_detail, which is the Go type, where the tool is
+		// not exist. One shipped application had one: a tool wrote its reference
+		// as get_process_detail, which is the Go type, where the tool is
 		// get_process.
 		//
 		// Skipped rather than substituted. The handle stays in the outstanding

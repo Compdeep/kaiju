@@ -47,9 +47,9 @@ type Trigger struct {
 	Type          string          `json:"type"` // "chat_query", "api_query", "scheduled", "event", "command"
 	ID            string          `json:"id"`
 	Data          json.RawMessage `json:"data"`
-	Source        string          `json:"source"`                   // peer ID or "local"
+	Source        string          `json:"source"`                   // who sent it, or "local"
 	DAGMode       string          `json:"dag_mode"`                 // optional override: "reflect", "nReflect", "orchestrator"
-	DataDir       string          `json:"data_dir"`                 // override data dir for retrieval skills (relay/gateway use temp path)
+	DataDir       string          `json:"data_dir"`                 // override data dir for retrieval skills (a forwarded run uses a temp path)
 	MaxIntent     *int            `json:"max_intent,omitempty"`     // optional IGX cap (can only lower intent, never escalate)
 	Scope         *ResolvedScope  `json:"scope,omitempty"`          // tool access scope (nil = full access)
 	SessionID     string          `json:"session_id,omitempty"`     // conversation session for memory
@@ -167,7 +167,7 @@ type ClearanceChecker interface {
 /*
  * Agent is the agentic reasoning engine.
  * desc: Core agent struct that orchestrates investigations via DAG or ReAct loop.
- *       Manages LLM clients, tool registry, IGX gate, memory, gossip, IPC,
+ *       Manages LLM clients, tool registry, IGX gate, memory, transports,
  *       embeddings, skill watching, the environment description, and live
  *       DAG streaming.
  */

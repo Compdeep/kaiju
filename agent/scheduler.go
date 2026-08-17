@@ -340,7 +340,6 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	var reflectionAggregate *bool // reflector's recommendation on aggregation
 	reflectionInflight := false   // true while a reflection node is running — prevents double injection
 	workSinceReflection := 0      // tool nodes completed since last reflection — used to ensure final reflect
-	floorForced := false          // true once a conclusion floor has grafted remediation (fires at most once)
 	// debugGraftPending tracks debugger-grafted nodes that haven't reached a
 	// terminal state yet. Reflection injection waits for this to reach 0
 	// before firing so we don't re-read stale failure state mid-fix.
@@ -1143,34 +1142,6 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						}
 					default:
 						diminishingStreak = 0
-					}
-
-					// Conclusion floor: a reflection may not CONCLUDE while a hard
-					// structural precondition is unmet. The floor's domain logic lives
-					// entirely in the edge and hands back opaque remediation steps; we
-					// graft them and loop ONCE (floorForced), then let the next
-					// reflection conclude on the fuller evidence. The scheduler knows
-					// nothing about what the steps are — only that a floor asked for them.
-					if ref.Decision == "conclude" && !floorForced {
-						if floorSteps, floorLabel := a.conclusionFloor(graph, 6); len(floorSteps) > 0 {
-							if floorNodes, ferr := planStepsToNodes(floorSteps, graph, budget, a.registry, dagMode); ferr == nil {
-								grafted := 0
-								for _, fn := range floorNodes {
-									if fn != nil {
-										fn.SpawnedBy = comp.NodeID
-										graph.AddChild(comp.NodeID, fn.ID)
-										grafted++
-									}
-								}
-								if grafted > 0 {
-									floorForced = true
-									ref.Decision = "continue"
-									workSinceReflection = 1 // ensure the next quiescence reflects, not breaks
-									log.Printf("[dag] conclusion floor unmet (%s) — grafted %d step(s), continuing before conclude", floorLabel, grafted)
-									appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "FLOOR", fmt.Sprintf("%s | grafted %d", floorLabel, grafted))
-								}
-							}
-						}
 					}
 
 					switch ref.Decision {

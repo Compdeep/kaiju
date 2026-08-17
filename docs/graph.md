@@ -223,7 +223,7 @@ Decisions steer the scheduler:
 - **replan** — the graph needs to GROW and the goal isn't answered yet. Two shapes, same decision:
   - *a success revealed the next move* — e.g. searches returned URLs → "fetch the 3 URLs the searches surfaced".
   - *a step FAILED and needs fixing* — describe the failure (exact error text, file paths, module names) in `next`. The Executive then plans a `debug` step; the reflector names the move, the Executive plans HOW.
-- **conclude** — the goal is met, OR the request is too vague/underspecified to act on (ask the user to clarify instead of guessing). If `aggregate=false` the reflector's `verdict` is the final answer verbatim; if `aggregate=true` the Aggregator runs. A `conclude` still passes the **conclusion floor** first — a structural precondition (e.g. found search URLs but read none) grafts remediation and defers the conclusion once (see [Edges — anti-fabrication layer](#edges--anti-fabrication-layer)).
+- **conclude** — the goal is met, OR the request is too vague/underspecified to act on (ask the user to clarify instead of guessing). If `aggregate=false` the reflector's `verdict` is the final answer verbatim; if `aggregate=true` the Aggregator runs. A `conclude` stands: nothing overrules it. What the reflector is holding and never followed is reported to it in the block the reframe prepends, and the decision is its own.
 
 The prompt leans hard on the anti-hallucination rule: conclude ONLY when the evidence *answers* the goal — an unfetched URL or an un-followed lead is `replan`, never a confident guess from memory. Transient tool output (empty fetch, HTTP 5xx, timeout, rate limit), out-of-scope failures, and truly-unfixable environment failures are `conclude`, not `replan` — they don't belong in the debugger.
 
@@ -303,7 +303,7 @@ An *edge* frames a hand-off between two steps: it gets the previous step's outpu
 
 Two of these — `coverageEdge` and `groundingEdge` — were removed. Each added a small model call to the reflector, both fired on the same condition so neither could fire alone, and both prepended a block to the same prompt: three calls to answer one question, with the second and third describing the same situation twice. The grounding one also spoke in one application's vocabulary, telling every run it had "real URLs from a search" whatever its tools actually returned.
 
-What survives of them is what the scheduler reads rather than what a model was told: `conclusionFloor`, below.
+What survives of them is what the scheduler reads rather than what a model was told. The block the reframe prepends reports what a run is holding and never followed, and the reflector decides what to do about it; nothing overrules that decision.
 
 - **`validatePlanEdges`** (`executive.go`) — runs at plan time, BEFORE any node fires, over every `${step.N.field}` reference in the plan. It rejects the three ways the planner mis-wires a hand-off, generically for any tool, from the declared output schemas:
   - **self-reference** — a step reads its own output (`${step.i…}` inside step `i`); a step cannot consume itself.
@@ -311,7 +311,6 @@ What survives of them is what the scheduler reads rather than what a model was t
   - **wrong-producer** — a top-level field the producing tool never emits, classically `${step.N.results.0.url}` off a `web_fetch` when a `results[]` list only comes from `web_search`. Only a tool that DECLARES an output schema is checked, and only its top-level field (`fieldExistsInSchema`), so an incomplete deep schema can't false-reject.
   Any broken edge becomes **one re-plan** carrying the exact fault as feedback, rather than a doomed run — a self/out-of-range ref would leak its literal placeholder into the tool (an "invalid URL …"), and a wrong-producer ref would dangle a dead edge the reflector then re-plans forever.
 
-- **`conclusionFloor`** (`references.go`) — a hard structural precondition the scheduler consults before it lets a reflection CONCLUDE. Today's one floor is grounding: a run that found real search URLs but read NONE of them must read some first, or the answer rests on snippets or invention. It returns deterministic `web_fetch` steps for the top unread URLs (sourced from the search, never model-invented); the scheduler grafts them and loops ONCE (`floorForced`), then lets the conclusion stand. The scheduler stays domain-agnostic — it grafts whatever steps come back, knowing nothing about them — so a future floor adds a branch HERE, never in the scheduler. Self-limiting: a run with no search has no grounded URLs and nothing fires.
 
 - **`NeedsSynthesis` / `decideAutoAggMode`** — the aggregator-mode decision (see Aggregator above) is made at **preflight over structural signals**, not left to the model at the end. `NeedsSynthesis` is a preflight flag ("this run must end with a written synthesis"); a run also counts as *complex* when it structurally fanned out to ≥ `complexFanoutFloor` (6) resolved tool nodes. In auto mode (`agg_mode -1`), `decideAutoAggMode` then picks the lane purely over `{compute, complex, evidence, reflector-wants}`:
   - **compute present** → executor lane (a compute run always needs a formatted answer).
@@ -466,7 +465,6 @@ The priority queue, worker pool, preemption, stop/cancel, and interject machiner
 | `internal/agent/microplanner.go` | clean-room debugger — RCA → fix plan |
 | `internal/agent/aggregator.go` | final answer synthesis + `decideAutoAggMode` |
 | `internal/agent/edge_coverage.go` | coverage edge — frames empty/failed gathers so the aggregator acknowledges absence |
-| `internal/agent/edge_grounding.go` | grounding edge + conclusion floor — only-real-search URLs; blocks a conclude that read no sources |
 | `internal/agent/compute.go` | runCompute, computePlan, computeCode |
 | `internal/agent/builtin_compute.go` | ComputeTool schema + dispatch wrapper |
 | `internal/agent/builtin_edit_file.go` | EditFileTool — task_files-required wrapper over the coder |

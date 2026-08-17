@@ -441,7 +441,7 @@
       <div class="gnode"><span class="dot" style="background:#38bdf8">EXE</span><div><div class="gt">Executive</div><div class="gd">The planner. One heavy call emits the DAG of steps (and, on a replan, grows it). Broken <code>${step}</code> wiring is rejected before the run.</div></div></div>
       <div class="gnode"><span class="dot" style="background:#8a8a98;color:#fff">TOOL</span><div><div class="gt">Tool</div><div class="gd">A single capability invocation — <code>bash</code>, <code>file_*</code>, <code>web_*</code>, <code>service</code>, a plugin. Gated by IGX, returns a typed envelope.</div></div></div>
       <div class="gnode"><span class="dot" style="background:#60a5fa">CMP</span><div><div class="gt">Compute</div><div class="gd">A coder model writes a real script, kaiju runs it sandboxed, stdout flows back into the graph — for precision or a library a model can't do in its head.</div></div></div>
-      <div class="gnode"><span class="dot" style="background:#f97316">RFL</span><div><div class="gt">Reflection</div><div class="gd">After each batch (and at quiescence): continue, replan, or conclude. A diminishing-returns brake and a conclusion floor keep it honest.</div></div></div>
+      <div class="gnode"><span class="dot" style="background:#f97316">RFL</span><div><div class="gt">Reflection</div><div class="gd">After each batch (and at quiescence): continue, replan, or conclude. A diminishing-returns brake keeps it from looping.</div></div></div>
       <div class="gnode"><span class="dot" style="background:#eab308">OBS</span><div><div class="gt">Observer</div><div class="gd">A lightweight watcher that can continue, inject a step, cancel, or ask for a reflection — bounded by its own budget.</div></div></div>
       <div class="gnode"><span class="dot" style="background:#eab308">INJ</span><div><div class="gt">Interjection</div><div class="gd">A human message sent into a running query. It becomes the next reflection's focus, steering the run without restarting it.</div></div></div>
       <div class="gnode"><span class="dot" style="background:#ef4444">DBG</span><div><div class="gt">Debug</div><div class="gd">The repair entry-point. A failure grafts a <code>debug</code> super-tool step that opens a root-cause cycle instead of blindly retrying.</div></div></div>
@@ -469,8 +469,7 @@
     <div class="cg">
       <div class="conn"><div class="ln"></div><div class="tip"></div></div>
       <div class="conn"><div class="ln"></div><div class="tip"></div></div>
-      <div class="cstep e-gate"><div class="cn"><span class="b">·</span> Conclusion floor</div><div class="cd">Blocks a "conclude" while a structural precondition is unmet — concluding without reading the sources it found — and grafts remediation instead.</div><div class="cw">conclusionFloor</div></div>
-    </div>
+          </div>
     <p class="note">Every edge is <b>gated</b>: a clean run with no gaps pays nothing. Together with the edge validation above, this is the anti-fabrication layer — the planner is kept from inventing wiring, and the aggregator from inventing evidence.</p>
   </section>
 

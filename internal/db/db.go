@@ -85,11 +85,15 @@ func (d *DB) migrate() error {
 		)`,
 
 		// Scopes
+		// No max_intent column. One was here, holding 2 for every scope on a scale
+		// that runs 0, 100, 200 — a leftover from an older scale of 0, 1, 2 — and no
+		// code ever read it. The ceiling a scope allows is intent_cap, added below.
+		// A database made before this keeps the old column; nothing reads it and
+		// SQLite makes dropping one awkward, so it is left alone.
 		`CREATE TABLE IF NOT EXISTS scopes (
 			name        TEXT PRIMARY KEY,
 			description TEXT NOT NULL DEFAULT '',
-			tools       TEXT NOT NULL DEFAULT '{}',
-			max_intent  INTEGER NOT NULL DEFAULT 2
+			tools       TEXT NOT NULL DEFAULT '{}'
 		)`,
 
 		// Sessions (conversation history)
@@ -202,6 +206,10 @@ func (d *DB) migrate() error {
 		`ALTER TABLE users ADD COLUMN groups TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE messages ADD COLUMN dag_trace TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE scopes ADD COLUMN cap TEXT NOT NULL DEFAULT '{}'`,
+		// How far a run may go for someone holding this scope. Existing scopes
+		// default to the top of the scale, so adding the column takes nothing away
+		// from anybody who already has it — an administrator lowers it deliberately.
+		`ALTER TABLE scopes ADD COLUMN intent_cap INTEGER NOT NULL DEFAULT 200`,
 		`ALTER TABLE intents ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`,
 		// runs.verdict became runs.outcome. A database created before the
 		// rename has the old column and CREATE TABLE IF NOT EXISTS will not

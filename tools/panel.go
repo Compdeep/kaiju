@@ -83,7 +83,7 @@ func (p *PanelPush) Parameters() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (p *PanelPush) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(panelPushData{}))
 }
 
 /*
@@ -104,7 +104,8 @@ func (p *PanelPush) ExecuteTyped(_ context.Context, params map[string]any) (tool
 	if plugin == "" || content == "" {
 		return toolapi.ToolMessage{}, fmt.Errorf("panel_push: plugin and content are required")
 	}
-	return toolapi.ToolText(fmt.Sprintf("pushed %d bytes to %s panel", len(content), plugin)), nil
+	return toolapi.ToolOK("status", fmt.Sprintf("pushed %d bytes to %s panel", len(content), plugin),
+		panelPushData{Plugin: plugin, Bytes: len(content)}), nil
 }
 
 /*

@@ -36,6 +36,15 @@ type ToolMessage struct {
 	Data    json.RawMessage `json:"data,omitempty"`    // the tool's own payload, verbatim + field-addressable
 }
 
+// EvidenceBudget is how much of one step's result reaches a prompt.
+//
+// Here rather than beside the cap that applies it, because a tool that assembles its
+// own evidence has to know the size it is writing into: web_research reads several
+// pages into one result, and without a budget it writes as much as it likes and the
+// cap takes the head and tail of whatever that came to — cutting across its sources
+// rather than choosing between them.
+const EvidenceBudget = 8000
+
 func marshalData(data any) json.RawMessage {
 	if data == nil {
 		return nil

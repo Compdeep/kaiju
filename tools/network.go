@@ -80,8 +80,28 @@ func (n *NetInfo) Parameters() json.RawMessage {
  * desc: Defines the output structure with action type and result string.
  * return: JSON schema as raw bytes
  */
+// OutputSchema names the payload fields, per action.
+//
+// It declared none of them, so a planner writing a later step had nothing to name
+// and could only quote the whole text back. Which fields are present depends on
+// the action asked for, and the description says so rather than pretending to one
+// fixed set: every action carries "action" and a count, and the rest belong to
+// one action each.
 func (n *NetInfo) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fields depend on action. All: action, count.",` +
+		`"properties":{` +
+		`"action":{"type":"string","enum":["interfaces","connectivity","dns","ports","connections"]},` +
+		`"count":{"type":"integer","description":"interfaces: interfaces up. dns: addresses. ports: listeners. connections: rows kept."},` +
+		`"interfaces":{"type":"array","description":"action=interfaces","items":{"type":"object","properties":{"name":{"type":"string"},"flags":{"type":"string"},"mac":{"type":"string"},"addrs":{"type":"array","items":{"type":"string"}}}}},` +
+		`"host":{"type":"string","description":"action=connectivity|dns"},` +
+		`"port":{"type":"integer","description":"action=connectivity"},` +
+		`"reachable":{"type":"boolean","description":"action=connectivity"},` +
+		`"latency_ms":{"type":"integer","description":"action=connectivity"},` +
+		`"addresses":{"type":"array","description":"action=dns","items":{"type":"string"}},` +
+		`"truncated":{"type":"boolean","description":"action=ports: the text was cut at 4KB, count was not"},` +
+		`"error":{"type":"string","description":"action=connectivity|dns: why it did not answer"},` +
+		`"output":{"type":"string","description":"action=connections: the listing command failed and this is what it printed"}` +
+		`}}`)
 }
 
 /*
@@ -162,7 +182,24 @@ func netInterfaces() (toolapi.ToolMessage, error) {
 		})
 	}
 
-	return toolapi.ToolOK("net", "", map[string]any{"action": "interfaces", "interfaces": result}), nil
+	// Text as well as fields. An action that filled only data was readable —
+	// the engine falls back to the raw payload as evidence when content is
+	// empty — but it reached the model as JSON while the other actions of the
+	// same tool reached it as a listing, and anything reading content directly
+	// showed nothing at all.
+	var text strings.Builder
+	for _, i := range result {
+		text.WriteString(i.Name + " " + strings.Join(i.Addrs, " "))
+		if i.MAC != "" {
+			text.WriteString(" mac=" + i.MAC)
+		}
+		text.WriteString("\n")
+	}
+	if len(result) == 0 {
+		return toolapi.ToolEmpty("net", "no interface on this host is up"), nil
+	}
+	return toolapi.ToolOK("net", strings.TrimRight(text.String(), "\n"),
+		map[string]any{"action": "interfaces", "count": len(result), "interfaces": result}), nil
 }
 
 /*
@@ -184,10 +221,14 @@ func netConnectivity(ctx context.Context, host string, port int) (toolapi.ToolMe
 	elapsed := time.Since(start)
 
 	if err != nil {
-		return toolapi.ToolOK("net", "", map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": false, "error": err.Error(), "latency_ms": elapsed.Milliseconds()}), nil
+		return toolapi.ToolOK("net",
+			fmt.Sprintf("%s is not reachable after %dms: %v", addr, elapsed.Milliseconds(), err),
+			map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": false, "error": err.Error(), "latency_ms": elapsed.Milliseconds()}), nil
 	}
 	conn.Close()
-	return toolapi.ToolOK("net", "", map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": true, "latency_ms": elapsed.Milliseconds()}), nil
+	return toolapi.ToolOK("net",
+		fmt.Sprintf("%s is reachable, %dms", addr, elapsed.Milliseconds()),
+		map[string]any{"action": "connectivity", "host": host, "port": port, "reachable": true, "latency_ms": elapsed.Milliseconds()}), nil
 }
 
 /*
@@ -205,10 +246,13 @@ func netDNS(ctx context.Context, host string) (toolapi.ToolMessage, error) {
 	resolver := &net.Resolver{}
 	addrs, err := resolver.LookupHost(ctx, host)
 	if err != nil {
-		return toolapi.ToolOK("net", "", map[string]any{"action": "dns", "host": host, "error": err.Error()}), nil
+		return toolapi.ToolOK("net",
+			fmt.Sprintf("%s did not resolve: %v", host, err),
+			map[string]any{"action": "dns", "host": host, "error": err.Error()}), nil
 	}
 
-	return toolapi.ToolOK("net", "", map[string]any{"action": "dns", "host": host, "addresses": addrs}), nil
+	return toolapi.ToolOK("net", host+" resolves to "+strings.Join(addrs, " "),
+		map[string]any{"action": "dns", "host": host, "count": len(addrs), "addresses": addrs}), nil
 }
 
 /*
@@ -243,11 +287,30 @@ func netListeningPorts(ctx context.Context) (toolapi.ToolMessage, error) {
 		}
 	}
 
+	// Counted before truncating, so the number is the number of listeners rather
+	// than the number that fitted in 4KB. The header row is not a listener.
+	count := 0
+	for i, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if i == 0 || strings.TrimSpace(line) == "" {
+			continue
+		}
+		count++
+	}
+	if count == 0 {
+		return toolapi.ToolEmpty("net", "nothing is listening on this host"), nil
+	}
+
 	output := string(out)
+	truncated := false
 	if len(output) > 4096 {
 		output = output[:4096] + "\n... (truncated)"
+		truncated = true
 	}
-	return toolapi.ToolOK("net", output, nil), nil
+	// A payload as well as the text, so a later step can name a field of what
+	// this returned. With data nil it could only quote the whole listing.
+	return toolapi.ToolOK("net", output, map[string]any{
+		"action": "ports", "count": count, "truncated": truncated,
+	}), nil
 }
 
 var _ toolapi.Tool = (*NetInfo)(nil)
@@ -329,5 +392,6 @@ func netConnections(ctx context.Context, host string, port int) (toolapi.ToolMes
 		}
 		return toolapi.ToolEmpty("net", "this host has no connections"), nil
 	}
-	return toolapi.ToolOK("net", strings.Join(kept, "\n"), map[string]any{"count": count}), nil
+	return toolapi.ToolOK("net", strings.Join(kept, "\n"),
+		map[string]any{"action": "connections", "count": count}), nil
 }

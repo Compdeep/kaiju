@@ -61,7 +61,7 @@ func (f *FileRead) Impact(map[string]any) int { return toolapi.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (f *FileRead) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(fileReadData{}))
 }
 
 /*
@@ -159,16 +159,25 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 		return toolapi.ToolEmpty("text", "the file is empty: "+path), nil
 	}
 
+	// The counts were in the text and nowhere else, so a step that needed to know
+	// whether it had the whole file had to read a parenthesis out of prose.
 	if tailLines > 0 {
+		shown := len(ring)
 		if total > tailLines {
 			ring = append([]string{fmt.Sprintf("... (showing the last %d of %d lines)", tailLines, total)}, ring...)
 		}
-		return toolapi.ToolText(strings.Join(ring, "\n")), nil
+		return toolapi.ToolOK("text", strings.Join(ring, "\n"), fileReadData{
+			Path: path, LinesShown: shown, LinesTotal: total,
+			Truncated: total > tailLines, FromEnd: true,
+		}), nil
 	}
+	shown := len(head)
 	if total > maxLines {
 		head = append(head, fmt.Sprintf("... (truncated at %d of %d lines)", maxLines, total))
 	}
-	return toolapi.ToolText(strings.Join(head, "\n")), nil
+	return toolapi.ToolOK("text", strings.Join(head, "\n"), fileReadData{
+		Path: path, LinesShown: shown, LinesTotal: total, Truncated: total > maxLines,
+	}), nil
 }
 
 var _ toolapi.Tool = (*FileRead)(nil)
@@ -220,7 +229,7 @@ func (f *FileWrite) Impact(map[string]any) int { return toolapi.ImpactAffect }
  * return: JSON schema as raw bytes
  */
 func (f *FileWrite) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(fileWriteData{}))
 }
 
 /*
@@ -287,13 +296,15 @@ func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (tool
 		if _, err := f2.WriteString(content); err != nil {
 			return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 		}
-		return toolapi.ToolText(fmt.Sprintf("appended %d bytes to %s", len(content), path)), nil
+		return toolapi.ToolOK("status", fmt.Sprintf("appended %d bytes to %s", len(content), path),
+			fileWriteData{Path: path, Bytes: len(content), Appended: true}), nil
 	}
 
 	if err := agent.OverwriteFile(path, content); err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 	}
-	return toolapi.ToolText(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
+	return toolapi.ToolOK("status", fmt.Sprintf("wrote %d bytes to %s", len(content), path),
+		fileWriteData{Path: path, Bytes: len(content)}), nil
 }
 
 /*

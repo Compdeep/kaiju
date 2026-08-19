@@ -80,7 +80,7 @@ func (w *WebFetch) Impact(map[string]any) int { return toolapi.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (w *WebFetch) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"},"url":{"type":"string","description":"the URL this call was given, echoed back so a later step can say which page a result came from. It is not a link found on the page, and fetching it again returns this same result — see the warning above about not chaining from this tool into another web_fetch"}}}`)
 }
 
 /*
@@ -288,6 +288,11 @@ func withURL(rawURL string, m toolapi.ToolMessage, err error) (toolapi.ToolMessa
 	if len(m.Data) > 0 {
 		_ = json.Unmarshal(m.Data, &obj)
 	}
+	// The URL that was asked for, echoed onto every result so a reader can say which
+	// page it came from. It was set here and declared nowhere, which made this the
+	// one tool returning a field its schema denied having — the description says in
+	// capitals that this tool produces no URLs, and meant no *discovered* ones. The
+	// declaration now names it and says which kind it is.
 	obj["url"] = rawURL
 	if b, e := json.Marshal(obj); e == nil {
 		m.Data = b

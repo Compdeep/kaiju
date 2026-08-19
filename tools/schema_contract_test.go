@@ -36,28 +36,29 @@ import (
 // dependencies: nothing here is executed, only asked what it declares.
 func schemaFixtures() map[string]toolapi.Tool {
 	return map[string]toolapi.Tool{
-		"archive":       &Archive{},
-		"bash":          &Bash{},
-		"clipboard":     &Clipboard{},
-		"disk_usage":    &DiskUsage{},
-		"env_list":      &EnvList{},
-		"file_list":     &FileList{},
-		"file_read":     &FileRead{},
-		"file_write":    &FileWrite{},
-		"git":           &Git{},
-		"memory_recall": &MemoryRecall{},
-		"memory_search": &MemorySearch{},
-		"memory_store":  &MemoryStore{},
-		"net_info":      &NetInfo{},
-		"panel_push":    &PanelPush{},
-		"plugin_list":   &PluginList{},
-		"process_kill":  &ProcessKill{},
-		"process_list":  &ProcessList{},
-		"service":       &Service{},
-		"sysinfo":       &Sysinfo{},
-		"web_fetch":     &WebFetch{},
-		"web_research":  &WebResearch{},
-		"web_search":    &WebSearch{},
+		"archive":        &Archive{},
+		"bash":           &Bash{},
+		"clipboard":      &Clipboard{},
+		"disk_usage":     &DiskUsage{},
+		"env_list":       &EnvList{},
+		"file_list":      &FileList{},
+		"file_read":      &FileRead{},
+		"file_write":     &FileWrite{},
+		"git":            &Git{},
+		"memory_recall":  &MemoryRecall{},
+		"memory_search":  &MemorySearch{},
+		"memory_store":   &MemoryStore{},
+		"net_info":       &NetInfo{},
+		"office_extract": &OfficeExtract{},
+		"panel_push":     &PanelPush{},
+		"plugin_list":    &PluginList{},
+		"process_kill":   &ProcessKill{},
+		"process_list":   &ProcessList{},
+		"service":        &Service{},
+		"sysinfo":        &Sysinfo{},
+		"web_fetch":      &WebFetch{},
+		"web_research":   &WebResearch{},
+		"web_search":     &WebSearch{},
 	}
 }
 
@@ -211,13 +212,24 @@ func TestEveryToolWithASchemaIsInTheInventory(t *testing.T) {
 	}
 }
 
-// A field declared in a schema must appear somewhere in the file that declares
+// A field declared in a schema must appear somewhere in the source that declares
 // it.
 //
 // A schema that lies is worse than none: the planner writes a reference to a
 // field the tool never sets, and the step fails at fire time on a path that
 // looked validated. This catches the case that matters most — a field invented
 // while writing the schema, which no run will ever produce.
+//
+// A schema derived with PayloadSchemaOf takes its fields from a struct's json
+// tags, so the field names are in the file that declares the struct rather than
+// in the file that declares the tool. Both are searched, and the struct is found
+// by reading the type name out of the OutputSchema call, so the two stay bound to
+// each other rather than the search widening to the whole package.
+//
+// The declarations themselves are cut out of the text before it is searched.
+// Without that, a field's own declaration answers the search, so every schema
+// written out by hand passes by containing itself — which this check did, proven by
+// declaring a field no run produces and watching it pass.
 //
 // "content" is exempt: it is the envelope's, not the payload's, and never
 // appears as a key in the tool's own source.
@@ -260,6 +272,34 @@ func TestNoSchemaDeclaresAFieldThatAppearsNowhere(t *testing.T) {
 			t.Errorf("%s declares a schema in a file this test cannot find", name)
 			continue
 		}
+		where := fileOf[typ.Name()]
+
+		// The derivation is read from the file as written, and the search happens
+		// over a copy with the declarations cut out. Reading the stripped copy for
+		// the derivation finds nothing, because the call being looked for is inside
+		// the body that was cut.
+		declaring := src
+		src = withoutSchemaDeclarations(src)
+
+		// A derived schema names its payload struct in the call. The struct may be
+		// declared elsewhere in the package, so that file is searched as well.
+		if payloadType, ok := derivedPayloadType(declaring, typ.Name()); ok {
+			decl := regexp.MustCompile(`type ` + payloadType + ` struct`)
+			found := false
+			for f, other := range sources {
+				if decl.MatchString(other) {
+					src += "\n" + other
+					where += " or " + f
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s derives its schema from %s and no file in this package declares that type",
+					name, payloadType)
+				continue
+			}
+		}
 
 		payload := toolapi.PayloadSchema(schema)
 		if payload == nil {
@@ -276,11 +316,57 @@ func TestNoSchemaDeclaresAFieldThatAppearsNowhere(t *testing.T) {
 			if field == "content" {
 				continue
 			}
-			if !strings.Contains(src, `"`+field+`"`) {
+			// A json tag may carry options after the name — `json:"path,omitempty"` —
+			// so the name alone in quotes is not there to find. Both forms count.
+			if !strings.Contains(src, `"`+field+`"`) && !strings.Contains(src, `"`+field+`,`) {
 				t.Errorf("%s declares %q and nothing in %s ever sets it — "+
 					"a planner told about this field would reference something no run produces",
-					name, field, fileOf[typ.Name()])
+					name, field, where)
 			}
+		}
+	}
+}
+
+// derivedPayloadType reads the struct name out of a tool's OutputSchema.
+//
+// Matches PayloadSchemaOf(xData{}) and PayloadSchemaOfWithNote(xData{}, "..."),
+// and only inside the named type's own OutputSchema method, so one file holding
+// several tools does not attribute one tool's payload to another.
+func derivedPayloadType(src, typeName string) (string, bool) {
+	start := regexp.MustCompile(`func \(\w+ \*` + typeName + `\) OutputSchema\(\)`).FindStringIndex(src)
+	if start == nil {
+		return "", false
+	}
+	body := src[start[1]:]
+	if end := strings.Index(body, "\n}"); end > 0 {
+		body = body[:end]
+	}
+	m := regexp.MustCompile(`PayloadSchemaOf(?:WithNote)?\((\w+)\{\}`).FindStringSubmatch(body)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// withoutSchemaDeclarations returns a file's text with every OutputSchema body
+// removed, so a search for a field name cannot be answered by the declaration that
+// named it.
+func withoutSchemaDeclarations(src string) string {
+	re := regexp.MustCompile(`func \(\w+ \*\w+\) OutputSchema\(\)`)
+	var b strings.Builder
+	rest := src
+	for {
+		loc := re.FindStringIndex(rest)
+		if loc == nil {
+			b.WriteString(rest)
+			return b.String()
+		}
+		b.WriteString(rest[:loc[0]])
+		rest = rest[loc[1]:]
+		if end := strings.Index(rest, "\n}"); end >= 0 {
+			rest = rest[end+2:]
+		} else {
+			return b.String()
 		}
 	}
 }

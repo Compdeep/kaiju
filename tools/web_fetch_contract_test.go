@@ -392,3 +392,30 @@ func TestWebFetch_PageWithNothingReadableIsEmpty(t *testing.T) {
 		t.Error("an empty fetch should say why, and which URL it was")
 	}
 }
+
+// The URL on every result is declared, and says which kind of URL it is.
+//
+// web.go sets url on every result while the declaration said, in capitals, that this
+// tool produces no URLs — meaning none discovered on the page. So it was the one tool
+// in either repository returning a field its own schema denied having, found by
+// comparing produced keys against declared ones across all 63.
+func TestWebFetchDeclaresTheURLItEchoes(t *testing.T) {
+	schema := string(NewWebFetch().OutputSchema())
+	fields, ok := toolapi.DeclaredPayloadFields(NewWebFetch().OutputSchema())
+	if !ok {
+		t.Fatal("web_fetch declares no payload")
+	}
+	found := false
+	for _, f := range fields {
+		if f == "url" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("url is produced on every result and not declared: %v", fields)
+	}
+	// And the description still steers a planner away from chaining fetch to fetch.
+	if !strings.Contains(schema, "not a link found on the page") {
+		t.Errorf("the declaration does not say which kind of URL this is: %s", schema)
+	}
+}

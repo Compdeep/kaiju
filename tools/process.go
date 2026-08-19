@@ -57,7 +57,7 @@ func (p *ProcessList) Impact(map[string]any) int { return toolapi.ImpactObserve 
  * return: JSON schema as raw bytes
  */
 func (p *ProcessList) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(processListData{}))
 }
 
 /*
@@ -134,7 +134,17 @@ func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (
 		}
 	}
 
-	return toolapi.ToolText(strings.Join(result, "\n")), nil
+	// The table was the whole answer, so a step that found a suspicious process in
+	// it had to carry the line forward as text to name its pid. The rows say the
+	// same thing in fields, and are empty on a platform whose columns are not the
+	// ones parsed, where the table is still complete.
+	return toolapi.ToolOK("processes", strings.Join(result, "\n"), processListData{
+		Count:     count,
+		Limit:     limit,
+		Filter:    filter,
+		AtLimit:   count >= limit,
+		Processes: parsePsRows(result),
+	}), nil
 }
 
 var _ toolapi.Tool = (*ProcessList)(nil)

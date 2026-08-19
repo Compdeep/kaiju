@@ -3,7 +3,8 @@ package db
 import (
 	"encoding/json"
 	"fmt"
-	"math"
+	"github.com/Compdeep/kaiju/agent/toolapi"
+	"github.com/Compdeep/kaiju/permissions"
 )
 
 /*
@@ -15,6 +16,10 @@ type Scope struct {
 	Description string         `json:"description"`
 	Tools       []string       `json:"tools"`
 	Cap         map[string]int `json:"cap,omitempty"`
+	// IntentCap is how far a run may go for someone holding this scope, on the same
+	// scale as a tool's impact: 0 observe, 100 affect, 200 control. A person's own
+	// ceiling still applies on top, and the lower of the two wins.
+	IntentCap int `json:"intentCap"`
 }
 
 /*
@@ -27,8 +32,8 @@ func (d *DB) CreateScope(s Scope) error {
 	toolsJSON, _ := json.Marshal(s.Tools)
 	capJSON, _ := json.Marshal(s.Cap)
 	_, err := d.conn.Exec(
-		`INSERT INTO scopes (name, description, tools, cap) VALUES (?, ?, ?, ?)`,
-		s.Name, s.Description, string(toolsJSON), string(capJSON),
+		`INSERT INTO scopes (name, description, tools, cap, intent_cap) VALUES (?, ?, ?, ?, ?)`,
+		s.Name, s.Description, string(toolsJSON), string(capJSON), s.IntentCap,
 	)
 	if err != nil {
 		return fmt.Errorf("db: create scope: %w", err)
@@ -43,10 +48,10 @@ func (d *DB) CreateScope(s Scope) error {
  * return: pointer to the Scope and nil error, or nil and an error if not found
  */
 func (d *DB) GetScope(name string) (*Scope, error) {
-	row := d.conn.QueryRow(`SELECT name, description, tools, cap FROM scopes WHERE name = ?`, name)
+	row := d.conn.QueryRow(`SELECT name, description, tools, cap, intent_cap FROM scopes WHERE name = ?`, name)
 	var s Scope
 	var toolsJSON, capJSON string
-	if err := row.Scan(&s.Name, &s.Description, &toolsJSON, &capJSON); err != nil {
+	if err := row.Scan(&s.Name, &s.Description, &toolsJSON, &capJSON, &s.IntentCap); err != nil {
 		return nil, err
 	}
 	json.Unmarshal([]byte(toolsJSON), &s.Tools)
@@ -63,7 +68,7 @@ func (d *DB) GetScope(name string) (*Scope, error) {
  * return: slice of all Scopes and nil error, or nil and an error on query failure
  */
 func (d *DB) ListScopes() ([]Scope, error) {
-	rows, err := d.conn.Query(`SELECT name, description, tools, cap FROM scopes ORDER BY name`)
+	rows, err := d.conn.Query(`SELECT name, description, tools, cap, intent_cap FROM scopes ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +78,7 @@ func (d *DB) ListScopes() ([]Scope, error) {
 	for rows.Next() {
 		var s Scope
 		var toolsJSON, capJSON string
-		if err := rows.Scan(&s.Name, &s.Description, &toolsJSON, &capJSON); err != nil {
+		if err := rows.Scan(&s.Name, &s.Description, &toolsJSON, &capJSON, &s.IntentCap); err != nil {
 			return nil, err
 		}
 		json.Unmarshal([]byte(toolsJSON), &s.Tools)
@@ -97,8 +102,8 @@ func (d *DB) UpdateScope(name string, s Scope) error {
 	toolsJSON, _ := json.Marshal(s.Tools)
 	capJSON, _ := json.Marshal(s.Cap)
 	result, err := d.conn.Exec(
-		`UPDATE scopes SET description = ?, tools = ?, cap = ? WHERE name = ?`,
-		s.Description, string(toolsJSON), string(capJSON), name,
+		`UPDATE scopes SET description = ?, tools = ?, cap = ?, intent_cap = ? WHERE name = ?`,
+		s.Description, string(toolsJSON), string(capJSON), s.IntentCap, name,
 	)
 	if err != nil {
 		return err
@@ -140,59 +145,55 @@ type UserScopeResult struct {
 }
 
 /*
- * ResolveUserScope merges all scopes assigned to a user into a single permission set.
- * desc: Unions allowed tools across scopes, takes the strictest per-tool cap, and caps intent at the user's max_intent. Returns deny-all if user has no scopes.
- * param: user - the User whose scopes should be resolved
- * return: merged UserScopeResult and nil error, or nil and an error on scope lookup failure
+ * ResolveUserScope works out what a user may do.
+ *
+ * The rule itself lives in the permissions package, where an application embedding this
+ * one can reach it. It was written here as well, and the two copies came to disagree:
+ * this one never read a user's groups, so somebody put in a group holding permissions
+ * received none of them, while the application's copy granted them. Neither program
+ * could see the other's version, so nothing could report the difference.
+ *
+ * This now reads the rows and hands the values over. Every scope and group is fetched
+ * rather than the few a user names, because there are a handful of each and one query
+ * apiece is simpler to read than a loop of lookups.
+ *
+ * param: user - the user to resolve.
+ * return: what they may do, or the error from reading the rows.
  */
 func (d *DB) ResolveUserScope(user *User) (*UserScopeResult, error) {
-	if len(user.Scopes) == 0 {
-		return &UserScopeResult{
-			Username:     user.Username,
-			AllowedTools: make(map[string]bool),
-			MaxImpact:    make(map[string]int),
-			MaxIntent:    0,
-		}, nil
+	allScopes, err := d.ListScopes()
+	if err != nil {
+		return nil, fmt.Errorf("db: resolve scope for %q: %w", user.Username, err)
+	}
+	allGroups, err := d.ListGroups()
+	if err != nil {
+		return nil, fmt.Errorf("db: resolve scope for %q: %w", user.Username, err)
 	}
 
-	resolved := &UserScopeResult{
-		Username:     user.Username,
-		AllowedTools: make(map[string]bool),
-		MaxImpact:    make(map[string]int),
-		// Start at infinity so the min-walk below finds the real ceiling
-		// from the user's max_intent.
-		MaxIntent: math.MaxInt32,
-	}
-
-	for _, scopeName := range user.Scopes {
-		scope, err := d.GetScope(scopeName)
-		if err != nil {
-			continue // scope not found, skip
-		}
-
-		// Tools: union
-		for _, tool := range scope.Tools {
-			resolved.AllowedTools[tool] = true
-		}
-
-		// Caps: strictest wins per tool
-		for tool, cap := range scope.Cap {
-			if existing, ok := resolved.MaxImpact[tool]; ok {
-				if cap < existing {
-					resolved.MaxImpact[tool] = cap
-				}
-			} else {
-				resolved.MaxImpact[tool] = cap
-			}
+	scopes := make(map[string]permissions.Scope, len(allScopes))
+	for _, s := range allScopes {
+		scopes[s.Name] = permissions.Scope{
+			Name: s.Name, Tools: s.Tools, Cap: s.Cap, IntentCap: s.IntentCap,
 		}
 	}
-
-	// Cap by user's own max_intent
-	if user.MaxIntent < resolved.MaxIntent {
-		resolved.MaxIntent = user.MaxIntent
+	groups := make(map[string]permissions.Group, len(allGroups))
+	for _, g := range allGroups {
+		groups[g.Name] = permissions.Group{Name: g.Name, Scopes: g.Scopes}
 	}
 
-	return resolved, nil
+	answer := permissions.Resolve(permissions.User{
+		Username:  user.Username,
+		Scopes:    user.Scopes,
+		Groups:    user.Groups,
+		MaxIntent: user.MaxIntent,
+	}, scopes, groups)
+
+	return &UserScopeResult{
+		Username:     answer.Username,
+		AllowedTools: answer.AllowedTools,
+		MaxImpact:    answer.MaxImpact,
+		MaxIntent:    answer.MaxIntent,
+	}, nil
 }
 
 /*
@@ -206,12 +207,14 @@ func (d *DB) SeedDefaultScopes() error {
 			Name:        "admin",
 			Description: "Full unrestricted access — all tools, no caps",
 			Tools:       []string{"*"},
+			IntentCap:   toolapi.ImpactControl,
 		},
 		{
 			Name:        "standard",
 			Description: "All tools with destructive operations capped",
 			Tools:       []string{"*"},
 			Cap:         map[string]int{"bash": 100, "git": 100},
+			IntentCap:   toolapi.ImpactControl,
 		},
 		{
 			Name:        "readonly",
@@ -221,6 +224,9 @@ func (d *DB) SeedDefaultScopes() error {
 				"process_list", "net_info", "env_list", "disk_usage",
 				"memory_recall", "memory_search", "clipboard",
 			},
+			// Read-only means read-only: this scope reaches nothing that changes
+			// anything, whatever tools a later edit adds to the list above.
+			IntentCap: toolapi.ImpactObserve,
 		},
 	}
 
@@ -228,8 +234,8 @@ func (d *DB) SeedDefaultScopes() error {
 		toolsJSON, _ := json.Marshal(s.Tools)
 		capJSON, _ := json.Marshal(s.Cap)
 		d.conn.Exec(
-			`INSERT OR IGNORE INTO scopes (name, description, tools, cap) VALUES (?, ?, ?, ?)`,
-			s.Name, s.Description, string(toolsJSON), string(capJSON),
+			`INSERT OR IGNORE INTO scopes (name, description, tools, cap, intent_cap) VALUES (?, ?, ?, ?, ?)`,
+			s.Name, s.Description, string(toolsJSON), string(capJSON), s.IntentCap,
 		)
 	}
 	return nil

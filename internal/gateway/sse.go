@@ -31,17 +31,10 @@ import (
  * return: an http.HandlerFunc that streams server-sent events until the client disconnects
  */
 func SSEHandler(ag *agent.Agent, database *db.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming not supported", http.StatusInternalServerError)
-			return
-		}
-
+	return streamDAG(ag, func(r *http.Request) (func(string) bool, bool) {
 		claims, ok := ClaimsFromContext(r.Context())
 		if !ok {
-			http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
-			return
+			return nil, false
 		}
 		principal := claims.Username
 
@@ -50,7 +43,7 @@ func SSEHandler(ag *agent.Agent, database *db.DB) http.HandlerFunc {
 		// session belongs to this principal, or it never will. The DB is touched
 		// at most once per distinct session seen on this connection.
 		owned := map[string]bool{}
-		ownsSession := func(sessionID string) bool {
+		return func(sessionID string) bool {
 			if sessionID == "" {
 				return false // unattributable — never forward on a per-principal stream
 			}
@@ -61,6 +54,53 @@ func SSEHandler(ag *agent.Agent, database *db.DB) http.HandlerFunc {
 			v := err == nil
 			owned[sessionID] = v
 			return v
+		}, true
+	})
+}
+
+/*
+ * SSEHandlerSinglePrincipal streams every DAG event, filtering nothing.
+ * desc: For a deployment that has no sign-in, where the transport is the
+ *       boundary rather than a token — an interface bound to a loopback address
+ *       inside another product, reached only by whoever is already on that
+ *       machine. There is one caller, so every event is that caller's.
+ *
+ *       It also forwards events carrying no session at all, which the filtered
+ *       handler drops as unattributable. Without a store there are no sessions,
+ *       so those are the only events there are.
+ *
+ *       Do NOT mount this where more than one principal can reach it. The
+ *       filtered SSEHandler is the one that keeps them apart.
+ * param: ag - the agent whose DAG events are streamed
+ * return: an http.HandlerFunc that streams server-sent events until the client disconnects
+ */
+func SSEHandlerSinglePrincipal(ag *agent.Agent) http.HandlerFunc {
+	return streamDAG(ag, func(*http.Request) (func(string) bool, bool) {
+		return func(string) bool { return true }, true
+	})
+}
+
+/*
+ * streamDAG is the event loop both handlers share.
+ * desc: admit runs once when the stream opens and returns the per-event
+ *       ownership test, or false to refuse the connection. Everything after
+ *       that is identical between the two, which is why it is written once.
+ * param: ag - the agent whose DAG events are streamed.
+ * param: admit - decides whether the caller may connect and what it may see.
+ * return: the handler.
+ */
+func streamDAG(ag *agent.Agent, admit func(*http.Request) (func(string) bool, bool)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			return
+		}
+
+		ownsSession, ok := admit(r)
+		if !ok {
+			http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+			return
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")

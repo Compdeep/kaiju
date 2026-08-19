@@ -25,10 +25,31 @@
                       <span class="tool-desc">{{ t.description }}</span>
                     </div>
                     <span :class="['badge', impactClass(t.default_impact)]">{{ impactLabel(t.default_impact) }}</span>
+
+                    <!-- Reachable from elsewhere in the installation: shown, and
+                         not changed from here. Granting or withdrawing that is a
+                         decision about the whole installation, not this machine. -->
+                    <span v-if="t.reach === 'everywhere'" class="reach reach-shared" title="Reachable from elsewhere in this installation. Changed centrally, not here.">
+                      shared
+                    </span>
+                    <!-- Read-only when this build was given nowhere to keep a
+                         change: showing a switch that forgets is worse than
+                         showing none. -->
+                    <span v-else-if="!writable" class="reach reach-static">{{ t.reach || 'local' }}</span>
+                    <button
+                      v-else
+                      class="reach reach-toggle"
+                      :class="{ on: t.reach !== 'off', busy: pending === t.name }"
+                      :disabled="pending === t.name"
+                      :title="t.reach === 'off' ? 'Switch on for this machine' : 'Switch off on this machine'"
+                      @click="toggle(t)">
+                      {{ t.reach === 'off' ? 'off' : 'on' }}
+                    </button>
                   </div>
                 </div>
               </div>
             </template>
+            <p v-if="problem" class="tool-problem">{{ problem }}</p>
             <p v-if="!tools.length" class="empty">no tools loaded</p>
           </div>
 
@@ -67,6 +88,13 @@ defineEmits(['close'])
 const tab = ref('tools')
 const tools = ref([])
 const intentOptions = ref([])
+// Which tool is mid-change, so its control cannot be clicked twice.
+const pending = ref('')
+// Whether this build can change anything. Discovered by trying: the route is
+// registered only where the application supplied somewhere to keep a change,
+// so its absence is the answer rather than a separate setting to read.
+const writable = ref(true)
+const problem = ref('')
 
 /**
  * desc: Group tools by source type (skills, custom, builtin) for categorized display
@@ -82,6 +110,35 @@ const toolGroups = computed(() => {
   if (builtin.length) groups.push({ label: 'builtin', tools: builtin })
   return groups
 })
+
+/**
+ * desc: Move one tool between off and local on this machine. A tool reachable
+ * from elsewhere never reaches here — its control is not rendered.
+ * @param {Object} t - the tool row
+ * @returns {Promise<void>}
+ */
+async function toggle(t) {
+  const next = t.reach === 'off' ? 'local' : 'off'
+  pending.value = t.name
+  problem.value = ''
+  try {
+    const res = await api.patch(`/api/v1/tools/${encodeURIComponent(t.name)}`, { reach: next })
+    t.reach = res.reach || next
+    // The change is real either way; this says whether it survives a restart.
+    if (res.kept === false) {
+      problem.value = `${t.name} is ${t.reach} now, but that could not be saved and will revert when this node restarts`
+    }
+  } catch (e) {
+    // A build with nowhere to keep changes has no such route at all.
+    if (String(e.message).includes('404')) {
+      writable.value = false
+    } else {
+      problem.value = e.message
+    }
+  } finally {
+    pending.value = ''
+  }
+}
 
 onMounted(async () => {
   try { tools.value = await api.get('/api/v1/tools') } catch {}
@@ -125,6 +182,23 @@ function impactLabel(rank) {
 </script>
 
 <style scoped>
+.reach {
+  font-size: 10px; font-family: var(--mono); text-transform: lowercase;
+  padding: 2px 8px; border-radius: var(--radius-sm); margin-left: 8px;
+  flex-shrink: 0; min-width: 56px; text-align: center;
+}
+.reach-shared { background: var(--accent-subtle); color: var(--accent); }
+.reach-static { background: var(--surface-hover); color: var(--text-muted); }
+.reach-toggle {
+  border: 1px solid var(--border); background: var(--surface-hover);
+  color: var(--text-muted); cursor: pointer; transition: var(--transition);
+}
+.reach-toggle.on { border-color: var(--signal-green); color: var(--signal-green); background: var(--signal-green-bg); }
+.reach-toggle.busy { opacity: 0.5; cursor: wait; }
+.tool-problem {
+  font-size: 12px; color: var(--signal-amber); margin: 8px 0 0;
+  padding: 8px 10px; background: var(--signal-amber-bg); border-radius: var(--radius-sm);
+}
 .tool-group { margin-bottom: 16px; }
 .tool-group-label {
   font-size: 10px; font-weight: 700; font-family: var(--mono);

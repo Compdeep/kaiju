@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -12,8 +13,40 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Which pages may open a socket here.
+//
+// A websocket is not covered by the rule that stops one site reading another's
+// replies: the handshake is an ordinary request, and once it is accepted the
+// page on the other end can send and receive freely. So accepting every origin
+// meant any page in the same browser could open one of these and talk to the
+// agent. Accepting only this host is the whole fix.
+//
+// A caller that sends no Origin at all is not a browser — a command-line client
+// or another program — and is allowed, because the transport is what decides
+// who reaches it.
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true }, // TODO: tighten for production
+	CheckOrigin: sameHost,
+}
+
+/*
+ * sameHost reports whether a handshake came from a page on this host.
+ * desc: Compares the host in Origin with the host the request was addressed to.
+ *       Hosts, not schemes: this is served over plain HTTP on a loopback
+ *       address, so there is no scheme to compare. An Origin that will not
+ *       parse is refused.
+ * param: r - the handshake request.
+ * return: true when the socket may be opened.
+ */
+func sameHost(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // not a browser
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return u.Host == r.Host
 }
 
 // wsMessage is the JSON wire format for WebSocket messages.

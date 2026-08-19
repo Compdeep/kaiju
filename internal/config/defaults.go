@@ -1,5 +1,7 @@
 package config
 
+import "github.com/Compdeep/kaiju/ui"
+
 /*
  * Default returns a Config with sensible defaults.
  * desc: Provides a fully populated Config using reasonable production defaults for all fields.
@@ -8,6 +10,11 @@ package config
 func Default() *Config {
 	classifierOn := true
 	return &Config{
+		// Every section on: this is kaiju's own interface, and it is the whole
+		// one. An application embedding the interface gets the opposite default
+		// — see the ui package — because the question there is what happens when
+		// somebody forgets. Here nobody can: this line is the answer.
+		UI: ui.Config{Sections: ui.AllSections()},
 		LLM: LLMConfig{
 			Provider:    "openai",
 			Endpoint:    "https://api.openai.com/v1",

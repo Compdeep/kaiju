@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -93,7 +92,7 @@ func (s *Service) freePort(port int) {
 	}
 	killed := false
 	for _, r := range recs {
-		if r.Port != port || r.PID <= 0 || !isAlive(r.PID) {
+		if r.Port != port || r.PID <= 0 || !processIsAlive(r.PID) {
 			continue
 		}
 		// A pid outlives the process that owned it, and the registry survives a
@@ -172,7 +171,7 @@ func (s *Service) reapDead() {
 		if recs[i].Status != "running" {
 			continue
 		}
-		if isAlive(recs[i].PID) {
+		if processIsAlive(recs[i].PID) {
 			s.crashes[recs[i].Name] = 0 // healthy — clear the fast-crash counter
 			continue
 		}
@@ -379,31 +378,6 @@ func (s *Service) findRecord(name string) (*ServiceRecord, []ServiceRecord, int,
 
 // ── Process helpers ──
 
-// isAlive returns true if the PID exists, is owned by us, and is not a
-// zombie. Uses signal 0 for existence check, then reads /proc/<pid>/status
-// to detect zombies (State: Z). Zombies still have a pid entry but are
-// dead — the service tool must not treat them as running.
-func isAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	if syscall.Kill(pid, 0) != nil {
-		return false
-	}
-	// Check for zombie state on Linux
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
-	if err != nil {
-		// Can't read proc — assume alive if signal 0 passed
-		return true
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "State:") {
-			return !strings.Contains(line, "Z (zombie)")
-		}
-	}
-	return true
-}
-
 // killGracefully sends SIGTERM to the service, waits up to timeout, then
 // SIGKILL to anything still there.
 //
@@ -422,65 +396,21 @@ func killGracefully(pid int, timeout time.Duration) error {
 	if pid <= 1 {
 		return nil
 	}
-	if !isAlive(pid) && !groupAlive(pid) {
+	if !processIsAlive(pid) && !treeIsAlive(pid) {
 		return nil
 	}
-	if err := signalGroup(pid, syscall.SIGTERM); err != nil {
-		return fmt.Errorf("sigterm: %w", err)
+	if err := stopProcessTree(pid); err != nil {
+		return fmt.Errorf("asking the process tree to stop: %w", err)
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		reap(pid)
-		if !groupAlive(pid) {
+		reapProcess(pid)
+		if !treeIsAlive(pid) {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return signalGroup(pid, syscall.SIGKILL)
-}
-
-// reap collects the shell if it has exited and we started it.
-//
-// It is spawned as a child of this process and never waited on, so once it
-// exits it stays a zombie until this process does. A zombie is still a member
-// of its process group, so without this the group looks occupied for the whole
-// timeout and every stop takes as long as it is allowed to. Services inherited
-// from a previous run of the agent are not our children; the error says so and
-// there is nothing to do about them, because init reaps those itself.
-func reap(pid int) {
-	var status syscall.WaitStatus
-	_, _ = syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
-}
-
-// signalGroup signals every process in the group led by pid.
-//
-// Setsid at spawn makes the service its own session leader, so its group id is
-// its pid. A record written before that, or one whose process is not a leader,
-// has no such group — those fall back to the process on its own, which is what
-// the tool did for everything until now.
-func signalGroup(pid int, sig syscall.Signal) error {
-	err := syscall.Kill(-pid, sig)
-	if err == nil {
-		return nil
-	}
-	if err != syscall.ESRCH {
-		return err
-	}
-	if err := syscall.Kill(pid, sig); err != nil && err != syscall.ESRCH {
-		return err
-	}
-	return nil
-}
-
-// groupAlive reports whether any process is left in the group led by pgid.
-// Signal 0 asks the question without sending anything; being refused permission
-// is still an answer that something is there.
-func groupAlive(pgid int) bool {
-	if pgid <= 1 {
-		return false
-	}
-	err := syscall.Kill(-pgid, 0)
-	return err == nil || err == syscall.EPERM
+	return killProcessTree(pid)
 }
 
 // ── Actions ──
@@ -532,15 +462,17 @@ func (s *Service) start(params map[string]any) (toolapi.ToolMessage, error) {
 		return toolapi.ToolMessage{}, err
 	}
 	if existing != nil {
-		if isAlive(existing.PID) {
+		if processIsAlive(existing.PID) {
 			// Check if command changed — if so, restart with new command
 			if existing.Command == command {
-				return toolapi.ToolOK("service", "", map[string]any{
-					"status":  "already_running",
-					"name":    existing.Name,
-					"pid":     existing.PID,
-					"message": fmt.Sprintf("service %q already running (pid %d)", name, existing.PID),
-				}), nil
+				return toolapi.ToolOK("service",
+					fmt.Sprintf("%s is already running (pid %d)", existing.Name, existing.PID),
+					map[string]any{
+						"status":  "already_running",
+						"name":    existing.Name,
+						"pid":     existing.PID,
+						"message": fmt.Sprintf("service %q already running (pid %d)", name, existing.PID),
+					}), nil
 			}
 			// Command changed — kill old process and start fresh
 			log.Printf("[service] %s command changed, restarting (old pid %d)", name, existing.PID)
@@ -591,7 +523,7 @@ func (s *Service) start(params map[string]any) (toolapi.ToolMessage, error) {
 	cmd.Dir = workdir
 	cmd.Stdout = outFile
 	cmd.Stderr = errFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setOwnSession(cmd)
 	if err := cmd.Start(); err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("start process: %w", err)
 	}
@@ -630,7 +562,11 @@ func (s *Service) start(params map[string]any) (toolapi.ToolMessage, error) {
 	if port > 0 {
 		result["port"] = int(port)
 	}
-	return toolapi.ToolOK("service", "", result), nil
+	text := fmt.Sprintf("started %s (pid %d)", name, pid)
+	if port > 0 {
+		text += fmt.Sprintf(" on port %d", int(port))
+	}
+	return toolapi.ToolOK("service", text, result), nil
 }
 
 func (s *Service) stop(params map[string]any) (toolapi.ToolMessage, error) {
@@ -647,13 +583,14 @@ func (s *Service) stop(params map[string]any) (toolapi.ToolMessage, error) {
 		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return toolapi.ToolMessage{}, fmt.Errorf("stop: service %q not found", name)
+		return toolapi.ToolEmpty("service", fmt.Sprintf(
+			"no service named %q is registered here, so there was nothing to stop", name)), nil
 	}
 
-	if !isAlive(rec.PID) {
+	if !processIsAlive(rec.PID) {
 		recs[idx].Status = "stopped"
 		_ = s.saveRegistry(recs)
-		return toolapi.ToolOK("service", "", map[string]any{
+		return toolapi.ToolOK("service", name+" was already stopped", map[string]any{
 			"status": "already_stopped",
 			"name":   name,
 		}), nil
@@ -666,7 +603,7 @@ func (s *Service) stop(params map[string]any) (toolapi.ToolMessage, error) {
 	if err := s.saveRegistry(recs); err != nil {
 		return toolapi.ToolMessage{}, err
 	}
-	return toolapi.ToolOK("service", "", map[string]any{
+	return toolapi.ToolOK("service", "stopped "+name, map[string]any{
 		"status": "stopped",
 		"name":   name,
 	}), nil
@@ -683,7 +620,8 @@ func (s *Service) restart(params map[string]any) (toolapi.ToolMessage, error) {
 		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return toolapi.ToolMessage{}, fmt.Errorf("restart: service %q not found", name)
+		return toolapi.ToolEmpty("service", fmt.Sprintf(
+			"no service named %q is registered here, so there was nothing to restart", name)), nil
 	}
 
 	if _, err := s.stop(map[string]any{"name": name}); err != nil {
@@ -710,25 +648,31 @@ func (s *Service) status(params map[string]any) (toolapi.ToolMessage, error) {
 		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return toolapi.ToolMessage{}, fmt.Errorf("status: service %q not found", name)
+		// Not registered is an answer, and asking is how a caller finds out. A Go
+		// error ends the step and takes the answer with it.
+		return toolapi.ToolEmpty("service", fmt.Sprintf(
+			"no service named %q is registered here", name)), nil
 	}
-	alive := isAlive(rec.PID)
+	alive := processIsAlive(rec.PID)
 	status := rec.Status
 	if status == "running" && !alive {
 		status = "crashed"
 	}
-	return toolapi.ToolOK("service", "", map[string]any{
-		"name":       rec.Name,
-		"status":     status,
-		"pid":        rec.PID,
-		"alive":      alive,
-		"command":    rec.Command,
-		"workdir":    rec.Workdir,
-		"started_at": rec.StartedAt.Format(time.RFC3339),
-		"uptime_sec": int(time.Since(rec.StartedAt).Seconds()),
-		"log_out":    rec.LogOut,
-		"log_err":    rec.LogErr,
-	}), nil
+	return toolapi.ToolOK("service",
+		fmt.Sprintf("%s is %s (pid %d, up %ds): %s",
+			rec.Name, status, rec.PID, int(time.Since(rec.StartedAt).Seconds()), rec.Command),
+		map[string]any{
+			"name":       rec.Name,
+			"status":     status,
+			"pid":        rec.PID,
+			"alive":      alive,
+			"command":    rec.Command,
+			"workdir":    rec.Workdir,
+			"started_at": rec.StartedAt.Format(time.RFC3339),
+			"uptime_sec": int(time.Since(rec.StartedAt).Seconds()),
+			"log_out":    rec.LogOut,
+			"log_err":    rec.LogErr,
+		}), nil
 }
 
 func (s *Service) logs(params map[string]any) (toolapi.ToolMessage, error) {
@@ -756,17 +700,31 @@ func (s *Service) logs(params map[string]any) (toolapi.ToolMessage, error) {
 		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return toolapi.ToolMessage{}, fmt.Errorf("logs: service %q not found", name)
+		// Not registered is an answer, and asking is how a caller finds out. A Go
+		// error ends the step and takes the answer with it.
+		return toolapi.ToolEmpty("service", fmt.Sprintf(
+			"no service named %q is registered here", name)), nil
 	}
 
 	result := map[string]any{"name": name}
+	var text strings.Builder
 	if stream == "out" || stream == "both" {
-		result["stdout"] = tailFile(rec.LogOut, linesNum)
+		out := tailFile(rec.LogOut, linesNum)
+		result["stdout"] = out
+		text.WriteString(out)
 	}
 	if stream == "err" || stream == "both" {
-		result["stderr"] = tailFile(rec.LogErr, linesNum)
+		errOut := tailFile(rec.LogErr, linesNum)
+		result["stderr"] = errOut
+		if text.Len() > 0 && errOut != "" {
+			text.WriteString("\n--- standard error ---\n")
+		}
+		text.WriteString(errOut)
 	}
-	return toolapi.ToolOK("service", "", result), nil
+	if strings.TrimSpace(text.String()) == "" {
+		return toolapi.ToolEmpty("service", name+" has written nothing to its logs"), nil
+	}
+	return toolapi.ToolOK("service", text.String(), result), nil
 }
 
 func (s *Service) list() (toolapi.ToolMessage, error) {
@@ -776,7 +734,7 @@ func (s *Service) list() (toolapi.ToolMessage, error) {
 	}
 	out := make([]map[string]any, 0, len(recs))
 	for _, rec := range recs {
-		alive := isAlive(rec.PID)
+		alive := processIsAlive(rec.PID)
 		status := rec.Status
 		if status == "running" && !alive {
 			status = "crashed"
@@ -793,7 +751,16 @@ func (s *Service) list() (toolapi.ToolMessage, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i]["name"].(string) < out[j]["name"].(string)
 	})
-	return toolapi.ToolOK("service", "", map[string]any{"services": out, "count": len(out)}), nil
+	if len(out) == 0 {
+		return toolapi.ToolEmpty("service", "no service is registered"), nil
+	}
+	var listing strings.Builder
+	for _, rec := range out {
+		listing.WriteString(fmt.Sprintf("%s %s pid=%v alive=%v %s\n",
+			rec["name"], rec["status"], rec["pid"], rec["alive"], rec["command"]))
+	}
+	return toolapi.ToolOK("service", strings.TrimRight(listing.String(), "\n"),
+		map[string]any{"services": out, "count": len(out)}), nil
 }
 
 func (s *Service) remove(params map[string]any) (toolapi.ToolMessage, error) {
@@ -809,9 +776,10 @@ func (s *Service) remove(params map[string]any) (toolapi.ToolMessage, error) {
 		return toolapi.ToolMessage{}, err
 	}
 	if rec == nil {
-		return toolapi.ToolMessage{}, fmt.Errorf("remove: service %q not found", name)
+		return toolapi.ToolEmpty("service", fmt.Sprintf(
+			"no service named %q is registered here, so there was nothing to remove", name)), nil
 	}
-	if isAlive(rec.PID) {
+	if processIsAlive(rec.PID) {
 		return toolapi.ToolMessage{}, fmt.Errorf("remove: service %q is still running (stop it first)", name)
 	}
 	recs = append(recs[:idx], recs[idx+1:]...)
@@ -852,6 +820,40 @@ func tailFile(path string, n int) string {
 
 // OutputSchema declares the uniform tool envelope; the service payload is
 // action-specific and carried in data.
+// OutputSchema declares the keys this tool's payload carries, per action.
+//
+// It declared none of them, so a run that started a service could not be followed
+// by one naming its pid, and a planner reading the declaration was told only that
+// there is an envelope.
+//
+// Written out here rather than derived from a struct, unlike the other tools in
+// this package. The payloads are built as maps and stay maps: a struct with
+// omitempty would drop alive when it is false and pid when it is 0, and a struct
+// without it would add every key to every action. Either changes the JSON an
+// existing reader receives. The contract test holds this list to the source by
+// requiring each name to appear in this file, which is where the maps are.
 func (s *Service) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(`{"type":"object",` +
+		`"description":"Which keys are present depends on the action. status, name: every action. services, count: list. stdout, stderr: logs. uptime_sec, alive, workdir: status.",` +
+		`"properties":{` +
+		`"status":{"type":"string","description":"started, already_running, stopped, already_stopped, running or crashed"},` +
+		`"name":{"type":"string","description":"the service"},` +
+		`"pid":{"type":"integer","description":"the process running it"},` +
+		`"alive":{"type":"boolean","description":"whether that process exists now, which is how a crashed service is told from a running one"},` +
+		`"command":{"type":"string","description":"the command line it was started with"},` +
+		`"workdir":{"type":"string","description":"the directory it runs in"},` +
+		`"port":{"type":"integer","description":"the port it was started on, when one was given"},` +
+		`"started_at":{"type":"string","format":"date-time","description":"when it was started"},` +
+		`"uptime_sec":{"type":"integer","description":"seconds since it was started"},` +
+		`"log_out":{"type":"string","description":"path of the file its standard output is written to"},` +
+		`"log_err":{"type":"string","description":"path of the file its standard error is written to"},` +
+		`"stdout":{"type":"string","description":"action=logs: the last lines of standard output"},` +
+		`"stderr":{"type":"string","description":"action=logs: the last lines of standard error"},` +
+		`"message":{"type":"string","description":"why nothing was done, when nothing was done"},` +
+		`"count":{"type":"integer","description":"action=list: how many services are registered"},` +
+		`"services":{"type":"array","description":"action=list: one per registered service",` +
+		`"items":{"type":"object","properties":{` +
+		`"name":{"type":"string"},"status":{"type":"string"},"pid":{"type":"integer"},` +
+		`"alive":{"type":"boolean"},"command":{"type":"string"},"started_at":{"type":"string","format":"date-time"}}}}` +
+		`}}`)
 }

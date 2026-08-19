@@ -605,6 +605,7 @@ func (a *API) handleListTools(w http.ResponseWriter, _ *http.Request) {
 			Impact:      ri.Impact,
 			Enabled:     ri.Enabled,
 			Source:      ri.Source,
+			Reach:       ri.Reach,
 		})
 	}
 	jsonResponse(w, toolInfos, http.StatusOK)

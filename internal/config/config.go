@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/Compdeep/kaiju/ui"
 )
 
 /*
@@ -30,12 +32,19 @@ type Config struct {
 	// holding the endpoint + key. The host (e.g. makeen) selects a provider +
 	// model per request; kaiju resolves the name to the keyed client here. The
 	// KEYS live only here — callers never supply a key, only a selection.
-	Providers  map[string]ProviderConfig `json:"providers,omitempty"`
-	Agent      AgentConfig               `json:"agent"`
-	Channels   ChannelsConfig            `json:"channels"`
-	API        APIConfig                 `json:"api"`
-	Tools      ToolsConfig               `json:"tools"`
-	SkillsDirs []string                  `json:"skills_dirs"`
+	Providers map[string]ProviderConfig `json:"providers,omitempty"`
+	Agent     AgentConfig               `json:"agent"`
+	// UI is what the web interface is told about itself: the brand it wears,
+	// the colour tokens it overrides, and which of its optional parts exist.
+	// Default() switches every section on, because kaiju's own interface is the
+	// whole one; a config file naming a section turns that one off. See the
+	// ui package for why the sections default the other way for an application
+	// that supplies nothing at all.
+	UI         ui.Config      `json:"ui,omitempty"`
+	Channels   ChannelsConfig `json:"channels"`
+	API        APIConfig      `json:"api"`
+	Tools      ToolsConfig    `json:"tools"`
+	SkillsDirs []string       `json:"skills_dirs"`
 	// Plugins names the optional, build-tag-gated plugins to switch on at startup
 	// (e.g. ["pdf"]). A name here only takes effect if the binary was compiled
 	// with that plugin's tag (`-tags plugin_pdf`); otherwise it's reported as

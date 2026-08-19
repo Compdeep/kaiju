@@ -3,7 +3,11 @@
     <!-- Col 1: Session sidebar -->
     <div class="sidebar" :style="{ width: sidebarW + 'px' }" :class="{ collapsed: sidebarCollapsed }">
       <router-link to="/chat" class="col-header sidebar-header">
-        <svg viewBox="0 11 100 100" width="38" height="38" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" class="kaiju-logo" :class="{ dark: settings.theme === 'dark' }">
+        <!-- A supplied logo replaces the drawn mark. The drawn one recolours
+             itself by mode; an image cannot, so an application supplying one
+             supplies a mark that reads in both. -->
+        <img v-if="brandLogo()" :src="brandLogo()" :alt="brandName()" width="38" height="38" class="brand-logo" />
+        <svg v-else viewBox="0 11 100 100" width="38" height="38" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" class="kaiju-logo" :class="{ dark: settings.theme === 'dark' }">
           <g class="k-body">
             <g transform="translate(50,44) rotate(180)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
             <g transform="translate(29,57) rotate(90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
@@ -54,7 +58,9 @@
         <div class="chat-title" :title="currentTitle">{{ currentTitle }}</div>
         <div class="chat-header-actions">
           <ModelSelector ref="modelSelectorRef" />
-          <button class="hdr-btn" :class="{ active: panel.open }" @click="panel.toggle()" :title="panel.open ? 'Close panel' : 'Open panel'">
+          <!-- Only where the workspace section exists: its routes are not
+               registered when it does not, and the panel would open empty. -->
+          <button v-if="sectionOn('workspace')" class="hdr-btn" :class="{ active: panel.open }" @click="panel.toggle()" :title="panel.open ? 'Close panel' : 'Open panel'">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
           </button>
           <!-- Utility cluster: lives here only while the panel is CLOSED; when the
@@ -101,7 +107,7 @@
           </div>
           <div :class="['msg', msg.role]">
             <div class="msg-meta">
-              <span class="msg-author">{{ msg.role === 'user' ? 'you' : 'kaiju' }}</span>
+              <span class="msg-author">{{ msg.role === 'user' ? 'you' : brandName() }}</span>
               <span class="msg-tools" v-if="editing !== i">
                 <button v-if="msg.id && !sessions.loading" class="msg-tool" title="Edit this message" @click="startEdit(i, msg)">✎</button>
                 <button v-if="msg.role === 'assistant' && i === lastAssistantIndex && !sessions.loading" class="msg-tool" title="Regenerate reply" @click="chat.regenerate()">↻</button>
@@ -129,7 +135,7 @@
 
         <div v-if="sessions.loading" class="msg assistant">
           <div class="msg-meta">
-            <span class="msg-author">kaiju</span>
+            <span class="msg-author">{{ brandName() }}</span>
             <span v-if="!dag.streamingVerdict" class="thinking-scan"></span>
           </div>
           <details v-if="dag.streamingReasoning" class="thinking-panel" :open="!dag.streamingVerdict">
@@ -207,7 +213,7 @@
 
     <!-- Col 3: Composable panel. The utility cluster hops into its header (via
          the #header-actions slot) whenever the panel is open. -->
-    <ComposablePanel v-if="panel.open">
+    <ComposablePanel v-if="panel.open && sectionOn('workspace')">
       <template #header-actions>
         <HeaderTools
           @open-tools="showTools = true"
@@ -221,7 +227,7 @@
     <!-- Modals (moved here from App.vue with the header removal — opened from the
          chat-header gear and the panel-header Tools / Users&Scopes buttons) -->
     <transition name="modal">
-      <AdminModal v-if="showAdmin" :initial-tab="adminTab" @close="showAdmin = false" />
+      <AdminModal v-if="showAdmin && sectionOn('users')" :initial-tab="adminTab" @close="showAdmin = false" />
     </transition>
     <transition name="modal">
       <SettingsModal v-if="showSettings" @close="onSettingsClose" />
@@ -266,6 +272,8 @@ import UploadChip from '../components/UploadChip.vue'
 import ModelSelector from '../components/ModelSelector.vue'
 import HeaderTools from '../components/HeaderTools.vue'
 import AdminModal from '../components/AdminModal.vue'
+import { brandName, brandLogo, sectionOn } from '../uiconfig'
+import { renderMarkdown } from '../markdown'
 import SettingsModal from '../components/SettingsModal.vue'
 import ToolsModal from '../components/ToolsModal.vue'
 import * as uploads from '../services/uploads'
@@ -552,13 +560,13 @@ function scrollToBottom(delay = 60) {
 
 
 /**
- * desc: Convert markdown-formatted text to HTML using marked + highlight.js
+ * desc: Convert markdown-formatted text to HTML using marked + highlight.js.
+ * The sanitising lives in ../markdown.js, which explains why it has to.
  * @param {string} text - Raw markdown text
  * @returns {string} HTML string with syntax-highlighted code blocks
  */
 function renderMd(text) {
-  if (!text) return ''
-  return marked.parse(text)
+  return renderMarkdown(text)
 }
 
 // Watch for route changes (e.g. clicking a session in sidebar or browser back/forward)
@@ -595,6 +603,7 @@ watch(() => sessions.sessionId, (newId) => {
 }
 .sidebar.collapsed .sidebar-header { justify-content: center; padding: 0; }
 /* Logo colours — mirror the old AppHeader brand (cyan light / indigo+pink dark) */
+.brand-logo { width: 38px; height: 38px; object-fit: contain; flex-shrink: 0; }
 .kaiju-logo { transition: filter 0.2s ease, transform 0.2s ease; flex-shrink: 0; }
 .kaiju-logo .k-body { stroke: #4FC3F7; }
 .kaiju-logo .k-eye { stroke: #4FC3F7; }

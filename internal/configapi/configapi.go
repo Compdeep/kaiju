@@ -1,4 +1,12 @@
-package api
+// Package configapi serves kaiju's own configuration file over HTTP.
+//
+// Separate from internal/api because it is the daemon's business, not the
+// interface's: it reads and writes the file kaiju was started with, which an
+// application embedding the interface does not have and would not want edited.
+// Keeping it here is also what lets the ui package import internal/api at all —
+// internal/config imports ui for the interface's own settings, so an api that
+// knew the daemon's configuration shape made a cycle.
+package configapi
 
 import (
 	_ "embed"
@@ -12,25 +20,25 @@ import (
 )
 
 /*
- * ConfigAPI handles reading and updating the kaiju config from the UI.
+ * API handles reading and updating the kaiju config from the UI.
  * desc: Provides GET/PATCH for runtime configuration and a model catalog endpoint.
  */
-type ConfigAPI struct {
+type API struct {
 	cfg     *config.Config
 	cfgPath string
 	agent   *agent.Agent // for live-updating LLM client
 }
 
 /*
- * NewConfigAPI creates config API handlers.
- * desc: Constructs a ConfigAPI wired to the live config, its disk path, and the agent for live-reload.
+ * NewAPI creates config API handlers.
+ * desc: Constructs a API wired to the live config, its disk path, and the agent for live-reload.
  * param: cfg - pointer to the live configuration struct
  * param: cfgPath - filesystem path where the config JSON is persisted
  * param: ag - agent instance for live-updating LLM and executor clients
- * return: a configured ConfigAPI instance
+ * return: a configured API instance
  */
-func NewConfigAPI(cfg *config.Config, cfgPath string, ag *agent.Agent) *ConfigAPI {
-	return &ConfigAPI{cfg: cfg, cfgPath: cfgPath, agent: ag}
+func New(cfg *config.Config, cfgPath string, ag *agent.Agent) *API {
+	return &API{cfg: cfg, cfgPath: cfgPath, agent: ag}
 }
 
 /*
@@ -38,7 +46,7 @@ func NewConfigAPI(cfg *config.Config, cfgPath string, ag *agent.Agent) *ConfigAP
  * desc: Registers get-config, update-config, and list-models endpoints.
  * param: mux - the HTTP serve mux to attach routes to
  */
-func (c *ConfigAPI) RegisterRoutes(mux *http.ServeMux) {
+func (c *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/config", c.handleGetConfig)
 	mux.HandleFunc("PATCH /api/v1/config", c.handleUpdateConfig)
 	mux.HandleFunc("GET /api/v1/models", c.handleListModels)
@@ -49,7 +57,7 @@ func (c *ConfigAPI) RegisterRoutes(mux *http.ServeMux) {
  * desc: Copies the config, masks the API key and JWT secret, and returns it as JSON.
  * param: w - HTTP response writer
  */
-func (c *ConfigAPI) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
+func (c *API) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 	// Return config with API key masked
 	safe := *c.cfg
 	if len(safe.LLM.APIKey) > 8 {
@@ -109,7 +117,7 @@ type configPatch struct {
  * param: w - HTTP response writer
  * param: r - HTTP request containing a configPatch JSON body
  */
-func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	var patch configPatch
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
@@ -267,7 +275,7 @@ func (c *ConfigAPI) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
  * desc: Marshals the config as indented JSON and writes it to the configured cfgPath.
  * return: an error if marshaling or writing fails
  */
-func (c *ConfigAPI) saveToDisk() error {
+func (c *API) saveToDisk() error {
 	data, err := json.MarshalIndent(c.cfg, "", "  ")
 	if err != nil {
 		return err
@@ -331,7 +339,7 @@ type modelCatalog struct {
  * desc: Returns the static list of all known LLM models across providers.
  * param: w - HTTP response writer
  */
-func (c *ConfigAPI) handleListModels(w http.ResponseWriter, _ *http.Request) {
+func (c *API) handleListModels(w http.ResponseWriter, _ *http.Request) {
 	// Mark each model available iff its provider is configured with a key.
 	// The legacy single-provider config (llm.provider) also counts, so hosts
 	// that haven't adopted the providers block still see their models.
@@ -388,4 +396,29 @@ func ModelLimits(id string) (contextTokens, maxOutputTokens int) {
 		}
 	}
 	return 0, 0
+}
+
+/*
+ * jsonResponse writes a value as JSON with the given status.
+ * desc: A copy of the helper this file used while it lived in package api.
+ *       Copying six lines is cheaper than exporting a helper from one package
+ *       so another can format a response the same way.
+ * param: w - the response.
+ * param: data - what to encode.
+ * param: status - the HTTP status.
+ */
+func jsonResponse(w http.ResponseWriter, data any, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+/*
+ * jsonError writes an error as JSON with the given status.
+ * param: w - the response.
+ * param: msg - what went wrong.
+ * param: status - the HTTP status.
+ */
+func jsonError(w http.ResponseWriter, msg string, status int) {
+	jsonResponse(w, map[string]string{"error": msg}, status)
 }

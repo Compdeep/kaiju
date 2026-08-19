@@ -14,8 +14,10 @@
           <line x1="58" y1="52" x2="58" y2="60" stroke="#f472b6" stroke-width="2.5"/>
         </svg>
       </div>
-      <h1>kaiju</h1>
+      <h1>{{ brandName() }}</h1>
       <p class="subtitle">sign in to continue</p>
+      <!-- Shown only where the application asked for it. -->
+      <p v-if="brandAttribution()" class="powered-by">powered by Kaiju</p>
       <form @submit.prevent="doLogin">
         <div class="form-group">
           <label>username</label>
@@ -35,6 +37,7 @@
 </template>
 
 <script setup>
+import { brandName, brandAttribution } from '../uiconfig'
 /**
  * desc: Login page with username/password form, error display, and shake animation on failed attempts
  */
@@ -87,6 +90,7 @@ async function doLogin() {
 .login-mark { margin-bottom: 20px; color: var(--text); }
 h1 { font-size: 20px; font-weight: 700; font-family: var(--mono); letter-spacing: -0.03em; margin-bottom: 4px; }
 .subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 28px; }
+.powered-by { color: var(--text-muted); font-size: 11px; margin: -20px 0 24px; opacity: 0.7; }
 .error-msg { color: var(--signal-red); font-size: 12px; margin-top: 6px; }
 .login-btn { width: 100%; margin-top: 16px; justify-content: center; }
 .shake { animation: shake 0.3s ease; }

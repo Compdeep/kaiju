@@ -15,15 +15,12 @@ import (
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
-	"github.com/Compdeep/kaiju/agent/uploads"
 	"github.com/Compdeep/kaiju/docs"
-	"github.com/Compdeep/kaiju/internal/api"
-	"github.com/Compdeep/kaiju/internal/auth"
 	"github.com/Compdeep/kaiju/internal/channels"
 	"github.com/Compdeep/kaiju/internal/channels/cli"
 	"github.com/Compdeep/kaiju/internal/channels/web"
-	kaijuclr "github.com/Compdeep/kaiju/internal/clearance"
 	"github.com/Compdeep/kaiju/internal/config"
+	"github.com/Compdeep/kaiju/internal/configapi"
 	kaijudb "github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
 	"github.com/Compdeep/kaiju/internal/memory"
@@ -31,6 +28,7 @@ import (
 	"github.com/Compdeep/kaiju/internal/skillhub"
 	"github.com/Compdeep/kaiju/internal/workspace"
 	"github.com/Compdeep/kaiju/tools"
+	"github.com/Compdeep/kaiju/ui"
 )
 
 var version = "dev"
@@ -323,7 +321,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 			RateLimit:   cfg.Agent.RateLimit,
 			// The model catalog is the application's, so the engine asks for the
 			// limits rather than carrying a copy of them.
-			Limits: api.ModelLimits,
+			Limits: configapi.ModelLimits,
 		},
 		PathConfig: agent.PathConfig{
 			DataDir:     cfg.Agent.DataDir,
@@ -799,96 +797,35 @@ func runServe() {
 		mux.HandleFunc("/ws", webCh.Handler())
 	}
 
-	// Auth + JWT (always available when web UI is served)
-	jwtSvc, err := auth.NewJWTService(cfg.API.JWTSecret, cfg.Agent.DataDir, 24)
-	if err != nil {
-		log.Fatalf("[kaiju] JWT service: %v", err)
-	}
-
-	// SSE endpoint for DAG events — JWT-authenticated and filtered per-principal:
-	// a caller only receives events for sessions it owns (isolation enforced in
-	// SSEHandler). Browsers pass the token via ?token= since an EventSource can't
-	// set an Authorization header.
-	mux.Handle("/events", gateway.WithJWTAuthOrQuery(jwtSvc)(gateway.SSEHandler(ag, kaijuDB)))
-
-	// Auth endpoints (unprotected — login doesn't need a token)
-	authAPI := api.NewAuthAPI(kaijuDB, jwtSvc)
-	authMux := http.NewServeMux()
-	authAPI.RegisterRoutes(authMux)
-	// Login doesn't need JWT; /me does
-	mux.Handle("/api/v1/auth/login", authMux)
-	mux.Handle("/api/v1/auth/me", gateway.WithJWTAuth(jwtSvc)(authMux))
-
-	// Management APIs (JWT-protected — scopes, groups, users, intents)
-	scopeAPI := api.NewScopeAPI(kaijuDB)
-	groupAPI := api.NewGroupAPI(kaijuDB)
-	userAPI := api.NewUserAPI(kaijuDB)
-	intentAPI := api.NewIntentAPI(kaijuDB, ag)
-
-	mgmtMux := http.NewServeMux()
-	scopeAPI.RegisterRoutes(mgmtMux)
-	groupAPI.RegisterRoutes(mgmtMux)
-	userAPI.RegisterRoutes(mgmtMux)
-	intentAPI.RegisterRoutes(mgmtMux)
-
-	mux.Handle("/api/v1/scopes", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/scopes/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/groups", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/groups/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/users", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/users/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/intents", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/intents/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/tool-intents", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/tool-intents/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-
-	// Clearance checker — load endpoints from DB, register with agent
-	clrChecker := kaijuclr.NewChecker()
-	if endpoints, err := kaijuDB.ListClearanceEndpoints(); err == nil {
-		for _, ep := range endpoints {
-			clrChecker.SetEndpoint(kaijuclr.Endpoint{
-				ToolName: ep.ToolName, URL: ep.URL,
-				TimeoutMs: ep.TimeoutMs, Headers: ep.Headers,
-			})
-		}
-		if len(endpoints) > 0 {
-			log.Printf("[kaiju] loaded %d clearance endpoints", len(endpoints))
-		}
-	}
-	ag.SetClearanceChecker(clrChecker)
-
-	// Execution API routes (always available — JWT-protected)
-	apiHandler := api.New(ag, cfg.Agent.SafetyLevel, kaijuDB, ag.LLMClient(), clrChecker)
-	// Uploads pipeline — uses the executor client for synchronous summaries.
-	apiHandler.SetUploadProcessor(uploads.New(ag, ag.ExecutorClient()))
-	// Vision lane — the model that answers image questions directly.
+	// The agent's model lanes. Not the interface's business: these decide which
+	// model answers what, and they are set whether or not anything is served.
 	ag.SetVisionModel(cfg.Vision.Provider, cfg.Vision.Model)
-	// Chat lane — direct completion, no planner (empty ⇒ reasoning model).
 	ag.SetChatModel(cfg.Chat.Provider, cfg.Chat.Model)
 	ag.SetRouteModel(cfg.Agent.RouteProvider, cfg.Agent.RouteModel)
 	ag.SetAnswerModel(cfg.Agent.AnswerProvider, cfg.Agent.AnswerModel)
-	execMux := http.NewServeMux()
-	apiHandler.RegisterRoutes(execMux)
-	mux.Handle("/api/v1/execute", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/oneshot", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/interject", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/stop", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/tools", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/status", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/usage", gateway.WithJWTAuth(jwtSvc)(execMux))
-	// Session + memory + clearance routes (JWT-protected)
-	mux.Handle("/api/v1/sessions", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/sessions/", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/memories", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/memories/", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/clearance", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/clearance/", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/workspace/files", gateway.WithJWTAuth(jwtSvc)(execMux))
-	// Serve uses token query param since browser <img>/<video>/iframes can't send Auth headers
-	mux.Handle("/api/v1/workspace/serve", gateway.WithJWTAuthOrQuery(jwtSvc)(execMux))
-	// Live preview serves from workspace/code/ — sub-resources (JS, CSS, images) can't carry auth tokens,
-	// so live preview is served without JWT. The main app is already authenticated.
-	mux.Handle("/api/v1/workspace/live/", execMux)
+
+	// The interface and every route it calls, in one call.
+	//
+	// This used to be a hundred and thirty lines here, and an application
+	// embedding the interface would have had to copy them. Now the same
+	// function serves both, so a route added for one is there for the other and
+	// they cannot drift apart. What kaiju's daemon adds below — its own
+	// documentation, its health check, its configuration editor — is what
+	// belongs to the daemon rather than to the interface.
+	authenticator, err := ui.NewAuthenticator(cfg.API.JWTSecret, cfg.Agent.DataDir, 24)
+	if err != nil {
+		log.Fatalf("[kaiju] token service: %v", err)
+	}
+	uiHandler, err := ui.Handler(ui.Options{
+		Agent:         ag,
+		Store:         ui.StoreOf(kaijuDB),
+		Auth:          authenticator,
+		Config:        cfg.UI,
+		DefaultIntent: cfg.Agent.SafetyLevel,
+	})
+	if err != nil {
+		log.Fatalf("[kaiju] %v", err)
+	}
 
 	// Config API (available without JWT — needed for initial setup via UI)
 	cfgPath := ""
@@ -898,7 +835,7 @@ func runServe() {
 			break
 		}
 	}
-	configAPI := api.NewConfigAPI(cfg, cfgPath, ag)
+	configAPI := configapi.New(cfg, cfgPath, ag)
 	configAPI.RegisterRoutes(mux)
 
 	// Health check
@@ -907,12 +844,16 @@ func runServe() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Web UI (embedded static files)
-	// Docs — the architecture overview + markdown reference docs, served public
-	// (no auth) at /docs/, before the SPA catch-all below.
+	// kaiju's own documentation, which is the daemon's and not the interface's:
+	// an application embedding the interface has no reason to serve kaiju's
+	// architecture page under its own name. Public, and registered before the
+	// interface below.
 	mux.Handle("/docs/", docs.Handler())
 
-	mux.Handle("/", gateway.WebUIHandler())
+	// The interface, at the root. Every pattern registered above is more
+	// specific, so Go's mux still prefers those and only what none of them
+	// matches reaches here.
+	mux.Handle("/", uiHandler)
 
 	// Message router goroutine
 	go func() {

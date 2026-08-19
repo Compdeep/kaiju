@@ -62,6 +62,39 @@ func NewWebSearch() *WebSearch {
  * param: cfg - search configuration
  * return: pointer to a new WebSearch
  */
+// One search instance per configuration, because the rate limiter that keeps this from
+// tripping a search engine's anti-bot protection lives on the instance.
+//
+// web_search and web_research both search. They each built their own, so each waited
+// out its own delay and the provider saw up to twice the configured rate — from the one
+// mechanism whose whole purpose is not to.
+var (
+	sharedSearchMu sync.Mutex
+	sharedSearches = map[SearchConfig]*WebSearch{}
+)
+
+/*
+ * sharedSearch returns the one search instance for a configuration, making it on first
+ * use.
+ *
+ * Keyed by the configuration because two tools configured differently are two different
+ * limits by intent, while two configured the same are one limit that was accidentally
+ * two. SearchConfig is comparable, so it is the key.
+ *
+ * param: cfg - the configuration.
+ * return: the instance, shared with every other caller passing the same configuration.
+ */
+func sharedSearch(cfg SearchConfig) *WebSearch {
+	sharedSearchMu.Lock()
+	defer sharedSearchMu.Unlock()
+	if s, ok := sharedSearches[cfg]; ok {
+		return s
+	}
+	s := NewWebSearchWithConfig(cfg)
+	sharedSearches[cfg] = s
+	return s
+}
+
 func NewWebSearchWithConfig(cfg SearchConfig) *WebSearch {
 	provider := cfg.Provider
 	if provider == "" {

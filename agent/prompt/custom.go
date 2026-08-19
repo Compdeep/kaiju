@@ -42,6 +42,13 @@ var (
 func Register(names ...string) error {
 	customMu.Lock()
 	defer customMu.Unlock()
+
+	// Checked in full before anything is written. It used to register as it went and
+	// return on the first bad name, so Register("A", "", "C") left A registered and
+	// C not — a caller that reported the error and stopped still had half of what it
+	// asked for in place, and Registered() then listed something that matched neither
+	// the request nor nothing.
+	clean := make([]string, 0, len(names))
 	for _, n := range names {
 		n = strings.TrimSpace(n)
 		if n == "" {
@@ -50,6 +57,9 @@ func Register(names ...string) error {
 		if _, builtin := targets[n]; builtin {
 			return fmt.Errorf("prompt: %q is a built-in section; supply it through Apply rather than registering it", n)
 		}
+		clean = append(clean, n)
+	}
+	for _, n := range clean {
 		if _, exists := custom[n]; !exists {
 			custom[n] = ""
 		}
@@ -87,6 +97,16 @@ func Registered() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// isRegistered reports whether a name is one an application declared, without
+// writing anything. The check half of setCustom, needed because an override file is
+// now validated in full before any of it is applied.
+func isRegistered(name string) bool {
+	customMu.Lock()
+	defer customMu.Unlock()
+	_, ok := custom[name]
+	return ok
 }
 
 // setCustom stores a section's text. Reports whether the name was registered;

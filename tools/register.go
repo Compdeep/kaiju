@@ -184,7 +184,8 @@ func Register(reg *toolapi.Registry, d Deps) ([]string, error) {
 	} else {
 		put(NewWebFetch())
 	}
-	put(NewWebSearchWithConfig(d.Search))
+	// The same instance web_research uses, so the two share one rate limiter.
+	put(sharedSearch(d.Search))
 	if d.Executor != nil {
 		put(NewWebResearch(d.Search, d.Executor))
 	}

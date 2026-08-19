@@ -27,7 +27,11 @@ type WebResearch struct {
 // NewWebResearch builds the tool from the same config web_search/web_fetch use.
 func NewWebResearch(cfg SearchConfig, executor *llm.Client) *WebResearch {
 	return &WebResearch{
-		search: NewWebSearchWithConfig(cfg),
+		// Shared with the registered web_search rather than a second instance. The
+		// limiter that keeps this from tripping a search engine's anti-bot
+		// protection is per-instance, so two instances meant two limiters and up to
+		// twice the configured rate at the provider.
+		search: sharedSearch(cfg),
 		fetch:  NewWebFetchWithLLM(executor),
 	}
 }
@@ -56,15 +60,32 @@ func (w *WebResearch) Parameters() json.RawMessage {
 }
 
 func (w *WebResearch) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema(`{"type":"object","description":"Research results: the query plus the sources actually read.","properties":{"query":{"type":"string"},"sources":{"type":"array","description":"each source read","items":{"type":"object","properties":{"url":{"type":"string"},"title":{"type":"string"},"content":{"type":"string"},"note":{"type":"string"}}}}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"The query, and where each answer came from. The extracted text is in content, trimmed so every source read is represented; this lists the sources themselves.","properties":{"query":{"type":"string"},"sources":{"type":"array","description":"each source read","items":{"type":"object","properties":{"url":{"type":"string"},"title":{"type":"string"},"status":{"type":"string"},"chars":{"type":"integer","description":"characters of text this source yielded, before trimming"},"trimmed":{"type":"boolean","description":"true when this source's text was cut to its share of the evidence budget"},"note":{"type":"string","description":"why a source was not read"}}}}}}`)
 }
 
+// researchSource is one page this tool read.
+//
+// The extracted text is not here. It was, and the readable half carried the same
+// text again with each source cut to 4000 characters — so one call put every page
+// in the result twice, once whole and once trimmed. Measured on one query: 11,479
+// characters of text beside 20,862 of payload. The evidence cap then took the head
+// and tail of that pair, so what a model finally read was the start of the text and
+// the end of the JSON.
+//
+// The text lives in the result's content, trimmed per source so every page is
+// represented. What stays here is what a later step would name: where it came from,
+// whether it was read, and how much it yielded.
 type researchSource struct {
 	URL     string `json:"url"`
 	Title   string `json:"title"`
 	Status  string `json:"status"` // the fetch's return code, e.g. "HTTP 200 OK" / "HTTP 404 Not Found"
-	Content string `json:"content,omitempty"`
+	Chars   int    `json:"chars"`  // extracted text, before trimming
+	Trimmed bool   `json:"trimmed,omitempty"`
 	Note    string `json:"note,omitempty"`
+
+	// content is the extracted text, kept for assembling the readable half below
+	// and deliberately not serialised — see the note above.
+	content string
 }
 
 // Execute satisfies the Tool interface for callers outside the DAG.
@@ -154,7 +175,8 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 				_ = json.Unmarshal(fMsg.Data, &fd)
 				src.Status = fd.Status
 				if fMsg.Status == toolapi.StatusOK {
-					src.Content = fMsg.Content
+					src.content = fMsg.Content
+					src.Chars = len(fMsg.Content)
 				} else {
 					src.Note = fMsg.Detail
 					if src.Status == "" {
@@ -162,7 +184,8 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 					}
 				}
 			} else {
-				src.Content = fOut
+				src.content = fOut
+				src.Chars = len(fOut)
 			}
 			sources[i] = src
 		}(i)
@@ -170,6 +193,21 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 	wg.Wait()
 
 	// 3) Assemble the readable evidence + count how many actually returned content.
+	//
+	// The budget is shared between the sources rather than given to each. Each used
+	// to keep 4000 characters, so four sources wrote 16,000 into a result the
+	// evidence cap trims to 8,000 — and that trim is a head and tail of the whole
+	// thing, which keeps the first two sources and the end of the last. A share each
+	// means every page this tool went and fetched is represented in what the model
+	// reads.
+	perSource := toolapi.EvidenceBudget
+	if n > 0 {
+		perSource = toolapi.EvidenceBudget / n
+	}
+	if perSource < 1000 {
+		perSource = 1000 // below this a page says too little to be worth having fetched
+	}
+
 	var b strings.Builder
 	read := 0
 	for i, s := range sources {
@@ -181,11 +219,12 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 		if code == "" {
 			code = "no response"
 		}
-		if strings.TrimSpace(s.Content) != "" {
+		if strings.TrimSpace(s.content) != "" {
 			read++
-			c := s.Content
-			if len(c) > 4000 {
-				c = c[:4000] + "\n…(truncated)"
+			c := s.content
+			if len(c) > perSource {
+				c = c[:perSource] + fmt.Sprintf("\n…(trimmed to this source's share of %d characters)", perSource)
+				sources[i].Trimmed = true
 			}
 			b.WriteString(fmt.Sprintf("### Source %d — %s  [%s]\n%s\n\n%s\n\n", i+1, title, code, s.URL, c))
 		} else {

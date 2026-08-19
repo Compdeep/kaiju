@@ -2,6 +2,7 @@ package agent
 
 import (
 	"io/fs"
+	"net/http"
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -103,6 +104,17 @@ type ModelConfig struct {
 	// happens per model when the lookup returns zeroes, so a model missing from
 	// the application's catalog is safe rather than broken.
 	Limits ModelLimits
+
+	// LLMTransport replaces how requests to the model reach it, for an
+	// application whose model is not at the other end of a socket. Nil is the
+	// ordinary case and leaves every client exactly as it was.
+	//
+	// It applies to every client this agent builds, including the ones
+	// SetLLMClient and SetExecutorClient rebuild at run time — a transport that
+	// survived construction but not a hot swap would work until the first time
+	// somebody changed the model, which is the kind of fault that is found in
+	// production rather than in a test.
+	LLMTransport http.RoundTripper
 }
 
 // ModelLimits reports what a model can take in and give back, in tokens. Zero

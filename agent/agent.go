@@ -276,7 +276,7 @@ func New(cfg Config) (*Agent, error) {
 		log.Fatalf("[agent] prompt load failed: %v", err)
 	}
 
-	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits)
+	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits).Transport(cfg.LLMTransport)
 
 	reg := toolapi.NewRegistry()
 
@@ -328,7 +328,7 @@ func New(cfg Config) (*Agent, error) {
 		if wire == "" {
 			wire = name
 		}
-		providerClients[name] = llm.NewClientWithProvider(wire, p.Endpoint, p.APIKey, "").Limits(cfg.Limits)
+		providerClients[name] = llm.NewClientWithProvider(wire, p.Endpoint, p.APIKey, "").Limits(cfg.Limits).Transport(cfg.LLMTransport)
 	}
 	if len(providerClients) > 0 {
 		names := make([]string, 0, len(providerClients))
@@ -573,7 +573,7 @@ func (a *Agent) InitEmbeddings(ctx context.Context) error {
 		apiKey = a.cfg.LLMAPIKey
 	}
 
-	a.embedClient = llm.NewClient(endpoint, apiKey, model)
+	a.embedClient = llm.NewClient(endpoint, apiKey, model).Transport(a.cfg.LLMTransport)
 
 	topK := a.cfg.EmbedTopK
 	if topK <= 0 {
@@ -992,7 +992,7 @@ func (a *Agent) GateInfo() (rateLimit, maxTurns, clearance int, lockdown bool) {
  * already going.
  */
 func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
-	a.llm = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits)
+	a.llm = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits).Transport(a.cfg.LLMTransport)
 	a.cfg.LLMEndpoint = endpoint
 	a.cfg.LLMAPIKey = apiKey
 	a.cfg.LLMModel = model
@@ -1010,7 +1010,7 @@ func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
  * this client on every call, and dispatcher.go hands it to compute steps.
  */
 func (a *Agent) SetExecutorClient(provider, endpoint, apiKey, model string) {
-	a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits)
+	a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits).Transport(a.cfg.LLMTransport)
 }
 
 /*

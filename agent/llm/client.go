@@ -218,6 +218,27 @@ func (c *Client) Limits(fn ModelLimits) *Client {
 	return c
 }
 
+/*
+ * Transport replaces how this client's requests reach the endpoint.
+ * desc: Complete, CompleteStream and Embed all send through the same http.Client,
+ *       so supplying its transport once covers every call this client makes. An
+ *       application whose model is not at the other end of an ordinary socket
+ *       supplies its own here, and nothing else about the client changes: the
+ *       request is still ordinary HTTP, and chunked replies still stream.
+ *
+ *       http.RoundTripper rather than an interface of our own, because the thing
+ *       being replaced is already named in the standard library and a second name
+ *       for it would need an adapter at every call site for no gain.
+ * param: rt - the transport, or nil to keep the default.
+ * return: the client, so this reads as part of construction.
+ */
+func (c *Client) Transport(rt http.RoundTripper) *Client {
+	if rt != nil {
+		c.http.Transport = rt
+	}
+	return c
+}
+
 // NewClient creates a Client targeting an OpenAI-compatible endpoint.
 func NewClient(endpoint, apiKey, model string) *Client {
 	return NewClientWithProvider(ProviderOpenAI, endpoint, apiKey, model)

@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -86,8 +85,16 @@ func (b *Bash) Description() string {
  * desc: Defines the output structure containing stdout and stderr from the command.
  * return: JSON schema as raw bytes
  */
+// OutputSchema declares the envelope and the payload bashData carries.
+//
+// It declared one field, "output", which this tool has never returned: the payload
+// is exit_code, stdout, stderr and command. A planner reading the declaration named
+// a field that was not there, and a run wiring it into a later step got nothing.
+//
+// Derived from bashData rather than written out beside it, so the two cannot come
+// to disagree again.
 func (b *Bash) OutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"output":{"type":"string","description":"stdout + stderr from the command"}}}`)
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(bashData{}))
 }
 
 /*
@@ -234,8 +241,9 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		cmd.Dir = b.workDir
 	}
 	// Put command in its own process group so we can kill the entire tree
-	// (including backgrounded children like `npx vite &`) on timeout.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// (including backgrounded children like `npx vite &`) on timeout. How that is
+	// done differs by platform; see process_unix.go and process_windows.go.
+	setOwnProcessGroup(cmd)
 
 	var stdout, stderr bytes.Buffer
 	var lastOutput atomic.Int64
@@ -250,7 +258,7 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 	err := runUntilIdle(ctx, cmd, idle, &lastOutput)
 	// If context timed out, kill the entire process group
 	if ctx.Err() == context.DeadlineExceeded && cmd.Process != nil {
-		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = killProcessTree(cmd.Process.Pid)
 	}
 
 	var result strings.Builder
@@ -332,10 +340,10 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 // captured streams, so consumers read them as typed fields instead of grepping
 // the raw string.
 type bashData struct {
-	ExitCode int    `json:"exit_code"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	Command  string `json:"command"`
+	ExitCode int    `json:"exit_code" desc:"the command's exit status; 0 is success"`
+	Stdout   string `json:"stdout" desc:"standard output, cut to 4000 bytes at each end if longer"`
+	Stderr   string `json:"stderr" desc:"standard error, cut the same way"`
+	Command  string `json:"command" desc:"the command line that was run"`
 }
 
 var _ toolapi.Tool = (*Bash)(nil)
@@ -424,8 +432,8 @@ func killGroup(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-		// No group (or not a platform with them): the process itself still goes.
+	if err := killProcessTree(cmd.Process.Pid); err != nil {
+		// The tree could not be ended: the process itself still goes.
 		_ = cmd.Process.Kill()
 	}
 }

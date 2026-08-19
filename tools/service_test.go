@@ -1,11 +1,12 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"os"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -62,7 +63,7 @@ func TestStoppingAServiceStopsTheProcess(t *testing.T) {
 	// subject of the test.
 	t.Cleanup(func() {
 		for _, pid := range children {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
+			_ = killProcessTree(pid)
 		}
 	})
 
@@ -71,7 +72,7 @@ func TestStoppingAServiceStopsTheProcess(t *testing.T) {
 	}
 
 	for _, pid := range children {
-		if isAlive(pid) {
+		if processIsAlive(pid) {
 			t.Errorf("stop reported the service stopped and pid %d is still running. "+
 				"It is the command itself: the shell was signalled and the process it "+
 				"started outlived it, still holding whatever port it bound", pid)
@@ -122,8 +123,7 @@ func newTestService(t *testing.T) (*Service, string) {
 		}
 		for _, r := range recs {
 			if r.PID > 1 {
-				_ = syscall.Kill(-r.PID, syscall.SIGKILL)
-				_ = syscall.Kill(r.PID, syscall.SIGKILL)
+				_ = killProcessTree(r.PID)
 			}
 		}
 	})
@@ -144,4 +144,27 @@ func childrenOf(pid int) []int {
 		}
 	}
 	return out
+}
+
+// A service nobody registered is an answer, not a failure.
+//
+// Asking about one is how a caller finds out whether it is there, and every action
+// that names a service raised a Go error instead — which ends the step and takes the
+// answer with it.
+func TestServiceOnANameThatIsNotRegistered(t *testing.T) {
+	svc := NewService(t.TempDir())
+	for _, action := range []string{"status", "logs", "stop", "restart", "remove"} {
+		msg, err := svc.ExecuteTyped(context.Background(),
+			map[string]any{"action": action, "name": "no-such-service"})
+		if err != nil {
+			t.Errorf("%s returned a Go error rather than a result: %v", action, err)
+			continue
+		}
+		if msg.Status != toolapi.StatusEmpty {
+			t.Errorf("%s = %q, want empty", action, msg.Status)
+		}
+		if !strings.Contains(msg.Detail, "no-such-service") {
+			t.Errorf("%s does not name the service: %q", action, msg.Detail)
+		}
+	}
 }

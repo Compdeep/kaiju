@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -40,7 +39,7 @@ func listenerOnAnyPort(t *testing.T) (pid, port int, command string, stop func()
 	command = "python3 -c " + script
 
 	cmd := exec.Command("sh", "-c", "exec python3 -c '"+script+"'")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setOwnSession(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start a listener: %v", err)
 	}
@@ -53,11 +52,11 @@ func listenerOnAnyPort(t *testing.T) (pid, port int, command string, stop func()
 		held = portOpen(port)
 	}
 	if !held {
-		_ = signalGroup(pid, syscall.SIGKILL)
+		_ = killProcessTree(pid)
 		t.Skipf("could not hold port %d, so there is nothing to clear", port)
 	}
 	return pid, port, script, func() {
-		_ = signalGroup(pid, syscall.SIGKILL)
+		_ = killProcessTree(pid)
 		_, _ = cmd.Process.Wait()
 	}
 }
@@ -77,7 +76,7 @@ func TestFreePortClearsOurOwnProcess(t *testing.T) {
 
 	s.freePort(port)
 
-	if isAlive(pid) {
+	if processIsAlive(pid) {
 		t.Error("a process this tool started and recorded was left running, so the " +
 			"spawn that follows cannot bind")
 	}
@@ -96,7 +95,7 @@ func TestFreePortLeavesAStrangersProcessAlone(t *testing.T) {
 
 	s.freePort(port)
 
-	if !isAlive(pid) {
+	if !processIsAlive(pid) {
 		t.Error("a process this tool never started was killed for holding a port — " +
 			"on a monitored machine that is the customer's own software")
 	}
@@ -118,7 +117,7 @@ func TestFreePortLeavesAReusedPidAlone(t *testing.T) {
 
 	s.freePort(port)
 
-	if !isAlive(pid) {
+	if !processIsAlive(pid) {
 		t.Error("a pid was signalled on the strength of the number alone; after a " +
 			"reboot that number belongs to a stranger")
 	}

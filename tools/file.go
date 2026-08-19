@@ -189,15 +189,47 @@ var _ toolapi.Tool = (*FileRead)(nil)
  * desc: Tool that writes string content to a file path, with optional append mode.
  */
 type FileWrite struct {
-	workspace string
+	where PathPolicy
 }
+
+// PathPolicy decides where a write may land, or refuses it.
+//
+// This exists because the rule was built into the tool. Every write went through
+// SafeJoin against a workspace, which rejects absolute paths and anything outside five
+// named subdirectories — the right rule for an assistant editing a project, and the
+// reason a coder step could not overwrite cmd/kaiju/main.go again after it did on
+// 2026-04-18. It is the wrong rule for every other kind of application, and there was no
+// way to supply a different one, so an application that writes elsewhere had to write its
+// own tool with the same name.
+//
+// The tool does the writing. What may be written is the application's to decide, exactly
+// as ProcessKill kills and leaves the question of whether it should to its caller.
+//
+// param: path - the path the caller asked for.
+// return: the path to write, or an error explaining the refusal to whoever asked.
+type PathPolicy func(path string) (string, error)
 
 /*
  * NewFileWrite creates a new FileWrite tool instance.
- * desc: Returns a zero-value FileWrite ready for use.
+ * desc: Writes wherever it is told when where is nil, which is what an application
+ *       operating on machines outside its own directory needs. Pass a policy to confine
+ *       it; ConfineToWorkspace is the one this module's own program uses.
+ * param: where - the policy, or nil for no restriction beyond the operating system's.
  * return: pointer to a new FileWrite
  */
-func NewFileWrite(workspace string) *FileWrite { return &FileWrite{workspace: workspace} }
+func NewFileWrite(where PathPolicy) *FileWrite { return &FileWrite{where: where} }
+
+/*
+ * ConfineToWorkspace returns the policy this module's own program uses: writes land
+ * inside the workspace's allowed subdirectories and nowhere else.
+ *
+ * param: dir - the workspace root.
+ * return: a policy refusing absolute paths, parent-directory escapes, and anything
+ *         outside the allowed subdirectories.
+ */
+func ConfineToWorkspace(dir string) PathPolicy {
+	return func(path string) (string, error) { return workspace.SafeJoin(dir, path) }
+}
 
 /*
  * Name returns the tool identifier.
@@ -272,14 +304,14 @@ func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (tool
 	if strings.HasPrefix(content, "${") || strings.HasPrefix(content, "{{") {
 		return toolapi.ToolMessage{}, fmt.Errorf("file_write: content is an unresolved placeholder %q — wire ${step.N.field} from an upstream step or use compute instead", content)
 	}
-	// Gate writes to the workspace-relative allowed zones. This blocks the
-	// agent from editing its own source tree (cmd/, internal/, etc.) when
-	// the CLI runs with workspace = cwd inside the Kaiju repo.
-	safePath, safeErr := workspace.SafeJoin(f.workspace, path)
-	if safeErr != nil {
-		return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", safeErr)
+	// Where the write may land is the application's rule, not this tool's.
+	if f.where != nil {
+		safePath, safeErr := f.where(path)
+		if safeErr != nil {
+			return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", safeErr)
+		}
+		path = safePath
 	}
-	path = safePath
 
 	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -292,9 +324,15 @@ func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (tool
 		if err != nil {
 			return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 		}
-		defer f2.Close()
 		if _, err := f2.WriteString(content); err != nil {
+			f2.Close()
 			return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", err)
+		}
+		// Closing was deferred, which threw the error away. A close that fails after a
+		// write that did not means the bytes may never have reached the disk, and
+		// reporting that as an append is a lie about what is on the machine.
+		if err := f2.Close(); err != nil {
+			return toolapi.ToolMessage{}, fmt.Errorf("file_write: finishing %s: %w", path, err)
 		}
 		return toolapi.ToolOK("status", fmt.Sprintf("appended %d bytes to %s", len(content), path),
 			fileWriteData{Path: path, Bytes: len(content), Appended: true}), nil

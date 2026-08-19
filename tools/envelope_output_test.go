@@ -16,7 +16,7 @@ func TestSchemaUnified(t *testing.T) {
 	schemas := map[string]json.RawMessage{
 		"sysinfo":    NewSysinfo().OutputSchema(),
 		"file_read":  NewFileRead("").OutputSchema(),
-		"file_write": NewFileWrite("").OutputSchema(),
+		"file_write": NewFileWrite(nil).OutputSchema(),
 		"file_list":  NewFileList("").OutputSchema(),
 		"web_search": NewWebSearch().OutputSchema(),
 		"web_fetch":  NewWebFetch().OutputSchema(),

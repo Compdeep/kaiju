@@ -50,7 +50,8 @@ func (a *Archive) Description() string {
  * return: JSON schema as raw bytes
  */
 func (a *Archive) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOfWithNote(archiveData{},
+		"Fields depend on action: entries is filled by list, dest by extract."))
 }
 
 /*
@@ -152,11 +153,19 @@ func archiveList(path, format string) (toolapi.ToolMessage, error) {
 			return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer r.Close()
-		var lines []string
+		var lines, names []string
 		for _, f := range r.File {
 			lines = append(lines, fmt.Sprintf("%10d  %s  %s", f.UncompressedSize64, f.Modified.Format("2006-01-02 15:04"), f.Name))
+			names = append(names, f.Name)
 		}
-		return toolapi.ToolText(fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n"))), nil
+		if len(lines) == 0 {
+			// An archive with nothing in it is a result about the archive, not a
+			// listing of length zero dressed as a success. It read "0 entries:" with
+			// nothing after the colon.
+			return toolapi.ToolEmpty("listing", "the archive "+path+" holds no entries"), nil
+		}
+		return toolapi.ToolOK("listing", fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n")),
+			archiveData{Action: "list", Path: path, Count: len(lines), Entries: names}), nil
 
 	case "tar.gz":
 		f, err := os.Open(path)
@@ -170,7 +179,7 @@ func archiveList(path, format string) (toolapi.ToolMessage, error) {
 		}
 		defer gz.Close()
 		tr := tar.NewReader(gz)
-		var lines []string
+		var lines, names []string
 		for {
 			hdr, err := tr.Next()
 			if err == io.EOF {
@@ -180,8 +189,16 @@ func archiveList(path, format string) (toolapi.ToolMessage, error) {
 				return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
 			}
 			lines = append(lines, fmt.Sprintf("%10d  %s  %s", hdr.Size, hdr.ModTime.Format("2006-01-02 15:04"), hdr.Name))
+			names = append(names, hdr.Name)
 		}
-		return toolapi.ToolText(fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n"))), nil
+		if len(lines) == 0 {
+			// An archive with nothing in it is a result about the archive, not a
+			// listing of length zero dressed as a success. It read "0 entries:" with
+			// nothing after the colon.
+			return toolapi.ToolEmpty("listing", "the archive "+path+" holds no entries"), nil
+		}
+		return toolapi.ToolOK("listing", fmt.Sprintf("%d entries:\n%s", len(lines), strings.Join(lines, "\n")),
+			archiveData{Action: "list", Path: path, Count: len(lines), Entries: names}), nil
 
 	default:
 		return toolapi.ToolMessage{}, fmt.Errorf("archive: unsupported format %q", format)
@@ -196,6 +213,65 @@ func archiveList(path, format string) (toolapi.ToolMessage, error) {
  * param: format - archive format ("zip" or "tar.gz")
  * return: confirmation message with extracted file count, or error on failure
  */
+/*
+ * withinDest reports whether an extracted path stays inside the destination.
+ *
+ * The test was a plain prefix comparison, which a sibling directory passes: with a
+ * destination of /tmp/out, an entry named ../outside/x cleans to /tmp/outside/x, which
+ * begins with /tmp/out and was written there. Requiring the separator is what makes the
+ * comparison mean "inside this directory" rather than "starts with these letters".
+ *
+ * param: dest - the directory the caller named.
+ * param: target - where the entry would be written.
+ * return: true when the target is the destination or below it.
+ */
+func withinDest(dest, target string) bool {
+	dest = filepath.Clean(dest)
+	target = filepath.Clean(target)
+	return target == dest || strings.HasPrefix(target, dest+string(os.PathSeparator))
+}
+
+/*
+ * archiveExtractResult reports what an extraction did, including what it did not do.
+ *
+ * Every per-entry failure was passed over silently and the count returned as a success,
+ * so an archive of a hundred entries where sixty could not be written reported
+ * "extracted 40 files" — which reads exactly like an archive that held forty. An entry
+ * whose path pointed outside the destination was passed over the same way, and that one
+ * is evidence rather than noise: a traversal path inside an archive is a fact about the
+ * archive, and it was the one thing this function was in a position to notice.
+ *
+ * param: path - the archive read.
+ * param: dest - where its contents were written.
+ * param: count - files written.
+ * param: skipped - entries that could not be written.
+ * param: refused - entries whose path pointed outside dest.
+ * return: the message a run receives.
+ */
+func archiveExtractResult(path, dest string, count, skipped, refused int) (toolapi.ToolMessage, error) {
+	data := archiveData{
+		Action: "extract", Path: path, Dest: dest, Count: count,
+		Skipped: skipped, Refused: refused, Complete: skipped == 0 && refused == 0,
+	}
+	text := fmt.Sprintf("extracted %d files to %s", count, dest)
+	if refused > 0 {
+		text += fmt.Sprintf("; %d entries refused for pointing outside %s", refused, dest)
+	}
+	if skipped > 0 {
+		text += fmt.Sprintf("; %d entries could not be written", skipped)
+	}
+	switch {
+	case count == 0 && (skipped > 0 || refused > 0):
+		// Nothing arrived, and entries were there to arrive. Reporting zero files as a
+		// success reads as an empty archive rather than a failed extraction.
+		return toolapi.ToolFail("status", text, data), nil
+	case count == 0:
+		return toolapi.ToolEmpty("status", "the archive holds no files to extract"), nil
+	default:
+		return toolapi.ToolOK("status", text, data), nil
+	}
+}
+
 func archiveExtract(archivePath, dest, format string) (toolapi.ToolMessage, error) {
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("archive: mkdir: %w", err)
@@ -208,11 +284,11 @@ func archiveExtract(archivePath, dest, format string) (toolapi.ToolMessage, erro
 			return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
 		}
 		defer r.Close()
-		count := 0
+		count, skipped, refused := 0, 0, 0
 		for _, f := range r.File {
 			target := filepath.Join(dest, f.Name)
-			// Prevent zip slip
-			if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dest)) {
+			if !withinDest(dest, target) {
+				refused++
 				continue
 			}
 			if f.FileInfo().IsDir() {
@@ -222,19 +298,28 @@ func archiveExtract(archivePath, dest, format string) (toolapi.ToolMessage, erro
 			os.MkdirAll(filepath.Dir(target), 0755)
 			rc, err := f.Open()
 			if err != nil {
+				skipped++
 				continue
 			}
 			out, err := os.Create(target)
 			if err != nil {
 				rc.Close()
+				skipped++
 				continue
 			}
-			io.Copy(out, rc)
-			out.Close()
+			_, copyErr := io.Copy(out, rc)
+			closeErr := out.Close()
 			rc.Close()
+			// A copy that stopped part way leaves a file shorter than the entry, and
+			// a close that failed may mean the bytes never reached the disk. Counting
+			// either as extracted puts a file in the count that is not on disk whole.
+			if copyErr != nil || closeErr != nil {
+				skipped++
+				continue
+			}
 			count++
 		}
-		return toolapi.ToolText(fmt.Sprintf("extracted %d files to %s", count, dest)), nil
+		return archiveExtractResult(archivePath, dest, count, skipped, refused)
 
 	case "tar.gz":
 		f, err := os.Open(archivePath)
@@ -248,7 +333,7 @@ func archiveExtract(archivePath, dest, format string) (toolapi.ToolMessage, erro
 		}
 		defer gz.Close()
 		tr := tar.NewReader(gz)
-		count := 0
+		count, skipped, refused := 0, 0, 0
 		for {
 			hdr, err := tr.Next()
 			if err == io.EOF {
@@ -258,7 +343,8 @@ func archiveExtract(archivePath, dest, format string) (toolapi.ToolMessage, erro
 				return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
 			}
 			target := filepath.Join(dest, hdr.Name)
-			if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dest)) {
+			if !withinDest(dest, target) {
+				refused++
 				continue
 			}
 			switch hdr.Typeflag {
@@ -268,14 +354,19 @@ func archiveExtract(archivePath, dest, format string) (toolapi.ToolMessage, erro
 				os.MkdirAll(filepath.Dir(target), 0755)
 				out, err := os.Create(target)
 				if err != nil {
+					skipped++
 					continue
 				}
-				io.Copy(out, tr)
-				out.Close()
+				_, copyErr := io.Copy(out, tr)
+				closeErr := out.Close()
+				if copyErr != nil || closeErr != nil {
+					skipped++
+					continue
+				}
 				count++
 			}
 		}
-		return toolapi.ToolText(fmt.Sprintf("extracted %d files to %s", count, dest)), nil
+		return archiveExtractResult(archivePath, dest, count, skipped, refused)
 
 	default:
 		return toolapi.ToolMessage{}, fmt.Errorf("archive: unsupported format %q", format)
@@ -299,7 +390,6 @@ func archiveCreate(archivePath string, files []string, format string) (toolapi.T
 		}
 		defer out.Close()
 		zw := zip.NewWriter(out)
-		defer zw.Close()
 		count := 0
 		for _, path := range files {
 			err := filepath.Walk(path, func(fpath string, info os.FileInfo, err error) error {
@@ -315,15 +405,33 @@ func archiveCreate(archivePath string, files []string, format string) (toolapi.T
 					return err
 				}
 				defer f.Close()
-				io.Copy(w, f)
+				// A copy that stopped part way puts a shorter file in the archive
+				// than the one on disk, and the count said it was added.
+				if _, err := io.Copy(w, f); err != nil {
+					return err
+				}
 				count++
 				return nil
 			})
 			if err != nil {
+				zw.Close()
 				return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
 			}
 		}
-		return toolapi.ToolText(fmt.Sprintf("created %s with %d files", archivePath, count)), nil
+		// Closing the writer is what writes the index at the end of a zip, so its
+		// error is the difference between an archive and a file that looks like one.
+		// It was deferred, which discarded it: a disk that filled during the write
+		// produced an unreadable file and the tool reported "created ... with N
+		// files", and the fault surfaced later as a corrupt archive nothing connected
+		// back to this step.
+		if err := zw.Close(); err != nil {
+			return toolapi.ToolMessage{}, fmt.Errorf("archive: finishing %s: %w", archivePath, err)
+		}
+		if err := out.Close(); err != nil {
+			return toolapi.ToolMessage{}, fmt.Errorf("archive: finishing %s: %w", archivePath, err)
+		}
+		return toolapi.ToolOK("status", fmt.Sprintf("created %s with %d files", archivePath, count),
+			archiveData{Action: "create", Path: archivePath, Count: count}), nil
 
 	case "tar.gz":
 		out, err := os.Create(archivePath)
@@ -332,9 +440,7 @@ func archiveCreate(archivePath string, files []string, format string) (toolapi.T
 		}
 		defer out.Close()
 		gz := gzip.NewWriter(out)
-		defer gz.Close()
 		tw := tar.NewWriter(gz)
-		defer tw.Close()
 		count := 0
 		for _, path := range files {
 			err := filepath.Walk(path, func(fpath string, info os.FileInfo, err error) error {
@@ -354,15 +460,39 @@ func archiveCreate(archivePath string, files []string, format string) (toolapi.T
 					return err
 				}
 				defer f.Close()
-				io.Copy(tw, f)
+				if _, err := io.Copy(tw, f); err != nil {
+					return err
+				}
 				count++
 				return nil
 			})
 			if err != nil {
+				tw.Close()
+				gz.Close()
 				return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
 			}
 		}
-		return toolapi.ToolText(fmt.Sprintf("created %s with %d files", archivePath, count)), nil
+		// Three closes, each writing the end of its own layer: the tar's trailing
+		// blocks, the gzip footer, and the file itself. All three were deferred and
+		// their errors discarded, so a write that failed at any layer still reported a
+		// created archive.
+		// In this order, and not from a map: each layer writes its ending into the one
+		// beneath it, so the tar has to finish before the gzip it sits in and the gzip
+		// before the file. Go randomises map iteration, so ranging a map here would
+		// close them in a different order on different runs.
+		layers := []struct {
+			what   string
+			closer io.Closer
+		}{{"tar", tw}, {"gzip", gz}, {"file", out}}
+		for _, layer := range layers {
+			what, closer := layer.what, layer.closer
+			if err := closer.Close(); err != nil {
+				return toolapi.ToolMessage{}, fmt.Errorf("archive: finishing the %s layer of %s: %w",
+					what, archivePath, err)
+			}
+		}
+		return toolapi.ToolOK("status", fmt.Sprintf("created %s with %d files", archivePath, count),
+			archiveData{Action: "create", Path: archivePath, Count: count}), nil
 
 	default:
 		return toolapi.ToolMessage{}, fmt.Errorf("archive: unsupported format %q", format)

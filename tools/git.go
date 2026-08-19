@@ -30,7 +30,7 @@ func NewGit() *Git { return &Git{} }
  * return: JSON schema as raw bytes
  */
 func (g *Git) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(gitData{}))
 }
 
 /*
@@ -205,8 +205,14 @@ func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.
 		output += stderr.String()
 	}
 
+	// Long output is cut, and whether it was cut is part of the answer. The notice
+	// went into the text and nothing into the payload, so a step reading the payload
+	// saw a line count and no sign that the count was of a fragment — and a diff cut
+	// at this limit reads as a diff that ends there.
+	truncated := false
 	if len(output) > 8192 {
 		output = output[:8192] + "\n... (truncated)"
+		truncated = true
 	}
 
 	// A git that exited non-zero is a failure, said so rather than returned as
@@ -221,7 +227,11 @@ func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.
 	if strings.TrimSpace(output) == "" {
 		return toolapi.ToolEmpty("command", "git "+action+" produced no output"), nil
 	}
-	return toolapi.ToolOK("command", output, map[string]any{"action": action}), nil
+	return toolapi.ToolOK("command", output, gitData{
+		Action:    action,
+		Lines:     len(strings.Split(strings.TrimRight(output, "\n"), "\n")),
+		Truncated: truncated,
+	}), nil
 }
 
 var _ toolapi.Tool = (*Git)(nil)

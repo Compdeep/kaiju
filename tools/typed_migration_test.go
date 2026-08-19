@@ -27,7 +27,7 @@ func allTools(t *testing.T) map[string]toolapi.Tool {
 		"env_list":       NewEnvList(),
 		"file_list":      NewFileList(ws),
 		"file_read":      NewFileRead(ws),
-		"file_write":     NewFileWrite(ws),
+		"file_write":     NewFileWrite(ConfineToWorkspace(ws)),
 		"git":            NewGit(),
 		"memory_recall":  NewMemoryRecall(nil),
 		"memory_search":  NewMemorySearch(nil),

@@ -425,7 +425,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	}
 	if cfg.Tools.File.Enabled {
 		reg.Replace(tools.NewFileRead(cfg.Agent.Workspace), "builtin")
-		reg.Replace(tools.NewFileWrite(cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewFileWrite(tools.ConfineToWorkspace(cfg.Agent.Workspace)), "builtin")
 		reg.Replace(tools.NewFileList(cfg.Agent.Workspace), "builtin")
 	}
 	if cfg.Tools.Web.Enabled {

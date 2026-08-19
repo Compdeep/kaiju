@@ -59,7 +59,7 @@ func (e *EnvList) Impact(map[string]any) int { return toolapi.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (e *EnvList) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(envListData{}))
 }
 
 /*
@@ -98,6 +98,7 @@ func (e *EnvList) ExecuteTyped(_ context.Context, params map[string]any) (toolap
 	sort.Strings(envs)
 
 	var result []string
+	data := envListData{Filter: filter, Variables: map[string]string{}}
 	for _, env := range envs {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) != 2 {
@@ -111,15 +112,21 @@ func (e *EnvList) ExecuteTyped(_ context.Context, params map[string]any) (toolap
 
 		if !showSensitive && isSensitiveKey(key) {
 			value = "****"
+			data.Masked++
 		}
 
 		result = append(result, fmt.Sprintf("%s=%s", key, value))
+		data.Variables[key] = value
 	}
 
 	if len(result) == 0 {
 		return toolapi.ToolEmpty("env", "no matching environment variables"), nil
 	}
-	return toolapi.ToolText(strings.Join(result, "\n")), nil
+	// The same pairs as fields, so a later step can name one variable instead of
+	// being handed the whole listing to read. Masking happens above, so a value
+	// here is masked exactly as it is in the text.
+	data.Count = len(result)
+	return toolapi.ToolOK("env", strings.Join(result, "\n"), data), nil
 }
 
 /*
@@ -186,7 +193,7 @@ func (d *DiskUsage) Impact(map[string]any) int { return toolapi.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (d *DiskUsage) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(diskUsageData{}))
 }
 
 /*
@@ -244,8 +251,14 @@ func diskUsageAll(ctx context.Context) (toolapi.ToolMessage, error) {
 	default:
 		dfCmd = exec.CommandContext(ctx, "df", "-h")
 	}
+	data := diskUsageData{Complete: true}
 	if out, err := dfCmd.CombinedOutput(); err == nil {
 		result.WriteString(strings.TrimSpace(string(out)))
+		data.Filesystems = parseDfTable(string(out))
+	} else {
+		// The overview is the first half of this answer. Without it the report is
+		// the directory sizes alone, which is not what was asked for.
+		data.Complete = false
 	}
 
 	// Part 2: top-level directory sizes (with timeout)
@@ -253,13 +266,24 @@ func diskUsageAll(ctx context.Context) (toolapi.ToolMessage, error) {
 		timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		duCmd := exec.CommandContext(timeoutCtx, "du", "-h", "--max-depth=1", "--threshold=100M", "/")
-		if out, err := duCmd.CombinedOutput(); err == nil {
+		out, err := duCmd.CombinedOutput()
+		if len(out) > 0 {
 			result.WriteString("\n\nTop-level directories (>100MB):\n")
 			result.WriteString(strings.TrimSpace(string(out)))
 		}
+		// du walking / from this process reaches directories it may not read, so
+		// a non-zero exit here is expected rather than exceptional. What it did
+		// read is kept either way, and the directories it was refused are named,
+		// because their contents are in none of the sizes above.
+		entries, unreadable := parseDuLines(string(out))
+		data.Entries = append(data.Entries, entries...)
+		data.Unreadable = append(data.Unreadable, unreadable...)
+		if err != nil || len(unreadable) > 0 {
+			data.Complete = false
+		}
 	}
 
-	return toolapi.ToolText(result.String()), nil
+	return toolapi.ToolOK("disk", result.String(), data), nil
 }
 
 /*
@@ -288,18 +312,52 @@ func diskUsagePath(ctx context.Context, path string) (toolapi.ToolMessage, error
 		if timeoutCtx.Err() == context.DeadlineExceeded {
 			// Return partial output if we got some before timeout
 			if len(out) > 0 {
-				return toolapi.ToolText(strings.TrimSpace(string(out)) + "\n(truncated — scan timed out)"), nil
+				entries, unreadable := parseDuLines(string(out))
+				return toolapi.ToolOK("disk",
+					strings.TrimSpace(string(out))+"\n(truncated — scan timed out)",
+					diskUsageData{Path: path, Entries: entries, Unreadable: unreadable, Complete: false}), nil
 			}
 			return toolapi.ToolMessage{}, fmt.Errorf("disk_usage: scan timed out after 15s")
+		}
+
+		// du exits non-zero when it cannot read a directory, having already
+		// printed the sizes it could read and a line per directory it could not.
+		// Discarding that left "exit status 1" as the whole answer, which is what
+		// asking for a path with anyone else's files under it produced — /tmp on
+		// a shared machine, every time.
+		//
+		// So the output it captured survives, and the status says the answer is
+		// incomplete rather than absent. Same shape as network_diag: a command
+		// that failed still said something, and what it said is the useful part.
+		if text := strings.TrimSpace(string(out)); text != "" {
+			entries, unreadable := parseDuLines(string(out))
+			msg := toolapi.ToolFail("disk",
+				"du could not read every directory under "+path+
+					", so this listing is incomplete: "+err.Error(),
+				diskUsageData{Path: path, Entries: entries, Unreadable: unreadable, Complete: false})
+			// ToolFail carries the reason and the fields; the listing du printed
+			// before it was refused goes in content, which is the whole point of
+			// this branch.
+			msg.Content = text
+			return msg, nil
 		}
 		return toolapi.ToolMessage{}, fmt.Errorf("disk_usage: %w", err)
 	}
 
+	// Parsed before the cut, so the fields describe the directory rather than the
+	// first 4KB of the listing of it.
+	entries, unreadable := parseDuLines(string(out))
+
 	output := strings.TrimSpace(string(out))
+	truncated := false
 	if len(output) > 4096 {
 		output = output[:4096] + "\n... (truncated)"
+		truncated = true
 	}
-	return toolapi.ToolText(output), nil
+	return toolapi.ToolOK("disk", output, diskUsageData{
+		Path: path, Entries: entries, Unreadable: unreadable,
+		Complete: len(unreadable) == 0, Truncated: truncated,
+	}), nil
 }
 
 var _ toolapi.Tool = (*DiskUsage)(nil)
@@ -339,7 +397,7 @@ func (c *Clipboard) Description() string { return "Read from or write to the sys
  * return: JSON schema as raw bytes
  */
 func (c *Clipboard) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema("")
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(clipboardData{}))
 }
 
 /*
@@ -429,7 +487,14 @@ func clipboardRead(ctx context.Context) (toolapi.ToolMessage, error) {
 			cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--output")
 			out, err = cmd.Output()
 			if err != nil {
-				return toolapi.ToolMessage{}, fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
+				// No clipboard program on this machine. A failure to look, said as
+				// one: a Go error ends the step, so a run that asked about the
+				// clipboard as one part of a wider question lost the rest of it —
+				// over a machine that simply has no graphical session.
+				return toolapi.ToolFail("clipboard",
+					"this machine has no clipboard to read: neither xclip nor xsel is "+
+						"installed, which is usual on a server with no graphical session",
+					clipboardData{Action: "read"}), nil
 			}
 		} else {
 			return toolapi.ToolMessage{}, fmt.Errorf("clipboard: %w", err)
@@ -437,10 +502,14 @@ func clipboardRead(ctx context.Context) (toolapi.ToolMessage, error) {
 	}
 
 	content := string(out)
+	// Measured before the cut, so a step reading bytes learns the size of what is
+	// on the clipboard and not the size of what fitted.
+	data := clipboardData{Action: "read", Bytes: len(content)}
 	if len(content) > 8192 {
 		content = content[:8192] + "\n... (truncated)"
+		data.Truncated = true
 	}
-	return toolapi.ToolOK("clipboard", content, nil), nil
+	return toolapi.ToolOK("clipboard", content, data), nil
 }
 
 /*
@@ -471,14 +540,21 @@ func clipboardWrite(ctx context.Context, content string) (toolapi.ToolMessage, e
 			cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--input")
 			cmd.Stdin = strings.NewReader(content)
 			if err := cmd.Run(); err != nil {
-				return toolapi.ToolMessage{}, fmt.Errorf("clipboard: install xclip or xsel for clipboard access")
+				// As on the read side: a machine with no clipboard program is a
+				// fact about the machine, and a Go error would end a run that asked
+				// about the clipboard as one part of a wider question.
+				return toolapi.ToolFail("clipboard",
+					"this machine has no clipboard to write to: neither xclip nor xsel is "+
+						"installed, which is usual on a server with no graphical session",
+					clipboardData{Action: "write", Bytes: len(content)}), nil
 			}
 		} else {
 			return toolapi.ToolMessage{}, fmt.Errorf("clipboard: %w", err)
 		}
 	}
 
-	return toolapi.ToolText(fmt.Sprintf("wrote %d bytes to clipboard", len(content))), nil
+	return toolapi.ToolOK("clipboard", fmt.Sprintf("wrote %d bytes to clipboard", len(content)),
+		clipboardData{Action: "write", Bytes: len(content)}), nil
 }
 
 var _ toolapi.Tool = (*Clipboard)(nil)

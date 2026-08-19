@@ -65,6 +65,16 @@ func (t *OfficeExtract) Parameters() json.RawMessage {
 // Impact is observe-only: it opens a file read-only and returns its text.
 func (t *OfficeExtract) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
+// OutputSchema declares the envelope and the payload officeData carries.
+//
+// This tool declared nothing at all — it did not implement the interface — while
+// returning a payload with a document's family and file name in it. A planner was
+// shown neither, so a step extracting a document could not be followed by one that
+// named what kind of document it was.
+func (t *OfficeExtract) OutputSchema() json.RawMessage {
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(officeData{}))
+}
+
 // Execute satisfies the Tool interface for callers outside the DAG.
 func (t *OfficeExtract) Execute(ctx context.Context, params map[string]any) (string, error) {
 	return toolapi.StringResult(t.ExecuteTyped(ctx, params))
@@ -97,6 +107,15 @@ func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (
 
 	kind, out, err := extractOOXML(&zr.Reader, ext, maxChars)
 	if err != nil {
+		// "zip: not a valid zip file" is what a caller sees for a plain text file,
+		// which names the container format rather than the mistake. Office documents
+		// are zip archives underneath; the caller does not need to know that to
+		// understand that this file is not one.
+		if strings.Contains(err.Error(), "not a valid zip file") {
+			return toolapi.ToolFail("text",
+				filepath.Base(path)+" is not an Office document or PDF: nothing here can read it. "+
+					"Use file_read for text files", nil), nil
+		}
 		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: %s: %w", filepath.Base(path), err)
 	}
 	// The document opened and held no text — a scanned page, an empty deck. It
@@ -105,11 +124,14 @@ func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (
 	if strings.TrimSpace(out) == "" {
 		return toolapi.ToolEmpty("text", "opened "+filepath.Base(path)+" but found no extractable text"), nil
 	}
+	// Counted before the cut, so a step reading chars learns the size of the
+	// document's text rather than the size of what fitted.
+	data := officeData{Kind: kind, File: filepath.Base(path), Chars: len(out)}
 	if len(out) > maxChars {
 		out = out[:maxChars] + "\n…[truncated]"
+		data.Truncated = true
 	}
-	return toolapi.ToolOK("text", fmt.Sprintf("%s: %s\n\n%s", kind, filepath.Base(path), out),
-		map[string]any{"kind": kind, "file": filepath.Base(path)}), nil
+	return toolapi.ToolOK("text", fmt.Sprintf("%s: %s\n\n%s", kind, filepath.Base(path), out), data), nil
 }
 
 // extractOOXML dispatches to the right family. When ext is empty/unknown it

@@ -36,9 +36,24 @@ func TestSchemaUnified(t *testing.T) {
 	if !strings.Contains(string(NewWebFetch().OutputSchema()), `"data":`) {
 		t.Errorf("web_fetch should carry its payload schema under data")
 	}
-	// text tools have no data — content-only
-	if strings.Contains(string(NewFileRead("").OutputSchema()), `"data":`) {
-		t.Errorf("file_read is text-only and should have no data schema")
+	// file_read was text-only and declared no payload, so a step could not ask
+	// whether it had the whole file: the counts were inside a parenthesis in the
+	// text. It now carries them as fields, and lines_total is the one that answers
+	// that question.
+	readSchema := string(NewFileRead("").OutputSchema())
+	if !strings.Contains(readSchema, `"data":`) {
+		t.Errorf("file_read declares no payload: %s", readSchema)
+	}
+	if !strings.Contains(readSchema, `"lines_total"`) {
+		t.Errorf("file_read does not declare lines_total, so nothing can tell a whole file from a truncated one: %s", readSchema)
+	}
+	// A declared payload with nothing in it is the same position as declaring
+	// none, and reads in a diff as though the tool were described.
+	for name, schema := range schemas {
+		if strings.Contains(string(schema), `"data":{}`) ||
+			strings.Contains(string(schema), `"data":{"type":"object"}}`) {
+			t.Errorf("%s declares a payload with no fields in it: %s", name, schema)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"strconv"
 	"strings"
 )
@@ -82,7 +83,9 @@ func (textNS) TailTruncate(s string, n int) string {
 const evidenceTruncMarker = "\n\n...(middle truncated by the 8000-char evidence cap)...\n\n"
 
 func (textNS) TruncateEvidence(s string) string {
-	const maxLen = 8000
+	// The budget lives in toolapi, where a tool assembling its own evidence can
+	// read it too.
+	const maxLen = toolapi.EvidenceBudget
 	if len(s) <= maxLen {
 		return s
 	}

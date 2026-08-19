@@ -95,14 +95,16 @@ func (s *Sysinfo) ExecuteTyped(ctx context.Context, _ map[string]any) (toolapi.T
 		cwd, _ = os.Getwd()
 	}
 
+	// workspace was here as a second copy of cwd under another name, declared
+	// nowhere, so it reached every consumer as an undeclared duplicate of the field
+	// beside it. Found by comparing what each tool produces against what it declares.
 	info := map[string]any{
-		"hostname":  hostname,
-		"os":        runtime.GOOS,
-		"arch":      runtime.GOARCH,
-		"cwd":       cwd,
-		"workspace": cwd,
-		"time":      time.Now().UTC().Format(time.RFC3339),
-		"cpus":      runtime.NumCPU(),
+		"hostname": hostname,
+		"os":       runtime.GOOS,
+		"arch":     runtime.GOARCH,
+		"cwd":      cwd,
+		"time":     time.Now().UTC().Format(time.RFC3339),
+		"cpus":     runtime.NumCPU(),
 	}
 	// What the machine is doing, as opposed to what it is: uptime, memory
 	// pressure, load. It costs a subprocess, so it is the one part of this tool

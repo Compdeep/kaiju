@@ -858,10 +858,13 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		// conversational fallback only when nothing valid remains.
 		if unknown := a.unknownToolNames(steps); len(unknown) > 0 {
 			log.Printf("[dag] executive planned non-existent tool(s) %v — asking it to re-plan with real tools", unknown)
+			// The list of real tools is right there in the message; naming two of
+			// them by hand as well told an application that registers neither to
+			// call tools that do not exist — inside the message correcting the
+			// model for calling tools that do not exist.
 			correction := fmt.Sprintf(
 				"Error: %s not callable tools — they may be skills or capabilities, not tools. "+
-					"Call plan() again using ONLY real tools from this list: %s. "+
-					"For researching the web, use web_search and web_fetch as steps.",
+					"Call plan() again using ONLY real tools from this list: %s.",
 				quoteList(unknown), strings.Join(relevant, ", "))
 			replanMessages := append(messages,
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},

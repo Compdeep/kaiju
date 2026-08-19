@@ -176,6 +176,17 @@ func applyOverride(path string, data []byte) error {
 	if len(overrides) == 0 {
 		return fmt.Errorf("prompt: override %s parsed to zero sections (malformed — expected `=== NAME ===` delimiters)", path)
 	}
+	// Every section is checked before any is applied. This used to write as it
+	// iterated and return on the first empty one — and it iterates a map, whose order
+	// Go randomises, so a file with one empty section applied a different subset of
+	// the others on every start. The prompt a run saw depended on map ordering.
+	for name, body := range overrides {
+		if _, known := targets[name]; known || isRegistered(name) {
+			if strings.TrimSpace(body) == "" {
+				return fmt.Errorf("prompt: override section %q in %s is empty", name, path)
+			}
+		}
+	}
 	for name, body := range overrides {
 		dst, known := targets[name]
 		if !known {

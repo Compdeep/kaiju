@@ -845,7 +845,24 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 
 		steps := payload.Steps
 
-		// Empty steps = trivial query, planner answered directly
+		// Empty steps = trivial query, planner answered directly.
+		//
+		// True on a first plan, and not on a re-plan. Stopping is the
+		// reflector's decision: its three outcomes are continue, replan and
+		// conclude, and conclude is how a run stops. A re-plan happens only
+		// because the reflector chose replan, which is it ruling that work
+		// remains — so an empty plan here is the planner overturning a
+		// decision that is not its own.
+		//
+		// Read from a run that did exactly that. The reflector asked for a
+		// specific fetch; the planner returned no steps and an answer recalled
+		// from memory; the run ended having done nothing it was asked to do.
+		// Its answer then had to be walked back by the stage that writes the
+		// reply, which said plainly that no calculation had been performed.
+		if len(steps) == 0 && len(replanFrame) > 0 {
+			log.Printf("[dag] executive returned no steps on a re-plan; the reflector asked for work, so this is refused")
+			return nil, fmt.Errorf("re-plan returned no steps: the reflector decided work remains, and stopping is its decision, not the planner's")
+		}
 		if len(steps) == 0 {
 			if payload.Answer != "" {
 				log.Printf("[dag] executive answered directly (no tools needed): %s", Text.TruncateLog(payload.Answer, 200))

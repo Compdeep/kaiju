@@ -219,6 +219,28 @@ func (c *Client) Limits(fn ModelLimits) *Client {
 }
 
 /*
+ * WindowFor reports what this client's model can take in and give back.
+ * desc: The same lookup Limits installed, asked rather than applied — for a
+ *       caller that has to size something itself before it builds a request.
+ *       A tool splitting a document into pieces is the case: it needs to know
+ *       how large a piece may be, and the answer is a property of the model
+ *       that will read it, not of the tool.
+ *
+ *       Both zero when no lookup was installed, or when the lookup does not
+ *       know this model. A caller that gets zero has to decide for itself what
+ *       to do about an unknown model; there is no default here, because a
+ *       number invented at this level would be wrong for every caller
+ *       differently.
+ * return: the model's input and output limits in tokens, or 0, 0.
+ */
+func (c *Client) WindowFor() (contextTokens, maxOutputTokens int) {
+	if c == nil || c.limits == nil {
+		return 0, 0
+	}
+	return c.limits(c.Model())
+}
+
+/*
  * Transport replaces how this client's requests reach the endpoint.
  * desc: Complete, CompleteStream and Embed all send through the same http.Client,
  *       so supplying its transport once covers every call this client makes. An

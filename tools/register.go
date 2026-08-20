@@ -97,6 +97,11 @@ type Deps struct {
 	// is Startpage with DuckDuckGo as a fallback.
 	Search SearchConfig
 
+	// Fetch bounds what web_fetch may spend on one page — disk, and the model.
+	// The zero value is this package's own, which is what a caller that has not
+	// thought about it should get; see FetchLimits.
+	Fetch FetchLimits
+
 	// Plugins is the application's plugin configuration. Nil omits
 	// plugin_enable and plugin_option, which have nothing to persist a change
 	// to. plugin_list is registered whenever a plugin is compiled in, since
@@ -179,11 +184,9 @@ func Register(reg *toolapi.Registry, d Deps) ([]string, error) {
 
 	// The web. web_fetch reads a page with or without a model; web_research
 	// needs one to summarise across sources, so it is omitted without one.
-	if d.Executor != nil {
-		put(NewWebFetchWithLLM(d.Executor))
-	} else {
-		put(NewWebFetch())
-	}
+	// The workspace is where a fetched page is kept, which is what lets a later
+	// step read the whole document rather than the part that fitted in a result.
+	put(NewWebFetchIn(d.Workspace, d.Executor, d.Fetch))
 	// The same instance web_research uses, so the two share one rate limiter.
 	put(sharedSearch(d.Search))
 	if d.Executor != nil {
@@ -220,4 +223,59 @@ func Register(reg *toolapi.Registry, d Deps) ([]string, error) {
 			"the tools they were meant to leave out are registered", names)
 	}
 	return registered, nil
+}
+
+// FetchLimits bounds one fetch: how much of a page may be kept, and how much
+// may be spent reading it.
+//
+// Neither is a property of the model, which is why neither is read from one.
+// How much disk a page may take is the deployment's business — a host with a
+// small disk and one building a corpus want different answers. How much may be
+// spent extracting from a page is a cost decision, and cost is not something a
+// tool should decide on a caller's behalf.
+//
+// Everything else about a fetch — how large a piece the extractor is given, how
+// long a reply it may write — comes from the model that will read it, through
+// llm.Client.WindowFor. There is no other number.
+type FetchLimits struct {
+	// MaxBodyBytes is the most of one page that is written to disk. A larger
+	// page is written up to this and the result says it was cut, so a caller is
+	// never silently given part of a document believing it has all of it.
+	//
+	// Zero means DefaultMaxBodyBytes.
+	MaxBodyBytes int
+
+	// ExtractTokenBudget is the most that may be spent reading one page, in
+	// input tokens across every chunk. The number of chunks read is this
+	// divided by what the model's window allows, so a large-window model reads
+	// a long page in one pass and a small one in several — without either
+	// number being written down here.
+	//
+	// Zero means DefaultExtractTokenBudget.
+	ExtractTokenBudget int
+}
+
+// What a caller that has not said gets. Both are deliberately generous: the
+// failure they exist to prevent is a run that silently saw a fraction of a
+// document, and that is worse than a run that cost more than it had to.
+const (
+	// DefaultMaxBodyBytes is eight megabytes, which holds essentially any
+	// document a fetch will meet while still being a number rather than "all
+	// of the disk".
+	DefaultMaxBodyBytes = 8 << 20
+
+	// DefaultExtractTokenBudget is enough to read a large document in several
+	// passes on a small-window model, and in one on a large one.
+	DefaultExtractTokenBudget = 200_000
+)
+
+// resolve fills the zero values, so every caller of these reads one number.
+func (f FetchLimits) resolve() FetchLimits {
+	if f.MaxBodyBytes <= 0 {
+		f.MaxBodyBytes = DefaultMaxBodyBytes
+	}
+	if f.ExtractTokenBudget <= 0 {
+		f.ExtractTokenBudget = DefaultExtractTokenBudget
+	}
+	return f
 }

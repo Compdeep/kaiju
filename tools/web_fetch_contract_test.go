@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -105,31 +107,43 @@ func TestWebFetch_AcceptsHTTPAndHTTPS(t *testing.T) {
 	w := NewWebFetch()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := w.Execute(ctx, map[string]any{"url": srv.URL, "format": "raw"}); err != nil {
+	if _, err := w.Execute(ctx, map[string]any{"url": srv.URL, "format": "markdown"}); err != nil {
 		t.Fatalf("http URL should be accepted, got %v", err)
 	}
 }
 
 // ── Format routing ────────────────────────────────────────────────────────
 
-func TestWebFetch_RawFormat(t *testing.T) {
+func TestWebFetch_KeepsThePageAndSaysWhere(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<html><body><h1>Title</h1><p>Body</p></body></html>`))
 	}))
 	defer srv.Close()
 
-	w := NewWebFetch()
-	out, err := w.Execute(context.Background(), map[string]any{"url": srv.URL, "format": "raw"})
+	// What replaced the "raw" mode. There is no longer a way to ask for a whole
+	// document inline — there never really was one, since it was cut at eight
+	// kilobytes — so the whole document is written and the result says where.
+	ws := t.TempDir()
+	w := NewWebFetchIn(ws, nil, FetchLimits{})
+	out, err := w.Execute(context.Background(), map[string]any{"url": srv.URL})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	result := fetchPayload(t, out)
-	if result["format"] != "raw" {
-		t.Errorf("format = %v, want raw", result["format"])
+
+	rel, _ := result["path"].(string)
+	if rel == "" {
+		t.Fatal("no path on the result, so a caller cannot read the page it just fetched")
 	}
-	content, _ := result["content"].(string)
-	if !strings.Contains(content, "<h1>Title</h1>") {
-		t.Errorf("raw format should preserve HTML tags, got: %s", content)
+	kept, rerr := os.ReadFile(filepath.Join(ws, rel))
+	if rerr != nil {
+		t.Fatalf("the path does not lead to the page: %v", rerr)
+	}
+	if !strings.Contains(string(kept), "<h1>Title</h1>") {
+		t.Errorf("the kept page is not the page that was fetched: %s", kept)
+	}
+	if n, _ := result["bytes"].(float64); int(n) != len(kept) {
+		t.Errorf("bytes = %v, want %d", result["bytes"], len(kept))
 	}
 }
 
@@ -253,7 +267,7 @@ func TestWebFetch_PassesCustomHeaders(t *testing.T) {
 	w := NewWebFetch()
 	_, err := w.Execute(context.Background(), map[string]any{
 		"url":     srv.URL,
-		"format":  "raw",
+		"format":  "markdown",
 		"headers": map[string]any{"Authorization": "Bearer test123"},
 	})
 	if err != nil {
@@ -277,7 +291,7 @@ func TestWebFetch_POSTSendsBody(t *testing.T) {
 	w := NewWebFetch()
 	_, err := w.Execute(context.Background(), map[string]any{
 		"url":    srv.URL,
-		"format": "raw",
+		"format": "markdown",
 		"method": "POST",
 		"body":   `{"q":"data"}`,
 	})
@@ -357,7 +371,7 @@ func TestWebFetch_StampsTheFetchedURL(t *testing.T) {
 	defer srv.Close()
 
 	w := NewWebFetch()
-	out, err := w.Execute(context.Background(), map[string]any{"url": srv.URL, "format": "raw"})
+	out, err := w.Execute(context.Background(), map[string]any{"url": srv.URL, "format": "markdown"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

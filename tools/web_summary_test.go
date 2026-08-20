@@ -34,7 +34,7 @@ func TestFormatSummary_FocusMissFallsBackToGeneral(t *testing.T) {
 		strings.Repeat("Enterprise AI adoption is accelerating across industries and functions. ", 15) +
 		"</p></article></body></html>")
 
-	out, err := wf.formatSummary(context.Background(), "HTTP 200 OK", "https://x.example/report", body, "the exact 2025 revenue figure in USD")
+	out, err := wf.formatExtract(context.Background(), "HTTP 200 OK", "https://x.example/report", body, "the exact 2025 revenue figure in USD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestFormatSummary_GeneralAlsoEmptyStillReportsNoContent(t *testing.T) {
 
 	wf := NewWebFetchWithLLM(llm.NewClient(srv.URL, "k", "test"))
 	body := []byte("<html><body><article><p>" + strings.Repeat("Generic filler text with no facts here. ", 15) + "</p></article></body></html>")
-	out, _ := wf.formatSummary(context.Background(), "HTTP 200 OK", "https://x.example/empty", body, "revenue")
+	out, _ := wf.formatExtract(context.Background(), "HTTP 200 OK", "https://x.example/empty", body, "revenue")
 	// Nothing found is an outcome, not content: it rides in Detail with the
 	// empty status, which is what the coverage statement reads.
 	if out.Status != toolapi.StatusEmpty {

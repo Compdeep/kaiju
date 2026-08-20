@@ -438,7 +438,9 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		reg.Replace(tools.NewFileList(cfg.Agent.Workspace), "builtin")
 	}
 	if cfg.Tools.Web.Enabled {
-		reg.Replace(tools.NewWebFetchWithLLM(ag.ExecutorClient()), "builtin")
+		// The workspace so a fetched page is kept and can be read in full later;
+		// the zero limits so this deployment takes the package's own.
+		reg.Replace(tools.NewWebFetchIn(cfg.Agent.Workspace, ag.ExecutorClient(), tools.FetchLimits{}), "builtin")
 		searchCfg := tools.SearchConfig{
 			Provider: cfg.Tools.Web.SearchProvider,
 			DelaySec: cfg.Tools.Web.SearchDelaySec,

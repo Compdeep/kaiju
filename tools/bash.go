@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -41,7 +43,18 @@ type Bash struct {
 	shell   string
 	timeout time.Duration
 	workDir string
+
+	// keepBytes is the most of one command's output that is written beside the
+	// working directory. Zero means DefaultMaxOutputBytes; a tool with no
+	// working directory writes nothing whatever this says.
+	keepBytes int
 }
+
+// DefaultMaxOutputBytes is what one command's kept output may reach when a
+// deployment has not said. Generous on purpose: the failure it exists to
+// prevent is a run that saw the first few kilobytes of a long output and
+// concluded from it.
+const DefaultMaxOutputBytes = 8 << 20
 
 /*
  * NewBash creates a new Bash tool configured with the given shell.
@@ -272,10 +285,24 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		result.WriteString(stderr.String())
 	}
 
-	// Truncate to 8KB
-	output := result.String()
+	// Everything the command printed goes to disk first, whatever is returned
+	// inline. What comes back inline is bounded because it travels into a
+	// prompt; the file is not, so a later step can read or search the whole
+	// thing rather than the beginning of it.
+	full := result.String()
+	outPath, outBytes, outCut, keepErr := b.keepOutput(full)
+	if keepErr != nil {
+		// The command ran. Losing its result because the output could not be
+		// filed would throw away more than it saves, so this is only noted.
+		outPath = ""
+	}
+
+	// The inline cut. Unchanged: a prompt has room for a few kilobytes and the
+	// caps between here and the model would take it anyway. What changed is
+	// that the rest is no longer gone.
+	output := full
 	if len(output) > 8192 {
-		output = output[:8192] + "\n... (truncated)"
+		output = output[:8192] + "\n... (truncated — the whole output is at output_path)"
 	}
 
 	if err != nil {
@@ -306,10 +333,13 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		stdoutStr := headTailTruncate(stdout.String(), 200, 600)
 		stderrStr := headTailTruncate(stderr.String(), 200, 600)
 		return toolapi.ToolFail("command", fmt.Sprintf("exit %d: %s", exitCode, err.Error()), bashData{
-			ExitCode: exitCode,
-			Stdout:   stdoutStr,
-			Stderr:   stderrStr,
-			Command:  command,
+			ExitCode:        exitCode,
+			Stdout:          stdoutStr,
+			Stderr:          stderrStr,
+			Command:         command,
+			OutputPath:      outPath,
+			OutputBytes:     outBytes,
+			OutputTruncated: outCut,
 		}), nil
 	}
 
@@ -327,7 +357,10 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 	// bashData for the same reason, and ${node.N.command} reads it from there.
 	if strings.TrimSpace(output) == "" {
 		return toolapi.ToolEmptyWith("command", "exited 0 and printed nothing", bashData{
-			ExitCode: 0,
+			ExitCode:        0,
+			OutputPath:      outPath,
+			OutputBytes:     outBytes,
+			OutputTruncated: outCut,
 			// Read rather than assumed empty: this branch tests the trimmed
 			// output, so a command that printed only whitespace lands here too
 			// and the payload should say so.
@@ -338,10 +371,13 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 	}
 
 	return toolapi.ToolOK("command", output, bashData{
-		ExitCode: 0,
-		Stdout:   headTailTruncate(stdout.String(), 4000, 4000),
-		Stderr:   headTailTruncate(stderr.String(), 4000, 4000),
-		Command:  command,
+		ExitCode:        0,
+		Stdout:          headTailTruncate(stdout.String(), 4000, 4000),
+		Stderr:          headTailTruncate(stderr.String(), 4000, 4000),
+		Command:         command,
+		OutputPath:      outPath,
+		OutputBytes:     outBytes,
+		OutputTruncated: outCut,
 	}), nil
 }
 
@@ -359,6 +395,16 @@ type bashData struct {
 	Stdout   string `json:"stdout" desc:"standard output, cut to 4000 bytes at each end if longer"`
 	Stderr   string `json:"stderr" desc:"standard error, cut the same way"`
 	Command  string `json:"command" desc:"the command line that was run"`
+
+	// Where the whole output went. A command's output can be any size and what
+	// comes back inline is a few kilobytes of it, so the rest used to be
+	// discarded — a build that failed on line four thousand reported its first
+	// eight kilobytes and nothing else. Now it is written and this says where,
+	// so a later step reads or searches the file instead of running the command
+	// again and hoping the part it needs is nearer the top.
+	OutputPath      string `json:"output_path,omitempty" desc:"where this command's whole output was written, relative to the working directory. Read or search this when what came back inline is not enough — it is everything the command printed, not a cut-down copy"`
+	OutputBytes     int    `json:"output_bytes,omitempty" desc:"how much output was written to output_path"`
+	OutputTruncated bool   `json:"output_truncated,omitempty" desc:"the command printed more than this deployment keeps, so output_path holds the beginning of it and not all of it"`
 }
 
 var _ toolapi.Tool = (*Bash)(nil)
@@ -451,4 +497,53 @@ func killGroup(cmd *exec.Cmd) {
 		// The tree could not be ended: the process itself still goes.
 		_ = cmd.Process.Kill()
 	}
+}
+
+/*
+ * keepOutput writes everything a command printed and returns where.
+ * desc: What comes back inline is a few kilobytes, because a tool result
+ *       travels into a prompt and a prompt has room for a few kilobytes. The
+ *       rest used to be dropped, so a command that printed ten thousand lines
+ *       reported its first two hundred and the run reasoned from those.
+ *
+ *       Written under the working directory, which is the sandbox the command
+ *       already ran in. A tool with no working directory writes nothing and
+ *       returns nothing — the same tool on a machine it does not own should not
+ *       start leaving files on it.
+ * param: output - everything the command printed, both streams, as reported.
+ * return: the path relative to the working directory, how much was written,
+ *         whether it was cut, and any error — which is not fatal to the command,
+ *         since the command already ran.
+ */
+func (b *Bash) keepOutput(output string) (path string, written int, truncated bool, err error) {
+	if b.workDir == "" || output == "" {
+		return "", 0, false, nil
+	}
+
+	limit := b.keepBytes
+	if limit <= 0 {
+		limit = DefaultMaxOutputBytes
+	}
+	keep := output
+	if len(keep) > limit {
+		keep = keep[:limit]
+		truncated = true
+	}
+
+	dir := filepath.Join(b.workDir, "output")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", 0, truncated, err
+	}
+	name := fmt.Sprintf("command_%d.txt", time.Now().UnixNano())
+	full := filepath.Join(dir, name)
+	if err := os.WriteFile(full, []byte(keep), 0o644); err != nil {
+		return "", 0, truncated, err
+	}
+
+	// Relative to the working directory, because that is how every other step
+	// is given a path: inside the sandbox, not absolute on one machine.
+	if rel, rerr := filepath.Rel(b.workDir, full); rerr == nil {
+		return rel, len(keep), truncated, nil
+	}
+	return full, len(keep), truncated, nil
 }

@@ -64,7 +64,7 @@ func TestConfigHandler_RefusesAConfigItCannotServe(t *testing.T) {
 
 func TestConfigHandler_ServesWhatItWasGiven(t *testing.T) {
 	in := Config{
-		Brand:    Brand{Name: "Enbarr", Attribution: true},
+		Brand:    Brand{Name: "Acme", Attribution: true},
 		Sections: Sections{Users: false, Workspace: true},
 	}
 	h, err := ConfigHandler(in)
@@ -82,7 +82,7 @@ func TestConfigHandler_ServesWhatItWasGiven(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("the body is not the configuration: %v", err)
 	}
-	if out.Brand.Name != "Enbarr" || !out.Brand.Attribution {
+	if out.Brand.Name != "Acme" || !out.Brand.Attribution {
 		t.Errorf("brand did not survive the round trip: %+v", out.Brand)
 	}
 	if out.Sections.Users || !out.Sections.Workspace {

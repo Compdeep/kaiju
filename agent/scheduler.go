@@ -1302,15 +1302,21 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					graph.SetResult(comp.NodeID, comp.Result)
 				}
 
-				// ── Detect bash errors (non-zero exit returned as result, not error) ──
-				if bashErr, isBash := bashError(comp); isBash && node.Type == NodeTool && node.ToolName == "bash" {
-					log.Printf("[dag] node %s (bash) completed with error: %s", comp.NodeID, Text.TruncateLog(comp.Result, 500))
-					graph.SetError(comp.NodeID, bashErr)
-					node.Error = bashErr
+				// ── A tool that reported a failure in its envelope ──
+				//
+				// A tool has two ways to say it failed: return a Go error, or
+				// return an envelope whose status is error. Only the first used
+				// to reach the node, so the second resolved like a success —
+				// its message became evidence, the run's failure list stayed
+				// empty, and nothing could ask for a repair.
+				if toolErr, failed := toolReportedFailure(comp); failed && node.Type == NodeTool {
+					log.Printf("[dag] node %s (%s) completed with error: %s", comp.NodeID, node.ToolName, Text.TruncateLog(comp.Result, 500))
+					graph.SetError(comp.NodeID, toolErr)
+					node.Error = toolErr
 					if strings.HasPrefix(node.Tag, "verify_") || strings.HasPrefix(node.Tag, "revalidate_") {
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_FAIL", comp.Result)
 					} else {
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BASH_ERROR", comp.Result)
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "TOOL_ERROR", comp.Result)
 					}
 
 					// Count this as work so the reflector sees it and can decide
@@ -2174,25 +2180,43 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	}, nil
 }
 
-// bashError reports whether a bash node completed with a failure, read from its
-// command envelope. Drives the self-repair loop: a failure here marks the node
+// toolReportedFailure reports whether a node completed with a failure, read from
+// its envelope. Drives the self-repair loop: a failure here marks the node
 // errored, which reaches the reflector, which can send the run to the debugger.
+//
+// It applies to every tool, not only the shell. A tool has two ways to say it
+// failed — return a Go error, or return an envelope whose status is error — and
+// only the first used to reach the node. So a step that fetched a page and got
+// a 400 back resolved like a success: its error message was filed as evidence,
+// the run's failure list stayed empty, and no repair could be asked for because
+// nothing had failed. Narrowing this to one tool was never the intent; it was
+// where it was first needed.
 //
 // It used to fall back to searching the result text for "bash_error":true when
 // a node had no typed body. Nothing has written that string since the tool
 // returned envelopes, and the one path that arrived without a body — a step
 // dispatched to another machine — now parses one, so the search could only ever
 // have matched a tool whose output happened to contain the words.
-func bashError(comp nodeCompletion) (error, bool) {
+//
+// KNOWN WART: a tool that refuses because it is not available here — no store
+// configured, a plugin not compiled in — reports the same status as one that
+// tried and could not. Both mark the node failed, and only the second is worth
+// a repair. Telling them apart needs a status of its own, which is a change
+// across every tool in this engine and in whatever embeds it.
+func toolReportedFailure(comp nodeCompletion) (error, bool) {
 	tb, ok := comp.Body.(toolMessageBody)
 	if !ok {
 		return nil, false
 	}
 	env := tb.Envelope()
-	if env.Type == "command" && env.Status == toolapi.StatusError {
-		return fmt.Errorf("bash failed: %s", Text.TruncateLog(env.Detail, 300)), true
+	if env.Status != toolapi.StatusError {
+		return nil, false
 	}
-	return nil, false
+	detail := env.Detail
+	if detail == "" {
+		detail = "the tool reported a failure and gave no reason"
+	}
+	return fmt.Errorf("%s failed: %s", env.Type, Text.TruncateLog(detail, 300)), true
 }
 
 // debugProblem reports whether a node completed as a debug envelope and returns
@@ -2490,7 +2514,7 @@ func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd,
 	//
 	// Failure detection now relies on:
 	//   1. bash exit code on the exec node — non-zero already routes through
-	//      bashError in the scheduler and is treated as failure.
+	//      toolReportedFailure in the scheduler and is treated as failure.
 	//   2. the reflector — it reads the exec node's captured stdout from
 	//      comp.Result with full context (goal, code, output) and decides
 	//      continue / investigate / conclude. The reflector is strictly

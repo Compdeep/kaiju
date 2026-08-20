@@ -432,6 +432,10 @@ func (c *Clipboard) Parameters() json.RawMessage {
 			"content": {"type": "string", "description": "Content to write (required for write action)"}
 		},
 		"required": ["action"],
+		"allOf": [
+			{"if": {"properties": {"action": {"const": "write"}}, "required": ["action"]},
+			 "then": {"required": ["content"]}}
+		],
 		"additionalProperties": false
 	}`)
 }

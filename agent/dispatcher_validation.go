@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -39,7 +40,63 @@ import (
 // param name is allowed.
 type parsedSchema struct {
 	Properties           map[string]json.RawMessage
-	AdditionalProperties bool // default true (JSON Schema), set false only when schema says so
+	Required             []string                 // names the schema marks required, in declared order
+	Conditional          []conditionalRequirement // names required only in certain modes
+	AdditionalProperties bool                     // default true (JSON Schema), set false only when schema says so
+}
+
+// conditionalRequirement is one "when this parameter holds one of these values,
+// these other parameters are required" rule, read from a schema's allOf entries.
+// Tools whose behaviour changes with a mode carry rules the flat "required" list
+// cannot express: clipboard needs content only to write, service needs command
+// only to start. Written flat, those parameters could not be marked required at
+// all, because they are not required in every mode — so the rule lived in a
+// description string, where no check could reach it and the call failed part-way
+// through a run instead of at planning.
+//
+// Only one shape is read, and anything else in allOf is ignored rather than
+// guessed at:
+//
+//	{"if":   {"properties": {"action": {"const": "write"}}, "required": ["action"]},
+//	 "then": {"required": ["content"]}}
+//
+// "enum" stands in for "const" when several values share a rule.
+type conditionalRequirement struct {
+	When    string   // the parameter whose value selects the mode
+	Equals  []string // the values of that parameter which make the rule apply
+	Require []string // the parameters required when it does
+}
+
+// describe names the rule in the words the planner is given back.
+func (c conditionalRequirement) describe() string {
+	if len(c.Equals) == 1 {
+		return fmt.Sprintf("%s is %q", c.When, c.Equals[0])
+	}
+	quoted := make([]string, len(c.Equals))
+	for i, v := range c.Equals {
+		quoted[i] = strconv.Quote(v)
+	}
+	return fmt.Sprintf("%s is one of %s", c.When, strings.Join(quoted, ", "))
+}
+
+// applies reports whether params select a mode this rule governs. A discriminator
+// that is absent, empty, not a string, or still an unresolved reference cannot be
+// read, so the rule stays silent — a check that cannot tell must not reject.
+func (c conditionalRequirement) applies(params map[string]any) bool {
+	v, ok := params[c.When].(string)
+	if !ok {
+		return false
+	}
+	v = strings.TrimSpace(v)
+	if v == "" || strings.Contains(v, "${") {
+		return false
+	}
+	for _, want := range c.Equals {
+		if strings.EqualFold(v, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseToolSchema reads a tool's Parameters() output and extracts just
@@ -58,14 +115,22 @@ func parseToolSchema(raw json.RawMessage) (parsedSchema, error) {
 	// true — we don't support conditional-properties schemas here).
 	var aux struct {
 		Properties           map[string]json.RawMessage `json:"properties"`
+		Required             []string                   `json:"required"`
 		AdditionalProperties json.RawMessage            `json:"additionalProperties"`
+		AllOf                []json.RawMessage          `json:"allOf"`
 	}
 	if err := json.Unmarshal(raw, &aux); err != nil {
 		return parsedSchema{}, fmt.Errorf("tool schema unreadable: %w", err)
 	}
 	out := parsedSchema{
 		Properties:           aux.Properties,
+		Required:             aux.Required,
 		AdditionalProperties: true, // JSON Schema default
+	}
+	for _, entry := range aux.AllOf {
+		if c, ok := parseConditional(entry); ok {
+			out.Conditional = append(out.Conditional, c)
+		}
 	}
 	if len(aux.AdditionalProperties) > 0 {
 		var b bool
@@ -78,20 +143,143 @@ func parseToolSchema(raw json.RawMessage) (parsedSchema, error) {
 	return out, nil
 }
 
-// validateDirectParams rejects any key in `params` that the tool's
-// schema does not allow. Templates inline (`${node.X.field}`) are just
-// strings as far as this check is concerned — the schema either lists
-// the param name or it doesn't.
+// parseConditional reads one allOf entry in the single supported shape, and
+// reports false for anything else — an entry using a construct this does not
+// model is skipped, never guessed at, because a misread rule would reject a call
+// that works.
+func parseConditional(raw json.RawMessage) (conditionalRequirement, bool) {
+	var entry struct {
+		If struct {
+			Properties map[string]struct {
+				Const json.RawMessage `json:"const"`
+				Enum  []string        `json:"enum"`
+			} `json:"properties"`
+		} `json:"if"`
+		Then struct {
+			Required []string `json:"required"`
+		} `json:"then"`
+	}
+	if json.Unmarshal(raw, &entry) != nil {
+		return conditionalRequirement{}, false
+	}
+	// One discriminator per rule. Two would mean a combination this does not model.
+	if len(entry.Then.Required) == 0 || len(entry.If.Properties) != 1 {
+		return conditionalRequirement{}, false
+	}
+	for key, cond := range entry.If.Properties {
+		values := cond.Enum
+		if len(cond.Const) > 0 {
+			var one string
+			if json.Unmarshal(cond.Const, &one) == nil {
+				values = append(values, one)
+			}
+		}
+		if len(values) == 0 {
+			return conditionalRequirement{}, false
+		}
+		return conditionalRequirement{When: key, Equals: values, Require: entry.Then.Required}, true
+	}
+	return conditionalRequirement{}, false
+}
+
+// missingRequirement is one parameter a call does not supply that its tool's
+// schema demands, carrying the mode that demanded it when a conditional rule is
+// the source — the planner needs to know a parameter became required because of
+// the mode it chose, not merely that it is missing.
+type missingRequirement struct {
+	Name string
+	When string // empty when the schema requires this in every mode
+}
+
+func (m missingRequirement) String() string {
+	if m.When == "" {
+		return strconv.Quote(m.Name)
+	}
+	return fmt.Sprintf("%s (required when %s)", strconv.Quote(m.Name), m.When)
+}
+
+// missingRequiredParams returns the names of parameters the schema marks
+// required that `params` carries no usable value for, in the order the
+// schema lists them. A key that is absent, nil, or a string that is empty
+// once trimmed counts as missing; false and 0 are values, not absences.
 //
-// Returns nil when every key is allowed. Returns a descriptive error
-// naming the first offending key and the tool's allowed set when not.
+// An unresolved reference (`${step.2.path}`) counts as supplied — whether
+// it resolves is resolution's business, not this check's.
+func missingRequiredParams(schema parsedSchema, params map[string]any) []missingRequirement {
+	var missing []missingRequirement
+	reported := make(map[string]bool)
+	add := func(key, when string) {
+		if reported[key] || suppliedParam(params, key) {
+			return
+		}
+		reported[key] = true
+		missing = append(missing, missingRequirement{Name: key, When: when})
+	}
+	for _, key := range schema.Required {
+		add(key, "")
+	}
+	for _, c := range schema.Conditional {
+		if !c.applies(params) {
+			continue
+		}
+		for _, key := range c.Require {
+			add(key, c.describe())
+		}
+	}
+	return missing
+}
+
+// suppliedParam reports whether params carries a usable value for key. Absent,
+// nil, or a string empty once trimmed is not usable; false and 0 are values a
+// caller chose, not absences.
+func suppliedParam(params map[string]any, key string) bool {
+	v, present := params[key]
+	if !present || v == nil {
+		return false
+	}
+	if str, isStr := v.(string); isStr && strings.TrimSpace(str) == "" {
+		return false
+	}
+	return true
+}
+
+// names reduces the requirements to bare parameter names, for messages that list
+// what a tool wants rather than what one call left out.
+func names(reqs []missingRequirement) []string {
+	out := make([]string, len(reqs))
+	for i, r := range reqs {
+		out[i] = r.Name
+	}
+	return out
+}
+
+// validateDirectParams rejects a call the tool's own schema says is wrong:
+// a key the schema does not allow, or a key the schema marks required that
+// the call does not supply. Templates inline (`${node.X.field}`) are just
+// strings as far as this check is concerned — the schema either lists the
+// param name or it doesn't.
+//
+// The required check runs whatever the schema says about extras, because
+// requiring a parameter and allowing unlisted ones are separate statements;
+// the unknown-key check runs only on a closed schema. This is the dispatch-time
+// backstop for validatePlanParams, which catches both at plan time where the
+// executive can re-plan against them.
+//
+// Returns nil when the call is allowed. Returns a descriptive error naming
+// the first offending key and the tool's own set when not.
 func validateDirectParams(tool toolapi.Tool, params map[string]any) error {
 	schema, err := parseToolSchema(tool.Parameters())
 	if err != nil {
 		return fmt.Errorf("validate %s params: %w", tool.Name(), err)
 	}
+	if missing := missingRequiredParams(schema, params); len(missing) > 0 {
+		log.Printf("[dispatch:reject] %s: required param(s) not supplied: %s",
+			tool.Name(), strings.Join(names(missing), ", "))
+		return fmt.Errorf("tool %s rejected: required parameter %s not supplied",
+			tool.Name(), missing[0])
+	}
 	if schema.AdditionalProperties {
-		return nil // tool's schema allows extras; nothing to reject
+		return nil // tool's schema allows extras; no name left to reject
 	}
 	for key := range params {
 		if _, declared := schema.Properties[key]; declared {

@@ -1703,34 +1703,51 @@ func validatePlanEdges(steps []PlanStep, registry *toolapi.Registry) []string {
 	return errs
 }
 
-// validatePlanParams checks each step's parameter NAMES against its tool's own
-// input schema, returning one human-readable error per invented parameter (empty
-// ⇒ clean). It is the plan-time twin of validatePlanEdges: that checks the wiring
-// BETWEEN steps (${step.N} references), this checks the parameters OF a step.
+// validatePlanParams checks each step's parameters against its tool's own input
+// schema, returning one human-readable error per fault (empty ⇒ clean). It is the
+// plan-time twin of validatePlanEdges: that checks the wiring BETWEEN steps
+// (${step.N} references), this checks the parameters OF a step. Two faults:
 //
-// Only tools whose schema is closed (additionalProperties:false) are checked — an
-// open-schema tool (compute, edit_file) legitimately takes extra dotted context.*
-// keys and is skipped. Catching a bad name here — web_search(topn: …), where the
-// count knob is max_results — lets the executive re-plan with the real names as
-// feedback, instead of the call being rejected later at dispatch and the node
-// just failing. The valid-name set comes from each tool's OWN schema, so it is not
-// a hardcoded list and covers any invented name, not specific ones.
+//   - a name the schema does not declare — web_search(topn: …), where the count
+//     knob is max_results. Checked only when the schema is closed
+//     (additionalProperties:false); an open-schema tool (compute, edit_file)
+//     legitimately takes extra dotted context.* keys, so extras are allowed there.
+//   - a name the schema marks required that the step does not supply. Checked for
+//     every tool, open schema or closed, because requiring a parameter and
+//     allowing unlisted ones are separate statements. A step supplying none at all
+//     is checked too: no parameters is the largest possible omission, not a reason
+//     to skip.
+//
+// Both come back as feedback the executive re-plans against, instead of the call
+// being rejected later at dispatch, or — where the schema is open and the tool
+// reads a default — the step running and answering a question nobody asked. The
+// name and requirement sets come from each tool's OWN schema, so this is not a
+// hardcoded list and covers any tool, not specific ones.
 func validatePlanParams(steps []PlanStep, registry *toolapi.Registry) []string {
 	if registry == nil {
 		return nil
 	}
 	var errs []string
 	for i, s := range steps {
-		if len(s.Params) == 0 {
-			continue
-		}
 		skill, ok := registry.Get(s.Tool)
 		if !ok {
 			continue // unknown tool name — not this check's job
 		}
 		schema, err := parseToolSchema(skill.Parameters())
-		if err != nil || schema.AdditionalProperties {
-			continue // unreadable schema, or extras allowed → nothing to reject
+		if err != nil {
+			continue // unreadable schema → nothing to check against
+		}
+		for _, m := range missingRequiredParams(schema, s.Params) {
+			if m.When != "" {
+				errs = append(errs, fmt.Sprintf("step %d (%s): required parameter %q is not supplied — %s requires it when %s",
+					i, s.Tool, m.Name, s.Tool, m.When))
+				continue
+			}
+			errs = append(errs, fmt.Sprintf("step %d (%s): required parameter %q is not supplied — %s requires: %s",
+				i, s.Tool, m.Name, s.Tool, strings.Join(schema.Required, ", ")))
+		}
+		if schema.AdditionalProperties {
+			continue // extras allowed → no name left to reject
 		}
 		for key := range s.Params {
 			if _, declared := schema.Properties[key]; declared {

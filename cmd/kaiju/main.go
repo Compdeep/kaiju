@@ -402,22 +402,33 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	if cfg.Tools.Sysinfo.Enabled {
 		reg.Replace(tools.NewSysinfo(cfg.Agent.Workspace), "builtin")
 	}
-	// Coding tools (compute + edit_file). disable_coding is the master switch for
-	// the whole coding module — when set, these tools aren't even registered, so
-	// the planner never sees them.
-	if cfg.Tools.Compute.Enabled && !cfg.Agent.DisableCoding {
+	// Coding tools (compute + edit_file), on the tool switch alone.
+	//
+	// disable_coding is NOT part of this condition any more. It is documented,
+	// here and on agent.Config, as refusing deep compute — codebase building —
+	// while leaving shallow analytical compute alone, and compute.go enforces
+	// exactly that: with the flag set an unstated mode defaults to shallow and
+	// only "deep" is refused. Including the flag here meant the tool was never
+	// registered, so that chokepoint never ran and shallow arithmetic went with
+	// codebase building. A deployment that wants no compute at all sets
+	// tools.compute.enabled to false; a caller that wants none for one request
+	// leaves it out of the tool list on its token.
+	if cfg.Tools.Compute.Enabled {
 		reg.Replace(agent.NewComputeTool(ag), "builtin")
-		// edit_file rides the same Coder pipeline as compute(shallow) so
-		// gate it on the same config flag. Decouple later if we want file
-		// edits without full compute capability.
+		// edit_file rides the same Coder pipeline as compute(shallow), so it
+		// follows the same switch.
 		reg.Replace(agent.NewEditFileTool(ag), "builtin")
-		// debug is the REPAIR super-tool (Holmes RCA → microplanner fix →
-		// validators). Its fix rides the same Coder pipeline, so gate it on the
-		// same flag — with coding disabled there's nothing to fix. Unlike the
-		// agent tool it IS visible to the planner: the executive plans a `debug`
-		// step when a re-plan is triggered by a failure.
-		reg.Replace(agent.NewDebugTool(ag), "builtin")
 	}
+	// debug is the REPAIR super-tool and the only door to Holmes: the executive
+	// plans a `debug` step after a failure and the scheduler grafts the first
+	// Holmes iteration onto it. Registered unconditionally.
+	//
+	// It used to sit inside the block above, which meant a deployment with
+	// coding off had no root-cause analysis at all — the guard in rca.go that
+	// keeps Holmes and drops only the code-fix graft was guarding a path nothing
+	// could enter. Diagnosis is not code generation, and turning the second off
+	// should not take the first with it.
+	reg.Replace(agent.NewDebugTool(ag), "builtin")
 	if cfg.Tools.Bash.Enabled {
 		reg.Replace(tools.NewBash(cfg.Tools.Bash.Shell, cfg.Agent.Workspace), "builtin")
 	}

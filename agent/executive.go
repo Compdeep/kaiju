@@ -7,6 +7,7 @@ import (
 	"log"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -361,7 +362,11 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		// model has no example showing the required `goal` and `mode` fields,
 		// and no "ONE compute(deep) node" rule, so it tends to plan multiple
 		// compute steps and forget the params on the second one.
-		if !a.cfg.DisableCoding {
+		// Included when this run can actually call compute, not when a setting
+		// says coding is on. The list this prompt is built from is already
+		// filtered by reach and by the run's scope, so asking it is asking the
+		// same question the dispatcher will ask later.
+		if slices.Contains(relevant, computeToolName) {
 			sb.WriteString("## Compute Nodes\n")
 			sb.WriteString("**Compute is the right tool whenever real computation is required.** The aggregator at the end of the plan is an LLM call that can handle small math, summarisation, and qualitative synthesis — but it CANNOT propagate orbits, run sgp4 / skyfield / pandas / scipy, parse thousand-row CSVs, or compute precision floating-point values. When the question needs any of those, **add a compute step.** The Persistence litany in your system prompt is explicit: the way to answer a hard quant question is to compute it, not to recommend an external app.\n\n")
 			sb.WriteString("Only omit compute when the answer truly is a lookup (a static value from a press release, a fact from Wikipedia, a short web summary). \"Looks like a lookup\" is not the same as \"is a lookup\" — *next visible Starlink passes over Tokyo tonight* is NOT pre-computed on any page; it requires sgp4 propagation. If a known web tool exists for it (Heavens-Above, in-the-sky.org), assume the tool is a JS widget that computes on click — not a fetchable answer. Fetch the underlying TLE catalogue from CelesTrak and compute it yourself.\n\n")
@@ -450,7 +455,9 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("NEVER plan when context is genuinely incomplete — emit `[{\"tool\":\"gap\",\"gap\":\"<question>\"}]` only for unresolvable references, ambiguous key terms, or information only the user has. Not an escape hatch for tool choice or gatherable data.\n")
 		sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
 		sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
-		if !a.cfg.DisableCoding {
+		// The workspace layout describes where compute puts what it builds, so
+		// it belongs with compute — see above.
+		if slices.Contains(relevant, computeToolName) {
 			sb.WriteString("\n## Workspace Layout\n")
 			sb.WriteString("- project/ — source code, application files\n")
 			sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")

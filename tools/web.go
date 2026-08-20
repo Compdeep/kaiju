@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -18,35 +20,65 @@ import (
 )
 
 /*
- * WebFetch fetches a URL and extracts content in the requested format.
- * desc: Tool supporting markdown (readability), text (plain), raw (HTML), and summary (LLM extract) modes.
+ * WebFetch fetches a URL, keeps the page, and returns the part that was asked
+ * for.
+ * desc: The body is written to the workspace on every fetch and the result says
+ *       where, so a caller that asked for the wrong shape has not lost the
+ *       document — a later step can read, search or parse the file with none of
+ *       the limits that apply to a result travelling into a prompt.
+ *
+ *       Inline, it returns what was asked for: the page as text, or the parts
+ *       of it matching a focus. How much of the page the extractor is shown, and
+ *       how long a reply it may write, come from the model that will read it.
  */
 type WebFetch struct {
-	client   *http.Client
-	executor *llm.Client // for summary mode (nil = summary unavailable)
+	client    *http.Client
+	executor  *llm.Client // for extract mode (nil = extract unavailable)
+	workspace string      // where a fetched body is kept ("" = nowhere)
+	limits    FetchLimits
 }
 
 /*
- * NewWebFetch creates a WebFetch tool without LLM summary capability.
- * desc: Initializes WebFetch with a 30-second HTTP client timeout and no LLM executor.
+ * NewWebFetch creates a WebFetch that keeps no page and extracts nothing.
+ * desc: No workspace, so nothing is written and no path comes back; no model,
+ *       so a focus cannot be answered. It reads a page and returns it.
  * return: pointer to a new WebFetch
  */
 func NewWebFetch() *WebFetch {
 	return &WebFetch{
 		client: &http.Client{Timeout: 30 * time.Second},
+		limits: FetchLimits{}.resolve(),
 	}
 }
 
 /*
- * NewWebFetchWithLLM creates a WebFetch tool with LLM summary capability.
- * desc: Initializes WebFetch with a 30-second HTTP client and an LLM client for summary mode.
- * param: executor - LLM client used for content summarization in summary mode
- * return: pointer to a new WebFetch with LLM support
+ * NewWebFetchWithLLM creates a WebFetch that can extract from what it fetched.
+ * desc: Kept for callers that have no workspace to keep pages in. Prefer
+ *       NewWebFetchIn, which does — the page surviving the fetch is what makes
+ *       a wrong guess about the inline shape recoverable.
+ * param: executor - the model that answers a focus
+ * return: pointer to a new WebFetch
  */
 func NewWebFetchWithLLM(executor *llm.Client) *WebFetch {
+	return NewWebFetchIn("", executor, FetchLimits{})
+}
+
+/*
+ * NewWebFetchIn creates a WebFetch that keeps every page it reads.
+ * desc: workspace is where bodies are written. Empty means none is, and the
+ *       result carries no path — everything else works as before, so a caller
+ *       without a sandbox is not broken, only less able to recover.
+ * param: workspace - the directory bodies are written under, or "".
+ * param: executor - the model that answers a focus, or nil.
+ * param: limits - what one fetch may spend; the zero value is this package's.
+ * return: pointer to a new WebFetch
+ */
+func NewWebFetchIn(workspace string, executor *llm.Client, limits FetchLimits) *WebFetch {
 	return &WebFetch{
-		client:   &http.Client{Timeout: 30 * time.Second},
-		executor: executor,
+		client:    &http.Client{Timeout: 30 * time.Second},
+		executor:  executor,
+		workspace: workspace,
+		limits:    limits.resolve(),
 	}
 }
 
@@ -80,7 +112,7 @@ func (w *WebFetch) Impact(map[string]any) int { return toolapi.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (w *WebFetch) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"extraction format used: markdown, text, raw, or summary"},"url":{"type":"string","description":"the URL this call was given, echoed back so a later step can say which page a result came from. It is not a link found on the page, and fetching it again returns this same result — see the warning above about not chaining from this tool into another web_fetch"}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"what was returned inline: markdown, text, or extract"},"path":{"type":"string","description":"where the whole page was written, relative to the workspace. Present on every fetch that has somewhere to write. Read, search or parse this in a later step when the inline content is not enough — it is the complete document, not a cut-down one"},"bytes":{"type":"integer","description":"how much of the page was written to path"},"body_truncated":{"type":"boolean","description":"the page was larger than this deployment keeps, so path holds the beginning of it and not all of it"},"url":{"type":"string","description":"the URL this call was given, echoed back so a later step can say which page a result came from. It is not a link found on the page, and fetching it again returns this same result — see the warning above about not chaining from this tool into another web_fetch"}}}`)
 }
 
 /*
@@ -93,7 +125,7 @@ func (w *WebFetch) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"url": {"type": "string", "description": "A real HTTP/HTTPS URL to fetch. Must start with http:// or https://. Never use placeholder values — wire upstream URLs in via ${step.N.results.M.url} (or similar dot-paths into the upstream JSON)."},
-			"format": {"type": "string", "description": "Extract mode: markdown (default), text, raw, summary", "enum": ["markdown", "text", "raw", "summary"]},
+			"format": {"type": "string", "description": "What to return inline. markdown (default) — the page as clean text, best for reading a reference document you are going to work from. text — the same, stripped of all markup. extract — only the parts matching the focus, quoted word for word, read across the WHOLE page; use this when you need exact names, parameters or figures, because it does not paraphrase. The full page is always written to disk and its path returned, whichever you pick.", "enum": ["markdown", "text", "extract", "summary"]},
 			"focus": {"type": "string", "description": "For summary mode: what to extract (e.g. 'pricing and shipping policies', 'key competitors')"},
 			"method": {"type": "string", "description": "HTTP method (default: GET)", "enum": ["GET", "POST"]},
 			"body": {"type": "string", "description": "Request body (for POST)"},
@@ -221,6 +253,17 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 
 	status := fmt.Sprintf("HTTP %d %s", resp.StatusCode, resp.Status)
 
+	// The page is kept first, before anything is decided about what to return
+	// inline. Every outcome below then carries a path, so a caller that asked
+	// for the wrong shape — or got a page that would not extract — still has the
+	// document and can read, search or parse it in a later step, with none of
+	// the limits that apply to a result travelling into a prompt.
+	//
+	// A failure to write is reported on the result and does not fail the fetch:
+	// the page was still read, and returning nothing because it could not be
+	// filed would lose more than it saved.
+	keptPath, keptBytes, keptCut, keepErr := w.keepBody(rawURL, bodyBytes)
+
 	// Build the result, then stamp the fetched URL onto it (withURL) at a single
 	// exit — so every outcome, especially a 404 or an empty page, records WHICH url
 	// produced it. A bare "HTTP 404" with no url is un-debuggable in the trace.
@@ -263,18 +306,63 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 
 	default:
 		switch format {
-		case "raw":
-			out, err = w.formatRaw(status, bodyBytes)
 		case "text":
 			out, err = w.formatText(ctx, status, rawURL, bodyBytes)
-		case "summary":
+		case "extract", "summary":
+			// "summary" is what this was called when it paraphrased. It never
+			// did — its instruction has always been to extract — so the name is
+			// kept working rather than breaking every caller that learned it.
 			focus, _ := params["focus"].(string)
-			out, err = w.formatSummary(ctx, status, rawURL, bodyBytes, focus)
+			out, err = w.formatExtract(ctx, status, rawURL, bodyBytes, focus)
 		default: // markdown
 			out, err = w.formatMarkdown(ctx, status, rawURL, bodyBytes)
 		}
 	}
-	return withURL(rawURL, out, err)
+	return withKept(rawURL, keptPath, keptBytes, keptCut, keepErr, out, err)
+}
+
+/*
+ * withKept records where the page was kept, then stamps the URL.
+ * desc: One exit, so every outcome carries both — a 404, a page that would not
+ *       extract, and a clean read all say which URL produced them and where the
+ *       body is. A caller reading a thin result can go to the file rather than
+ *       fetching again.
+ * param: rawURL - what was fetched.
+ * param: path - where the body was written, or "" if it was not.
+ * param: bytes - how much was written.
+ * param: cut - whether the body was larger than the deployment allows.
+ * param: keepErr - why nothing was written, if that is what happened.
+ * param: m - the result so far.
+ * param: err - the error so far.
+ * return: the result with the fetch recorded on it.
+ */
+func withKept(rawURL, path string, bytes int, cut bool, keepErr error, m toolapi.ToolMessage, err error) (toolapi.ToolMessage, error) {
+	if err != nil {
+		return withURL(rawURL, m, err)
+	}
+	obj := map[string]any{}
+	if len(m.Data) > 0 {
+		_ = json.Unmarshal(m.Data, &obj)
+	}
+	switch {
+	case path != "":
+		obj["path"] = path
+		obj["bytes"] = bytes
+		if cut {
+			obj["body_truncated"] = true
+		}
+	case keepErr != nil:
+		// Said out loud rather than left absent: a caller that expected a path
+		// and finds none should be told the page was read and not filed, not
+		// left to conclude the tool does not do that.
+		obj["kept"] = "the page was read but could not be written: " + keepErr.Error()
+	}
+	if len(obj) > 0 {
+		if b, mErr := json.Marshal(obj); mErr == nil {
+			m.Data = b
+		}
+	}
+	return withURL(rawURL, m, err)
 }
 
 // withURL stamps the fetched URL onto a fetch-result envelope: into Data always,
@@ -358,23 +446,6 @@ func marshalFetchResult(r fetchResult) (toolapi.ToolMessage, error) {
 		msg.Content = r.Content
 	}
 	return msg, nil
-}
-
-/*
- * formatRaw returns the raw response body truncated to 8KB.
- * desc: Returns the unprocessed HTML body with an HTTP status.
- * param: status - HTTP status line string
- * param: body - raw response body bytes
- * return: JSON {status, content} with body truncated to 8KB
- */
-func (w *WebFetch) formatRaw(status string, body []byte) (toolapi.ToolMessage, error) {
-	// This tool's own cap on a raw body. The first of four — see
-	// agent.maxToolResultLen for where the others cut.
-	s := string(body)
-	if len(s) > 8192 {
-		s = s[:8192] + "\n... (truncated)"
-	}
-	return marshalFetchResult(fetchResult{Status: status, Content: s, Format: "raw"})
 }
 
 // primaryContent returns a reader PLUGIN's extraction of the URL when one is
@@ -461,16 +532,27 @@ func (w *WebFetch) formatText(_ context.Context, status, rawURL string, body []b
 }
 
 /*
- * formatSummary extracts content with readability, then uses the executor LLM to summarize.
- * desc: Combines readability extraction with LLM summarization, falling back to markdown if no LLM is available.
+ * formatExtract reads the page and returns the parts of it that match a focus,
+ * word for word.
+ * desc: It does not paraphrase, and never did — its instruction has always been
+ *       to extract, keeping exact names, numbers and dates. What changed is how
+ *       much of the page it sees: it used to be handed the first sixteen
+ *       thousand characters and asked about the whole document, so on anything
+ *       longer it answered about the beginning and said nothing about the rest.
+ *
+ *       Now the page is split into pieces sized from the model that will read
+ *       them, and read until the deployment's budget for one page is spent. The
+ *       result says how many pieces there were and how many were read, because
+ *       a caller told it saw six of forty can ask for more or go to the file,
+ *       and a caller told nothing assumes it saw everything.
  * param: ctx - context for cancellation
  * param: status - HTTP status line string
  * param: rawURL - the original URL for readability parsing
  * param: body - raw HTML body bytes
- * param: focus - optional focus topic for the LLM summary prompt
- * return: status line with title and LLM-generated summary, or fallback content on failure
+ * param: focus - what to look for; empty asks for what the page is about
+ * return: the matching text, or the page as markdown when no model is available
  */
-func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, body []byte, focus string) (toolapi.ToolMessage, error) {
+func (w *WebFetch) formatExtract(ctx context.Context, status, rawURL string, body []byte, focus string) (toolapi.ToolMessage, error) {
 	if w.executor == nil {
 		// No LLM available, fall back to markdown
 		return w.formatMarkdown(ctx, status, rawURL, body)
@@ -511,21 +593,15 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 				Status:  status,
 				Title:   title,
 				Content: "",
-				Format:  "summary",
+				Format:  "extract",
 				Note:    "no extractable content (likely JS-rendered, login-walled, or an interactive widget). Try a different URL — an API endpoint or a static documentation page.",
 			})
 		}
 	}
 
-	// Truncate for LLM context (don't send 256KB to the summarizer)
-	if len(content) > 16000 {
-		content = content[:16000]
-	}
-
-	// Build the summary prompt. Be explicit that the summarizer must
-	// extract from the supplied content only — no general-knowledge
-	// fallback. If the page doesn't contain the requested info, return
-	// the exact sentinel below.
+	// Build the extraction prompt. Be explicit that it must take from the
+	// supplied content only — no general-knowledge fallback. If the page
+	// doesn't contain what was asked for, return the exact sentinel below.
 	const noContentSentinel = "__NO_RELEVANT_CONTENT__"
 	prompt := "Extract the key information from this web page content. Use ONLY what is present in the user message; do not draw on outside knowledge."
 	if focus != "" {
@@ -537,27 +613,64 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 		prompt += fmt.Sprintf("\n\nPage title: %s", title)
 	}
 
-	resp, err := w.executor.Complete(ctx, &llm.ChatRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: prompt},
-			{Role: "user", Content: content},
-		},
-		Temperature: 0.2,
-		MaxTokens:   1024,
-	})
-	if err != nil {
-		// LLM failed, fall back to readability text
-		if len(content) > 4096 {
-			content = content[:4096] + "..."
+	// How much of the page goes in one pass, and how long a reply may be, are
+	// the reading model's to say — see readingWindow. What used to be here were
+	// two numbers, 16000 and 1024, which on a large-window model wasted most of
+	// it and on a long page answered about the first few pages only.
+	perPass, replyTokens := w.readingWindow(len(prompt))
+	chunks := splitForReading(content, perPass)
+	readable := w.chunksAffordable(len(chunks), perPass)
+
+	pieces := make([]string, 0, readable)
+	var lastErr error
+	for i := 0; i < readable; i++ {
+		resp, err := w.executor.Complete(ctx, &llm.ChatRequest{
+			Messages: []llm.Message{
+				{Role: "system", Content: prompt},
+				{Role: "user", Content: chunks[i]},
+			},
+			Temperature: 0.2,
+			MaxTokens:   replyTokens,
+		})
+		if err != nil {
+			lastErr = err
+			break
 		}
-		return marshalFetchResult(fetchResult{Status: status, Title: title, Content: content, Format: "summary"})
+		if len(resp.Choices) == 0 {
+			continue
+		}
+		got := strings.TrimSpace(resp.Choices[0].Message.Content)
+		// A piece that holds none of what was asked for says so, and saying so
+		// once per piece would drown the pieces that do.
+		if got == "" || strings.Contains(got, noContentSentinel) {
+			continue
+		}
+		pieces = append(pieces, got)
 	}
 
-	if len(resp.Choices) == 0 {
-		return marshalFetchResult(fetchResult{Status: status, Title: title, Content: "", Format: "summary", Note: "summary failed (no LLM choices)"})
+	if lastErr != nil && len(pieces) == 0 {
+		// The model could not be reached at all. Fall back to the page as text,
+		// which is worth more than nothing and is what this did before.
+		if len(content) > perPass {
+			content = content[:perPass] + "..."
+		}
+		return marshalFetchResult(fetchResult{Status: status, Title: title, Content: content, Format: "extract"})
 	}
 
-	summary := strings.TrimSpace(resp.Choices[0].Message.Content)
+	summary := strings.Join(pieces, "\n\n")
+	if summary == "" {
+		// Every piece read said the page does not hold this. Handled below by
+		// the sentinel path, which retries once without the focus rather than
+		// discarding a page that carries something else useful.
+		summary = noContentSentinel
+	}
+
+	// What was actually read, so a caller is never left assuming it saw the
+	// whole page when the budget stopped it partway.
+	coverage := ""
+	if readable < len(chunks) {
+		coverage = fmt.Sprintf("read %d of %d parts of this page — the rest was not read; the whole page is at the path on this result", readable, len(chunks))
+	}
 
 	// Detect the explicit sentinel.
 	if strings.Contains(summary, noContentSentinel) {
@@ -569,8 +682,8 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 		if focus != "" && len(strings.TrimSpace(content)) >= 400 {
 			if g := w.generalSummary(ctx, content, noContentSentinel); g != "" {
 				return marshalFetchResult(fetchResult{
-					Status: status, Title: title, Content: g, Format: "summary",
-					Note: "general summary — the page did not contain the specific focus requested",
+					Status: status, Title: title, Content: g, Format: "extract",
+					Note: "the whole page, not the focus — the page did not contain what the focus asked for",
 				})
 			}
 		}
@@ -578,7 +691,7 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 			Status:  status,
 			Title:   title,
 			Content: "",
-			Format:  "summary",
+			Format:  "extract",
 			Note:    "the fetched page did not contain the requested information",
 		})
 	}
@@ -592,12 +705,18 @@ func (w *WebFetch) formatSummary(ctx context.Context, status, rawURL string, bod
 			Status:  status,
 			Title:   title,
 			Content: "",
-			Format:  "summary",
-			Note:    "summarizer could not extract the requested information from the page",
+			Format:  "extract",
+			Note:    "the model could not find the requested information on the page",
 		})
 	}
 
-	return marshalFetchResult(fetchResult{Status: status, Title: title, Content: summary, Format: "summary"})
+	return marshalFetchResult(fetchResult{
+		Status: status, Title: title, Content: summary, Format: "extract",
+		// Empty unless the budget stopped the reading short, in which case it
+		// says so — a caller that believes it saw the whole page and did not is
+		// the failure this whole path exists to end.
+		Note: coverage,
+	})
 }
 
 // generalSummary is the focus-free fallback: summarize whatever real content the
@@ -839,3 +958,211 @@ func indexFoldASCII(s, needle string) int {
 }
 
 var _ toolapi.Tool = (*WebFetch)(nil)
+
+// ── Keeping the page ────────────────────────────────────────────────────────
+
+/*
+ * keepBody writes a fetched body under the workspace and returns its path.
+ * desc: Every fetch does this, whatever shape was asked for inline. It is the
+ *       whole reason a caller can recover from asking for the wrong one: the
+ *       document is on disk, and a later step reads, searches or parses it with
+ *       none of the limits that apply to something travelling into a prompt.
+ *
+ *       A body over the deployment's ceiling is written up to it and reported
+ *       as cut. Silently keeping part of a document that a caller believes is
+ *       whole is the failure this exists to prevent, so it is never silent.
+ * param: rawURL - what was fetched, used to name the file.
+ * param: body - the bytes as they arrived.
+ * return: the path, how many bytes were written, whether it was cut, and any
+ *         error — an error here is not fatal to the fetch and the caller says so.
+ */
+func (w *WebFetch) keepBody(rawURL string, body []byte) (path string, written int, truncated bool, err error) {
+	if w.workspace == "" {
+		return "", 0, false, nil
+	}
+
+	keep := body
+	if len(keep) > w.limits.MaxBodyBytes {
+		keep = keep[:w.limits.MaxBodyBytes]
+		truncated = true
+	}
+
+	dir := filepath.Join(w.workspace, "fetched")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", 0, truncated, err
+	}
+
+	name := fetchFileName(rawURL)
+	full := filepath.Join(dir, name)
+	if err := os.WriteFile(full, keep, 0o644); err != nil {
+		return "", 0, truncated, err
+	}
+
+	// Relative to the workspace, because that is the shape every other tool
+	// takes a path in: a later file_read or bash step is given a path inside
+	// the sandbox, not one that only means something on this machine.
+	if rel, rerr := filepath.Rel(w.workspace, full); rerr == nil {
+		return rel, len(keep), truncated, nil
+	}
+	return full, len(keep), truncated, nil
+}
+
+/*
+ * fetchFileName names a kept body after where it came from.
+ * desc: Host and path, with everything that is not a letter, digit, dash, dot
+ *       or underscore replaced — so the name says which page it holds — plus a
+ *       timestamp, so fetching one URL twice keeps both rather than one
+ *       overwriting the other mid-run.
+ * param: rawURL - the URL fetched.
+ * return: a file name, never empty and never a path.
+ */
+func fetchFileName(rawURL string) string {
+	stem := rawURL
+	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+		stem = u.Host + u.Path
+	}
+	var b strings.Builder
+	for _, r := range stem {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '-', r == '.', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	stem = strings.Trim(b.String(), "_.")
+	if stem == "" {
+		stem = "page"
+	}
+	// Long URLs make unwieldy names and can pass what a filesystem takes.
+	if len(stem) > 120 {
+		stem = stem[:120]
+	}
+	return fmt.Sprintf("%s_%d", stem, time.Now().UnixNano())
+}
+
+// ── How much a page is read in, and how much of it is read ──────────────────
+
+// What a fetch falls back to when the model will not say how big its window is.
+//
+// One number, in one place, for one case: a provider that publishes no limits.
+// It is deliberately the behaviour this tool had before it could ask, so an
+// unknown model behaves exactly as everything did previously rather than
+// differently and unpredictably.
+const unknownModelWindowChars = 16000
+
+// unknownModelReplyTokens is the same idea for the reply.
+const unknownModelReplyTokens = 1024
+
+// Characters per token, for turning a model's token window into a number of
+// characters of page. Deliberately pessimistic: over-estimating the tokens in a
+// piece of text makes the piece smaller and the reading slower, while
+// under-estimating makes a request the model refuses.
+const charsPerToken = 3
+
+/*
+ * readingWindow reports how much page goes into one pass and how long a reply
+ * may be, from the model that will read it.
+ * desc: The input window is what the model takes, less the instruction it is
+ *       sent with and the reply it has to have room for. The reply is the
+ *       model's own output limit — an extraction that quotes a list of names or
+ *       parameters runs past a small one and is cut mid-item.
+ *
+ *       Both fall back to this file's one unknown-model number when the client
+ *       carries no limits or does not know the model.
+ * param: promptChars - how much the instruction itself takes.
+ * return: characters of page per pass, and tokens of reply.
+ */
+func (w *WebFetch) readingWindow(promptChars int) (perPassChars, replyTokens int) {
+	ctxTokens, outTokens := 0, 0
+	if w.executor != nil {
+		ctxTokens, outTokens = w.executor.WindowFor()
+	}
+
+	replyTokens = outTokens
+	if replyTokens <= 0 {
+		replyTokens = unknownModelReplyTokens
+	}
+
+	if ctxTokens <= 0 {
+		return unknownModelWindowChars, replyTokens
+	}
+
+	// What is left of the window once the instruction and the reply have their
+	// room. A tenth is held back so a request never lands exactly on the limit.
+	spare := ctxTokens - replyTokens - (promptChars / charsPerToken)
+	spare -= ctxTokens / 10
+	if spare <= 0 {
+		return unknownModelWindowChars, replyTokens
+	}
+
+	perPassChars = spare * charsPerToken
+	if perPassChars < 2000 {
+		// A window this small reads nothing useful in a pass; the fallback is
+		// closer to workable than a sliver would be.
+		perPassChars = 2000
+	}
+	return perPassChars, replyTokens
+}
+
+/*
+ * chunksAffordable reports how many pieces the deployment's budget pays for.
+ * desc: A token budget rather than a count, so a model with a large window
+ *       reads a long page in one pass and a small one in several, and neither
+ *       number is written down. Always at least one: a budget that pays for no
+ *       reading at all is a misconfiguration, and returning nothing would hide
+ *       it behind an empty result.
+ * param: total - how many pieces the page came to.
+ * param: perPassChars - how much page each piece holds.
+ * return: how many to read.
+ */
+func (w *WebFetch) chunksAffordable(total, perPassChars int) int {
+	if total <= 1 {
+		return total
+	}
+	affordable := w.limits.ExtractTokenBudget / (perPassChars / charsPerToken)
+	if affordable < 1 {
+		affordable = 1
+	}
+	if affordable > total {
+		affordable = total
+	}
+	return affordable
+}
+
+/*
+ * splitForReading cuts text into pieces of at most size, on paragraph breaks
+ * where it can.
+ * desc: Cutting mid-sentence loses the sentence for both pieces, and what is
+ *       being looked for is often a name or a figure inside one. Paragraph
+ *       breaks are the cheapest boundary that does not need to understand the
+ *       text.
+ * param: text - the page.
+ * param: size - the most one piece may hold, in characters.
+ * return: the pieces, in order; one piece when the text already fits.
+ */
+func splitForReading(text string, size int) []string {
+	if size <= 0 || len(text) <= size {
+		return []string{text}
+	}
+	var out []string
+	for len(text) > size {
+		cut := strings.LastIndex(text[:size], "\n\n")
+		if cut < size/2 {
+			// No paragraph break in the back half — take a line break, then
+			// give up and cut where the size says.
+			if nl := strings.LastIndex(text[:size], "\n"); nl > size/2 {
+				cut = nl
+			} else {
+				cut = size
+			}
+		}
+		out = append(out, strings.TrimSpace(text[:cut]))
+		text = text[cut:]
+	}
+	if rest := strings.TrimSpace(text); rest != "" {
+		out = append(out, rest)
+	}
+	return out
+}

@@ -204,8 +204,13 @@ Every input goes in `params`. Each value is one of:
 Each example below is ONE pattern — read the bold label to see which kind of task it is for, then copy the shape that matches yours.
 
 **Read a source you found (the usual web-research chain).** Step 0 is web_search; step 1 fetches and reads one of its result URLs →
-  `{"tool":"web_fetch","params":{"url":"${step.0.results.0.url}","format":"summary","focus":"the specific facts/figures you need"},"depends_on":[0]}`
-  This is how research reads its sources — a news article, an analyst report, a docs page, a paper. For deep research, plan one fetch per top result (`${step.0.results.0.url}`, `${step.0.results.1.url}`, …): a URL you searched but never fetched is NOT a source you have read.
+  `{"tool":"web_fetch","params":{"url":"${step.0.results.0.url}","format":"extract","focus":"the specific facts/figures you need"},"depends_on":[0]}`
+  This is how research reads its sources — a news article, an analyst report, a paper. `extract` returns the matching text word for word, read across the whole page. For deep research, plan one fetch per top result (`${step.0.results.0.url}`, `${step.0.results.1.url}`, …): a URL you searched but never fetched is NOT a source you have read.
+
+**Read a reference you are going to work from.** Documentation, a specification, a schema, a manual — anything whose exact wording you need because you are about to write something against it →
+  `{"tool":"web_fetch","params":{"url":"${step.0.results.0.url}","format":"markdown"},"depends_on":[0]}`
+  `markdown` gives you the page as clean text. Use it when you do not yet know which part matters; use `extract` with a focus when you do. Do not reach for a format that keeps the page as it was sent — you get the top of the file, which is its markup and its navigation, not what it says.
+  Every fetch also writes the whole page to disk and returns `path`. When what came back inline is not enough, do not fetch the page again — plan a step that reads or searches `${step.N.path}`, which is the complete document.
 
 **Process a file with compute.** Step 0 is file_read of a CSV; step 1 is compute that processes it →
   `{"tool":"compute","params":{"goal":"clean and rank rows","mode":"shallow","context.csv":"${step.0.content}"},"depends_on":[0]}`

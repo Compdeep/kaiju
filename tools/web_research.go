@@ -157,7 +157,7 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 			defer wg.Done()
 			r := sd.Results[i]
 			src := researchSource{URL: r.URL, Title: r.Title}
-			fParams := map[string]any{"url": r.URL, "format": "summary"}
+			fParams := map[string]any{"url": r.URL, "format": "extract"}
 			if focus != "" {
 				fParams["focus"] = focus
 			}

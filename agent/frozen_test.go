@@ -62,7 +62,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	"SOUL":         {"ed330645ec6a4e06", 4889},
 	"ROUTE":        {"4c55c2820a774445", 1655},
 	"PREFLIGHT":    {"6bfa4528251eb9c6", 10264},
-	"EXECUTIVE":    {"5d1dfdd906da474b", 3299},
+	"EXECUTIVE":    {"f46c148c5a72cd2a", 4188},
 	"AGGREGATOR":   {"a782c5558ef001d0", 3631},
 	"REFRAME":      {"2f3311663f869d6b", 1567},
 	"REFRAME_HOOK": {"2066afe67efca674", 329},

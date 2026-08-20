@@ -80,6 +80,10 @@ func (a *Archive) Parameters() json.RawMessage {
 			"format": {"type": "string", "enum": ["zip", "tar.gz"], "description": "Archive format (default: inferred from extension)"}
 		},
 		"required": ["action", "archive_path"],
+		"allOf": [
+			{"if": {"properties": {"action": {"const": "create"}}, "required": ["action"]},
+			 "then": {"required": ["files"]}}
+		],
 		"additionalProperties": false
 	}`)
 }

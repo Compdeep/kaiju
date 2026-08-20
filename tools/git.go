@@ -92,6 +92,10 @@ func (g *Git) Parameters() json.RawMessage {
 			"path": {"type": "string", "description": "Working directory (default: current directory)"}
 		},
 		"required": ["action"],
+		"allOf": [
+			{"if": {"properties": {"action": {"enum": ["commit", "branch_create", "checkout", "merge"]}}, "required": ["action"]},
+			 "then": {"required": ["args"]}}
+		],
 		"additionalProperties": false
 	}`)
 }

@@ -71,6 +71,10 @@ func (n *NetInfo) Parameters() json.RawMessage {
 			"port": {"type": "integer", "description": "Port number for a connectivity check, or a port to filter connections by"}
 		},
 		"required": ["action"],
+		"allOf": [
+			{"if": {"properties": {"action": {"enum": ["connectivity", "dns"]}}, "required": ["action"]},
+			 "then": {"required": ["host"]}}
+		],
 		"additionalProperties": false
 	}`)
 }

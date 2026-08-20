@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -124,12 +126,75 @@ func (b toolMessageBody) Evidence() string {
 		return line
 	}
 	if b.msg.Content != "" {
-		return b.msg.Content
+		return b.msg.Content + b.handleLine()
 	}
 	if len(b.msg.Data) > 0 {
 		return string(b.msg.Data)
 	}
 	return ""
+}
+
+// handleFields are payload fields that name something the result did not carry
+// inline: a file holding the whole of what a tool produced, when the content
+// above is a bounded part of it.
+//
+// Why they need naming at all: a stage's whole view of an earlier step is the
+// text Evidence returns, and that text has always been Content alone. Anything
+// in the payload was reachable by ${node.N.field} and discoverable by nobody —
+// a planner writing the next step could not see that a field existed, so a tool
+// that kept the rest of its output on disk was keeping it for a reader who
+// would never learn of it.
+//
+// Read from a run that had been told a path exists and was given none: it
+// invented one from the URL, and the step that followed failed on a file that
+// was never there.
+var handleFields = []struct{ key, says string }{
+	{"path", "the whole page is in this file"},
+	{"output_path", "the command's whole output is in this file"},
+}
+
+/*
+ * handleLine names a file the payload points at, for the text a stage reads.
+ * desc: One line after the content, only when the payload holds such a field.
+ *       It says the name to reference — the field, not the value — because a
+ *       later step reaches the file by wiring ${step.N.<field>} and not by
+ *       copying a path out of prose it read.
+ * return: the line, starting with a newline, or "" when there is no such field.
+ */
+func (b toolMessageBody) handleLine() string {
+	if len(b.msg.Data) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(b.msg.Data, &payload); err != nil {
+		return ""
+	}
+	for _, f := range handleFields {
+		v, ok := payload[f.key].(string)
+		if !ok || v == "" {
+			continue
+		}
+		// Both the value and the way to reference it. The value, because a
+		// stage that cannot see the real path invents a plausible one — that is
+		// what happened, and the step after it failed on a file that was never
+		// there. The reference form, because wiring it is what survives a
+		// re-plan, while a path copied out of prose is a literal that goes stale.
+		line := fmt.Sprintf("\n\n[%s: %s — %s. Reference it as ${step.N.%s} in a later step.]",
+			f.key, f.says, v, f.key)
+		if cut, _ := payload[truncatedFlagFor(f.key)].(bool); cut {
+			line += "\n[it holds the beginning of what was produced, not all of it]"
+		}
+		return line
+	}
+	return ""
+}
+
+// truncatedFlagFor names the payload field that says a kept file is partial.
+func truncatedFlagFor(key string) string {
+	if key == "output_path" {
+		return "output_truncated"
+	}
+	return "body_truncated"
 }
 
 // failureOutput is whatever a failed tool produced: its rendered text, or its

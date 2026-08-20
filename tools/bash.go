@@ -318,8 +318,23 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 	// says "not there", and reporting it as a result leaves the next step to
 	// infer the absence from an empty string — which reads the same as a
 	// command whose output was lost.
+	//
+	// The command goes in the payload, not in the detail. Detail is prose that a
+	// later stage reads as a statement about the world, and a command is text
+	// the planner wrote: one that ran a comment and a single print statement had
+	// that print statement quoted back and then reported as something the run
+	// had confirmed. The failure path above already keeps the command in
+	// bashData for the same reason, and ${node.N.command} reads it from there.
 	if strings.TrimSpace(output) == "" {
-		return toolapi.ToolEmpty("command", fmt.Sprintf("%q exited 0 and printed nothing", command)), nil
+		return toolapi.ToolEmptyWith("command", "exited 0 and printed nothing", bashData{
+			ExitCode: 0,
+			// Read rather than assumed empty: this branch tests the trimmed
+			// output, so a command that printed only whitespace lands here too
+			// and the payload should say so.
+			Stdout:  stdout.String(),
+			Stderr:  stderr.String(),
+			Command: command,
+		}), nil
 	}
 
 	return toolapi.ToolOK("command", output, bashData{

@@ -70,6 +70,29 @@ func ToolEmpty(kind, detail string) ToolMessage {
 	return ToolMessage{Type: kind, Status: StatusEmpty, Detail: detail}
 }
 
+/*
+ * ToolEmptyWith reports nothing to show, and carries the tool's own payload.
+ * desc: ToolEmpty with the data channel the other two constructors have. It
+ *       exists because Detail is prose — a stage downstream reads it as a
+ *       statement about the world — and a tool with something to record and
+ *       nowhere structured to put it will write that something into the prose.
+ *
+ *       bash did exactly that: an empty result named the whole command in
+ *       Detail, so a step that ran a script of comments and one print statement
+ *       had that print statement read back as something the run established. Detail says why
+ *       nothing came back; anything the caller supplied belongs in data.
+ *
+ *       Naming a short parameter in Detail is not the same thing and is still
+ *       right — "the file is empty: /etc/hosts" is a reason, not an echo.
+ * param: kind - the payload discriminator.
+ * param: detail - why there is nothing, in the tool's own words.
+ * param: data - the tool's structured payload; may be nil.
+ * return: the message.
+ */
+func ToolEmptyWith(kind, detail string, data any) ToolMessage {
+	return ToolMessage{Type: kind, Status: StatusEmpty, Detail: detail, Data: marshalData(data)}
+}
+
 // ToolFail reports a failure; detail is the reason, data may carry structured
 // error context (e.g. exit_code / stderr).
 func ToolFail(kind, detail string, data any) ToolMessage {

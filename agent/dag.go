@@ -127,7 +127,11 @@ func (s NodeState) String() string {
  *       tool binding, parameters, dependency edges, result, and timing.
  */
 type Node struct {
-	ID        string
+	ID string
+	// Round is the planning round this node was added in. Stamped by AddNode,
+	// read by the sources that describe the run so that earlier rounds can be
+	// presented as history rather than as the current situation.
+	Round     int
 	Type      NodeType
 	State     NodeState
 	ToolName  string
@@ -260,6 +264,7 @@ type Graph struct {
 	mu        sync.RWMutex
 	nodes     map[string]*Node
 	counter   int
+	round     int // which planning round nodes added now belong to; see BeginRound
 	observer  chan<- DAGEvent
 	Gaps      []string // capability gaps declared by the executive (not mutex-protected — set once after planning)
 	SessionID string   // conversation session for per-session state (blueprints + interfaces.json)
@@ -609,9 +614,35 @@ func (g *Graph) AddNode(n *Node) string {
 	g.counter++
 	n.ID = fmt.Sprintf("n%d", g.counter)
 	n.State = StatePending
+	n.Round = g.round
 	g.nodes[n.ID] = n
 	g.emit(DAGEvent{Type: "add", NodeID: n.ID, Node: g.nodeInfo(n)})
 	return n.ID
+}
+
+/*
+ * BeginRound starts a new planning round.
+ * desc: Nodes added from here on carry the new number, so a stage reading the
+ *       run can tell what it just did from what it did earlier. Without it every
+ *       step of a long run is presented as equally current, and a problem solved
+ *       in the first round is still described as the situation in the fifth.
+ *
+ *       Called once where the round counter moves. Nothing else sets it, and a
+ *       run that never replans leaves every node in round 0.
+ */
+func (g *Graph) BeginRound() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.round++
+}
+
+/*
+ * Round reports the round a graph is currently adding nodes in.
+ */
+func (g *Graph) Round() int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.round
 }
 
 /*
@@ -854,6 +885,29 @@ func (g *Graph) AllDone() bool {
  *       Results are keyed by tag or tool name, with deduplication suffixes.
  * return: map of label to truncated result string.
  */
+/*
+ * ResolvedResultsByRound splits the resolved results into what the current
+ * planning round produced and what earlier rounds did.
+ * desc: Same results and the same labels as ResolvedResultsSoFar, in two maps
+ *       instead of one, so a stage describing the run can say which of it is
+ *       the situation now and which is how it got here. Presenting them as one
+ *       list is how a step from the first round goes on being read as the
+ *       current state for the rest of the run.
+ * return: this round's results, and every earlier round's.
+ */
+func (g *Graph) ResolvedResultsByRound() (current, earlier map[string]string) {
+	round := g.Round()
+	current, earlier = map[string]string{}, map[string]string{}
+	for label, n := range g.resolvedResultNodes() {
+		into := current
+		if n.Round < round {
+			into = earlier
+		}
+		into[label] = Text.TruncateEvidence(n.Result)
+	}
+	return current, earlier
+}
+
 func (g *Graph) ResolvedResultsSoFar() map[string]string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -881,6 +935,34 @@ func (g *Graph) ResolvedResultsSoFar() map[string]string {
 		results[label] = Text.TruncateEvidence(n.Result)
 	}
 	return results
+}
+
+/*
+ * resolvedResultNodes is the labelling ResolvedResultsSoFar does, keeping the
+ * node so a caller can ask it something the result text cannot answer.
+ * desc: Same rule for which nodes count and the same labels, written once so
+ *       the two readers cannot disagree about either.
+ * return: label to node, for every resolved tool or compute node.
+ */
+func (g *Graph) resolvedResultNodes() map[string]*Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	out := make(map[string]*Node)
+	for _, n := range g.nodes {
+		if n.State != StateResolved {
+			continue
+		}
+		if n.Type != NodeTool && n.Type != NodeCompute {
+			continue
+		}
+		label := formatNodeLabel(n)
+		if _, exists := out[label]; exists {
+			label = fmt.Sprintf("%s (%s)", label, n.ID)
+		}
+		out[label] = n
+	}
+	return out
 }
 
 // formatNodeLabel creates a descriptive label like "file_read(project/frontend/package.json)"

@@ -1209,6 +1209,10 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							break
 						}
 						replanCount++
+						// Everything planned from here belongs to the new round,
+						// so what this round did can be told apart from what
+						// earlier ones did when the run is described.
+						graph.BeginRound()
 						log.Printf("[dag] reflection: replan #%d/%d — %s", replanCount, maxReplans, Text.TruncateLog(next, 200))
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "REPLAN", fmt.Sprintf("#%d/%d | %s", replanCount, maxReplans, Text.TruncateLog(next, 200)))
 						// Record this round for the reflector's ## History so the NEXT

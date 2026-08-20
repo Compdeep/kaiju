@@ -12,17 +12,17 @@ import (
 // look successful and self-repair stops.
 func TestBashError_TriggersOnTypedFailure(t *testing.T) {
 	fail := toolMessageBody{msg: toolapi.ToolFail("command", "exit 1", map[string]any{"exit_code": 1, "stderr": "boom"})}
-	if _, isBash := bashError(nodeCompletion{Body: fail}); !isBash {
+	if _, failed := toolReportedFailure(nodeCompletion{Body: fail}); !failed {
 		t.Fatal("a failed command body must be detected as a bash error (drives self-repair)")
 	}
 	ok := toolMessageBody{msg: toolapi.ToolOK("command", "hi", map[string]any{"exit_code": 0})}
-	if _, isBash := bashError(nodeCompletion{Body: ok}); isBash {
+	if _, failed := toolReportedFailure(nodeCompletion{Body: ok}); failed {
 		t.Fatal("a successful command must not be flagged as a bash error")
 	}
 	// A completion with no envelope declares no outcome. Guessing from its text
 	// is what the string search did, and it could only ever have matched a tool
 	// whose output happened to contain the words.
-	if _, isBash := bashError(nodeCompletion{Result: `{"bash_error":true}`}); isBash {
+	if _, failed := toolReportedFailure(nodeCompletion{Result: `{"bash_error":true}`}); failed {
 		t.Fatal("a bare string was read as a failure")
 	}
 }
@@ -61,7 +61,7 @@ func TestARemoteResultKeepsItsEnvelope(t *testing.T) {
 		t.Fatal("an envelope from the far end did not parse, so a remote step " +
 			"carries no outcome at all")
 	}
-	if _, isBash := bashError(nodeCompletion{Body: body}); !isBash {
+	if _, failed := toolReportedFailure(nodeCompletion{Body: body}); !failed {
 		t.Error("a command that failed on another machine was not detected as a " +
 			"failure, so the run treats it as done and never repairs it")
 	}

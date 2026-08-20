@@ -1072,16 +1072,27 @@ func (s *nodeReturnsSource) Load(g *Graph, t *Trigger, a *Agent, params map[stri
 		}
 
 	default: // "all" — resolved + failed
-		resolved := g.ResolvedResultsSoFar()
+		// Split by planning round, so what this round produced is not presented
+		// alongside what earlier rounds produced as though the two were equally
+		// current. A run that replans several times otherwise reads as though
+		// every attempt it ever made were still the situation.
+		resolved, earlier := g.ResolvedResultsByRound()
 		failed := g.FailedNodes()
 
-		if len(resolved) == 0 && len(failed) == 0 {
+		if len(resolved) == 0 && len(earlier) == 0 && len(failed) == 0 {
 			return "", nil
 		}
 
 		if len(resolved) > 0 {
 			sb.WriteString("### Resolved\n\n")
 			for label, result := range resolved {
+				sb.WriteString(fmt.Sprintf("**%s:**\n%s\n\n", label, result))
+			}
+		}
+
+		if len(earlier) > 0 {
+			sb.WriteString("### Resolved in earlier rounds\n\n")
+			for label, result := range earlier {
 				sb.WriteString(fmt.Sprintf("**%s:**\n%s\n\n", label, result))
 			}
 		}

@@ -63,7 +63,16 @@ func (s *stepOutcomesSource) Load(g *Graph, _ *Trigger, a *Agent, _ map[string]a
 	if g == nil {
 		return "", nil
 	}
-	var produced, failed, unused []string
+	// Split by planning round. Everything a run has ever done is available
+	// here, and handing it over as one list presents a step from the first
+	// round as though it were the situation now — so a problem already solved
+	// keeps being described as the problem, and the stage reading this keeps
+	// solving it again.
+	//
+	// The current round is what the run just did. Earlier rounds are history:
+	// still worth knowing, and not the thing in front of it.
+	current := g.Round()
+	var produced, earlier, failed, unused []string
 
 	for _, n := range g.ResolvedByType(NodeTool) {
 		outcome := "produced a result"
@@ -84,7 +93,12 @@ func (s *stepOutcomesSource) Load(g *Graph, _ *Trigger, a *Agent, _ map[string]a
 				outcome = "returned something but did not say whether it found anything"
 			}
 		}
-		produced = append(produced, "- "+stepLabel(n)+": "+outcome)
+		line := "- " + stepLabel(n) + ": " + outcome
+		if n.Round < current {
+			earlier = append(earlier, line)
+			continue
+		}
+		produced = append(produced, line)
 	}
 
 	for _, n := range g.FailedNodes() {
@@ -105,16 +119,23 @@ func (s *stepOutcomesSource) Load(g *Graph, _ *Trigger, a *Agent, _ map[string]a
 		}
 	}
 
-	if len(produced) == 0 && len(failed) == 0 {
+	if len(produced) == 0 && len(earlier) == 0 && len(failed) == 0 {
 		return "", nil
 	}
 
 	var sb strings.Builder
 	sb.WriteString("HOW EACH STEP ENDED:\n")
-	if len(produced) == 0 {
-		sb.WriteString("(no step has produced anything yet)\n")
-	} else {
+	switch {
+	case len(produced) > 0:
 		sb.WriteString(strings.Join(produced, "\n") + "\n")
+	case len(earlier) > 0:
+		sb.WriteString("(nothing has run yet in this round)\n")
+	default:
+		sb.WriteString("(no step has produced anything yet)\n")
+	}
+	if len(earlier) > 0 {
+		sb.WriteString("\nEARLIER ROUNDS, ALREADY BEEN THROUGH:\n")
+		sb.WriteString(strings.Join(earlier, "\n") + "\n")
 	}
 	if len(failed) > 0 {
 		sb.WriteString("\nSTEPS THAT DID NOT COMPLETE:\n")

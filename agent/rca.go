@@ -217,11 +217,16 @@ func dispatchMicroplannerWithRCA(ctx context.Context, a *Agent, graph *Graph, bu
 	completionCh chan<- nodeCompletion, trigger Trigger, parentID string, investigationCount int,
 	problem string, rca *RCAReport, addressing []string, intent gates.Intent) (string, error) {
 
-	// Coding module disabled: the microplanner is a code-fix planner (blueprint /
-	// compute-per-file). When coding is off, Holmes still produces its RCA as
-	// evidence, but we don't graft a fix planner — the investigation concludes and
-	// the aggregator reports the failure + root cause honestly.
-	if a.cfg.DisableCoding {
+	// The microplanner is a code-fix planner: it grafts compute-per-file steps.
+	// When this run cannot reach compute there is nothing for those steps to
+	// call, so Holmes still produces its root-cause analysis as evidence and the
+	// run concludes on it — the aggregator reports the failure and the cause
+	// honestly instead of planning a fix that cannot run.
+	//
+	// Derived from the tool rather than from a setting: a deployment that turns
+	// compute off, and a caller whose scope excludes it, are the same situation
+	// here, and one condition answers both.
+	if !a.CanReachTool(computeToolName, trigger.Scope) {
 		return "", nil
 	}
 

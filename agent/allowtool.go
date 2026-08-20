@@ -108,3 +108,37 @@ func triggerOf(g *Graph) *Trigger {
 	}
 	return g.Context.trigger
 }
+
+// computeToolName is the registered name of the compute super-tool. Named here
+// because two places outside the tool itself have to ask whether this run can
+// reach it — see CanReachTool.
+const computeToolName = "compute"
+
+/*
+ * CanReachTool reports whether one run may call a tool by name.
+ * desc: Two questions, both of which have to be yes. The registry must hold it
+ *       at local reach or better, which is the deployment's answer; and the
+ *       run's scope must allow it, which is the caller's — a nil scope being
+ *       the local operator, who is unrestricted.
+ *
+ *       It exists so that behaviour which only makes sense alongside a tool can
+ *       be derived from whether that tool is reachable, rather than from a
+ *       second setting that says the same thing and can disagree with it. The
+ *       compute curriculum in the planner's prompt and the code-fix planner
+ *       after a root-cause analysis are both of that kind: neither is useful
+ *       when the run cannot call compute, and both were previously keyed on a
+ *       configuration flag that could be set while the tool was still there,
+ *       or clear while it was not.
+ * param: name - the tool.
+ * param: scope - the run's tool scope, or nil for an unrestricted caller.
+ * return: whether a call would be allowed to reach the tool.
+ */
+func (a *Agent) CanReachTool(name string, scope *ResolvedScope) bool {
+	if a == nil || a.registry == nil {
+		return false
+	}
+	if _, ok := a.registry.Get(name); !ok {
+		return false
+	}
+	return scope == nil || scope.AllowedTools["*"] || scope.AllowedTools[name]
+}

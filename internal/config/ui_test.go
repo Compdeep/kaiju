@@ -40,7 +40,7 @@ func TestLoad_NamingOneSectionLeavesTheOthers(t *testing.T) {
 func TestLoad_ABrandAndAThemeArriveIntact(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kaiju.json")
-	body := `{"ui":{"brand":{"name":"Enbarr","attribution":true},
+	body := `{"ui":{"brand":{"name":"Acme","attribution":true},
 	                 "theme":{"default":"dark","light":{"--accent":"#2F6FED"}}}}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestLoad_ABrandAndAThemeArriveIntact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if c.UI.Brand.Name != "Enbarr" || !c.UI.Brand.Attribution {
+	if c.UI.Brand.Name != "Acme" || !c.UI.Brand.Attribution {
 		t.Errorf("brand = %+v", c.UI.Brand)
 	}
 	if c.UI.Theme.Default != "dark" || c.UI.Theme.Light["--accent"] != "#2F6FED" {

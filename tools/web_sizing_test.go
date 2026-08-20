@@ -1,6 +1,12 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -99,5 +105,48 @@ func TestSplitForReading_CutsOnParagraphsAndKeepsEverything(t *testing.T) {
 	// A text that already fits is one piece, unchanged.
 	if one := splitForReading("short", 900); len(one) != 1 || one[0] != "short" {
 		t.Errorf("a short text was split: %v", one)
+	}
+}
+
+// The body is read to what the deployment keeps, not to what extraction needs.
+//
+// The read cap was 256KB, sized for reading the top of a page, from when that
+// was the only thing done with a body. It is now also the document that gets
+// kept, so a cap sized for extraction made the kept file the top of the page
+// too — and a caller sent to the file for the rest of a document found the same
+// beginning again, one directory along.
+func TestFetch_KeepsMoreThanExtractionNeeds(t *testing.T) {
+	// Comfortably past the old 256KB read cap.
+	big := strings.Repeat("some sentence of ordinary length here.\n", 20_000)
+	if len(big) < 300_000 {
+		t.Fatalf("the fixture is only %d bytes; it has to pass the old cap", len(big))
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(big))
+	}))
+	defer srv.Close()
+
+	ws := t.TempDir()
+	f := NewWebFetchIn(ws, nil, FetchLimits{})
+	msg, err := f.ExecuteTyped(context.Background(), map[string]any{"url": srv.URL})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var payload map[string]any
+	if uerr := json.Unmarshal(msg.Data, &payload); uerr != nil {
+		t.Fatalf("payload unreadable: %v", uerr)
+	}
+	rel, _ := payload["path"].(string)
+	if rel == "" {
+		t.Fatal("no path")
+	}
+	kept, rerr := os.ReadFile(filepath.Join(ws, rel))
+	if rerr != nil {
+		t.Fatalf("read: %v", rerr)
+	}
+	if len(kept) != len(big) {
+		t.Errorf("kept %d bytes of a %d-byte page — the read cap is still cutting it", len(kept), len(big))
 	}
 }

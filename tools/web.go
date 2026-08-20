@@ -237,14 +237,24 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 	}
 	defer resp.Body.Close()
 
-	// Read cap: HTML extraction needs ~256KB, but a binary we can decode (a PDF,
-	// via a plugin-registered decoder) needs the whole file — a search hit is
-	// often a multi-MB report and the HTML cap would corrupt it. Both signals
-	// (Content-Type header, URL) are known before the body is read.
+	// How much of the body is read at all.
+	//
+	// This was 256KB, sized for what HTML extraction needs, from when extraction
+	// was the only thing done with a body. It is now also the document that gets
+	// kept, and a cap sized for reading the top of a page silently made the kept
+	// file the top of the page too — a caller sent to the file for the rest of a
+	// document found the same beginning again, one directory along.
+	//
+	// So the cap is what this deployment keeps. A binary a plugin can decode
+	// still reads to a fixed ceiling of its own, because a decoder wants the
+	// whole file and its size has nothing to do with how much of a page is worth
+	// keeping.
 	ctype := resp.Header.Get("Content-Type")
-	readCap := int64(256 * 1024)
+	readCap := int64(w.limits.MaxBodyBytes)
 	if toolapi.HasBinaryDecoder(ctype) || looksLikePDFURL(rawURL) {
-		readCap = 16 * 1024 * 1024
+		if binaryCap := int64(16 * 1024 * 1024); binaryCap > readCap {
+			readCap = binaryCap
+		}
 	}
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, readCap))
 	if err != nil {

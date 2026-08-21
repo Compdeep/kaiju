@@ -180,3 +180,56 @@ func TestSubstituteTemplates_WidensOnlyABareReference(t *testing.T) {
 		t.Fatalf("an embedded reference keeps the text it always had, got %q", text)
 	}
 }
+
+// A tool that already sets its own "was this cut" flag is believed, rather than
+// having a size comparison stand in for it. file_read reports lines, not bytes,
+// so comparing a character count against a line count would be meaningless.
+func TestWholeBesideExcerpt_PrefersTheToolsOwnFlag(t *testing.T) {
+	build := func(cut bool) (*toolapi.Registry, *Graph, string) {
+		reg := toolapi.NewRegistry()
+		reg.Replace(&excerptTool{name: "line_reader", dec: []toolapi.Excerpt{
+			{Field: partField, Whole: wholeField, Flag: "was_cut", Use: useWording},
+		}}, "builtin")
+		g := NewGraph()
+		id := g.AddNode(&Node{Type: NodeTool, Tag: "read", ToolName: "line_reader"})
+		g.SetBody(id, toolMessageBody{msg: toolapi.ToolMessage{
+			Type: "file", Status: toolapi.StatusOK,
+			Data: json.RawMessage(`{"part":"first lines","everything":"etc/site.conf","was_cut":` +
+				map[bool]string{true: "true", false: "false"}[cut] + `}`),
+		}})
+		return reg, g, id
+	}
+
+	reg, g, id := build(true)
+	widened, ok := wholeBesideExcerpt(reg, g, id, partField, "first lines")
+	if !ok {
+		t.Fatal("the tool said it cut the value, so both must be handed over")
+	}
+	if widened[wholeField] != "etc/site.conf" || widened["was_cut"] != true {
+		t.Fatalf("the file and the flag must both ride along, got %v", widened)
+	}
+
+	reg, g, id = build(false)
+	if _, ok := wholeBesideExcerpt(reg, g, id, partField, "the whole file"); ok {
+		t.Fatal("the tool said it returned everything; there is nothing to widen")
+	}
+}
+
+// A declaration with neither a size nor a flag cannot tell whether anything was
+// cut, so it must not guess.
+func TestWholeBesideExcerpt_SilentWithNeitherSizeNorFlag(t *testing.T) {
+	reg := toolapi.NewRegistry()
+	reg.Replace(&excerptTool{name: "vague", dec: []toolapi.Excerpt{
+		{Field: partField, Whole: wholeField, Use: useWording},
+	}}, "builtin")
+	g := NewGraph()
+	id := g.AddNode(&Node{Type: NodeTool, Tag: "read", ToolName: "vague"})
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolMessage{
+		Type: "thing", Status: toolapi.StatusOK,
+		Data: json.RawMessage(`{"part":"x","everything":"kept/doc.txt"}`),
+	}})
+
+	if _, ok := wholeBesideExcerpt(reg, g, id, partField, "x"); ok {
+		t.Fatal("nothing declared says whether it was cut, so nothing may be assumed")
+	}
+}

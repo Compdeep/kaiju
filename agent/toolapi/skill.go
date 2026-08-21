@@ -113,8 +113,15 @@ type Excerpting interface {
 type Excerpt struct {
 	Field string // the payload field carrying only part of what was produced
 	Whole string // the payload field naming the file that holds all of it
-	Size  string // the payload field stating that file's size in bytes
-	Use   string // the tool's own words for what to reference instead, and why
+	// One of Size or Flag says whether this call was actually cut. Size names a
+	// field holding the whole thing's size in bytes, compared against what came
+	// back. Flag names a boolean the tool already sets when it cut something —
+	// preferred when a tool has one, since it is the tool's own answer rather
+	// than a comparison standing in for it. A tool declaring neither is never
+	// treated as cut, because there would be nothing to tell from.
+	Size string
+	Flag string
+	Use  string // the tool's own words for what to reference instead, and why
 }
 
 /*

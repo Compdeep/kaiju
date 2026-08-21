@@ -106,6 +106,18 @@ func (b *Bash) Description() string {
 //
 // Derived from bashData rather than written out beside it, so the two cannot come
 // to disagree again.
+// Excerpts declares that stdout is cut at each end while output_path names
+// everything the command printed. A step wired to stdout when the output did
+// not fit is refused, for the same reason web_fetch refuses content.
+func (b *Bash) Excerpts() []toolapi.Excerpt {
+	return []toolapi.Excerpt{{
+		Field: "stdout",
+		Whole: "output_path",
+		Size:  "output_bytes",
+		Use:   "reference output_path instead and read that file in this step: stdout is cut at each end, and the file is everything the command printed",
+	}}
+}
+
 func (b *Bash) OutputSchema() json.RawMessage {
 	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(bashData{}))
 }

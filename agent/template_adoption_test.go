@@ -37,7 +37,7 @@ func TestParametersWithNoTemplatesAreLeftAlone(t *testing.T) {
 	g := NewGraph()
 	n := &Node{Params: map[string]any{"x": "literal"}}
 	n.ID = g.AddNode(n)
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Errorf("params with nothing to substitute reported %v", err)
 	}
 	if n.Params["x"] != "literal" {
@@ -46,7 +46,7 @@ func TestParametersWithNoTemplatesAreLeftAlone(t *testing.T) {
 }
 
 func TestANodeWithNoParametersIsLeftAlone(t *testing.T) {
-	if err := substituteTemplates(&Node{}, NewGraph()); err != nil {
+	if err := substituteTemplates(&Node{}, NewGraph(), nil); err != nil {
 		t.Errorf("a node with no params reported %v", err)
 	}
 }
@@ -55,7 +55,7 @@ func TestABareReferenceKeepsTheObject(t *testing.T) {
 	g, dep := graphWithDep(t, `{"results":[{"url":"https://x"},{"url":"https://y"}]}`, StateResolved)
 	n := &Node{Params: map[string]any{"data": "${node." + dep + "}"}}
 	n.ID = g.AddNode(n)
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 	got, ok := n.Params["data"].(map[string]any)
@@ -71,7 +71,7 @@ func TestAPathReadsAFieldOutOfTheDependency(t *testing.T) {
 	g, dep := graphWithDep(t, `{"url":"https://example.com/a"}`, StateResolved)
 	n := &Node{Params: map[string]any{"target": "${node." + dep + ".url}"}}
 	n.ID = g.AddNode(n)
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 	if n.Params["target"] != "https://example.com/a" {
@@ -85,7 +85,7 @@ func TestSeveralReferencesInOneStringAreAllSubstituted(t *testing.T) {
 		"cmd": "ssh ${node." + dep + ".name}:${node." + dep + ".port}",
 	}}
 	n.ID = g.AddNode(n)
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 	if n.Params["cmd"] != "ssh alpha:8080" {
@@ -97,7 +97,7 @@ func TestAReferenceToANodeThatIsNotThereIsAnError(t *testing.T) {
 	g := NewGraph()
 	n := &Node{Params: map[string]any{"x": "${node.nonexistent.field}"}}
 	n.ID = g.AddNode(n)
-	err := substituteTemplates(n, g)
+	err := substituteTemplates(n, g, nil)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("error = %v, want it to say the node was not found", err)
 	}
@@ -109,7 +109,7 @@ func TestAReferenceToADependencyWithNoOutputIsAnError(t *testing.T) {
 	g.SetResult(dep, "")
 	n := &Node{Params: map[string]any{"x": "${node." + dep + ".f}"}}
 	n.ID = g.AddNode(n)
-	err := substituteTemplates(n, g)
+	err := substituteTemplates(n, g, nil)
 	if err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Errorf("error = %v, want it to say the result was empty", err)
 	}
@@ -121,7 +121,7 @@ func TestAFailedDependencyThatProducedOutputStillResolves(t *testing.T) {
 	g, dep := graphWithDep(t, `{"err":"oops","exit":1}`, StateFailed)
 	n := &Node{Params: map[string]any{"data": "${node." + dep + "}"}}
 	n.ID = g.AddNode(n)
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("a failed dependency with output reported %v", err)
 	}
 	if got := n.Params["data"].(map[string]any)["err"]; got != "oops" {
@@ -140,7 +140,7 @@ func TestAFieldAskedOfProseInjectsTheWholeResult(t *testing.T) {
 	g, dep := graphWithDep(t, "just a string, not JSON", StateResolved)
 	n := &Node{Params: map[string]any{"x": "${node." + dep + ".field}"}}
 	n.ID = g.AddNode(n)
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 	if n.Params["x"] != "just a string, not JSON" {
@@ -153,7 +153,7 @@ func TestProseWithNoFieldAskedForResolves(t *testing.T) {
 	g, dep := graphWithDep(t, "raw output bytes", StateResolved)
 	n := &Node{Params: map[string]any{"x": "${node." + dep + "}"}}
 	n.ID = g.AddNode(n)
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("a bare reference to prose reported %v", err)
 	}
 	if n.Params["x"] != "raw output bytes" {
@@ -169,7 +169,7 @@ func TestSeveralFieldsOfOneDependencyAllResolve(t *testing.T) {
 		"z": "${node." + dep + ".c}",
 	}}
 	n.ID = g.AddNode(n)
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 	if n.Params["x"] != "alpha" || n.Params["y"] != "beta" || n.Params["z"] != "gamma" {
@@ -209,7 +209,7 @@ func TestBothSpellingsOfAWrappedFieldResolve(t *testing.T) {
 
 	for _, ref := range []string{".url", ".data.url"} {
 		n := &Node{ID: "n2", Params: map[string]any{"u": "${node." + dep + ref + "}"}}
-		if err := substituteTemplates(n, g); err != nil {
+		if err := substituteTemplates(n, g, nil); err != nil {
 			t.Fatalf("%s: %v", ref, err)
 		}
 		if n.Params["u"] != "https://example.test" {
@@ -231,7 +231,7 @@ func TestManyFieldsOfOneDependencyReparseIt(t *testing.T) {
 		"w": "${node." + dep + ".a}", "x": "${node." + dep + ".b}",
 		"y": "${node." + dep + ".c}", "z": "${node." + dep + ".d}",
 	}}
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 	for k, want := range map[string]string{"w": "1", "x": "2", "y": "3", "z": "4"} {
@@ -258,7 +258,7 @@ func TestABareReferenceToAnEnvelopeGivesThePayload(t *testing.T) {
 	g.SetBody(dep, NewToolBody(toolapi.ToolOK("listing", "2 processes", map[string]any{"count": 2})))
 
 	n := &Node{ID: "n2", Params: map[string]any{"x": "${node." + dep + "}"}}
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 	got, ok := n.Params["x"].(map[string]any)

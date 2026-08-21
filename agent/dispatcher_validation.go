@@ -486,69 +486,75 @@ func sortedKeys(m map[string]json.RawMessage) []string {
 	return out
 }
 
-// excerptHandles pairs a payload field that carries only part of what a tool
-// produced with the fields naming the whole of it and how large that whole is.
+// wholeBesideExcerpt widens a reference to a truncated field into an object
+// carrying that text, the file holding all of it, and that file's size.
 //
-// web_fetch returns content cut to what fits a prompt and writes the whole page
-// to path. bash returns stdout cut the same way and writes everything the
-// command printed to output_path. Both cuts are right for reading: the value
-// travels into a prompt, and a prompt has a size. Neither is right as the input
-// to a step that must work over everything the tool produced — a count, a
-// search, a total — because that step answers from the part and reports the
-// answer as though it covered all of it.
+// A tool cuts a value down to what fits a prompt and writes the whole of it to a
+// file. Both are correct, and both are returned — but a ${step.N.field}
+// reference names one field, so a plan that names the truncated one hands the
+// next step a part and nothing else. That is how a step counted inside 8,102 of
+// 1,219,043 characters and reported the number as the document's, three runs
+// running, while the whole copy sat unread.
 //
-// The engine cannot infer these pairs, because only the tool knows which of its
-// fields is the cut copy of which file. Adding a tool here is how it opts in.
-var excerptHandles = map[string]struct{ whole, size string }{
-	"content": {whole: "path", size: "bytes"},
-	"stdout":  {whole: "output_path", size: "output_bytes"},
-}
-
-// refuseExcerptReference reports why a reference must not be substituted: it
-// names a field holding part of what a tool produced while the same payload
-// names a file holding all of it.
+// Handing over both costs nothing: a step that only needed to read still has the
+// text, and a step that has to work over everything now has somewhere to read it
+// from. The keys are the tool's OWN declared names, so the engine imposes no
+// vocabulary of its own beyond "note", which carries the tool's wording.
 //
-// It refuses only when all three hold — the field is one a tool declared as an
-// excerpt, the payload names a whole copy, and that copy is larger than the
-// value just resolved. A tool that kept no file, a page small enough to come
-// back whole, and every other field resolve exactly as before.
-func refuseExcerptReference(graph *Graph, depID, field string, val any) error {
-	pair, declared := excerptHandles[field]
-	if !declared {
-		return nil
-	}
+// The pairing is read from the tool through toolapi.Excerpting, never from a
+// list kept here. A tool that declares nothing is treated as returning
+// everything it produced, and its references resolve untouched.
+//
+// It widens only when the tool declared this field, the payload names a whole
+// copy, and that copy is larger than the value resolved. A page that came back
+// whole, a tool that kept no file, an unstated size, and a value that is not
+// text are all left exactly as they were.
+func wholeBesideExcerpt(reg *toolapi.Registry, graph *Graph, depID, field string, val any) (map[string]any, bool) {
 	part, isText := val.(string)
-	if !isText {
-		return nil
-	}
-	if graph == nil {
-		return nil
+	if !isText || graph == nil || reg == nil {
+		return nil, false
 	}
 	producer := graph.Get(depID)
-	if producer == nil || producer.Body == nil {
-		return nil
+	if producer == nil || producer.Body == nil || producer.ToolName == "" {
+		return nil, false
 	}
-	rawWhole, _ := producer.Body.Field(pair.whole)
-	whole, _ := rawWhole.(string)
-	if strings.TrimSpace(whole) == "" {
-		return nil // the tool kept nothing, so the excerpt is all there is
+	skill, known := reg.Get(producer.ToolName)
+	if !known {
+		return nil, false
 	}
-	rawSize, found := producer.Body.Field(pair.size)
-	total, known := asByteCount(rawSize)
-	if !found || !known || total <= len(part) {
-		return nil // came back whole, or the size is not stated
+	for _, declared := range toolapi.GetExcerpts(skill) {
+		if declared.Field != field {
+			continue
+		}
+		rawWhole, _ := producer.Body.Field(declared.Whole)
+		whole, _ := rawWhole.(string)
+		if strings.TrimSpace(whole) == "" {
+			return nil, false // the tool kept no file, so the text is all there is
+		}
+		total, stated := asByteCount(producer.Body.Field(declared.Size))
+		if !stated || total <= len(part) {
+			return nil, false // came back whole, or the size is not stated
+		}
+		widened := map[string]any{
+			declared.Field: part,
+			declared.Whole: whole,
+			declared.Size:  total,
+		}
+		if strings.TrimSpace(declared.Use) != "" {
+			widened["note"] = declared.Use
+		}
+		return widened, true
 	}
-	return fmt.Errorf(
-		"%s holds %d of the %d bytes that node %s produced, and the whole of it is in %q. "+
-			"A step given the %s answers from part of what was produced and reports that answer as if it covered all of it. "+
-			"Reference %q instead and have this step read that file",
-		field, len(part), total, depID, whole, field, pair.whole)
+	return nil, false
 }
 
 // asByteCount reads a size out of a payload. A number that survived a JSON round
 // trip arrives as float64, so both forms are accepted and anything else is
 // treated as unstated rather than guessed at.
-func asByteCount(v any) (int, bool) {
+func asByteCount(v any, found bool) (int, bool) {
+	if !found {
+		return 0, false
+	}
 	switch n := v.(type) {
 	case int:
 		return n, true

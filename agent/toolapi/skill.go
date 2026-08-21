@@ -90,6 +90,46 @@ type Outputter interface {
 	OutputSchema() json.RawMessage
 }
 
+/*
+ * Excerpting is an optional interface for a tool whose result carries only part
+ * of what it produced, beside a file holding all of it.
+ * desc: A tool that cuts a value down to what fits a prompt while writing the whole of it to a file declares that pair here, so a step wired to the part is refused instead of answering from a fraction and reporting the answer as if it covered everything; a tool that returns all of what it produced does not implement this
+ */
+type Excerpting interface {
+	/*
+	 * Excerpts declares each cut field beside the field naming the whole of it.
+	 * desc: Read when a ${step.N.field} reference is about to be substituted
+	 * return: one entry per cut field, or nil
+	 */
+	Excerpts() []Excerpt
+}
+
+// Excerpt names one field that carries part of what a tool produced, the fields
+// naming the whole of it and its size, and what a caller should reference
+// instead. Only the tool knows which of its fields is a cut copy of which file,
+// so this is declared here and the engine keeps no list of its own — an engine
+// holding tool field names would have to be edited every time a tool gained or
+// renamed one.
+type Excerpt struct {
+	Field string // the payload field carrying only part of what was produced
+	Whole string // the payload field naming the file that holds all of it
+	Size  string // the payload field stating that file's size in bytes
+	Use   string // the tool's own words for what to reference instead, and why
+}
+
+/*
+ * GetExcerpts returns what a tool declared about its cut fields.
+ * desc: Checks whether the tool implements Excerpting; a tool that does not returns nil and is treated as returning everything it produced
+ * param: t - the tool to query
+ * return: the declared entries, or nil
+ */
+func GetExcerpts(t Tool) []Excerpt {
+	if e, ok := t.(Excerpting); ok {
+		return e.Excerpts()
+	}
+	return nil
+}
+
 // TypedExecutor is the typed output path: a tool returns a ToolMessage envelope
 // directly instead of a marshalled string, so the dispatcher stores the typed
 // body with no JSON round-trip and consumers read Status/Data off it rather than

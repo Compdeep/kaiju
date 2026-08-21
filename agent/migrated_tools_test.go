@@ -102,7 +102,7 @@ func TestMigratedToolPathsStillResolve(t *testing.T) {
 			id := g.AddNode(&Node{Type: NodeTool, ToolName: "t"})
 			g.SetBody(id, body)
 			n := &Node{ID: "reader", Params: map[string]any{"x": "${node." + id + "}"}}
-			if err := substituteTemplates(n, g); err != nil {
+			if err := substituteTemplates(n, g, nil); err != nil {
 				t.Fatalf("substituteTemplates: %v", err)
 			}
 			if _, isMap := n.Params["x"].(map[string]any); !isMap {

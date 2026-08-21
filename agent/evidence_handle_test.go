@@ -22,8 +22,8 @@ func bodyWith(t *testing.T, msg toolapi.ToolMessage) toolMessageBody {
 
 func TestEvidence_NamesTheFileThePayloadPointsAt(t *testing.T) {
 	b := bodyWith(t, toolapi.ToolOK("page", "the first part of a long document", map[string]any{
-		"path":  "fetched/example_123",
-		"bytes": 1219043,
+		"full_content_path": "fetched/example_123",
+		"bytes":             1219043,
 	}))
 
 	ev := b.Evidence()
@@ -35,7 +35,7 @@ func TestEvidence_NamesTheFileThePayloadPointsAt(t *testing.T) {
 	}
 	// The field name, not just the value: a later step reaches the file by
 	// wiring a reference, not by copying a path out of prose.
-	if !strings.Contains(ev, "${step.N.path}") {
+	if !strings.Contains(ev, "${step.N.full_content_path}") {
 		t.Errorf("the way to reference it is not shown:\n%s", ev)
 	}
 }
@@ -55,8 +55,8 @@ func TestEvidence_NamesAKeptCommandOutput(t *testing.T) {
 // same beginning again and believes it is the whole.
 func TestEvidence_SaysWhenTheKeptFileIsPartial(t *testing.T) {
 	b := bodyWith(t, toolapi.ToolOK("page", "content", map[string]any{
-		"path":           "fetched/example_123",
-		"body_truncated": true,
+		"full_content_path": "fetched/example_123",
+		"body_truncated":    true,
 	}))
 	if ev := b.Evidence(); !strings.Contains(ev, "not all of it") {
 		t.Errorf("a partial file is presented as complete:\n%s", ev)

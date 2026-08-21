@@ -194,7 +194,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// every reference points at a concrete node id. Fails fast if the
 	// dep hasn't resolved or the named field is absent — same recovery
 	// chain handles that case.
-	if err := substituteTemplates(n, graph); err != nil {
+	if err := substituteTemplates(n, graph, a.registry); err != nil {
 		log.Printf("[dag] node %s template substitution failed: %v", n.ID, err)
 		ch <- a.finish(n, "", nil, fmt.Errorf("dependency injection failed: %w", err))
 		return
@@ -369,7 +369,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
  * legitimate dep output — the planner often chains on stderr to drive
  * the next step's diagnosis.
  */
-func substituteTemplates(n *Node, graph *Graph) error {
+func substituteTemplates(n *Node, graph *Graph, reg *toolapi.Registry) error {
 	if n.Params == nil {
 		return nil
 	}
@@ -396,12 +396,21 @@ func substituteTemplates(n *Node, graph *Graph) error {
 		if m := nodeTemplateBareRe.FindStringSubmatch(s); m != nil {
 			depID := m[1]
 			field := m[2]
-			val, err := resolveTemplateFieldCached(graph, resolved, depID, field, n.ID)
+			val, err := resolveTemplateFieldCached(graph, resolved, depID, field, n.ID, reg)
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
 				}
 				return s, false
+			}
+			// Widened here and not inside resolution because only this branch
+			// keeps the value's type. The embedded branch below turns whatever
+			// it gets into text, and an object rendered into the middle of a
+			// sentence would be worse than the text it replaced.
+			if widened, ok := wholeBesideExcerpt(reg, graph, depID, field, val); ok {
+				log.Printf("[dag] inject %s ← node %s.%s widened to %d keys: %d bytes inline, plus the file holding all of it",
+					n.ID, depID, field, len(widened), len(fmt.Sprint(val)))
+				return widened, true
 			}
 			log.Printf("[dag] inject %s ← node %s%s (%d bytes)", n.ID, depID, dotPrefix(field), len(fmt.Sprint(val)))
 			return val, true
@@ -412,7 +421,7 @@ func substituteTemplates(n *Node, graph *Graph) error {
 			m := nodeTemplateRe.FindStringSubmatch(match)
 			depID := m[1]
 			field := m[2]
-			val, err := resolveTemplateFieldCached(graph, resolved, depID, field, n.ID)
+			val, err := resolveTemplateFieldCached(graph, resolved, depID, field, n.ID, reg)
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -436,19 +445,13 @@ func substituteTemplates(n *Node, graph *Graph) error {
 //
 // owner is included in error messages so the recovery chain can name
 // which step failed.
-func resolveTemplateFieldCached(graph *Graph, cache map[string]any, depID, field, owner string) (any, error) {
+func resolveTemplateFieldCached(graph *Graph, cache map[string]any, depID, field, owner string, reg *toolapi.Registry) (any, error) {
 	key := depID + "\x00" + field
 	if v, ok := cache[key]; ok {
 		return v, nil
 	}
 	v, err := resolveTemplateField(graph, depID, field, owner)
 	if err != nil {
-		return nil, err
-	}
-	// Refused before it is substituted, because this is the last point where the
-	// value is still known to be a cut copy of a file the payload names. Once it
-	// is in the params it is indistinguishable from the whole.
-	if err := refuseExcerptReference(graph, depID, field, v); err != nil {
 		return nil, err
 	}
 	cache[key] = v

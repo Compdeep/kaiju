@@ -138,7 +138,7 @@ func TestFetch_KeepsMoreThanExtractionNeeds(t *testing.T) {
 	if uerr := json.Unmarshal(msg.Data, &payload); uerr != nil {
 		t.Fatalf("payload unreadable: %v", uerr)
 	}
-	rel, _ := payload["path"].(string)
+	rel, _ := payload["full_content_path"].(string)
 	if rel == "" {
 		t.Fatal("no path")
 	}

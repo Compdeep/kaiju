@@ -131,7 +131,7 @@ func TestWebFetch_KeepsThePageAndSaysWhere(t *testing.T) {
 	}
 	result := fetchPayload(t, out)
 
-	rel, _ := result["path"].(string)
+	rel, _ := result["full_content_path"].(string)
 	if rel == "" {
 		t.Fatal("no path on the result, so a caller cannot read the page it just fetched")
 	}

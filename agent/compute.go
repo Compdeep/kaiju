@@ -653,6 +653,11 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	//
 	// Until then, this block silently skips the read when task_files is
 	// empty, and the coder edits blind.
+	// Whether a file this call may edit already exists. The loop below reads each
+	// named file to show its content; the same answer decides whether "edits" is
+	// offered at all, so the Coder is never given a reply shape that cannot be
+	// carried out.
+	editable := false
 	if len(codeCtx.taskFiles) > 0 {
 		userPrompt += "\n## Your Task Files (write ONLY these)\n"
 		for _, f := range codeCtx.taskFiles {
@@ -669,6 +674,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			if readErr != nil || len(data) == 0 {
 				continue // file doesn't exist or empty — write mode
 			}
+			editable = true
 			userPrompt += "\n## Mode: EDIT (file exists — use old_content/new_content text replacements)\n"
 			userPrompt += fmt.Sprintf("\n## Current Content of %s\n```\n%s\n```\n", targetPath, string(data))
 		}
@@ -714,7 +720,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			{Role: "system", Content: coderSystem},
 			{Role: "user", Content: userPrompt},
 		},
-		Tools:       []llm.ToolDef{coderToolDef()},
+		Tools:       []llm.ToolDef{coderToolDef(editable)},
 		ToolChoice:  "required",
 		Temperature: 0.2,
 		MaxTokens:   16384,
@@ -755,6 +761,14 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			return "", fmt.Errorf("compute edit rejected: %w", safeErr)
 		}
 
+		// Said in the engine's own words rather than passed up as a filesystem
+		// error. The reflector reads this text to decide what to do next, and on
+		// the raw "no such file or directory" it twice concluded the run had a
+		// path or timing problem and sent an investigation after one, when what
+		// happened is that edits were produced for a file nobody had written.
+		if _, statErr := os.Stat(codePath); os.IsNotExist(statErr) {
+			return "", fmt.Errorf("cannot edit %s: it does not exist, so there is nothing to replace — write it whole instead", destPath)
+		}
 		if err := ApplyFileEdits(codePath, editResp.Edits); err != nil {
 			return "", fmt.Errorf("apply edits to %s: %w", destPath, err)
 		}

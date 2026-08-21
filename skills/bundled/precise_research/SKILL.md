@@ -14,7 +14,7 @@ Use when the question asks for a precise factual answer: a count, a name, a date
 Many questions reference Wikipedia directly or ask about well-documented facts.
 
 1. `web_fetch` — fetch the specific Wikipedia page with `format=summary` and a focused `focus` parameter targeting the exact data point
-2. If the page is ambiguous or long, fetch with `format=raw` and use `bash` with `grep` to extract the specific line
+2. If the page is long, fetch it and then search the file it saved. `web_fetch` returns `full_content_path`, which is the whole page on disk. Use `bash` with `grep` on that file. Do not use `format=raw` — it no longer exists.
 
 ### GitHub data
 
@@ -28,8 +28,18 @@ Questions about GitHub issues, commits, dates, or contributors.
 Questions that ask "how many" require finding a complete list and counting.
 
 1. `web_search` — find the authoritative source
-2. `web_fetch` — fetch it with focus on the specific items to count
-3. `bash` — if needed, use `python3 -c "..."` to count or compute from extracted data
+2. `web_fetch` — fetch it
+3. `bash` or `compute` — count over the file at `full_content_path`, not over `content`
+
+`content` is shortened so it fits in a prompt. On a long page it holds only the
+opening. Counting in it gives a count for that opening, not for the document.
+
+`full_content_path` is the whole page on disk. `bytes` is its size. Compare
+`bytes` with the length of `content` to see how much you were given.
+
+A step that counts, searches, or totals must read the file. Pass
+`full_content_path` to that step and open it there. Never paste the document
+into a parameter — it would go into a prompt, and a large one does not fit.
 
 ### Date lookups
 

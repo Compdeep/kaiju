@@ -222,27 +222,28 @@ type NodeAction struct {
  *       SSE events and dashboard display.
  */
 type NodeInfo struct {
-	ID         string       `json:"id"`
-	Type       string       `json:"type"`
-	State      string       `json:"state"`
-	Tag        string       `json:"tag"`
-	Tool       string       `json:"tool,omitempty"`
-	DependsOn  []string     `json:"deps,omitempty"`
-	SpawnedBy  string       `json:"spawn,omitempty"`
-	Ms         int64        `json:"ms,omitempty"` // elapsed ms
-	Error      string       `json:"err,omitempty"`
-	ResultSize int          `json:"result_size,omitempty"` // bytes of result
-	Result     string       `json:"result,omitempty"`      // truncated result for frontend display
-	Summary    string       `json:"summary,omitempty"`     // short human-readable summary line
-	Params     string       `json:"params,omitempty"`      // compact params summary
-	Impact     int          `json:"impact,omitempty"`      // tool impact level for this call
-	ErrType    string       `json:"err_type,omitempty"`    // "gate", "clearance", "timeout", "exec"
-	Source     string       `json:"source,omitempty"`      // "builtin", "skillmd", "custom"
-	Actions    []NodeAction `json:"actions,omitempty"`     // side-effects: panel_show, notify, etc.
-	Skills     []string     `json:"skills,omitempty"`      // skill cards whose sections shaped this node's prompts
-	TokensIn   int          `json:"tokens_in,omitempty"`   // prompt tokens
-	TokensOut  int          `json:"tokens_out,omitempty"`  // completion tokens
-	StartedAt  string       `json:"started_at,omitempty"`  // "Apr 13 11:30:05"
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	State      string          `json:"state"`
+	Tag        string          `json:"tag"`
+	Tool       string          `json:"tool,omitempty"`
+	DependsOn  []string        `json:"deps,omitempty"`
+	SpawnedBy  string          `json:"spawn,omitempty"`
+	Ms         int64           `json:"ms,omitempty"` // elapsed ms
+	Error      string          `json:"err,omitempty"`
+	ResultSize int             `json:"result_size,omitempty"` // bytes of result
+	Result     string          `json:"result,omitempty"`      // truncated result for frontend display
+	Payload    json.RawMessage `json:"payload,omitempty"`     // the tool's own fields, long values shortened
+	Summary    string          `json:"summary,omitempty"`     // short human-readable summary line
+	Params     string          `json:"params,omitempty"`      // compact params summary
+	Impact     int             `json:"impact,omitempty"`      // tool impact level for this call
+	ErrType    string          `json:"err_type,omitempty"`    // "gate", "clearance", "timeout", "exec"
+	Source     string          `json:"source,omitempty"`      // "builtin", "skillmd", "custom"
+	Actions    []NodeAction    `json:"actions,omitempty"`     // side-effects: panel_show, notify, etc.
+	Skills     []string        `json:"skills,omitempty"`      // skill cards whose sections shaped this node's prompts
+	TokensIn   int             `json:"tokens_in,omitempty"`   // prompt tokens
+	TokensOut  int             `json:"tokens_out,omitempty"`  // completion tokens
+	StartedAt  string          `json:"started_at,omitempty"`  // "Apr 13 11:30:05"
 	// OperatorMessage is the human's injected query on an interjection node.
 	OperatorMessage string `json:"operator_message,omitempty"`
 }
@@ -399,6 +400,7 @@ func (g *Graph) nodeInfo(n *Node) *NodeInfo {
 		// Generate a short summary line for the trace header. Prefer the typed
 		// body's summary (reflection decision, compute files, tool kind/status);
 		// RawTextBody (opaque/legacy) keeps the richer nodeSummary heuristics.
+		info.Payload = nodePayload(n)
 		info.Summary = nodeSummary(n)
 		if n.Body != nil {
 			if _, raw := n.Body.(RawTextBody); !raw {
@@ -754,6 +756,67 @@ func (g *Graph) SetState(nodeID string, state NodeState) {
 		n.State = state
 		g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
 	}
+}
+
+// A trace has to show what a tool returned, and a tool that returns a page
+// returns more than a trace can hold — so values are shortened and the shape is
+// not.
+const (
+	payloadValueChars = 400   // per string value
+	payloadWholeChars = 12000 // the whole structure, after shortening
+)
+
+/*
+ * nodePayload renders a node's own fields for the trace.
+ * desc: The trace carried only the rendered evidence text, cut at 512
+ *       characters. A tool whose evidence is short showed every field. A tool
+ *       whose evidence is long showed the opening of one value and none of its
+ *       other fields, so a file it had written was invisible to anyone reading
+ *       the run. Which fields a reader can see should not depend on how much
+ *       text one of them happens to hold, so every field is sent and long
+ *       values are cut rather than the structure around them.
+ * param: n - the node whose body to render
+ * return: the fields as JSON, or nil when there is no body or it will not marshal
+ */
+func nodePayload(n *Node) json.RawMessage {
+	if n == nil || n.Body == nil {
+		return nil
+	}
+	whole, ok := n.Body.Field("")
+	if !ok || whole == nil {
+		return nil
+	}
+	b, err := json.Marshal(shortenPayloadValues(whole, payloadValueChars))
+	if err != nil || len(b) > payloadWholeChars {
+		return nil
+	}
+	return b
+}
+
+// shortenPayloadValues walks a decoded payload and cuts long strings, leaving
+// every key, every nesting level and every list length as they were. What is
+// lost is the middle of a long value; what survives is which fields exist.
+func shortenPayloadValues(v any, max int) any {
+	switch t := v.(type) {
+	case string:
+		if len(t) <= max {
+			return t
+		}
+		return t[:max] + fmt.Sprintf("… (%d chars)", len(t))
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, inner := range t {
+			out[k] = shortenPayloadValues(inner, max)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, inner := range t {
+			out[i] = shortenPayloadValues(inner, max)
+		}
+		return out
+	}
+	return v
 }
 
 /*

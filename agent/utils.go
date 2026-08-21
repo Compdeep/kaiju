@@ -696,7 +696,7 @@ func loadLatestBlueprint(workspace, sessionID string) string {
 	return string(data)
 }
 
-func buildComputeUserPrompt(goal, query string, ctxData any, hints []any, plan, blueprintMode string) string {
+func buildComputeUserPrompt(goal, query string, ctxData any, hints []any, plan, blueprintMode, fieldMeanings string) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("## Goal\n%s\n", goal))
@@ -710,6 +710,16 @@ func buildComputeUserPrompt(goal, query string, ctxData any, hints []any, plan, 
 		if err == nil && string(contextJSON) != "null" {
 			sb.WriteString(fmt.Sprintf("\n## Available Data (from upstream steps)\n```json\n%s\n```\n", string(contextJSON)))
 		}
+	}
+
+	// What those values are, in the words of the tools that produced them. The
+	// data above says a field exists; this says what it holds — which of two
+	// fields is the whole of something and which is a part, what a path leads
+	// to, what a number counts. Without it a script is written against guesses
+	// about the shape in front of it.
+	if strings.TrimSpace(fieldMeanings) != "" {
+		sb.WriteString("\n## What those fields are (declared by the tools that produced them)\n")
+		sb.WriteString(fieldMeanings)
 	}
 
 	if len(hints) > 0 {

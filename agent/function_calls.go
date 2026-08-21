@@ -407,12 +407,42 @@ func architectToolDef() llm.ToolDef {
 	}
 }
 
-func coderToolDef() llm.ToolDef {
+// coderToolDef builds the Coder's reply shape. editable says whether a file
+// this call may edit already exists.
+//
+// When it does not, "edits" is left out. Both fields used to be offered on
+// every call, with which one applies said only in their descriptions — so a
+// Coder naming a brand new file could reply with text replacements for content
+// that was never written, and the run failed on "no such file or directory".
+// It came down to which of two allowed answers the model happened to give:
+// two runs with identical inputs went opposite ways, one writing its file and
+// one failing on it. An answer that cannot be carried out should not be on
+// offer, which settles it before the model is asked rather than after it
+// replies.
+func coderToolDef(editable bool) llm.ToolDef {
+	editsField := ""
+	description := "Submit code for a new file, in 'code'."
+	if editable {
+		editsField = `,
+					"edits": {
+						"type": "array",
+						"description": "Text-replacement edits. Use this for EXISTING files (edit mode). Each edit is a verbatim old_content → new_content replacement.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"old_content": {"type": "string"},
+								"new_content": {"type": "string"}
+							},
+							"required": ["old_content", "new_content"]
+						}
+					}`
+		description = "Submit code to write or edit. Use 'code' to replace a file wholesale, 'edits' for text replacements within an existing one."
+	}
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
 			Name:        "submit_code",
-			Description: "Submit code to write or edit. Use 'code' for new files, 'edits' for modifying existing files.",
+			Description: description,
 			Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -426,20 +456,8 @@ func coderToolDef() llm.ToolDef {
 					},
 					"code": {
 						"type": "string",
-						"description": "Complete file content. Use this for NEW files (write mode)."
-					},
-					"edits": {
-						"type": "array",
-						"description": "Text-replacement edits. Use this for EXISTING files (edit mode). Each edit is a verbatim old_content → new_content replacement.",
-						"items": {
-							"type": "object",
-							"properties": {
-								"old_content": {"type": "string"},
-								"new_content": {"type": "string"}
-							},
-							"required": ["old_content", "new_content"]
-						}
-					}
+						"description": "Complete file content."
+					}` + editsField + `
 				},
 				"required": ["language", "filename"]
 			}`),

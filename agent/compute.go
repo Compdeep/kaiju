@@ -118,6 +118,7 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 	// from whichever cards the classifier picked for this investigation.
 	// Every compute node (including parallel coder grafts) sees the same
 	// classifier-selected cards, so there's nothing to propagate through params.
+	fieldMeanings := a.upstreamFieldMeanings(ec.Graph, n, ctxData)
 	var architectGuidance, coderGuidance string
 	if ec.SkillCards != nil {
 		architectGuidance = ec.SkillCards["architect"]
@@ -136,9 +137,9 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 		if ec.Graph != nil {
 			sessionID = ec.Graph.SessionID
 		}
-		result, execErr = a.computePlan(ec.Ctx, ec.Graph, goal, query, ctxData, hints, blueprintRef, blueprintMode, tag, ts, architectGuidance, sessionID)
+		result, execErr = a.computePlan(ec.Ctx, ec.Graph, goal, query, ctxData, hints, blueprintRef, blueprintMode, tag, ts, architectGuidance, sessionID, fieldMeanings)
 	default: // shallow
-		result, execErr = a.computeCode(ec.Ctx, ec.Graph, goal, query, ctxData, hints, blueprintRef, blueprintMode, tag, ts, lang, codeCtx, coderGuidance)
+		result, execErr = a.computeCode(ec.Ctx, ec.Graph, goal, query, ctxData, hints, blueprintRef, blueprintMode, tag, ts, lang, codeCtx, coderGuidance, fieldMeanings)
 	}
 
 	n.EndedAt = time.Now()
@@ -298,7 +299,7 @@ func rootFromTaskFiles(taskFiles []string) string {
 }
 
 func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query string, ctxData any,
-	hints []any, blueprintRef, blueprintMode, tag string, ts int64, architectGuidance, sessionID string) (string, error) {
+	hints []any, blueprintRef, blueprintMode, tag string, ts int64, architectGuidance, sessionID string, fieldMeanings string) (string, error) {
 
 	// Load session interfaces (API contracts + schema from prior turns).
 	// This is session-scoped already; not part of ContextGate.
@@ -322,7 +323,7 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 		}
 	}
 
-	userPrompt := buildComputeUserPrompt(goal, query, ctxData, hints, priorBlueprint, blueprintMode)
+	userPrompt := buildComputeUserPrompt(goal, query, ctxData, hints, priorBlueprint, blueprintMode, fieldMeanings)
 	if block := formatInterfacesForPrompt(ifaces); block != "" {
 		userPrompt += "\n\n" + block
 	}
@@ -560,7 +561,7 @@ type computeCodeContext struct {
  */
 func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query string, ctxData any,
 	hints []any, blueprintRef, blueprintMode, tag string, ts int64, lang string,
-	codeCtx *computeCodeContext, coderGuidance string) (string, error) {
+	codeCtx *computeCodeContext, coderGuidance, fieldMeanings string) (string, error) {
 
 	// Load blueprint — either from explicit ref or latest on disk.
 	var plan string
@@ -602,7 +603,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		}
 	}
 
-	userPrompt := buildComputeUserPrompt(goal, query, ctxData, hints, plan, blueprintMode)
+	userPrompt := buildComputeUserPrompt(goal, query, ctxData, hints, plan, blueprintMode, fieldMeanings)
 	if lang != "" {
 		userPrompt += fmt.Sprintf("\n## Preferred Language\n%s\n", lang)
 	}

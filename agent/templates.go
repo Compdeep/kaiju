@@ -24,7 +24,8 @@ import (
 // found inside a plan step's params tree.
 type TemplateRef struct {
 	Type   string   // "step" or "node"
-	Index  int      // when Type == "step"
+	Index  int      // when Type == "step" and it named a position
+	Tag    string   // when Type == "step" and it named a tag instead
 	NodeID string   // when Type == "node"
 	Path   []string // dot-path tokens after the leading index/id; may be empty
 	Raw    string   // original "${...}" text including the braces
@@ -75,11 +76,16 @@ func parseRef(raw, kind, body string) *TemplateRef {
 	ref := &TemplateRef{Type: kind, Raw: raw}
 	switch kind {
 	case "step":
-		idx, err := strconv.Atoi(parts[0])
-		if err != nil {
-			return nil
+		// A position or a tag. Returning nothing for a tag made the reference
+		// indistinguishable from ordinary prose, so it survived every check that
+		// looks for references and was handed to a model as text — which read it
+		// as a data path and looked the value up under keys that do not exist.
+		if idx, err := strconv.Atoi(parts[0]); err == nil {
+			ref.Index = idx
+		} else {
+			ref.Tag = parts[0]
+			ref.Index = -1
 		}
-		ref.Index = idx
 	case "node":
 		ref.NodeID = parts[0]
 	default:

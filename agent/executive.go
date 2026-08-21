@@ -1560,7 +1560,26 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 //	${step.3.content}         → match, step=3, path="content"
 //	${step.0.results.0.url}   → match, step=0, path="results.0.url"
 //	${node.X.field}           → not matched (already rewritten)
-var stepTemplateRe = regexp.MustCompile(`\$\{step\.(\d+)(?:\.([^}]+))?\}`)
+//
+// A step reference names either a position in the plan or a step's tag. Tags
+// matter because a re-plan renumbers positions and does not rename tags, so a
+// reflector naming an earlier step reaches for the tag — the only form that
+// still means the same step in the next round.
+var stepTemplateRe = regexp.MustCompile(`\$\{step\.([a-zA-Z0-9_-]+)(?:\.([^}]+))?\}`)
+
+// stepIndexFor resolves the first segment of a step reference to a position.
+// A number is a position. Anything else is a tag, looked up in the plan.
+func stepIndexFor(ref string, steps []PlanStep) (int, bool) {
+	if n, err := strconv.Atoi(ref); err == nil {
+		return n, true
+	}
+	for i := range steps {
+		if steps[i].Tag == ref {
+			return i, true
+		}
+	}
+	return -1, false
+}
 
 // rewriteStepTemplates walks every string value reachable in params,
 // finds ${step.N(.path)?} placeholders, and rewrites them in place to
@@ -1576,8 +1595,12 @@ func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string,
 	walkParams(params, func(s string) (any, bool) {
 		out := stepTemplateRe.ReplaceAllStringFunc(s, func(match string) string {
 			m := stepTemplateRe.FindStringSubmatch(match)
-			idx, _ := strconv.Atoi(m[1])
+			idx, resolved := stepIndexFor(m[1], steps)
 			field := m[2]
+			if !resolved {
+				log.Printf("[dag] template %s on %s names no step in this plan, leaving placeholder unresolved", match, owner)
+				return match
+			}
 			if idx < 0 || idx >= len(nodeIDs) || nodeIDs[idx] == "" || nodeIDs[idx] == owner {
 				// Out of range, or a SELF-reference. A node can't consume its own
 				// output, and a replan often points ${step.0…} at what is really a

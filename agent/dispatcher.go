@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -435,7 +436,50 @@ func substituteTemplates(n *Node, graph *Graph, reg *toolapi.Registry) error {
 		}
 		return s, false
 	})
-	return firstErr
+	if firstErr != nil {
+		return firstErr
+	}
+	return refuseUnresolvedReference(n)
+}
+
+// unresolvedReferenceRe matches this engine's own reference syntax and nothing
+// else. A shell command may legitimately carry ${HOME}, and a template a tool
+// writes may carry ${anything}; neither is a reference to an earlier step.
+var unresolvedReferenceRe = regexp.MustCompile(`\$\{(?:step|node)\.[^}]*\}`)
+
+/*
+ * refuseUnresolvedReference fails a node whose parameters still name a step.
+ * desc: A reference that resolves is replaced by a value. One that does not used
+ *       to stay in the parameter as text, and text is handed to whatever runs
+ *       next — so a model was shown a placeholder in prose, read it as a data
+ *       path, and looked the value up under keys that do not exist. A reference
+ *       nobody could resolve is a broken edge, and a broken edge should stop the
+ *       step rather than travel on as prose.
+ * param: n - the node about to run
+ * return: an error naming every reference left unresolved, or nil
+ */
+func refuseUnresolvedReference(n *Node) error {
+	if n == nil || n.Params == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var left []string
+	walkParams(n.Params, func(s string) (any, bool) {
+		for _, m := range unresolvedReferenceRe.FindAllString(s, -1) {
+			if !seen[m] {
+				seen[m] = true
+				left = append(left, m)
+			}
+		}
+		return s, false
+	})
+	if len(left) == 0 {
+		return nil
+	}
+	sort.Strings(left)
+	return fmt.Errorf("%s still names %s after substitution: nothing in this run produced it, "+
+		"so the value it stands for was never supplied. Reference a step that ran, by its tag or its position",
+		n.ID, strings.Join(left, ", "))
 }
 
 // resolveTemplateField looks up dep node by ID, verifies it has a

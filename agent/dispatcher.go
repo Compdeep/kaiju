@@ -445,6 +445,12 @@ func resolveTemplateFieldCached(graph *Graph, cache map[string]any, depID, field
 	if err != nil {
 		return nil, err
 	}
+	// Refused before it is substituted, because this is the last point where the
+	// value is still known to be a cut copy of a file the payload names. Once it
+	// is in the params it is indistinguishable from the whole.
+	if err := refuseExcerptReference(graph, depID, field, v); err != nil {
+		return nil, err
+	}
 	cache[key] = v
 	return v, nil
 }

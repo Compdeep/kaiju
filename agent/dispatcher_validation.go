@@ -485,3 +485,77 @@ func sortedKeys(m map[string]json.RawMessage) []string {
 	sort.Strings(out)
 	return out
 }
+
+// excerptHandles pairs a payload field that carries only part of what a tool
+// produced with the fields naming the whole of it and how large that whole is.
+//
+// web_fetch returns content cut to what fits a prompt and writes the whole page
+// to path. bash returns stdout cut the same way and writes everything the
+// command printed to output_path. Both cuts are right for reading: the value
+// travels into a prompt, and a prompt has a size. Neither is right as the input
+// to a step that must work over everything the tool produced — a count, a
+// search, a total — because that step answers from the part and reports the
+// answer as though it covered all of it.
+//
+// The engine cannot infer these pairs, because only the tool knows which of its
+// fields is the cut copy of which file. Adding a tool here is how it opts in.
+var excerptHandles = map[string]struct{ whole, size string }{
+	"content": {whole: "path", size: "bytes"},
+	"stdout":  {whole: "output_path", size: "output_bytes"},
+}
+
+// refuseExcerptReference reports why a reference must not be substituted: it
+// names a field holding part of what a tool produced while the same payload
+// names a file holding all of it.
+//
+// It refuses only when all three hold — the field is one a tool declared as an
+// excerpt, the payload names a whole copy, and that copy is larger than the
+// value just resolved. A tool that kept no file, a page small enough to come
+// back whole, and every other field resolve exactly as before.
+func refuseExcerptReference(graph *Graph, depID, field string, val any) error {
+	pair, declared := excerptHandles[field]
+	if !declared {
+		return nil
+	}
+	part, isText := val.(string)
+	if !isText {
+		return nil
+	}
+	if graph == nil {
+		return nil
+	}
+	producer := graph.Get(depID)
+	if producer == nil || producer.Body == nil {
+		return nil
+	}
+	rawWhole, _ := producer.Body.Field(pair.whole)
+	whole, _ := rawWhole.(string)
+	if strings.TrimSpace(whole) == "" {
+		return nil // the tool kept nothing, so the excerpt is all there is
+	}
+	rawSize, found := producer.Body.Field(pair.size)
+	total, known := asByteCount(rawSize)
+	if !found || !known || total <= len(part) {
+		return nil // came back whole, or the size is not stated
+	}
+	return fmt.Errorf(
+		"%s holds %d of the %d bytes that node %s produced, and the whole of it is in %q. "+
+			"A step given the %s answers from part of what was produced and reports that answer as if it covered all of it. "+
+			"Reference %q instead and have this step read that file",
+		field, len(part), total, depID, whole, field, pair.whole)
+}
+
+// asByteCount reads a size out of a payload. A number that survived a JSON round
+// trip arrives as float64, so both forms are accepted and anything else is
+// treated as unstated rather than guessed at.
+func asByteCount(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
+}

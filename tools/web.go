@@ -112,7 +112,7 @@ func (w *WebFetch) Impact(map[string]any) int { return toolapi.ImpactObserve }
  * return: JSON schema as raw bytes
  */
 func (w *WebFetch) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"what was returned inline: markdown, text, or extract"},"path":{"type":"string","description":"where the whole page was written, relative to the workspace. Present on every fetch that has somewhere to write. Read, search or parse this in a later step when the inline content is not enough — it is the complete document, not a cut-down one"},"bytes":{"type":"integer","description":"how much of the page was written to path"},"body_truncated":{"type":"boolean","description":"the page was larger than this deployment keeps, so path holds the beginning of it and not all of it"},"url":{"type":"string","description":"the URL this call was given, echoed back so a later step can say which page a result came from. It is not a link found on the page, and fetching it again returns this same result — see the warning above about not chaining from this tool into another web_fetch"}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content} when that text is enough on its own. When a step has to work on the whole document — anything that writes or runs a script over it — reference ${step.N.path} instead and let that step read the file: content is bounded by the model's window and can hold a fraction of the document, while path always names all of it.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"what was returned inline: markdown, text, or extract"},"path":{"type":"string","description":"where the whole page was written, relative to the workspace. Present on every fetch that has somewhere to write. Read, search or parse this in a later step when the inline content is not enough — it is the complete document, not a cut-down one"},"bytes":{"type":"integer","description":"how much of the page was written to path"},"content_bytes":{"type":"integer","description":"how much came back inline in content. Compare it with bytes: when it is smaller, content holds part of the document and path holds all of it"},"content_truncated":{"type":"boolean","description":"content does not carry the whole document, because the inline text is bounded by the model's window. path is unaffected and names the complete file, so a step that needs all of it should read path"},"body_truncated":{"type":"boolean","description":"the page was larger than this deployment keeps, so path holds the beginning of it and not all of it"},"url":{"type":"string","description":"the URL this call was given, echoed back so a later step can say which page a result came from. It is not a link found on the page, and fetching it again returns this same result — see the warning above about not chaining from this tool into another web_fetch"}}}`)
 }
 
 /*
@@ -360,6 +360,20 @@ func withKept(rawURL, path string, bytes int, cut bool, keepErr error, m toolapi
 		obj["bytes"] = bytes
 		if cut {
 			obj["body_truncated"] = true
+		}
+		// Two reductions happen, and only the first used to be recorded. The
+		// page is cut to what this deployment keeps (body_truncated), and then
+		// the inline text is cut again to what fits a model's window. A stage
+		// reading the result could see that the file held the whole page and
+		// still not know the text beside it was a fraction of that file, so a
+		// step wired to the text answered from the part it was given and said
+		// the answer was confirmed. Both sizes are stated here so a later stage
+		// can compare them instead of assuming they match.
+		if inline, ok := obj["content"].(string); ok {
+			obj["content_bytes"] = len(inline)
+			if len(inline) < bytes {
+				obj["content_truncated"] = true
+			}
 		}
 	case keepErr != nil:
 		// Said out loud rather than left absent: a caller that expected a path

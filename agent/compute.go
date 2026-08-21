@@ -228,7 +228,14 @@ func computeSessionID(g *Graph) string {
 // projectPrefix returns the project root path, resolved in order:
 //  1. graph.ProjectRoot (set by architect)
 //  2. common prefix of taskFiles (e.g. "project/kaiju_webapp/" from task_files paths)
-//  3. "project/" (legacy fallback)
+//  3. "project/<session>/" — one directory per conversation
+//  4. "project/" (legacy fallback, when there is no session to name)
+//
+// Step 3 exists because only the architect sets ProjectRoot, so every run that
+// never planned deeply fell through to a bare "project/" shared by every
+// conversation on the machine. A later run's coder then met a file it had not
+// written, was handed no content to match against, and failed applying edits to
+// something another conversation had left there.
 func projectPrefix(g *Graph, taskFiles []string) string {
 	if g != nil && g.ProjectRoot != "" {
 		root := g.ProjectRoot
@@ -240,7 +247,30 @@ func projectPrefix(g *Graph, taskFiles []string) string {
 	if root := rootFromTaskFiles(taskFiles); root != "" {
 		return root
 	}
+	if dir := threadDir(computeSessionID(g)); dir != "" {
+		return "project/" + dir + "/"
+	}
 	return "project/"
+}
+
+// threadDir reduces a session id to one path segment, or "" when there is
+// nothing safe to use. A caller with no session, or an id carrying anything
+// other than letters, digits, dash or underscore, keeps the shared directory
+// rather than having a path built out of a value that was never meant to name
+// one.
+func threadDir(sessionID string) string {
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return ""
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return ""
+		}
+	}
+	return id
 }
 
 // rootFromTaskFiles extracts the project root from task_files paths.

@@ -2375,7 +2375,7 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 	// here instead — the dep may have completed since the first attempt — and
 	// fail cleanly with the injection error if it genuinely can't resolve. No LLM.
 	if nodeTemplateRe.MatchString(command) {
-		if err := substituteTemplates(node, graph); err != nil {
+		if err := substituteTemplates(node, graph, a.registry); err != nil {
 			log.Printf("[dag] oneshot: %s has unresolved templates (dependency injection, not a shell fix): %v", node.ID, err)
 			ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("dependency injection failed: %w", err)}
 			return
@@ -2438,7 +2438,7 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 	// the dispatcher — so a placeholder can never reach the shell. (The LLM fix
 	// shouldn't introduce one, but this keeps the retry path consistent with
 	// normal dispatch and closes the leak for good.)
-	if err := substituteTemplates(node, graph); err != nil {
+	if err := substituteTemplates(node, graph, a.registry); err != nil {
 		ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("dependency injection failed: %w", err)}
 		return
 	}

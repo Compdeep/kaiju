@@ -149,7 +149,7 @@ func (b toolMessageBody) Evidence() string {
 // invented one from the URL, and the step that followed failed on a file that
 // was never there.
 var handleFields = []struct{ key, says string }{
-	{"path", "the whole page is in this file"},
+	{"full_content_path", "the whole page is in this file"},
 	{"output_path", "the command's whole output is in this file"},
 }
 

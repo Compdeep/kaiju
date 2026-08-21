@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -8,101 +9,174 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// producerNode stands up a resolved node carrying the payload a tool returned,
-// so the check reads it exactly as it does at fire time.
-func producerNode(t *testing.T, payload string) (*Graph, string) {
+// excerptTool declares that one of its fields is truncated. plainTool is the
+// same tool declaring nothing. The pair is what proves the engine reads the
+// declaration rather than recognising field names of its own.
+//
+// The names here are deliberately not the ones any real tool uses: if the engine
+// ever starts looking for "content" or "path", these tests keep passing while
+// production breaks, so odd names are the point.
+type excerptTool struct {
+	name string
+	dec  []toolapi.Excerpt
+}
+
+func (e *excerptTool) Name() string                { return e.name }
+func (e *excerptTool) Description() string         { return "" }
+func (e *excerptTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
+func (e *excerptTool) Impact(map[string]any) int   { return 0 }
+func (e *excerptTool) Execute(context.Context, map[string]any) (string, error) {
+	return "", nil
+}
+func (e *excerptTool) Excerpts() []toolapi.Excerpt { return e.dec }
+
+var _ toolapi.Tool = (*excerptTool)(nil)
+var _ toolapi.Excerpting = (*excerptTool)(nil)
+
+const (
+	partField   = "part"
+	wholeField  = "everything"
+	sizeField   = "how_big"
+	useWording  = "read everything in this step, part is only the opening"
+	partialData = `{"part":"the opening","everything":"kept/doc.txt","how_big":1219043}`
+)
+
+func excerptGraph(t *testing.T, payload string, declares bool) (*toolapi.Registry, *Graph, string) {
 	t.Helper()
+	reg := toolapi.NewRegistry()
+	tool := &excerptTool{name: "page_reader"}
+	if declares {
+		tool.dec = []toolapi.Excerpt{{Field: partField, Whole: wholeField, Size: sizeField, Use: useWording}}
+	}
+	reg.Replace(tool, "builtin")
+
 	g := NewGraph()
-	id := g.AddNode(&Node{Type: NodeTool, Tag: "fetch", ToolName: "web_fetch"})
+	id := g.AddNode(&Node{Type: NodeTool, Tag: "read", ToolName: "page_reader"})
 	g.SetBody(id, toolMessageBody{msg: toolapi.ToolMessage{
 		Type:    "page",
 		Status:  toolapi.StatusOK,
-		Content: "the opening of the document",
+		Content: "the opening",
 		Data:    json.RawMessage(payload),
 	}})
-	return g, id
+	return reg, g, id
 }
 
-// The failure this exists for: a step counted inside 8,102 characters of a
-// 1,219,043-character document and reported 17 as the document's total, three
-// runs in a row, while the complete copy sat unread on disk.
-func TestRefuseExcerptReference_RefusesAPartWhenTheWholeIsOnDisk(t *testing.T) {
-	g, id := producerNode(t, `{"content":"the opening","path":"fetched/doc.txt","bytes":1219043}`)
+// The failure this exists for: a step was handed 8,102 of 1,219,043 characters,
+// counted inside them, and reported the number as the document's — three runs
+// running — while the whole copy sat unread in a file the same result named.
+func TestWholeBesideExcerpt_HandsOverBothWhenOnlyPartWasInline(t *testing.T) {
+	reg, g, id := excerptGraph(t, partialData, true)
 
-	err := refuseExcerptReference(g, id, "content", "the opening")
-	if err == nil {
-		t.Fatal("a reference to part of a document must be refused while the whole exists")
+	widened, ok := wholeBesideExcerpt(reg, g, id, partField, "the opening")
+	if !ok {
+		t.Fatal("a reference to the truncated field must be widened while the whole exists")
 	}
-	for _, want := range []string{"fetched/doc.txt", "1219043", `"path"`} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("the refusal must name %s, got %q", want, err)
-		}
+	if widened[partField] != "the opening" {
+		t.Fatalf("the text must survive, got %v", widened[partField])
+	}
+	if widened[wholeField] != "kept/doc.txt" {
+		t.Fatalf("the file must be named, got %v", widened[wholeField])
+	}
+	if widened[sizeField] != 1219043 {
+		t.Fatalf("the size must be carried, got %v", widened[sizeField])
+	}
+	if widened["note"] != useWording {
+		t.Fatalf("the tool's own wording must ride along, got %v", widened["note"])
 	}
 }
 
-func TestRefuseExcerptReference_AllowsWhatCameBackWhole(t *testing.T) {
+// THE GUARD AGAINST THE ENGINE KNOWING TOOL FIELD NAMES.
+//
+// Byte-for-byte the payload widened above. The only difference is that the tool
+// declares nothing. If this fails, something in the engine has started
+// recognising field names instead of reading toolapi.Excerpting.
+func TestWholeBesideExcerpt_EngineHoldsNoFieldNamesOfItsOwn(t *testing.T) {
+	reg, g, id := excerptGraph(t, partialData, false)
+
+	if _, ok := wholeBesideExcerpt(reg, g, id, partField, "the opening"); ok {
+		t.Fatal("a tool that declared nothing must be left alone, whatever its fields are called")
+	}
+}
+
+func TestWholeBesideExcerpt_LeavesWhatCameBackWholeAlone(t *testing.T) {
 	whole := "a short page, entire"
-	g, id := producerNode(t, `{"content":"`+whole+`","path":"fetched/small.txt","bytes":20}`)
+	reg, g, id := excerptGraph(t, `{"part":"`+whole+`","everything":"kept/small.txt","how_big":20}`, true)
 
-	if err := refuseExcerptReference(g, id, "content", whole); err != nil {
-		t.Fatalf("content matching the file is the whole of it: %v", err)
+	if _, ok := wholeBesideExcerpt(reg, g, id, partField, whole); ok {
+		t.Fatal("text matching the file is the whole of it; nothing to widen")
 	}
 }
 
-// A tool with nowhere to write still returns its excerpt, and that excerpt is
-// then all there is — refusing it would leave the step with nothing.
-func TestRefuseExcerptReference_AllowsWhenTheToolKeptNothing(t *testing.T) {
-	g, id := producerNode(t, `{"content":"some text","kept":"the page was read but could not be written"}`)
+// A tool with nowhere to write still returns its text, and that text is then all
+// there is — widening would name a file that does not exist.
+func TestWholeBesideExcerpt_LeavesItAloneWhenTheToolKeptNothing(t *testing.T) {
+	reg, g, id := excerptGraph(t, `{"part":"some text","kept":"read but not written"}`, true)
 
-	if err := refuseExcerptReference(g, id, "content", "some text"); err != nil {
-		t.Fatalf("no file means the excerpt is all there is: %v", err)
+	if _, ok := wholeBesideExcerpt(reg, g, id, partField, "some text"); ok {
+		t.Fatal("no file means the text is all there is")
 	}
 }
 
-// Only fields a tool declared as an excerpt are governed. A title is short
-// beside a large file and must not be mistaken for a cut copy of it.
-func TestRefuseExcerptReference_LeavesOtherFieldsAlone(t *testing.T) {
-	g, id := producerNode(t, `{"content":"x","title":"A Page","path":"fetched/doc.txt","bytes":1219043}`)
+func TestWholeBesideExcerpt_LeavesUndeclaredFieldsAlone(t *testing.T) {
+	reg, g, id := excerptGraph(t, partialData, true)
 
-	for _, field := range []string{"title", "path", "bytes", "status", "format"} {
-		if err := refuseExcerptReference(g, id, field, "A Page"); err != nil {
-			t.Fatalf("field %q is not an excerpt, got %v", field, err)
+	for _, field := range []string{wholeField, sizeField, "title", "status"} {
+		if _, ok := wholeBesideExcerpt(reg, g, id, field, "something"); ok {
+			t.Fatalf("field %q was never declared as truncated", field)
 		}
 	}
 }
 
-func TestRefuseExcerptReference_CoversTheCommandOutputPair(t *testing.T) {
-	g := NewGraph()
-	id := g.AddNode(&Node{Type: NodeTool, Tag: "run", ToolName: "bash"})
-	g.SetBody(id, toolMessageBody{msg: toolapi.ToolMessage{
-		Type:   "command",
-		Status: toolapi.StatusOK,
-		Data:   json.RawMessage(`{"stdout":"first lines","output_path":"output/run.txt","output_bytes":900000}`),
-	}})
-
-	err := refuseExcerptReference(g, id, "stdout", "first lines")
-	if err == nil {
-		t.Fatal("stdout cut from a much larger output must be refused too")
+func TestWholeBesideExcerpt_SilentWhenItCannotTell(t *testing.T) {
+	reg, g, id := excerptGraph(t, `{"part":"x","everything":"kept/doc.txt"}`, true) // no size
+	if _, ok := wholeBesideExcerpt(reg, g, id, partField, "x"); ok {
+		t.Fatal("an unstated size must not widen")
 	}
-	if !strings.Contains(err.Error(), "output_path") {
-		t.Fatalf("the refusal must name the field holding all of it, got %q", err)
+	if _, ok := wholeBesideExcerpt(reg, g, "no-such-node", partField, "x"); ok {
+		t.Fatal("an unknown producer must not widen")
+	}
+	if _, ok := wholeBesideExcerpt(reg, g, id, partField, 42); ok {
+		t.Fatal("a value that is not text is not truncated text")
+	}
+	if _, ok := wholeBesideExcerpt(nil, g, id, partField, "x"); ok {
+		t.Fatal("no registry must not widen")
+	}
+	if _, ok := wholeBesideExcerpt(reg, nil, id, partField, "x"); ok {
+		t.Fatal("no graph must not widen")
 	}
 }
 
-// A size that never survived a JSON round trip, a missing node, and a non-string
-// value must all pass rather than be guessed at.
-func TestRefuseExcerptReference_SilentWhenItCannotTell(t *testing.T) {
-	g, id := producerNode(t, `{"content":"x","path":"fetched/doc.txt"}`) // no size stated
-	if err := refuseExcerptReference(g, id, "content", "x"); err != nil {
-		t.Fatalf("an unstated size must not refuse: %v", err)
+// Widening only holds where the whole parameter is one reference, because that
+// is the only branch that keeps the value's type. A reference sitting inside a
+// longer sentence is rendered as text, and an object rendered into the middle of
+// a sentence would be worse than the text it replaced — so that case keeps the
+// text it always had.
+func TestSubstituteTemplates_WidensOnlyABareReference(t *testing.T) {
+	reg, g, id := excerptGraph(t, partialData, true)
+
+	bare := &Node{Type: NodeCompute, Params: map[string]any{"context": "${node." + id + "." + partField + "}"}}
+	if err := substituteTemplates(bare, g, reg); err != nil {
+		t.Fatalf("unexpected: %v", err)
 	}
-	if err := refuseExcerptReference(g, "no-such-node", "content", "x"); err != nil {
-		t.Fatalf("an unknown producer must not refuse: %v", err)
+	got, isObject := bare.Params["context"].(map[string]any)
+	if !isObject {
+		t.Fatalf("a bare reference must arrive as an object, got %T", bare.Params["context"])
 	}
-	if err := refuseExcerptReference(g, id, "content", 42); err != nil {
-		t.Fatalf("a non-text value is not an excerpt: %v", err)
+	if got[wholeField] != "kept/doc.txt" {
+		t.Fatalf("the file must be named in it, got %v", got)
 	}
-	if err := refuseExcerptReference(nil, id, "content", "x"); err != nil {
-		t.Fatalf("no graph must not refuse: %v", err)
+
+	embedded := &Node{Type: NodeCompute, Params: map[string]any{
+		"context": "the page said: ${node." + id + "." + partField + "} — count in it",
+	}}
+	if err := substituteTemplates(embedded, g, reg); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	text, isText := embedded.Params["context"].(string)
+	if !isText {
+		t.Fatalf("an embedded reference must stay text, got %T", embedded.Params["context"])
+	}
+	if !strings.Contains(text, "the opening") || strings.Contains(text, "kept/doc.txt") {
+		t.Fatalf("an embedded reference keeps the text it always had, got %q", text)
 	}
 }

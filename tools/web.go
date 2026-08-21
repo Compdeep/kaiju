@@ -111,8 +111,21 @@ func (w *WebFetch) Impact(map[string]any) int { return toolapi.ImpactObserve }
  * desc: Defines the output structure with status, title, and extracted content fields.
  * return: JSON schema as raw bytes
  */
+// Excerpts declares that content is cut to what fits a prompt while path names
+// the whole page. A step wired to content when the page did not come back whole
+// is refused, because it would work on part of the document and report its
+// answer as covering all of it.
+func (w *WebFetch) Excerpts() []toolapi.Excerpt {
+	return []toolapi.Excerpt{{
+		Field: "content",
+		Whole: "full_content_path",
+		Size:  "bytes",
+		Use:   "read full_content_path in this step: content is cut down to what fits a prompt, and that file is the whole page",
+	}}
+}
+
 func (w *WebFetch) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"what was returned inline: markdown, text, or extract"},"path":{"type":"string","description":"where the whole page was written, relative to the workspace. Present on every fetch that has somewhere to write. Read, search or parse this in a later step when the inline content is not enough — it is the complete document, not a cut-down one"},"bytes":{"type":"integer","description":"how much of the page was written to path"},"body_truncated":{"type":"boolean","description":"the page was larger than this deployment keeps, so path holds the beginning of it and not all of it"},"url":{"type":"string","description":"the URL this call was given, echoed back so a later step can say which page a result came from. It is not a link found on the page, and fetching it again returns this same result — see the warning above about not chaining from this tool into another web_fetch"}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"Fetched page content as JSON. This tool CONSUMES URLs — it does NOT produce URLs. Do not chain from this tool's output into another web_fetch. Reference the extracted text in a downstream step's params with ${step.N.content}.","properties":{"status":{"type":"string","description":"HTTP status line"},"title":{"type":"string","description":"page title"},"content":{"type":"string","description":"extracted page content (text, not URLs)"},"format":{"type":"string","description":"what was returned inline: markdown, text, or extract"},"full_content_path":{"type":"string","description":"the file holding the whole page, relative to the workspace. Present on every fetch that has somewhere to write. content is cut down to what fits a prompt; this file is not. A step that has to work over the whole document — count, search, total — reads this file"},"bytes":{"type":"integer","description":"the size of the file at full_content_path, so it can be compared with how much came back in content"},"body_truncated":{"type":"boolean","description":"the page was larger than this deployment keeps, so even full_content_path holds the beginning of it and not all of it"},"url":{"type":"string","description":"the URL this call was given, echoed back so a later step can say which page a result came from. It is not a link found on the page, and fetching it again returns this same result — see the warning above about not chaining from this tool into another web_fetch"}}}`)
 }
 
 /*
@@ -356,7 +369,7 @@ func withKept(rawURL, path string, bytes int, cut bool, keepErr error, m toolapi
 	}
 	switch {
 	case path != "":
-		obj["path"] = path
+		obj["full_content_path"] = path
 		obj["bytes"] = bytes
 		if cut {
 			obj["body_truncated"] = true

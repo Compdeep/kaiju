@@ -16,7 +16,7 @@ func TestABareReferenceInjectsTheValueNotItsText(t *testing.T) {
 	g.SetResult(dep, `{"results":[{"url":"https://example.test"}],"count":1}`)
 
 	n := &Node{ID: "n2", Params: map[string]any{"payload": "${node." + dep + "}"}}
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 
@@ -37,7 +37,7 @@ func TestABareReferenceToProseInjectsTheProse(t *testing.T) {
 	g.SetResult(dep, "the quick brown fox")
 
 	n := &Node{ID: "n2", Params: map[string]any{"text": "${node." + dep + "}"}}
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 	if n.Params["text"] != "the quick brown fox" {
@@ -53,7 +53,7 @@ func TestAStepReferenceAtFireTimeIsAnError(t *testing.T) {
 	g := NewGraph()
 	n := &Node{ID: "n2", Params: map[string]any{"q": "${step.0.results}"}}
 
-	err := substituteTemplates(n, g)
+	err := substituteTemplates(n, g, nil)
 
 	if err == nil {
 		t.Fatal("a step reference was accepted at fire time")
@@ -78,7 +78,7 @@ func TestOneDependencyIsResolvedOnce(t *testing.T) {
 		"b": "${node." + dep + ".count}",
 		"c": "count is ${node." + dep + ".count} exactly",
 	}}
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestTheTypedBodyStillAnswersTheFieldAccess(t *testing.T) {
 	g.SetBody(dep, NewToolBody(toolapi.ToolOK("search", "", map[string]any{"url": "https://example.test"})))
 
 	n := &Node{ID: "n2", Params: map[string]any{"u": "${node." + dep + ".url}"}}
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates: %v", err)
 	}
 	if n.Params["u"] != "https://example.test" {
@@ -107,7 +107,7 @@ func TestTheTypedBodyStillAnswersTheFieldAccess(t *testing.T) {
 	}
 	// The envelope wrapper is tolerated on the path, as the body decides.
 	n = &Node{ID: "n3", Params: map[string]any{"u": "${node." + dep + ".data.url}"}}
-	if err := substituteTemplates(n, g); err != nil {
+	if err := substituteTemplates(n, g, nil); err != nil {
 		t.Fatalf("substituteTemplates with a data prefix: %v", err)
 	}
 	if n.Params["u"] != "https://example.test" {

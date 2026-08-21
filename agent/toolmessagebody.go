@@ -148,9 +148,12 @@ func (b toolMessageBody) Evidence() string {
 // Read from a run that had been told a path exists and was given none: it
 // invented one from the URL, and the step that followed failed on a file that
 // was never there.
-var handleFields = []struct{ key, says string }{
-	{"path", "the whole page is in this file"},
-	{"output_path", "the command's whole output is in this file"},
+var handleFields = []struct{ key, says, partialInline, inlineSize string }{
+	// partialInline names the flag saying the text beside this handle is not the
+	// whole of what the file holds, and inlineSize how much of it came back. Both
+	// empty for a handle whose tool does not measure that yet.
+	{"path", "the whole page is in this file", "content_truncated", "content_bytes"},
+	{"output_path", "the command's whole output is in this file", "", ""},
 }
 
 /*
@@ -184,9 +187,28 @@ func (b toolMessageBody) handleLine() string {
 		if cut, _ := payload[truncatedFlagFor(f.key)].(bool); cut {
 			line += "\n[it holds the beginning of what was produced, not all of it]"
 		}
+		// The file can be whole and the text beside it still be a fraction of it.
+		// Said plainly, with both sizes, because a stage that is not told this
+		// treats the text it was handed as the whole thing and reports an answer
+		// drawn from part of a document as though it covered all of it.
+		if short, _ := payload[f.partialInline].(bool); short {
+			line += fmt.Sprintf("\n[the text above is not the whole of it%s. To work on all of it, wire ${step.N.%s} into a later step and read the file there — do not answer from the text above.]",
+				inlineVersusFile(payload, f.inlineSize), f.key)
+		}
 		return line
 	}
 	return ""
+}
+
+// inlineVersusFile states the two sizes when the payload carries both, so the
+// difference is a fact a stage can read rather than something it has to assume.
+func inlineVersusFile(payload map[string]any, sizeKey string) string {
+	inline, iOK := payload[sizeKey].(float64)
+	whole, wOK := payload["bytes"].(float64)
+	if !iOK || !wOK || whole <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" — %d bytes of the %d in that file", int(inline), int(whole))
 }
 
 // truncatedFlagFor names the payload field that says a kept file is partial.

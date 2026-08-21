@@ -102,7 +102,9 @@ func (n *NetInfo) OutputSchema() json.RawMessage {
 		`"reachable":{"type":"boolean","description":"action=connectivity"},` +
 		`"latency_ms":{"type":"integer","description":"action=connectivity"},` +
 		`"addresses":{"type":"array","description":"action=dns","items":{"type":"string"}},` +
-		`"truncated":{"type":"boolean","description":"action=ports: the text was cut at 4KB, count was not"},` +
+		`"truncated":{"type":"boolean","description":"action=ports: the text was cut at 4KB; count and ports were not"},` +
+		`"ports":{"type":"array","description":"action=ports: one row per listener, every one of them","items":{"type":"string"}},` +
+		`"connections":{"type":"array","description":"action=connections: one row per connection kept after any host and port filter","items":{"type":"string"}},` +
 		`"error":{"type":"string","description":"action=connectivity|dns: why it did not answer"},` +
 		`"output":{"type":"string","description":"action=connections: the listing command failed and this is what it printed"}` +
 		`}}`)
@@ -293,13 +295,20 @@ func netListeningPorts(ctx context.Context) (toolapi.ToolMessage, error) {
 
 	// Counted before truncating, so the number is the number of listeners rather
 	// than the number that fitted in 4KB. The header row is not a listener.
-	count := 0
+	//
+	// The rows are kept as well as counted. Four of this tool's five actions
+	// returned their result as payload fields a later step could name; this one
+	// and connections returned only a count, leaving the listing reachable only
+	// as the text a model reads. A step wanting the listeners had no field to
+	// reference, so it referenced whatever else was declared.
+	rows := []string{}
 	for i, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
 		if i == 0 || strings.TrimSpace(line) == "" {
 			continue
 		}
-		count++
+		rows = append(rows, line)
 	}
+	count := len(rows)
 	if count == 0 {
 		return toolapi.ToolEmpty("net", "nothing is listening on this host"), nil
 	}
@@ -310,10 +319,11 @@ func netListeningPorts(ctx context.Context) (toolapi.ToolMessage, error) {
 		output = output[:4096] + "\n... (truncated)"
 		truncated = true
 	}
-	// A payload as well as the text, so a later step can name a field of what
-	// this returned. With data nil it could only quote the whole listing.
+	// The rows as well as the text: the text is what a model reads, the rows are
+	// what a later step names. truncated describes the text only — the rows are
+	// every listener, whether or not they all fitted in 4KB.
 	return toolapi.ToolOK("net", output, map[string]any{
-		"action": "ports", "count": count, "truncated": truncated,
+		"action": "ports", "count": count, "truncated": truncated, "ports": rows,
 	}), nil
 }
 
@@ -374,7 +384,11 @@ func netConnections(ctx context.Context, host string, port int) (toolapi.ToolMes
 	if port > 0 {
 		portStr = strconv.Itoa(port)
 	}
-	count := 0
+	// Two collections, because they are read by different things. kept keeps the
+	// header rows so the text a model reads is a listing it can make sense of.
+	// rows is the data alone, because a step naming this field iterates it and a
+	// header is not a connection.
+	rows := []string{}
 	for _, line := range lines[headerEnd:] {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -386,8 +400,9 @@ func netConnections(ctx context.Context, host string, port int) (toolapi.ToolMes
 			continue
 		}
 		kept = append(kept, line)
-		count++
+		rows = append(rows, line)
 	}
+	count := len(rows)
 
 	// Nothing matched is something known about the host, not a failed listing.
 	if count == 0 {
@@ -397,5 +412,5 @@ func netConnections(ctx context.Context, host string, port int) (toolapi.ToolMes
 		return toolapi.ToolEmpty("net", "this host has no connections"), nil
 	}
 	return toolapi.ToolOK("net", strings.Join(kept, "\n"),
-		map[string]any{"action": "connections", "count": count}), nil
+		map[string]any{"action": "connections", "count": count, "connections": rows}), nil
 }

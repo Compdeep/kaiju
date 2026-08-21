@@ -170,6 +170,11 @@ type PlanStep struct {
 	// declaration says whether it needs one.
 	Target string `json:"target,omitempty"`
 	Gap    string `json:"gap,omitempty"` // capability gap: what's needed but unavailable
+	// UnresolvedDeps holds depends_on entries that named neither a position nor
+	// any step's tag. Kept rather than discarded so the plan can be sent back
+	// for correction: a step declaring a dependency on something that is not in
+	// the plan is a broken plan, and the executive can fix one it is told about.
+	UnresolvedDeps []string `json:"-"`
 }
 
 // planStepFields is every JSON name a step may carry: PlanStep's own, read off
@@ -640,8 +645,102 @@ type executiveCallPayload struct {
 	Steps  []PlanStep `json:"steps"`
 }
 
+/*
+ * linkDependsOnTags resolves depends_on entries that name a step's tag.
+ * desc: FlexInts.UnmarshalJSON can only hold positions, so a name is dropped as
+ *       it decodes and the step silently loses an edge — the scheduler then has
+ *       nothing to make it wait, and validateDataFlow, whose whole check is
+ *       "declared a dependency but wired no value", returns early because the
+ *       declaration is the thing that went missing. A re-plan is where this
+ *       bites: positions restart with each plan and tags do not, so a reflector
+ *       naming an earlier step writes the one form that gets thrown away.
+ *
+ *       Reads the same JSON the steps were decoded from, matches each name
+ *       against the plan's own tags, and records the rest on the step.
+ * param: stepsArray - the raw JSON array the steps were decoded from
+ * param: steps - the decoded steps, updated in place
+ */
+func linkDependsOnTags(stepsArray json.RawMessage, steps []PlanStep) {
+	var probe []struct {
+		DependsOn []json.RawMessage `json:"depends_on"`
+	}
+	if len(stepsArray) == 0 || json.Unmarshal(stepsArray, &probe) != nil {
+		return
+	}
+	byTag := make(map[string]int, len(steps))
+	for i := range steps {
+		if steps[i].Tag != "" {
+			byTag[steps[i].Tag] = i
+		}
+	}
+	for i := range probe {
+		if i >= len(steps) {
+			break
+		}
+		for _, entry := range probe[i].DependsOn {
+			var name string
+			if json.Unmarshal(entry, &name) != nil {
+				continue // a number, already carried as a position
+			}
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if _, isNumber := strconv.Atoi(name); isNumber == nil {
+				continue // a position written as a string, already carried
+			}
+			idx, known := byTag[name]
+			if !known || idx == i {
+				steps[i].UnresolvedDeps = append(steps[i].UnresolvedDeps, name)
+				continue
+			}
+			if !slices.Contains(steps[i].DependsOn, idx) {
+				steps[i].DependsOn = append(steps[i].DependsOn, idx)
+				log.Printf("[dag] plan: step %d depends on %q → step %d", i, name, idx)
+			}
+		}
+	}
+}
+
+/*
+ * validatePlanDeps reports dependencies that name nothing in the plan.
+ * desc: The plan-time twin of the other two validators: validatePlanEdges checks
+ *       the values wired between steps, validatePlanParams the parameters of a
+ *       step, and this the dependencies of one. A name that matches no tag and
+ *       no position is returned so the executive re-plans against it.
+ * param: steps - the plan
+ * return: one message per unresolved dependency, empty when the plan is clean
+ */
+func validatePlanDeps(steps []PlanStep) []string {
+	var errs []string
+	for i := range steps {
+		for _, name := range steps[i].UnresolvedDeps {
+			tags := make([]string, 0, len(steps))
+			for j := range steps {
+				if steps[j].Tag != "" && j != i {
+					tags = append(tags, strconv.Quote(steps[j].Tag))
+				}
+			}
+			available := "this plan has no other tagged steps"
+			if len(tags) > 0 {
+				available = "the steps in this plan are tagged " + strings.Join(tags, ", ")
+			}
+			errs = append(errs, fmt.Sprintf("step %d (%s): depends_on names %q, which is neither a step position nor any step's tag — %s",
+				i, steps[i].Tool, name, available))
+		}
+	}
+	return errs
+}
+
 // parseExecutivePayload handles LLMs returning steps as a JSON string instead of an array.
 func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
+	// The steps array as it arrived, so a depends_on entry naming a tag can be
+	// matched before FlexInts decodes it away.
+	var arrived struct {
+		Steps json.RawMessage `json:"steps"`
+	}
+	_ = json.Unmarshal([]byte(raw), &arrived)
+
 	if err := json.Unmarshal([]byte(raw), payload); err != nil {
 		// Try parsing with steps as a string (double-encoded JSON)
 		var flex struct {
@@ -661,10 +760,12 @@ func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
 				return fmt.Errorf("steps is a string but not valid JSON: %w", err3)
 			}
 			log.Printf("[dag] executive: unwrapped string-encoded steps (%d steps)", len(payload.Steps))
+			linkDependsOnTags(json.RawMessage(stepsStr), payload.Steps)
 			return nil
 		}
 		return err
 	}
+	linkDependsOnTags(arrived.Steps, payload.Steps)
 	return nil
 }
 
@@ -942,7 +1043,8 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		for corrections := 0; ; corrections++ {
 			edgeErrs := validatePlanEdges(steps, a.registry)
 			paramErrs := validatePlanParams(steps, a.registry)
-			allErrs := append(append([]string{}, edgeErrs...), paramErrs...)
+			depErrs := validatePlanDeps(steps)
+			allErrs := append(append(append([]string{}, edgeErrs...), paramErrs...), depErrs...)
 			if len(allErrs) == 0 {
 				break // plan is clean — proceed
 			}

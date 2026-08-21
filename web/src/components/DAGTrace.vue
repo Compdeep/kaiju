@@ -53,17 +53,23 @@
             <span v-if="item.node.tokens_in || item.node.tokens_out" class="t-tokens">{{ fmtTokens((item.node.tokens_in || 0) + (item.node.tokens_out || 0)) }}tok</span>
             <span v-if="item.node.result_size" class="t-size">{{ fmtSize(item.node.result_size) }}</span>
             <span :class="['t-st', item.node.state]">{{ stChr(item.node.state) }}</span>
-            <span v-if="item.node.result" class="t-expand">{{ expandedResults[item.node.id] ? '−' : '+' }}</span>
+            <span v-if="item.node.result || item.node.payload" class="t-expand">{{ expandedResults[item.node.id] ? '−' : '+' }}</span>
           </div>
 
-          <div v-if="item.type === 'node' && item.node.result && expandedResults[item.node.id]" class="tl-result">
+          <div v-if="item.type === 'node' && (item.node.result || item.node.payload) && expandedResults[item.node.id]" class="tl-result">
             <div v-if="item.node.type === 'holmes' && parseReasoning(item.node.result)" class="t-rca-content">
               <div class="t-rca-reasoning">{{ parseReasoning(item.node.result) }}</div>
               <div v-if="parseRCA(item.node.result)" class="t-rca-conclusion">
                 <span class="t-rca-label">Root cause:</span> {{ parseRCA(item.node.result) }}
               </div>
             </div>
-            <pre v-else class="t-result-content">{{ item.node.result }}</pre>
+            <template v-else>
+              <!-- The tool's own fields, every one of them. The text below is
+                   cut at 512 chars, so a tool returning one long value showed
+                   the start of that value and none of its other fields. -->
+              <pre v-if="item.node.payload" class="t-result-content t-payload">{{ fmtPayload(item.node.payload) }}</pre>
+              <pre v-if="item.node.result" class="t-result-content">{{ item.node.result }}</pre>
+            </template>
           </div>
 
           <div v-if="item.type === 'interject'" class="tl tl-sub">
@@ -383,6 +389,18 @@ function compactParams(p) {
  * @returns {string} Formatted size string
  */
 function fmtSize(b) { return b < 1024 ? b + 'b' : (b / 1024).toFixed(1) + 'kb' }
+
+// The payload arrives already shortened per value by the backend, so this only
+// lays it out. Anything unparseable is shown as it came rather than dropped,
+// because a reader looking for a field needs to see there was one.
+function fmtPayload(p) {
+  if (p == null) return ''
+  try {
+    return JSON.stringify(typeof p === 'string' ? JSON.parse(p) : p, null, 2)
+  } catch (e) {
+    return typeof p === 'string' ? p : String(p)
+  }
+}
 function fmtTokens(t) { return t >= 1000 ? (t / 1000).toFixed(1) + 'k' : String(t) }
 
 /**
@@ -586,6 +604,15 @@ function parseRCA(result) {
   color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* The tool's own fields, set apart from the text below them so a reader can
+   tell what the tool returned from what it rendered. */
+.t-payload {
+  color: var(--text-primary, var(--text-secondary));
+  border-left: 2px solid var(--border, rgba(127, 127, 127, 0.35));
+  padding-left: 8px;
+  margin-bottom: 6px;
 }
 
 /* RCA reasoning display */

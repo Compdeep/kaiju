@@ -22,6 +22,7 @@ import (
 var frozenExcerptDeclarations = map[string][]toolapi.Excerpt{
 	"web_fetch": {{Field: "content", Whole: "full_content_path", Size: "bytes"}},
 	"bash":      {{Field: "stdout", Whole: "output_path", Size: "output_bytes"}},
+	"file_read": {{Field: "content", Whole: "path", Flag: "truncated"}},
 }
 
 func excerptDeclaringTools(t *testing.T) map[string]toolapi.Tool {
@@ -29,6 +30,7 @@ func excerptDeclaringTools(t *testing.T) map[string]toolapi.Tool {
 	return map[string]toolapi.Tool{
 		"web_fetch": NewWebFetchIn(t.TempDir(), nil, FetchLimits{MaxBodyBytes: DefaultMaxBodyBytes}),
 		"bash":      NewBash("/bin/sh", t.TempDir()),
+		"file_read": NewFileRead(t.TempDir()),
 	}
 }
 
@@ -44,9 +46,12 @@ func TestFrozen_WhichToolsDeclareACutField(t *testing.T) {
 		}
 		for i, w := range want {
 			got := declared[i]
-			if got.Field != w.Field || got.Whole != w.Whole || got.Size != w.Size {
-				t.Fatalf("%s declares {%s,%s,%s}, frozen at {%s,%s,%s} — a rename on one side only leaves a step reading part of a document and calling it the whole",
-					name, got.Field, got.Whole, got.Size, w.Field, w.Whole, w.Size)
+			if got.Field != w.Field || got.Whole != w.Whole || got.Size != w.Size || got.Flag != w.Flag {
+				t.Fatalf("%s declares {%s,%s,size=%s,flag=%s}, frozen at {%s,%s,size=%s,flag=%s} — a rename on one side only leaves a step reading part of something and calling it the whole",
+					name, got.Field, got.Whole, got.Size, got.Flag, w.Field, w.Whole, w.Size, w.Flag)
+			}
+			if got.Size == "" && got.Flag == "" {
+				t.Fatalf("%s declares neither a size nor a flag for %q, so nothing can tell whether a call was cut", name, got.Field)
 			}
 			if strings.TrimSpace(got.Use) == "" {
 				t.Fatalf("%s declares no wording for %q — the refusal would tell a planner nothing about what to do instead", name, got.Field)
@@ -67,7 +72,10 @@ func TestFrozen_EveryDeclaredFieldExistsInTheOutputSchema(t *testing.T) {
 		props := schemaProperties(t, out.OutputSchema())
 
 		for _, d := range toolapi.GetExcerpts(tool) {
-			for label, field := range map[string]string{"Field": d.Field, "Whole": d.Whole, "Size": d.Size} {
+			for label, field := range map[string]string{"Field": d.Field, "Whole": d.Whole, "Size": d.Size, "Flag": d.Flag} {
+				if field == "" {
+					continue // a declaration uses one of Size or Flag, not both
+				}
 				if _, present := props[field]; !present {
 					t.Fatalf("%s declares %s=%q but its output schema does not carry that field — declared: %v",
 						name, label, field, sortedProps(props))
@@ -85,17 +93,24 @@ func schemaProperties(t *testing.T, raw json.RawMessage) map[string]json.RawMess
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		t.Fatalf("output schema unreadable: %v", err)
 	}
-	// Tool payloads ride inside the uniform envelope, so the fields a
-	// ${step.N.field} reference resolves against live under data.
+	// A ${step.N.field} reference resolves against the payload under data, and
+	// falls back to the envelope's own fields — file_read's text is the
+	// envelope's content, not a payload field — so both levels count here.
+	merged := map[string]json.RawMessage{}
+	for k, v := range envelope.Properties {
+		merged[k] = v
+	}
 	if data, wrapped := envelope.Properties["data"]; wrapped {
 		var inner struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 		}
-		if json.Unmarshal(data, &inner) == nil && len(inner.Properties) > 0 {
-			return inner.Properties
+		if json.Unmarshal(data, &inner) == nil {
+			for k, v := range inner.Properties {
+				merged[k] = v
+			}
 		}
 	}
-	return envelope.Properties
+	return merged
 }
 
 func sortedProps(m map[string]json.RawMessage) []string {

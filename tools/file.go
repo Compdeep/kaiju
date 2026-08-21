@@ -60,6 +60,19 @@ func (f *FileRead) Impact(map[string]any) int { return toolapi.ImpactObserve }
  * desc: Defines the output structure containing file contents as a string.
  * return: JSON schema as raw bytes
  */
+// Excerpts declares that the text of a read is capped at a line count while
+// path names the file it came from. A step wired to the text when the file was
+// longer than the cap is working from part of it, and the file is still there
+// to be read in full by a step that runs over it rather than reads it.
+func (f *FileRead) Excerpts() []toolapi.Excerpt {
+	return []toolapi.Excerpt{{
+		Field: "content",
+		Whole: "path",
+		Flag:  "truncated",
+		Use:   "read path in this step: the text above stops at this tool's line cap, and that file is all of it",
+	}}
+}
+
 func (f *FileRead) OutputSchema() json.RawMessage {
 	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(fileReadData{}))
 }

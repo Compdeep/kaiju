@@ -531,14 +531,26 @@ func wholeBesideExcerpt(reg *toolapi.Registry, graph *Graph, depID, field string
 		if strings.TrimSpace(whole) == "" {
 			return nil, false // the tool kept no file, so the text is all there is
 		}
-		total, stated := asByteCount(producer.Body.Field(declared.Size))
-		if !stated || total <= len(part) {
-			return nil, false // came back whole, or the size is not stated
-		}
 		widened := map[string]any{
 			declared.Field: part,
 			declared.Whole: whole,
-			declared.Size:  total,
+		}
+		switch {
+		case declared.Flag != "":
+			cut, _ := producer.Body.Field(declared.Flag)
+			wasCut, _ := cut.(bool)
+			if !wasCut {
+				return nil, false // the tool says it returned everything
+			}
+			widened[declared.Flag] = true
+		case declared.Size != "":
+			total, stated := asByteCount(producer.Body.Field(declared.Size))
+			if !stated || total <= len(part) {
+				return nil, false // came back whole, or the size is not stated
+			}
+			widened[declared.Size] = total
+		default:
+			return nil, false // nothing declared to tell whether it was cut
 		}
 		if strings.TrimSpace(declared.Use) != "" {
 			widened["note"] = declared.Use

@@ -60,10 +60,29 @@ func TestFindRefs_MidStringMultiple(t *testing.T) {
 	}
 }
 
+// A step reference whose first segment is not a number names a tag. It used to
+// be treated as malformed and silently discarded, which left it in the
+// parameter as prose for a model to read as a data path — so it is parsed now,
+// and this holds that it is not thrown away again.
+func TestFindRefs_ReadsATagReference(t *testing.T) {
+	got := FindRefs("${step.fetch_page.full_content_path}")
+	if len(got) != 1 {
+		t.Fatalf("a tag reference must be read, got %v", got)
+	}
+	if got[0].Tag != "fetch_page" {
+		t.Fatalf("tag = %q, want fetch_page", got[0].Tag)
+	}
+	if got[0].Index != -1 {
+		t.Fatalf("a tag names no position, got index %d", got[0].Index)
+	}
+	if len(got[0].Path) != 1 || got[0].Path[0] != "full_content_path" {
+		t.Fatalf("the field must survive, got %v", got[0].Path)
+	}
+}
+
 func TestFindRefs_RejectsMalformed(t *testing.T) {
 	cases := []string{
-		"${step.}",         // empty index
-		"${step.abc}",      // non-numeric step index
+		"${step.}",         // nothing named at all
 		"${other.5.field}", // unknown kind
 		"$step.0.field",    // missing braces
 	}

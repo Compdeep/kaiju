@@ -29,6 +29,10 @@ type Message struct {
 	Content   string `json:"content"`
 	DAGTrace  string `json:"dag_trace,omitempty"` // JSON DAG trace, set on assistant messages
 	CreatedAt int64  `json:"created_at"`
+	// CompactedInto is the id of the summary message that replaced this one,
+	// or zero while it is still part of the live conversation. A compacted
+	// message is kept and readable; it is simply no longer sent to a model.
+	CompactedInto int64 `json:"compacted_into,omitempty"`
 }
 
 /*
@@ -176,7 +180,8 @@ func (d *DB) GetMessages(sessionID string, limit int) ([]Message, error) {
 		limit = 1000
 	}
 	rows, err := d.conn.Query(
-		`SELECT id, session_id, role, content, dag_trace, created_at FROM messages WHERE session_id = ? ORDER BY created_at LIMIT ?`,
+		`SELECT id, session_id, role, content, dag_trace, created_at, compacted_into FROM messages
+		 WHERE session_id = ? AND compacted_into = 0 ORDER BY created_at LIMIT ?`,
 		sessionID, limit,
 	)
 	if err != nil {
@@ -187,7 +192,7 @@ func (d *DB) GetMessages(sessionID string, limit int) ([]Message, error) {
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.DAGTrace, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.DAGTrace, &m.CreatedAt, &m.CompactedInto); err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, m)
@@ -235,7 +240,8 @@ func (d *DB) GetRecentMessages(sessionID string, limit int) ([]Message, error) {
 		limit = 1000
 	}
 	rows, err := d.conn.Query(
-		`SELECT id, session_id, role, content, dag_trace, created_at FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`,
+		`SELECT id, session_id, role, content, dag_trace, created_at, compacted_into FROM messages
+		 WHERE session_id = ? AND compacted_into = 0 ORDER BY created_at DESC LIMIT ?`,
 		sessionID, limit,
 	)
 	if err != nil {
@@ -246,7 +252,7 @@ func (d *DB) GetRecentMessages(sessionID string, limit int) ([]Message, error) {
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.DAGTrace, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.DAGTrace, &m.CreatedAt, &m.CompactedInto); err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, m)
@@ -341,13 +347,72 @@ func (d *DB) UpdateSessionTitle(id, title string) error {
  * param: keepNewest - number of most recent messages to retain
  * return: error on query failure, nil on success
  */
-func (d *DB) DeleteOldestMessages(sessionID string, keepNewest int) error {
+/*
+ * MarkCompacted records that the older messages of a session are now stood for
+ * by a summary, without removing them.
+ * desc: Everything but the newest keepNewest live messages is marked with
+ *       summaryID. They stop being loaded for a model, and stay readable and
+ *       searchable — before this they were deleted, so a conversation past the
+ *       window was gone from the record and not only from the model's view, and
+ *       whatever the summary left out could not be recovered by anyone.
+ *       Already-compacted messages are left alone, so a second compaction does
+ *       not reassign them to a later summary.
+ * param: sessionID - the session being compacted
+ * param: keepNewest - how many live messages remain live
+ * param: summaryID - the message id of the summary that stands for the rest. It
+ *       is excluded from the update: the summary is written with a timestamp
+ *       older than the messages it precedes, so it would otherwise be among the
+ *       oldest and be marked as standing for itself.
+ * return: any error from the update
+ */
+func (d *DB) MarkCompacted(sessionID string, keepNewest int, summaryID int64) error {
 	_, err := d.conn.Exec(
-		`DELETE FROM messages WHERE session_id = ? AND id NOT IN (
-			SELECT id FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?
-		)`, sessionID, sessionID, keepNewest,
+		`UPDATE messages SET compacted_into = ?
+		  WHERE session_id = ? AND compacted_into = 0 AND id != ? AND id NOT IN (
+			SELECT id FROM messages WHERE session_id = ? AND compacted_into = 0
+			 ORDER BY created_at DESC LIMIT ?
+		  )`, summaryID, sessionID, summaryID, sessionID, keepNewest,
 	)
 	return err
+}
+
+/*
+ * GetFullTranscript returns every message of a session, compacted ones included.
+ * desc: The reader for anyone showing the conversation rather than sending it to
+ *       a model — each row carries compacted_into, so a summary can be shown in
+ *       place with the messages it stands for. Ordered oldest first, with offset
+ *       for paging, since a long session is more than a view wants at once.
+ * param: sessionID - the session to read
+ * param: limit - maximum rows (defaults to 200 when not positive)
+ * param: offset - rows to skip, for paging
+ * return: the messages, or an error
+ */
+func (d *DB) GetFullTranscript(sessionID string, limit, offset int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := d.conn.Query(
+		`SELECT id, session_id, role, content, dag_trace, created_at, compacted_into FROM messages
+		  WHERE session_id = ? ORDER BY created_at LIMIT ? OFFSET ?`,
+		sessionID, limit, offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.DAGTrace, &m.CreatedAt, &m.CompactedInto); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
 }
 
 /*
@@ -375,10 +440,13 @@ func (d *DB) SetDAGTrace(sessionID, trace string) error {
  * param: createdAt - unix timestamp to set as the message creation time
  * return: error on insertion failure, nil on success
  */
-func (d *DB) PrependMessage(sessionID, role, content string, createdAt int64) error {
-	_, err := d.conn.Exec(
+func (d *DB) PrependMessage(sessionID, role, content string, createdAt int64) (int64, error) {
+	res, err := d.conn.Exec(
 		`INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)`,
 		sessionID, role, content, createdAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }

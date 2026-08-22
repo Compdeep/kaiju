@@ -304,7 +304,12 @@ func routeToolDef() llm.ToolDef {
 			Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {
-					"mode": { "type": "string", "enum": ["chat", "agent"] }
+					"mode": { "type": "string", "enum": ["chat", "agent"] },
+					"lacking_context": {
+						"type": "array",
+						"items": { "type": "string" },
+						"description": "Words to look up in earlier messages, when answering needs something said earlier that is not in the summary or the messages shown. Use the words the conversation itself would have used — they are matched against the earlier text as written. Leave empty when what is shown is enough."
+					}
 				},
 				"required": ["mode"]
 			}`),

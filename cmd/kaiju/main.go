@@ -581,6 +581,7 @@ func runChat() {
 		// than beside the other tools because the agent is built before the database
 		// is open, and a tool with no store to read would only ever say so.
 		ag.Registry().Replace(tools.NewMessageSearch(chatDB), "builtin")
+		ag.SetMessageStore(chatDB)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -758,6 +759,10 @@ func runServe() {
 	// than beside the other tools because the agent is built before the database
 	// is open, and a tool with no store to read would only ever say so.
 	ag.Registry().Replace(tools.NewMessageSearch(kaijuDB), "builtin")
+	// And the same store to the agent itself, which is what the chat lane reads
+	// through when the router says a turn needs something said earlier. The agent
+	// side needs no such wiring: message_search above is a tool it can call.
+	ag.SetMessageStore(kaijuDB)
 
 	// Safeguard: a run killed by a restart/crash leaves a user turn with no reply,
 	// which the UI reads as "still running" and spins a progress bar forever. On

@@ -220,9 +220,12 @@ type Agent struct {
 	clearance         *localClearance  // IGX node clearance
 	clearanceExplicit bool             // true if cfg.NodeClearance was set; false means we're on the bootstrap default
 	memory            *Memory
-	triggers          chan Trigger
-	embedStore        *EmbeddingStore // nil if embeddings disabled
-	embedClient       *llm.Client     // nil if embeddings disabled
+	// messages is where the chat lane reads earlier conversation from when the
+	// router says the answer needs it. Nil leaves recall off.
+	messages    toolapi.MessageStore
+	triggers    chan Trigger
+	embedStore  *EmbeddingStore // nil if embeddings disabled
+	embedClient *llm.Client     // nil if embeddings disabled
 
 	soulPrompt    string                      // from SOUL.md → BOOT.md body → default
 	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)

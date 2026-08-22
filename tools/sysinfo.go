@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"runtime"
 	"strings"
 	"time"
@@ -68,12 +69,33 @@ func (s *Sysinfo) Parameters() json.RawMessage {
 }
 
 /*
+ * effectiveUser names the account this process runs as.
+ * desc: user.Current reads the password database, which a statically linked
+ *       build cannot always do; the environment is the fallback, and an empty
+ *       result leaves the field out rather than guessing at a name.
+ * return: the account name, or empty when it cannot be established
+ */
+func effectiveUser() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	for _, key := range []string{"USER", "USERNAME", "LOGNAME"} {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+/*
  * OutputSchema returns the JSON schema for the tool's output.
- * desc: Defines the output structure with hostname, os, arch, cwd, time, and cpus fields.
+ * desc: Defines the output structure: what the machine is, what it is doing, and
+ *       who this process is on it — the last of which is what turns a refusal by
+ *       the operating system into something a reader can attribute.
  * return: JSON schema as raw bytes
  */
 func (s *Sysinfo) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema(`{"type":"object","description":"System information. Chain individual fields into downstream steps via ${step.N.<field>} placeholders.","properties":{"hostname":{"type":"string","description":"machine hostname"},"os":{"type":"string","description":"operating system name (e.g. linux, darwin, windows)"},"arch":{"type":"string","description":"CPU architecture"},"cwd":{"type":"string","description":"current working directory path"},"time":{"type":"string","description":"current time"},"cpus":{"type":"integer","description":"number of CPU cores"},"snapshot":{"type":"string","description":"uptime, total and free memory, and load average as the platform reports them; absent when the host would not say"}}}`)
+	return toolapi.EnvelopeSchema(`{"type":"object","description":"System information. Chain individual fields into downstream steps via ${step.N.<field>} placeholders.","properties":{"hostname":{"type":"string","description":"machine hostname"},"os":{"type":"string","description":"operating system name (e.g. linux, darwin, windows)"},"arch":{"type":"string","description":"CPU architecture"},"cwd":{"type":"string","description":"current working directory path"},"time":{"type":"string","description":"current time"},"cpus":{"type":"integer","description":"number of CPU cores"},"snapshot":{"type":"string","description":"uptime, total and free memory, and load average as the platform reports them; absent when the host would not say"},"user":{"type":"string","description":"the account this process runs as"},"uid":{"type":"integer","description":"its numeric user id; absent on platforms that do not have one"},"root":{"type":"boolean","description":"true when this process runs as root. When false, writing outside this user\u0027s own files, changing service configuration, and installing software will be refused by the operating system — a permission denied is that, not a missing file"},"path":{"type":"string","description":"the PATH this process searches for programs. A command not found means the program is not on THIS list, which is not the same as not installed: administrative programs usually live in /usr/sbin and /sbin, which a non-root PATH often omits"}}}`)
 }
 
 /*
@@ -105,6 +127,26 @@ func (s *Sysinfo) ExecuteTyped(ctx context.Context, _ map[string]any) (toolapi.T
 		"cwd":      cwd,
 		"time":     time.Now().UTC().Format(time.RFC3339),
 		"cpus":     runtime.NumCPU(),
+	}
+
+	// Who this process is, and what it can reach. Without these, a run that is
+	// refused by the operating system has symptoms and no cause: a permission
+	// denied writing under /etc, a command not found for a program that is
+	// installed in /usr/sbin, and a service it cannot restart all read as
+	// separate faults, and the run reported that the software was missing when
+	// it was installed and running. One fact — this process is not root —
+	// explains all three, and nothing was reporting it.
+	if name := effectiveUser(); name != "" {
+		info["user"] = name
+	}
+	// Geteuid is -1 on Windows, where the question does not apply, so the field
+	// is absent there rather than answered wrongly.
+	if uid := os.Geteuid(); uid >= 0 {
+		info["uid"] = uid
+		info["root"] = uid == 0
+	}
+	if path := os.Getenv("PATH"); path != "" {
+		info["path"] = path
 	}
 	// What the machine is doing, as opposed to what it is: uptime, memory
 	// pressure, load. It costs a subprocess, so it is the one part of this tool

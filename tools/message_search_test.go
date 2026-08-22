@@ -25,6 +25,12 @@ func (s *stubStore) SearchMessages(_ context.Context, query, sessionID string, l
 	return s.answer, s.err
 }
 
+// message_search does not recall; the chat lane does. Present so the stub is a
+// whole store.
+func (s *stubStore) RecallMessages(context.Context, string, []string, toolapi.Recall) ([]toolapi.FoundMessage, error) {
+	return nil, nil
+}
+
 // payload reads the tool's own fields out of the envelope.
 func payload(t *testing.T, msg toolapi.ToolMessage) map[string]any {
 	t.Helper()

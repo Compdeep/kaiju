@@ -15,6 +15,34 @@ type MessageStore interface {
 	// first. An empty sessionID searches every session; limit is the most rows
 	// to return, and an implementation may return fewer.
 	SearchMessages(ctx context.Context, query, sessionID string, limit int) ([]FoundMessage, error)
+
+	// RecallMessages returns earlier messages of one conversation that mention
+	// any of the terms, together with the messages around them, in the order
+	// they were written.
+	//
+	// Any rather than all: the terms come from a model reading the question, and
+	// requiring every one of them would return nothing whenever it offered a
+	// word the conversation never used. Around them, because a reply that
+	// matches is often meaningless without the question it answered.
+	RecallMessages(ctx context.Context, sessionID string, terms []string, opts Recall) ([]FoundMessage, error)
+}
+
+// Recall bounds what one recall returns, so a long conversation cannot put more
+// into a prompt than the prompt has room for.
+type Recall struct {
+	// SkipNewest is how many of the most recent messages to leave out, being the
+	// ones already in front of the model. Zero searches the whole conversation.
+	SkipNewest int
+
+	// Hits is how many matching messages to build the answer around.
+	Hits int
+
+	// Around is how many messages either side of each match to include.
+	Around int
+
+	// MaxChars is the most text to return. Messages are dropped whole, oldest
+	// first, so what comes back is never a message cut in half.
+	MaxChars int
 }
 
 // FoundMessage is one message a search matched.

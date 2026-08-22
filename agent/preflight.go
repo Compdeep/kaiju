@@ -26,6 +26,12 @@ type PreflightResult struct {
 	Context            string       // one-line framing of the user's intent based on conversation history
 	ComputeMode        string       // "" (no compute / no opinion) | "shallow" | "deep" — authoritative for the planner
 	NeedsSynthesis     bool         // true ⇒ the run must end with the aggregator (a written synthesis), not a short reflector summary — set for deep/multi-source research and "build a section/report" tasks
+
+	// LackingContext is what the router asked to have looked up in the earlier
+	// messages, because answering needs something said before the part the model
+	// can see. Empty is the usual answer and means nothing was missing. Only the
+	// router fills it; the classify call has no opinion about it.
+	LackingContext []string
 }
 
 // preflightCategories is the fixed set of tool categories the preflight
@@ -84,9 +90,10 @@ func mentionsLiveInventory(query string) bool {
  * never loads the skills it won't use. Fails safe to "chat" (the cheap lane) on
  * any classifier error.
  */
-func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history []llm.Message) string {
+func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history []llm.Message) (string, []string) {
 	if a.classifyStub != nil {
-		return a.classifyStub(query, history).Mode
+		pf := a.classifyStub(query, history)
+		return pf.Mode, pf.LackingContext
 	}
 	// Deterministic override — decided in code, NOT by the classifier. A question
 	// about the live plugin/tool inventory ("do you have plugins?", "what tools do
@@ -98,7 +105,7 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	// capability list.
 	if mentionsLiveInventory(query) {
 		log.Printf("[route] deterministic → agent (asks about live plugin/tool inventory)")
-		return "agent"
+		return "agent", nil
 	}
 	// Give the router just enough context to interpret a terse follow-up, then the
 	// current message. See routeContext for what's included (summary + last turn).
@@ -111,7 +118,10 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 		Tools:       []llm.ToolDef{routeToolDef()},
 		ToolChoice:  "required",
 		Temperature: 0.0,
-		MaxTokens:   16,
+		// Room for the mode and a handful of words to look up. It was 16, which
+		// fits the mode alone: a reply carrying anything else would be cut part
+		// way through and fail to parse, taking the routing decision with it.
+		MaxTokens: 96,
 	})
 	// On ANY classifier failure — the model errored, refused, or returned
 	// unparseable output — fall back to "chat", which the ROUTE prompt itself calls
@@ -122,26 +132,47 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	// the (also aligned) planner then refused. Failing toward the cheap, safe
 	// conversational lane keeps the user's selected chat model in play.
 	if err != nil {
-		return "chat"
+		return "chat", nil
 	}
 	raw, err := extractToolArgs(resp)
 	if err != nil {
 		traceFault(ctx, "no tool args returned")
-		return "chat"
+		return "chat", nil
 	}
 	var out struct {
-		Mode string `json:"mode"`
+		Mode    string   `json:"mode"`
+		Lacking []string `json:"lacking_context"`
 	}
 	if err := ParseLLMJSON(raw, &out); err != nil {
 		traceFault(ctx, "parse failed: "+err.Error())
-		return "chat"
+		return "chat", nil
 	}
+	lacking := cleanTerms(out.Lacking)
 	switch out.Mode {
 	case "chat", "agent":
-		return out.Mode
+		return out.Mode, lacking
 	default:
-		return "chat"
+		return "chat", lacking
 	}
+}
+
+// cleanTerms drops the blanks and the repeats from what the router asked for.
+//
+// A model listing the same word twice, or offering an empty string among real
+// ones, would otherwise widen the search expression without widening what it
+// finds.
+func cleanTerms(in []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, t := range in {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[strings.ToLower(t)] {
+			continue
+		}
+		seen[strings.ToLower(t)] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 // routeContext returns a MINIMAL slice of chat history for the router: the running

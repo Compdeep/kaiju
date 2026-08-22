@@ -5,6 +5,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // ChatTurn is the input to the chat lane. History is the conversation so far
@@ -30,6 +31,15 @@ type ChatTurn struct {
 	// is a COPY of this — so it inherits everything the request specified (models,
 	// intent, scope, session, history) with nothing to thread by hand.
 	Base Trigger
+	// Recalled is earlier messages of this conversation, from before the part
+	// History carries, that the router said the answer needs. Empty on almost
+	// every turn. Converse puts them in the request; nothing stores them, because
+	// a stored copy would be summarised at the next compaction and recalled
+	// again, and the conversation would fill with repetitions of itself.
+	Recalled []toolapi.FoundMessage
+	// RecallTerms is what those messages were found by looking for, so the model
+	// is told what the search was and can judge a match that is not relevant.
+	RecallTerms []string
 }
 
 // ChatResult is the outcome of a chat turn.
@@ -65,7 +75,11 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// agent directly, callers use execute mode (chat_mode=false), not this lane.
 	// ChatTools is the palette the agent uses if it escalates, never the trigger.
 	mayEscalate := t.Agent == nil || *t.Agent
-	if mayEscalate && a.routeQuery(ctx, t.TriggerID, t.Query, t.History) == "agent" {
+	mode, lacking := "chat", []string(nil)
+	if mayEscalate {
+		mode, lacking = a.routeQuery(ctx, t.TriggerID, t.Query, t.History)
+	}
+	if mode == "agent" {
 		// Chat answers can be long. Force the aggregator (agg_mode=2, reasoning
 		// lane, full synthesis budget) so a reflection-concluded run doesn't hand
 		// back the 1024-token-capped reflection outcome truncated mid-sentence.
@@ -73,7 +87,10 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		outcome, nodes, llmCalls, err := a.RunAgentTask(ctx, t.Base, t.Query)
 		return ChatResult{Content: outcome, Nodes: nodes, LLMCalls: llmCalls}, err
 	}
-	// Tool-less conversation.
+	// Tool-less conversation. The router may have said the answer needs something
+	// said before the part of the conversation the model is sent; the agent side
+	// needs no such step, since message_search is a tool it can call.
+	t.Recalled, t.RecallTerms = a.recall(ctx, t, lacking), lacking
 	return a.Converse(ctx, t)
 }
 
@@ -106,6 +123,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	} else {
 		messages = BuildMessagesWithHistory(system, t.Query, nil)
 	}
+	messages = withRecall(messages, recallBlock(t.Recalled, t.RecallTerms))
 	if len(t.Images) > 0 && IsVisionModel(t.Model) {
 		llm.AttachImages(messages, t.Images)
 	}

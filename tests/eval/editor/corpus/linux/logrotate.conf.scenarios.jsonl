@@ -1,0 +1,2 @@
+{"query": "keep 30 rotations instead of 7 and rotate weekly instead of daily, leaving compression and the postrotate script alone", "check": "grep -q 'rotate 30' $FILE && grep -q 'weekly' $FILE && ! grep -q 'rotate 7' $FILE && grep -q 'delaycompress' $FILE && grep -q 'systemctl reload app.service' $FILE"}
+{"query": "change the create mode from 0640 to 0600, changing nothing else", "check": "grep -q 'create 0600 app app' $FILE && ! grep -q '0640' $FILE && grep -q 'sharedscripts' $FILE"}

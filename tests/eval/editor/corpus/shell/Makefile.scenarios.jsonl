@@ -1,0 +1,2 @@
+{"query": "bump VERSION from 0.3.1 to 0.4.0 and add -s -w to the ldflags, keeping the main.version flag", "check": "grep -q 'VERSION := 0.4.0' $FILE && grep ldflags $FILE | grep -q -- '-s -w' && grep ldflags $FILE | grep -q 'main.version' && grep -q '^test:' $FILE"}
+{"query": "add a vet target that runs 'go vet ./...' and add it to .PHONY, keeping every existing target", "check": "grep -q '^vet:' $FILE && grep -q 'go vet ./...' $FILE && grep '.PHONY' $FILE | grep -q vet && grep -q '^build:' $FILE && grep -q '^clean:' $FILE"}

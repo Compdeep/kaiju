@@ -1,0 +1,3 @@
+{"core": true, "query": "change Restart from on-failure to always and raise RestartSec from 5 to 30, keeping every other setting", "check": "grep -q '^Restart=always' $FILE && grep -q '^RestartSec=30' $FILE && grep -q '^ExecStart=/usr/bin/node /srv/app/server.js' $FILE && grep -q '^User=app' $FILE"}
+{"query": "change the PORT environment variable from 3000 to 8080, leaving NODE_ENV=production alone", "check": "grep -q '^Environment=PORT=8080' $FILE && grep -q '^Environment=NODE_ENV=production' $FILE && ! grep -q 'PORT=3000' $FILE"}
+{"query": "raise LimitNOFILE from 4096 to 65535 and add LimitNPROC=4096 to the Service section", "check": "grep -q '^LimitNOFILE=65535' $FILE && grep -q '^LimitNPROC=4096' $FILE && grep -q '^WantedBy=multi-user.target' $FILE"}

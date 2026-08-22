@@ -125,7 +125,11 @@ export async function switchSession(id) {
     try {
       const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
       ss.messages = (msgs || []).map(m => {
-        const msg = { id: m.id, role: m.role, content: m.content }
+        // compacted_into is the id of the summary that now stands for this
+        // message. Carried so the view can fold it under that summary instead
+        // of showing it inline — it is still part of the record, just no
+        // longer part of what a model is sent.
+        const msg = { id: m.id, role: m.role, content: m.content, compactedInto: m.compacted_into || 0 }
         if (m.dag_trace) {
           try { msg.trace = JSON.parse(m.dag_trace) } catch {}
         }
@@ -158,7 +162,7 @@ export async function refreshMessages(id) {
   try {
     const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
     ss.messages = (msgs || []).map(m => {
-      const msg = { id: m.id, role: m.role, content: m.content }
+      const msg = { id: m.id, role: m.role, content: m.content, compactedInto: m.compacted_into || 0 }
       if (m.dag_trace) { try { msg.trace = JSON.parse(m.dag_trace) } catch {} }
       return msg
     })

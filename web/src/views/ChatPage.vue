@@ -96,17 +96,40 @@
         </div>
 
         <template v-for="(msg, i) in sessions.messages" :key="i">
+          <!-- A message a summary now stands for. Still in the record, so it is
+               rendered, but folded away until its summary is opened. -->
+          <div
+            v-if="msg.compactedInto"
+            v-show="opened[msg.compactedInto]"
+            :class="['msg', msg.role, 'msg-folded']"
+          >
+            <div class="msg-meta">
+              <span class="msg-author">{{ msg.role === 'user' ? 'you' : brandName() }}</span>
+            </div>
+            <div class="msg-content md" v-html="renderMd(msg.content)"></div>
+          </div>
+
+          <!-- The summary itself, in place of everything above it that it replaced. -->
+          <div v-else-if="foldedCount(msg.id)" class="summary-mark">
+            <button class="summary-toggle" @click="opened[msg.id] = !opened[msg.id]">
+              <span class="summary-caret">{{ opened[msg.id] ? '▾' : '▸' }}</span>
+              context summarised from here
+              <span class="summary-count">{{ foldedCount(msg.id) }} earlier messages</span>
+            </button>
+            <div v-if="opened[msg.id]" class="summary-body md" v-html="renderMd(summaryText(msg.content))"></div>
+          </div>
+
           <!-- Show saved trace above its assistant message -->
           <DAGTrace
-            v-if="msg.role === 'assistant' && msg.trace && msg.trace.length"
+            v-else-if="msg.role === 'assistant' && msg.trace && msg.trace.length"
             :nodes="msg.trace"
             :running="false"
           />
-          <div v-if="msg.gaps && msg.gaps.length" class="gaps-strip">
+          <div v-if="!msg.compactedInto && !foldedCount(msg.id) && msg.gaps && msg.gaps.length" class="gaps-strip">
             <span class="gaps-icon">!</span>
             <span v-for="(gap, gi) in msg.gaps" :key="gi" class="gap-tag">{{ gap }}</span>
           </div>
-          <div :class="['msg', msg.role]">
+          <div v-if="!msg.compactedInto && !foldedCount(msg.id)" :class="['msg', msg.role]">
             <div class="msg-meta">
               <span class="msg-author">{{ msg.role === 'user' ? 'you' : brandName() }}</span>
               <span class="msg-tools" v-if="editing !== i">
@@ -370,6 +393,26 @@ function onSettingsClose() {
 }
 
 // ── Inline message editing / regenerate ──
+// Summaries the reader has opened, keyed by the summary's message id. Opening
+// one reveals the messages it stands for, which are otherwise folded away.
+const opened = ref({})
+
+/** desc: how many messages a given summary stands for (0 if it is not a summary). */
+function foldedCount(id) {
+  if (!id) return 0
+  let n = 0
+  for (const m of sessions.messages) if (m.compactedInto === id) n++
+  return n
+}
+
+const summaryPrefix = '[Conversation summary]: '
+
+/** desc: the summary without the marker the compactor writes in front of it. */
+function summaryText(content) {
+  const c = content || ''
+  return c.startsWith(summaryPrefix) ? c.slice(summaryPrefix.length) : c
+}
+
 const editing = ref(null)   // index of the message being edited, or null
 const editBuf = ref('')     // edit textarea buffer
 const lastAssistantIndex = computed(() => {
@@ -727,6 +770,18 @@ watch(() => sessions.sessionId, (newId) => {
 .msg-edit { display: flex; flex-direction: column; gap: 6px; }
 .msg-edit-area { width: 100%; resize: vertical; font: inherit; font-size: 14px; line-height: 1.6; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 .msg-edit-actions { display: flex; gap: 6px; }
+
+/* A summary and the messages it stands for. The marker is quiet by default so a
+   long thread still reads as a thread; opening it shows the summary text and
+   unfolds the messages above it. */
+.summary-mark { display: flex; flex-direction: column; gap: 8px; max-width: min(740px, 100%); }
+.summary-toggle { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: none; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; padding: 7px 2px; text-align: left; }
+.summary-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.summary-caret { font-size: 10px; width: 9px; }
+.summary-count { margin-left: auto; opacity: .75; }
+.summary-body { font-size: 13px; line-height: 1.6; color: var(--text-muted); background: var(--surface); border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; padding: 10px 12px; }
+.msg-folded { opacity: .62; }
+.msg-folded:hover { opacity: 1; }
 .msg-edit-save, .msg-edit-cancel { font-size: 12px; padding: 3px 10px; border-radius: 5px; border: 1px solid var(--line); cursor: pointer; background: var(--surface); color: var(--text); }
 .msg-edit-save { background: var(--accent); color: #fff; border-color: var(--accent); }
 .msg-author {

@@ -90,7 +90,14 @@ func (b *Bash) Name() string { return "bash" }
  * return: description string
  */
 func (b *Bash) Description() string {
-	return "Execute any command, script, or program available on the system. This is the general-purpose tool — if something can be done from the command line, use bash. Covers: running CLI tools, downloading files, processing data, managing packages, automation, and anything else the OS can do. To manage processes (kill PIDs, free ports, signal daemons) prefer the process_list and process_kill tools."
+	return "Execute any command, script, or program available on the system. This is the " +
+		"default tool for operating a machine: networking, files, processes, software packages, " +
+		"services, disks, logs, and anything else the OS can already do. Reach for it first — " +
+		"where a command already answers the question, running it is the whole step, and reading " +
+		"what a host is doing (listening sockets, open connections and who holds them, running " +
+		"processes, disk and memory) is exactly that. " +
+		"To kill or signal a process, prefer process_kill: it records which process and why, " +
+		"which a bare kill does not."
 }
 
 /*

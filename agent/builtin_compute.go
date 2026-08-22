@@ -36,8 +36,9 @@ func (c *ComputeTool) Description() string {
 	return "Compute a VALUE via a runnable script, or scaffold a whole new project. " +
 		"Shallow mode: the Coder emits a script, the script runs, stdout is captured " +
 		"on `.output` so downstream steps can read it via ${step.N.output} — use this for analytics, rankings, " +
-		"calculations, derived data. Deep mode: architect plans then multiple coders " +
-		"build — use this ONLY for new-codebase scaffolding. " +
+		"calculations, derived data. Deep mode: an architect plans, then several coders " +
+		"build in parallel — use it when the work spans multiple files that have to agree " +
+		"with one another, whether the codebase is new or already there. " +
 		"DO NOT use compute to edit a specific known file — use `edit_file` for that. " +
 		"Provide the GOAL, not the code."
 }

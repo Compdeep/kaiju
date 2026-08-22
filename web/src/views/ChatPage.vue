@@ -57,6 +57,7 @@
       <div class="col-header chat-header">
         <div class="chat-title" :title="currentTitle">{{ currentTitle }}</div>
         <div class="chat-header-actions">
+          <IntentSelector ref="intentSelectorRef" />
           <ModelSelector ref="modelSelectorRef" />
           <!-- Only where the workspace section exists: its routes are not
                registered when it does not, and the panel would open empty. -->
@@ -269,6 +270,7 @@ import DAGTrace from '../components/DAGTrace.vue'
 import ComposablePanel from '../components/ComposablePanel.vue'
 import UploadButton from '../components/UploadButton.vue'
 import UploadChip from '../components/UploadChip.vue'
+import IntentSelector from '../components/IntentSelector.vue'
 import ModelSelector from '../components/ModelSelector.vue'
 import HeaderTools from '../components/HeaderTools.vue'
 import AdminModal from '../components/AdminModal.vue'
@@ -323,6 +325,7 @@ const auth = useAuthStore()
 const settings = useSettingsStore()
 const input = ref('')
 const composeInput = ref(null)     // <textarea> ref, for auto-grow
+const intentSelectorRef = ref(null) // <IntentSelector> ref, to re-sync after Advanced settings
 const modelSelectorRef = ref(null) // <ModelSelector> ref, to re-sync after Advanced settings
 
 // ── Chat-header state ──
@@ -363,6 +366,7 @@ function doLogout() { auth.logout(); router.push('/login') }
 function onSettingsClose() {
   showSettings.value = false
   modelSelectorRef.value?.reload()
+  intentSelectorRef.value?.reload()
 }
 
 // ── Inline message editing / regenerate ──

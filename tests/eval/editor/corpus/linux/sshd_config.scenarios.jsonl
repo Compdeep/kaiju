@@ -1,0 +1,3 @@
+{"core": true, "query": "turn off password authentication and forbid root login entirely, leaving every other setting exactly as it is", "check": "grep -q '^PasswordAuthentication no' $FILE && grep -q '^PermitRootLogin no' $FILE && grep -q '^PubkeyAuthentication yes' $FILE && grep -q '^UsePAM yes' $FILE && grep -q '^Subsystem sftp' $FILE"}
+{"query": "set ClientAliveInterval to 300 and leave ClientAliveCountMax at 3", "check": "grep -q '^ClientAliveInterval 300' $FILE && grep -q '^ClientAliveCountMax 3' $FILE && ! grep -q '^ClientAliveInterval 0' $FILE"}
+{"query": "change the listening port from 22 to 2222 and leave ListenAddress alone", "check": "grep -q '^Port 2222' $FILE && grep -q '^ListenAddress 0.0.0.0' $FILE && ! grep -q '^Port 22$' $FILE"}

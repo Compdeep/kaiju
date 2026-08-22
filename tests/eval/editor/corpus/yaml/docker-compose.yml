@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  api:
+    image: registry.internal/api:1.4.0
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+    depends_on:
+      - db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      retries: 3
+
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: appdb
+
+volumes:
+  dbdata:

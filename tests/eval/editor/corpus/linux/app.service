@@ -1,0 +1,19 @@
+[Unit]
+Description=Example application service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=app
+Group=app
+WorkingDirectory=/srv/app
+ExecStart=/usr/bin/node /srv/app/server.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=3000
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

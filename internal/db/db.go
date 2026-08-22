@@ -205,6 +205,12 @@ func (d *DB) migrate() error {
 		`ALTER TABLE users ADD COLUMN profiles TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE users ADD COLUMN groups TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE messages ADD COLUMN dag_trace TEXT NOT NULL DEFAULT ''`,
+		// Compaction used to delete what it summarised, so a conversation older
+		// than the window was gone: not from the model's view, from the record.
+		// It is now marked with the id of the summary that stands for it, so the
+		// thread can still be read and searched, and a summary can say which
+		// messages it replaced. Zero means the message is still live.
+		`ALTER TABLE messages ADD COLUMN compacted_into INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE scopes ADD COLUMN cap TEXT NOT NULL DEFAULT '{}'`,
 		// How far a run may go for someone holding this scope. Existing scopes
 		// default to the top of the scale, so adding the column takes nothing away

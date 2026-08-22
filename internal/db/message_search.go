@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -23,34 +24,58 @@ import (
 // answer for the messages that exist rather than the ones that existed when it
 // was built.
 func (d *DB) migrateMessageSearch() error {
-	// Whether the index is here already, asked before it is created. It cannot be
-	// asked afterwards: for an external-content table a plain count reads the
-	// messages table, so a brand new index with nothing in it reports as many rows
-	// as there are messages and looks full.
-	var built int
-	if err := d.conn.QueryRow(
-		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`,
-	).Scan(&built); err != nil {
-		return err
+	// The function the triggers call. Without it every insert into messages
+	// fails, so this is reported rather than left to show up as a broken write.
+	if segmentFuncErr != nil {
+		return fmt.Errorf("register %s: %w", segmentFuncName, segmentFuncErr)
 	}
 
+	// An index built before the segmentation held the messages table's own text,
+	// which cannot carry it. Recognised by its definition and replaced: a query
+	// segmented one way against text indexed another matches nothing, and says
+	// nothing about why.
+	var def string
+	if err := d.conn.QueryRow(
+		`SELECT COALESCE(sql, '') FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`,
+	).Scan(&def); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if def != "" && !strings.Contains(def, "content=''") {
+		for _, s := range []string{
+			`DROP TRIGGER IF EXISTS messages_fts_insert`,
+			`DROP TRIGGER IF EXISTS messages_fts_delete`,
+			`DROP TRIGGER IF EXISTS messages_fts_update`,
+			`DROP TABLE messages_fts`,
+		} {
+			if _, err := d.conn.Exec(s); err != nil {
+				return err
+			}
+		}
+		def = ""
+	}
+	built := def != ""
+
 	stmts := []string{
+		// Contentless: the index holds the segmented terms and nothing else, and
+		// the text itself is read back from messages through the rowid. Storing
+		// the segmented form as well would be a second copy of every message that
+		// nothing ever reads.
 		`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 			content,
-			content='messages',
-			content_rowid='id',
+			content='',
+			contentless_delete=1,
 			tokenize='porter unicode61'
 		)`,
 		`CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
-			INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+			INSERT INTO messages_fts(rowid, content) VALUES (new.id, ` + segmentFuncName + `(new.content));
 		END`,
 		`CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
-			INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+			DELETE FROM messages_fts WHERE rowid = old.id;
 		END`,
 		`CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
-			INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
-			INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
-		END;`,
+			DELETE FROM messages_fts WHERE rowid = old.id;
+			INSERT INTO messages_fts(rowid, content) VALUES (new.id, ` + segmentFuncName + `(new.content));
+		END`,
 	}
 	for _, s := range stmts {
 		if _, err := d.conn.Exec(s); err != nil {
@@ -62,8 +87,10 @@ func (d *DB) migrateMessageSearch() error {
 	// a database with messages already in it would otherwise have an index that
 	// finds nothing older than this migration — a search answering "no" about
 	// conversations that are sitting in the table.
-	if built == 0 {
-		if _, err := d.conn.Exec(`INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')`); err != nil {
+	if !built {
+		if _, err := d.conn.Exec(
+			`INSERT INTO messages_fts(rowid, content) SELECT id, ` + segmentFuncName + `(content) FROM messages`,
+		); err != nil {
 			return err
 		}
 	}
@@ -90,7 +117,8 @@ func (d *DB) SearchMessages(ctx context.Context, query, sessionID string, limit 
 	if limit <= 0 {
 		limit = 20
 	}
-	found, err := d.searchMessages(ctx, query, sessionID, limit)
+	match := segmentForQuery(query)
+	found, err := d.searchMessages(ctx, match, sessionID, limit)
 	if err == nil {
 		return found, nil
 	}
@@ -104,7 +132,7 @@ func (d *DB) SearchMessages(ctx context.Context, query, sessionID string, limit 
 		// contain it, which is an answer, where the index's parse error is not.
 		return nil, nil
 	}
-	if plain == query {
+	if plain == match {
 		return nil, err
 	}
 	return d.searchMessages(ctx, plain, sessionID, limit)
@@ -158,6 +186,13 @@ func plainTerms(query string) string {
 		// "AND". A lower-case "not" or "or" is ordinary prose and is kept.
 		switch w {
 		case "AND", "OR", "NOT", "NEAR":
+			continue
+		}
+		// A run of CJK comes out of FieldsFunc as one word, since every character
+		// in it is a letter. Quoting it whole would ask the index for a token it
+		// never wrote, so it goes through the same segmentation as the rest.
+		if hasUnspaced(w) {
+			terms = append(terms, segmentForQuery(w))
 			continue
 		}
 		terms = append(terms, `"`+w+`"`)

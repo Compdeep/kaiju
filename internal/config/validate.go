@@ -8,7 +8,9 @@ import (
 
 /*
  * Validate checks the config for required fields and consistency.
- * desc: Ensures API key and model are set, safety level is in range, DAG mode is valid, and required directories exist.
+ * desc: Ensures API key and model are set, DAG mode is valid, and required directories exist.
+ *       Says nothing about agent.safety_level: it is a rank from the intent
+ *       registry, which the registry itself defines and this package cannot see.
  * return: an error describing the first validation failure, or nil if valid
  */
 func (c *Config) Validate() error {
@@ -17,9 +19,6 @@ func (c *Config) Validate() error {
 	}
 	if c.LLM.Model == "" {
 		return fmt.Errorf("config: llm.model is required")
-	}
-	if c.Agent.SafetyLevel < 0 || c.Agent.SafetyLevel > 2 {
-		return fmt.Errorf("config: agent.safety_level must be 0, 1, or 2")
 	}
 	if c.Agent.DAGMode != "" && c.Agent.DAGMode != "reflect" && c.Agent.DAGMode != "nReflect" && c.Agent.DAGMode != "orchestrator" {
 		return fmt.Errorf("config: agent.dag_mode must be reflect, nReflect, or orchestrator")

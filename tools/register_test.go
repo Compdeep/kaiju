@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -201,4 +202,26 @@ func TestEveryRegisteredNameIsTheToolsOwn(t *testing.T) {
 	}
 	sort.Strings(registered)
 	t.Logf("core tools (%d): %s", len(registered), strings.Join(registered, ", "))
+}
+
+// message_search is registered only when there is somewhere to search. Without a
+// store it would register and then answer every call by saying it cannot.
+func TestMessageSearchRegistersOnlyWithAStore(t *testing.T) {
+	bare := toolapi.NewRegistry()
+	names, err := Register(bare, Deps{})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if slices.Contains(names, "message_search") {
+		t.Error("message_search registered with no store to read")
+	}
+
+	withStore := toolapi.NewRegistry()
+	names, err = Register(withStore, Deps{Messages: &stubStore{}})
+	if err != nil {
+		t.Fatalf("register with a store: %v", err)
+	}
+	if !slices.Contains(names, "message_search") {
+		t.Errorf("message_search not registered though a store was given: %v", names)
+	}
 }

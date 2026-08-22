@@ -88,6 +88,10 @@ type Deps struct {
 	// them.
 	Memory *agent.Memory
 
+	// Messages is the store message_search reads. Nil omits it, which leaves an
+	// agent able to see no further back than the messages it was sent.
+	Messages toolapi.MessageStore
+
 	// Executor is the model web_fetch and web_research use to summarise what
 	// they retrieved. Nil omits web_research entirely and leaves web_fetch
 	// returning the page as it found it.
@@ -191,6 +195,11 @@ func Register(reg *toolapi.Registry, d Deps) ([]string, error) {
 	put(sharedSearch(d.Search))
 	if d.Executor != nil {
 		put(NewWebResearch(d.Search, d.Executor))
+	}
+
+	// Reading back the conversation itself, when there is one to read.
+	if d.Messages != nil {
+		put(NewMessageSearch(d.Messages))
 	}
 
 	// Memory, when there is somewhere to put it.

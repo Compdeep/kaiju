@@ -572,21 +572,76 @@ When done, provide a clear response to the original request.
 
 You are writing the opening of a briefing for a stage that is about to %s.
 
-You are given the request the run is serving, what each step produced, what those steps returned, anything that did not complete, and any value the run already holds that nothing has followed up.
+You are given the request the run is serving, what the completed work produced,
+what it returned, anything that did not complete, and any value the run already
+holds that nothing has used.
 
-Write one short paragraph, three or four sentences: what the run has established, what it has not, and what is still open. Where something is missing, unread or unused, say what its absence leaves unsettled — the consequence is the part worth reading. If nothing is missing and nothing is unused, say that plainly; a run that went well is worth stating as clearly as one that did not.
+Judge the run against the actual request, not against the amount of work
+performed. Lead with the verdict: say whether the request is answered fully,
+answered in part, or not answered, and identify the evidence that decides that
+verdict.
 
-Then, on its own line after the paragraph, write:
+Calibrate your tone to the quality of the run.
 
-STANDING: <one line — what is settled, and what is not>
+If the evidence clearly answers the request, say so directly and without
+inventing objections. Identify what establishes the answer and briefly note any
+material that remains unread or unused only if it could affect the answer.
+
+If the run has made useful but incomplete progress, distinguish precisely
+between what has been established and what remains unmet. Do not allow partial
+work, plausible-looking output, or a large volume of material to masquerade as
+an answer. A confident result drawn from part of the material is not an answer
+to the whole request; say which part it covers.
+
+If progress is poor, be adversarial — demanding, not performatively hostile.
+Aggression is warranted only by weak reasoning, poor relevance, unsupported
+claims, contradictions, or lack of meaningful progress; do not manufacture
+criticism when the run is sound. Challenge output that is irrelevant,
+unsupported, contradictory, circular, superficial, disconnected from the
+request, or unusable as evidence. If the run has produced activity without
+resolving the question, say so plainly. If it has ignored decisive material,
+failed to use its own results, or returned claims that do not follow from what
+was established, name the failure directly. Do not soften a failed run with
+phrases such as "some progress was made" unless that progress genuinely settles
+a specific part of the request.
+
+Write one short paragraph of three or four sentences. It must state:
+
+- whether the request is answered fully, in part, or not at all;
+- what evidence supports that judgment;
+- what is missing, unread, unused, conflicting, or unsupported; and
+- exactly what part of the request remains unmet as a result.
+
+Then, on its own line, write:
+
+WHERE WE ARE: <one line stating whether what is in hand answers the request and
+exactly what remains unmet>
 
 Rules:
-- Do not answer the request, even when the evidence looks like it settles it. Say what the evidence shows and what it leaves open, and leave the answer to the stage that writes one.
-- When two steps say different things, say that they differ. Do not choose between them, and do not call the material consistent when it is not.
-- Do not say what should be done next. Say what is unsettled and leave the choice to the reader: it knows what has already been tried and you do not.
-- Name only steps and values that appear in the input, and no others.
-- Write in the words the request uses. Do not describe a value by the kind of thing it looks like — a value a step produced is a value, whatever its shape.
-- Say nothing about how the run is organised: no steps-by-number, no plan, no graph.
+
+- Evaluate whether the evidence answers the request. Do not reward effort,
+  volume, confident language, or apparent sophistication.
+- Treat a returned value as evidence only for what it actually establishes.
+  Do not present your own inference as something a step proved.
+- Do not write the answer itself, even when the evidence settles it. Saying
+  that the request is answered is not the same as answering it; the answer
+  belongs to the stage that writes one.
+- When outputs disagree, say that they disagree and identify the point of
+  conflict. Do not silently reconcile them, choose between them, or call the
+  material consistent.
+- When an output does not address the request, say that it does not address the
+  request. Do not infer usefulness merely because it is related to the topic.
+- When a claim is unsupported by the returned material, call it unsupported.
+  When the reasoning does not follow, say that it does not follow.
+- Do not say what should happen next or propose corrective actions. Identify
+  the failure or unmet requirement; the reader already knows what has been
+  attempted.
+- Name only work and values present in the input. Do not invent missing work,
+  evidence, or explanations.
+- Use the request's own terms. Do not replace a returned value with a category
+  based on what it resembles.
+- Say nothing about the run's internal organisation: no step numbers, plan,
+  graph, nodes, or orchestration.
 
 === REFRAME_HOOK ===
 

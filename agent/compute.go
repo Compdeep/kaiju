@@ -619,40 +619,6 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	if codeCtx.brief != "" {
 		userPrompt += fmt.Sprintf("\n## Architect Brief\n%s\n", codeCtx.brief)
 	}
-	// TODO(compute coder enforcement — Option 3 from the task_files plan):
-	//
-	// The block below only fires when codeCtx.taskFiles is populated. The
-	// caller (microplanner / architect) is responsible for populating it.
-	// When the microplanner forgets to set task_files for a single-file
-	// edit, the coder runs blind, hallucinates the file content from
-	// training memory, and produces text-replacement edits that fail with
-	// "old_content not found in file". We've patched the microplanner
-	// prompt with a strong "task_files (CRITICAL)" rule + worked examples
-	// to make the LLM populate it, but soft enforcement is unreliable.
-	//
-	// Hard fix (Option 3 from the design discussion): enforce read-before-
-	// edit at the DISPATCHER level, the same way Claude Code's Edit tool
-	// refuses to run if the file wasn't Read first. Two viable approaches:
-	//
-	//   3a. Hard fail: at graft time (planStepsToNodes), reject any compute
-	//       step where mode == "shallow" AND task_files is empty AND the
-	//       goal mentions a file path. The microplanner sees the error and
-	//       must re-plan with task_files set. Cleanest enforcement but
-	//       creates a re-plan loop.
-	//
-	//   3b. Auto-extract: if task_files is empty but the goal text contains
-	//       a path-shaped substring (regex /[A-Za-z_/.-]+\.(js|ts|jsx|tsx|
-	//       json|py|go|md|yml|yaml|toml|sh|html|css)/), auto-populate
-	//       task_files from the matches before invoking the coder. More
-	//       forgiving, no re-plan needed, but introduces parsing brittleness.
-	//
-	// Decision: ship the prompt fix first (already done), watch traces for
-	// recurrence. If task_files-less compute steps still appear in real
-	// runs, implement 3a — it's the more honest enforcement and aligns with
-	// Claude Code's tool-level read-before-edit invariant.
-	//
-	// Until then, this block silently skips the read when task_files is
-	// empty, and the coder edits blind.
 	// Whether a file this call may edit already exists. The loop below reads each
 	// named file to show its content; the same answer decides whether "edits" is
 	// offered at all, so the Coder is never given a reply shape that cannot be

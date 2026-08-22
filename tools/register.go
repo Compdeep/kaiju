@@ -164,7 +164,7 @@ func Register(reg *toolapi.Registry, d Deps) ([]string, error) {
 	// Shell and files. The sandbox is the workspace when there is one.
 	put(NewBash(d.Shell, d.Workspace))
 	put(NewFileRead(d.Workspace))
-	put(NewFileWrite(ConfineToWorkspace(d.Workspace)))
+	put(NewFileWrite(WorkspaceDefault(d.Workspace)))
 	put(NewFileList(d.Workspace))
 	put(NewArchive())
 	put(NewOfficeExtract(d.Workspace))

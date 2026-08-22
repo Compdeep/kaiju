@@ -240,6 +240,22 @@ func NewFileWrite(where PathPolicy) *FileWrite { return &FileWrite{where: where}
  * return: a policy refusing absolute paths, parent-directory escapes, and anything
  *         outside the allowed subdirectories.
  */
+/*
+ * WorkspaceDefault returns the policy that treats the workspace as where work
+ * lands by default rather than the only place it may land.
+ * desc: A relative path resolves under the workspace with the same escape and
+ *       zone rules ConfineToWorkspace applies. A path with a root is taken as
+ *       given, unless it lands inside the workspace, where the zone rules apply
+ *       again — so writing to the agent's own tree cannot be done by spelling
+ *       the path out in full. A write outside is graded by the gate, which sees
+ *       the intent and clearance a path rule cannot.
+ * param: dir - the workspace root.
+ * return: a policy that defaults to the workspace and permits a named location.
+ */
+func WorkspaceDefault(dir string) PathPolicy {
+	return func(path string) (string, error) { return workspace.Resolve(dir, path) }
+}
+
 func ConfineToWorkspace(dir string) PathPolicy {
 	return func(path string) (string, error) { return workspace.SafeJoin(dir, path) }
 }

@@ -2500,6 +2500,14 @@ func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd,
 	}
 	execID := graph.AddNode(execNode)
 	graph.AddChild(compID, execID)
+	// The script this child runs is what produces the parent's `output`, and a
+	// step wired to that field depends on the parent — so it would otherwise be
+	// ready at the same moment as this child and could run first, reading a
+	// field that has not been written yet.
+	if waited := graph.WaitAlsoOn(compID, execID, "output"); len(waited) > 0 {
+		log.Printf("[dag] %s now also waits for %s, which produces %s.output",
+			strings.Join(waited, ", "), execID, compID)
+	}
 	grafted = append(grafted, execNode)
 	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: execID, Node: graph.SnapshotNode(execID)})
 

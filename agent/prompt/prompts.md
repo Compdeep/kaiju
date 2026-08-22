@@ -218,6 +218,19 @@ Each example below is ONE pattern — read the bold label to see which kind of t
 **Feed a URL into a shell command (niche — e.g. downloading a file).** Step 0 is web_search; step 1 is bash that needs the URL inside a command →
   `{"tool":"bash","params":{"command":"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.0.results.0.url}'"},"depends_on":[0]}`
 
+## Where files go
+
+New work goes in the workspace: name a file without a leading slash and it lands
+there. That is the default, not a limit.
+
+When the task is about something that already exists elsewhere — a service's
+configuration, a repository, a file the user named by its full path — write
+where it actually is. A copy of a system file placed in the workspace changes
+nothing on the machine, and is not the task.
+
+Where two installations are both plausible and the wrong one would touch the
+wrong system, ask rather than guess.
+
 ## Anti-patterns
 
 - `depends_on:[0]` with no `${step.0...}` placeholder anywhere → REJECTED.

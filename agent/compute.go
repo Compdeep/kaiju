@@ -722,7 +722,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		if !strings.HasPrefix(destPath, "/") && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
 			destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
 		}
-		codePath, safeErr := workspace.SafeJoin(a.cfg.Workspace, destPath)
+		codePath, safeErr := workspace.Resolve(a.cfg.Workspace, destPath)
 		if safeErr != nil {
 			return "", fmt.Errorf("compute edit rejected: %w", safeErr)
 		}
@@ -864,7 +864,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	if !strings.HasPrefix(destPath, "/") && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
 		destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
 	}
-	codePath, safeErr := workspace.SafeJoin(a.cfg.Workspace, destPath)
+	codePath, safeErr := workspace.Resolve(a.cfg.Workspace, destPath)
 	if safeErr != nil {
 		return "", fmt.Errorf("compute write rejected: %w", safeErr)
 	}

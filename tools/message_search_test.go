@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -212,5 +213,24 @@ func TestMessageSearchTakesTheSessionFromTheRun(t *testing.T) {
 		if store.gotSession != session {
 			t.Errorf("run in %q searched %q", session, store.gotSession)
 		}
+	}
+}
+
+// The listing is cut by characters, not bytes. A byte cut lands inside a
+// multi-byte character — Japanese is three bytes to the character — and the
+// listing the model reads then ends in a broken one.
+func TestMessageSearchCutsTheListingByCharacters(t *testing.T) {
+	for _, prefix := range []string{"", "a", "ab", "abcd"} {
+		store := &stubStore{answer: []toolapi.FoundMessage{
+			{ID: 1, Role: "user", Content: prefix + strings.Repeat("会議で決めたタイムアウト", 40)},
+		}}
+		msg := run(t, NewMessageSearch(store), "s1", map[string]any{"query": "x"})
+		if !utf8.ValidString(msg.Content) {
+			t.Errorf("prefix %q: the listing is not valid UTF-8", prefix)
+		}
+	}
+	store := &stubStore{answer: []toolapi.FoundMessage{{ID: 1, Role: "user", Content: strings.Repeat("🐋", 400)}}}
+	if msg := run(t, NewMessageSearch(store), "s1", map[string]any{"query": "x"}); !utf8.ValidString(msg.Content) {
+		t.Error("four-byte characters: the listing is not valid UTF-8")
 	}
 }

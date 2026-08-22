@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -218,10 +219,13 @@ const messageSearchExcerpt = 300
 // sight. The whole text of each is in the payload beside it.
 func oneLine(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > messageSearchExcerpt {
-		return s[:messageSearchExcerpt] + "…"
+	// Counted in characters, not bytes. A byte count cuts a multi-byte character
+	// in half — a Japanese character is three bytes, an emoji four — and the
+	// listing the model reads then carries a broken one where the message ends.
+	if utf8.RuneCountInString(s) <= messageSearchExcerpt {
+		return s
 	}
-	return s
+	return string([]rune(s)[:messageSearchExcerpt]) + "…"
 }
 
 // messageSearchData is what message_search returns beside its listing.

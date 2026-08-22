@@ -234,5 +234,11 @@ func (d *DB) migrate() error {
 	d.conn.Exec(`DELETE FROM messages WHERE role = 'dag_trace'`)
 
 	// Seed default profiles
+	// The full-text index over messages, after the tables it reads and the
+	// columns the alters added.
+	if err := d.migrateMessageSearch(); err != nil {
+		return err
+	}
+
 	return d.SeedDefaultScopes()
 }

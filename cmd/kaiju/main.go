@@ -577,6 +577,10 @@ func runChat() {
 		if err := ag.LoadIntentRegistry(intentsFrom(chatDB)); err != nil {
 			log.Printf("[chat] intent registry load failed: %v", err)
 		}
+		// message_search, now there is a transcript to search. Registered here rather
+		// than beside the other tools because the agent is built before the database
+		// is open, and a tool with no store to read would only ever say so.
+		ag.Registry().Replace(tools.NewMessageSearch(chatDB), "builtin")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -749,6 +753,11 @@ func runServe() {
 	}
 	defer kaijuDB.Close()
 	log.Printf("[kaiju] database opened: %s/kaiju.db", cfg.Agent.DataDir)
+
+	// message_search, now there is a transcript to search. Registered here rather
+	// than beside the other tools because the agent is built before the database
+	// is open, and a tool with no store to read would only ever say so.
+	ag.Registry().Replace(tools.NewMessageSearch(kaijuDB), "builtin")
 
 	// Safeguard: a run killed by a restart/crash leaves a user turn with no reply,
 	// which the UI reads as "still running" and spins a progress bar forever. On

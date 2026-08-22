@@ -46,6 +46,7 @@ func schemaFixtures() map[string]toolapi.Tool {
 		"file_write":     &FileWrite{},
 		"git":            &Git{},
 		"memory_recall":  &MemoryRecall{},
+		"message_search": &MessageSearch{},
 		"memory_search":  &MemorySearch{},
 		"memory_store":   &MemoryStore{},
 		"net_info":       &NetInfo{},

@@ -51,9 +51,11 @@ func (d *DebugTool) Description() string {
 		"then a clean-room debugger plans and applies the fix, then validators confirm it. " +
 		"Use this ONLY when a prior step FAILED and the failure is inside the agent's control — " +
 		"pass the exact error text, file paths, and module names in `problem`. " +
-		"Do NOT use it for transient errors (timeouts, HTTP 5xx, rate limits, empty results), " +
-		"for out-of-scope or unfixable-environment failures (sudo/root, OS package managers, a missing " +
-		"language runtime), or when nothing actually failed. One debug step per failure — plan it as a " +
+		"Do NOT use it for transient errors (timeouts, HTTP 5xx, rate limits, empty results) — " +
+		"those are retried, not diagnosed — or when nothing actually failed. " +
+		"Where a fix would need privileges or would change the machine beyond this run, say so in " +
+		"`problem` and plan it anyway: the gate decides whether it may proceed, and knowing the cause " +
+		"is worth having either way. One debug step per failure — plan it as a " +
 		"leaf; the next re-plan handles follow-on work once the fix lands."
 }
 

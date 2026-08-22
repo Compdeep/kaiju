@@ -39,7 +39,7 @@ func NewWebResearch(cfg SearchConfig, executor *llm.Client) *WebResearch {
 func (w *WebResearch) Name() string { return "web_research" }
 
 func (w *WebResearch) Description() string {
-	return "Search the web AND read the top results in ONE step. Runs a search, then fetches and extracts the actual text of the top result pages and returns their content. Prefer this over web_search+web_fetch for any research: every source is grounded (the URLs come from the search and are read for you), so you never invent a URL or stop at snippets. Params: query (required); optional max_sources (top results to read, default 4, max 6), recency_days, focus (the facts to extract)."
+	return "Search the web AND read the top results in ONE step. Runs a search, then fetches and extracts the actual text of the top result pages and returns their content. Every source is grounded — the URLs come from the search and are read for you — so no URL is invented and no answer stops at a snippet. Use it for a single research angle where reading the top results is enough. Where you need to choose the sources yourself, or follow one result into the next, plan web_search and read the ones you pick with web_fetch. Params: query (required); optional max_sources (top results to read, default 4, max 6), recency_days, focus (the facts to extract)."
 }
 
 func (w *WebResearch) Impact(map[string]any) int { return toolapi.ImpactObserve }

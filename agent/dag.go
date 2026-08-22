@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Compdeep/kaiju/agent/toolapi"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -883,6 +885,50 @@ func (g *Graph) SetError(nodeID string, err error) {
  * param: parentID - the ID of the parent node.
  * param: childID - the ID of the child node.
  */
+/*
+ * WaitAlsoOn makes pending nodes that read a field off parentID wait for childID.
+ * desc: A field a node produces AFTER it resolves cannot be read by a dependent
+ *       that becomes ready the moment it resolves. compute is the case: it
+ *       resolves, an exec child is grafted to run the script it wrote, and only
+ *       when that child finishes is its stdout merged onto the parent as
+ *       `output`. A step wired to ${node.<compute>.output} depends on the
+ *       compute node, so it and the child become ready together and the step can
+ *       be dispatched first — reading a field that has not arrived and failing
+ *       with "field \"output\" absent".
+ *
+ *       Adding the child as a second dependency lets the graph do the ordering,
+ *       with no waiting, retrying or new state. Only nodes that actually name
+ *       the field are touched, so anything else keeps the edges it had.
+ * param: parentID - the node producing the field late
+ * param: childID - the node whose completion produces it
+ * param: field - the field name those dependents must wait for
+ * return: the ids of the nodes given the extra dependency
+ */
+func (g *Graph) WaitAlsoOn(parentID, childID, field string) []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	var waited []string
+	for id, n := range g.nodes {
+		if id == childID || n.State != StatePending || !slices.Contains(n.DependsOn, parentID) {
+			continue
+		}
+		if slices.Contains(n.DependsOn, childID) {
+			continue
+		}
+		for _, ref := range FindRefs(n.Params) {
+			if ref.Type != "node" || ref.NodeID != parentID || len(ref.Path) == 0 || ref.Path[0] != field {
+				continue
+			}
+			n.DependsOn = append(n.DependsOn, childID)
+			waited = append(waited, id)
+			break
+		}
+	}
+	sort.Strings(waited)
+	return waited
+}
+
 func (g *Graph) AddChild(parentID, childID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

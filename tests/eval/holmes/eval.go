@@ -599,21 +599,18 @@ func runScenario(kaijuShortName, absBin, configPath string, sc scenario, timeout
 	fmt.Println(tail)
 	fmt.Println("──────────────────")
 
-	// Capture the per-investigation prompt trace kaiju writes to
-	// /tmp/kaiju-prompts/<alert_id>.log. We copy it into the workdir so it
-	// survives with -keep, and on verify failure persist a stable copy under
-	// tests/eval/holmes/failures/ so the reflector/planner/aggregator prompts
-	// are inspectable without rerunning.
-	alertID := extractAlertID(body)
+	// Capture the prompt trace kaiju writes to /tmp/kaiju-prompts/<run id>.log.
+	// We copy it into the workdir so it survives with -keep, and on verify
+	// failure persist a stable copy under tests/eval/holmes/failures/ so the
+	// reflector, planner and aggregator prompts are inspectable without
+	// rerunning.
+	triggerID := extractTriggerID(body)
 	workdirTrace := ""
-	if alertID != "" {
-		src := filepath.Join("/tmp/kaiju-prompts", alertID+".log")
-		if _, err := os.Stat(src); err == nil {
-			workdirTrace = filepath.Join(workDir, ".kaiju_prompts.log")
-			if cerr := copyFile(src, workdirTrace, 0644); cerr != nil {
-				log.Printf("[%s] could not copy prompt trace: %v", sc.name, cerr)
-				workdirTrace = ""
-			}
+	if src := traceFor(triggerID); src != "" {
+		workdirTrace = filepath.Join(workDir, ".kaiju_prompts.log")
+		if cerr := copyFile(src, workdirTrace, 0644); cerr != nil {
+			log.Printf("[%s] could not copy prompt trace: %v", sc.name, cerr)
+			workdirTrace = ""
 		}
 	}
 
@@ -621,12 +618,12 @@ func runScenario(kaijuShortName, absBin, configPath string, sc scenario, timeout
 		return fmt.Errorf("scenario %s has no verify func", sc.name)
 	}
 	if err := sc.verify(workDir, body); err != nil {
-		saved := persistTrace(sc.name, workdirTrace, alertID)
+		saved := persistTrace(sc.name, workdirTrace, triggerID)
 		if saved != "" {
 			return fmt.Errorf("post-fix verify failed: %w\n    prompt trace: %s", err, saved)
 		}
-		if alertID != "" {
-			return fmt.Errorf("post-fix verify failed: %w\n    (no prompt trace captured; kaiju alert=%s)", err, alertID)
+		if triggerID != "" {
+			return fmt.Errorf("post-fix verify failed: %w\n    (no prompt trace captured; kaiju id=%s)", err, triggerID)
 		}
 		return fmt.Errorf("post-fix verify failed: %w", err)
 	}
@@ -685,14 +682,25 @@ func readReflectorDecisions(workDir string) []reflectorDecision {
 	return out
 }
 
-// extractAlertID parses the "alert=run-<nano>" marker kaiju prints on each
-// run. The prompt trace file is named /tmp/kaiju-prompts/<alert_id>.log.
-func extractAlertID(output string) string {
-	idx := strings.Index(output, "alert=")
+// The prompt trace, and where to look for it.
+//
+// kaiju names the file after the RUN — /tmp/kaiju-prompts/<run id>.log — and
+// what it prints is the trigger's id. Those are different on purpose: one
+// trigger can produce several runs, and the run id is that id with a timestamp
+// after it. So the id is read from the output and the file is found by prefix.
+//
+// This used to read a different marker, which the engine stopped printing when
+// its identifiers were renamed — see 7e4c842. It failed silently: no marker, no
+// id, no trace, and a failing scenario reported without the prompts that would
+// have explained it.
+
+// extractTriggerID parses the "id=<id>" marker kaiju prints on each run.
+func extractTriggerID(output string) string {
+	idx := strings.Index(output, "id=")
 	if idx < 0 {
 		return ""
 	}
-	rest := output[idx+len("alert="):]
+	rest := output[idx+len("id="):]
 	end := strings.IndexAny(rest, " ,)\n\t")
 	if end < 0 {
 		return strings.TrimSpace(rest)
@@ -700,13 +708,42 @@ func extractAlertID(output string) string {
 	return strings.TrimSpace(rest[:end])
 }
 
+// traceFor returns the prompt trace a trigger's run wrote, or "" if there is
+// none. The run id is the trigger's id with a timestamp appended, so the file
+// is matched by prefix and the newest wins — a rerun of one scenario leaves
+// several, and the last is the one that just failed.
+func traceFor(triggerID string) string {
+	if triggerID == "" {
+		return ""
+	}
+	matches, err := filepath.Glob(filepath.Join(promptTraceDir, triggerID+"*.log"))
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	newest, newestAt := "", time.Time{}
+	for _, m := range matches {
+		info, serr := os.Stat(m)
+		if serr != nil {
+			continue
+		}
+		if info.ModTime().After(newestAt) {
+			newest, newestAt = m, info.ModTime()
+		}
+	}
+	return newest
+}
+
+// promptTraceDir is where kaiju writes them. Its own constant is unexported, so
+// this is the one place the path is repeated and the one place to change it.
+const promptTraceDir = "/tmp/kaiju-prompts"
+
 // persistTrace copies a captured prompt trace into
 // tests/eval/holmes/failures/<scenario>-<timestamp>.log so it survives
 // workdir cleanup. Returns the destination path, or "" on any failure.
-func persistTrace(scenarioName, workdirTrace, alertID string) string {
+func persistTrace(scenarioName, workdirTrace, triggerID string) string {
 	src := workdirTrace
-	if src == "" && alertID != "" {
-		src = filepath.Join("/tmp/kaiju-prompts", alertID+".log")
+	if src == "" {
+		src = traceFor(triggerID)
 	}
 	if src == "" {
 		return ""

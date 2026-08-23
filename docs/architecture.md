@@ -43,8 +43,18 @@ This directory holds the detailed reference docs behind that overview.
   isolation, and the chat-boundary rule.
 - **[skills.md](skills.md)** — guidance skills vs capability cards, and how they are
   selected and injected.
-- **[router-model-bench.md](router-model-bench.md)** — the model lanes and the
-  benchmark behind the route-model default.
+- **[model-calls.md](model-calls.md)** — the one door every model call goes
+  through: the four lanes, what the engine decides and what the client decides,
+  and how a reply is sized against the model that answers it.
+- **[router-model-bench.md](router-model-bench.md)** — the benchmark behind the
+  route-model default.
+
+## Embedding
+
+Building an application on the engine: what you construct, what you implement,
+and where your own logic goes — [embedding.md](embedding.md). Covers the
+minimal working agent, writing a tool, the fourteen handlers and what each nil
+costs, and why a handler is a function while a setting is a value.
 
 ## Config & operations
 - **[config.md](config.md)** — the full configuration reference.

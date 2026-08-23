@@ -1,0 +1,274 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
+
+	"github.com/Compdeep/kaiju/agent/toolapi"
+)
+
+// ─── ProcessList ────────────────────────────────────────────────────────────
+
+/*
+ * ProcessList lists running processes with optional filtering.
+ * desc: Tool that queries the OS for running processes and returns a formatted table with PID, name, CPU, and memory.
+ */
+type ProcessList struct{}
+
+/*
+ * NewProcessList creates a new ProcessList tool instance.
+ * desc: Returns a zero-value ProcessList ready for use.
+ * return: pointer to a new ProcessList
+ */
+func NewProcessList() *ProcessList { return &ProcessList{} }
+
+/*
+ * Name returns the tool identifier.
+ * desc: Returns "process_list" as the tool name.
+ * return: the string "process_list"
+ */
+func (p *ProcessList) Name() string { return "process_list" }
+
+/*
+ * Description returns a human-readable description of the tool.
+ * desc: Explains that this tool lists running processes with optional name filtering.
+ * return: description string
+ */
+func (p *ProcessList) Description() string {
+	return "List running processes with PID, name, CPU and memory usage. Optionally filter by name."
+}
+
+/*
+ * Impact returns the safety impact level for this tool.
+ * desc: Always returns ImpactObserve since listing processes is non-destructive.
+ * param: _ - unused parameters
+ * return: ImpactObserve (0)
+ */
+func (p *ProcessList) Impact(map[string]any) int { return toolapi.ImpactObserve }
+
+/*
+ * OutputSchema returns the JSON schema for the tool's output.
+ * desc: Defines the output structure containing a process list table as a string.
+ * return: JSON schema as raw bytes
+ */
+func (p *ProcessList) OutputSchema() json.RawMessage {
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(processListData{}))
+}
+
+/*
+ * Parameters returns the JSON schema for the tool's input parameters.
+ * desc: Defines the optional filter (substring match) and limit (default 30) parameters.
+ * return: JSON schema as raw bytes
+ */
+func (p *ProcessList) Parameters() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"filter": {"type": "string", "description": "Filter processes by name (substring match)"},
+			"limit": {"type": "integer", "description": "Max processes to return (default: 30)"}
+		},
+		"additionalProperties": false
+	}`)
+}
+
+/*
+ * Execute lists running processes, optionally filtered by name.
+ * desc: Runs ps (Unix) or Get-Process (Windows), filters by name substring, and limits output count.
+ * param: ctx - context for cancellation
+ * param: params - optionally contains "filter" and "limit"
+ * return: formatted process list table as a string, or error on command failure
+ */
+// Execute satisfies the Tool interface for callers outside the DAG.
+func (p *ProcessList) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return toolapi.StringResult(p.ExecuteTyped(ctx, params))
+}
+
+func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
+	filter, _ := params["filter"].(string)
+	limit := 30
+	if l, ok := toolapi.ParamNum(params, "limit"); ok && l > 0 {
+		limit = int(l)
+	}
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+			"Get-Process | Sort-Object CPU -Descending | Select-Object -First "+strconv.Itoa(limit*2)+
+				" Id, ProcessName, CPU, @{N='MemMB';E={[math]::Round($_.WorkingSet64/1MB,1)}} | Format-Table -AutoSize")
+	default:
+		// auxww, not aux: without it a long command line is cut at the
+		// terminal width, and the part that identifies a suspicious process
+		// — the script path, the flags, the connect-back address — is
+		// exactly the part that gets cut.
+		cmd = exec.CommandContext(ctx, "ps", "auxww", "--sort=-pcpu")
+	}
+
+	out, err := cmd.Output()
+	if err != nil {
+		return toolapi.ToolMessage{}, fmt.Errorf("process_list: %w", err)
+	}
+
+	lines := strings.Split(string(out), "\n")
+	var result []string
+	count := 0
+	for i, line := range lines {
+		if i == 0 {
+			result = append(result, line) // header
+			continue
+		}
+		if count >= limit {
+			break
+		}
+		if filter != "" && !strings.Contains(strings.ToLower(line), strings.ToLower(filter)) {
+			continue
+		}
+		if strings.TrimSpace(line) != "" {
+			result = append(result, line)
+			count++
+		}
+	}
+
+	// The table was the whole answer, so a step that found a suspicious process in
+	// it had to carry the line forward as text to name its pid. The rows say the
+	// same thing in fields, and are empty on a platform whose columns are not the
+	// ones parsed, where the table is still complete.
+	return toolapi.ToolOK("processes", strings.Join(result, "\n"), processListData{
+		Count:     count,
+		Limit:     limit,
+		Filter:    filter,
+		AtLimit:   count >= limit,
+		Processes: parsePsRows(result),
+	}), nil
+}
+
+var _ toolapi.Tool = (*ProcessList)(nil)
+
+// ─── ProcessKill ────────────────────────────────────────────────────────────
+
+/*
+ * ProcessKill terminates a process by PID.
+ * desc: Tool that sends a termination signal (SIGTERM or SIGKILL) to a process, or uses taskkill on Windows.
+ */
+type ProcessKill struct{}
+
+/*
+ * NewProcessKill creates a new ProcessKill tool instance.
+ * desc: Returns a zero-value ProcessKill ready for use.
+ * return: pointer to a new ProcessKill
+ */
+func NewProcessKill() *ProcessKill { return &ProcessKill{} }
+
+/*
+ * Name returns the tool identifier.
+ * desc: Returns "process_kill" as the tool name.
+ * return: the string "process_kill"
+ */
+func (p *ProcessKill) Name() string { return "process_kill" }
+
+/*
+ * Description returns a human-readable description of the tool.
+ * desc: Explains that this tool terminates a process by PID.
+ * return: description string
+ */
+func (p *ProcessKill) Description() string {
+	return "Terminate a process by PID. Use process_list first to find the target."
+}
+
+/*
+ * Impact returns the safety impact level for this tool.
+ * desc: Always returns ImpactControl since killing processes is a destructive operation.
+ * param: _ - unused parameters
+ * return: ImpactControl (2)
+ */
+func (p *ProcessKill) Impact(map[string]any) int { return toolapi.ImpactControl }
+
+/*
+ * OutputSchema returns the JSON schema for the tool's output.
+ * desc: Defines the output structure containing the kill result message.
+ * return: JSON schema as raw bytes
+ */
+func (p *ProcessKill) OutputSchema() json.RawMessage {
+	return toolapi.EnvelopeSchema(`{"type":"object","properties":{
+		"pid":    {"type":"integer","description":"the process that was signalled"},
+		"force":  {"type":"boolean","description":"true when it was killed rather than asked to stop"},
+		"ok":     {"type":"boolean","description":"true when the signal was delivered"},
+		"output": {"type":"string","description":"what the kill command printed — present only on a failure"}
+	}}`)
+}
+
+/*
+ * Parameters returns the JSON schema for the tool's input parameters.
+ * desc: Defines the required pid integer and optional force boolean parameters.
+ * return: JSON schema as raw bytes
+ */
+func (p *ProcessKill) Parameters() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"pid": {"type": "integer", "description": "Process ID to kill"},
+			"force": {"type": "boolean", "description": "Force kill (SIGKILL on Unix, /F on Windows). Default: false"}
+		},
+		"required": ["pid"],
+		"additionalProperties": false
+	}`)
+}
+
+/*
+ * Execute terminates the specified process by PID.
+ * desc: Sends SIGTERM (or SIGKILL with force) on Unix, or runs taskkill on Windows.
+ * param: ctx - context for cancellation
+ * param: params - must contain "pid"; optionally "force" for SIGKILL/forced termination
+ * return: confirmation message with PID and force status, or error if PID is missing
+ */
+// Execute satisfies the Tool interface for callers outside the DAG.
+func (p *ProcessKill) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return toolapi.StringResult(p.ExecuteTyped(ctx, params))
+}
+
+func (p *ProcessKill) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
+	pidFloat, ok := toolapi.ParamNum(params, "pid")
+	if !ok {
+		return toolapi.ToolMessage{}, fmt.Errorf("process_kill: pid is required")
+	}
+	pid := int(pidFloat)
+	if pid <= 1 {
+		return toolapi.ToolMessage{}, fmt.Errorf("process_kill: refusing to kill pid %d (unsafe — use process_list to find the correct PID first)", pid)
+	}
+	force, _ := params["force"].(bool)
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		args := []string{"/PID", strconv.Itoa(pid)}
+		if force {
+			args = append(args, "/F")
+		}
+		cmd = exec.CommandContext(ctx, "taskkill", args...)
+	default:
+		sig := "-TERM"
+		if force {
+			sig = "-KILL"
+		}
+		cmd = exec.CommandContext(ctx, "kill", sig, strconv.Itoa(pid))
+	}
+
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		return toolapi.ToolFail("status", fmt.Sprintf("kill pid %d: %v", pid, err),
+			map[string]any{"pid": pid, "force": force, "ok": false, "output": output}), nil
+	}
+	// The pid in the payload, not only in the sentence: a later step that has to
+	// confirm the process is gone needs the number, and reading it back out of
+	// rendered text is what the payload exists to avoid.
+	return toolapi.ToolOK("status", fmt.Sprintf("killed pid %d (force=%v)\n%s", pid, force, output),
+		map[string]any{"pid": pid, "force": force, "ok": true}), nil
+}
+
+var _ toolapi.Tool = (*ProcessKill)(nil)

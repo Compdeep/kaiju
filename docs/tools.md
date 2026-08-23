@@ -1,14 +1,17 @@
 # Built-in Tools
 
 Every capability the planner can call — a shell command, a web fetch, a file
-edit — is a `Tool`. The Executive picks tools by name, the Dispatcher fires them,
-and the IGX gate decides whether each invocation is allowed. This doc describes
-the tool contract, the registry that holds them, the envelope they emit, and the
-full catalogue of what ships built in.
+edit — is a `Tool`. The Executive picks tools by name, the Dispatcher fires
+them, and the IGX gate decides whether each invocation is allowed. This doc
+describes the tool contract, the registry that holds them, the envelope they
+emit, and the full catalogue of what ships built in.
+
+> Embedding kaiju in your own application? `docs/embedding-tools.md` covers
+> registering the core set and replacing one of its tools with your own.
 
 ## The Tool interface
 
-`internal/agent/tools/skill.go`. Four methods, implemented by every compiled
+`agent/toolapi/skill.go`. Four methods, implemented by every compiled
 built-in and every SKILL.md wrapper:
 
 ```go
@@ -18,6 +21,28 @@ type Tool interface {
     Parameters() json.RawMessage                               // JSON Schema for the call args
     Impact(params map[string]any) int                          // IGX tier for THIS invocation
     Execute(ctx context.Context, params map[string]any) (string, error)
+}
+```
+
+### Impact with no parameters is the tool's worst case
+
+`Impact` is asked two questions. With parameters it means "what tier is THIS
+call", and that is what the gate uses. With `nil` it means "what tier is this
+tool", which is what an application asks when deciding whether to offer it at
+all — and a tool that grades itself by reading its parameters will find none,
+match nothing, and answer with its cheapest tier unless it is written not to.
+
+That is the unsafe direction. A shell with no command in it is not a read-only
+tool; it is a shell nobody has typed into yet. So a graded tool returns its
+worst case when it has nothing to grade:
+
+```go
+func (b *Bash) Impact(params map[string]any) int {
+    cmd, _ := params["command"].(string)
+    if cmd == "" {
+        return tools.ImpactControl   // the abstract question, answered honestly
+    }
+    ...
 }
 ```
 
@@ -46,7 +71,7 @@ builtins), so tool authors hardcode them. The gate passes an invocation when
 
 ## The Registry
 
-`internal/agent/tools/registry.go`. One thread-safe, in-process map keyed by tool
+`agent/toolapi/registry.go`. One thread-safe, in-process map keyed by tool
 name. Each entry carries the tool plus two pieces of metadata:
 
 - **source** — where it came from: `"builtin"`, `"skillmd:<path>"` (a SKILL.md
@@ -62,7 +87,7 @@ OpenAI function-calling defs for the LLM.
 
 ## The ToolMessage envelope
 
-`internal/agent/tools/toolmessage.go`. Every tool result is a uniform envelope so
+`agent/toolapi/toolmessage.go`. Every tool result is a uniform envelope so
 an edge can frame presence / absence / failure the same way regardless of which
 tool ran. The envelope adds only the framing signals; the tool's own payload
 lives verbatim in `Data`.
@@ -208,10 +233,10 @@ for how those seams feed `web_fetch`.
 
 | file | responsibility |
 |---|---|
-| `internal/agent/tools/skill.go` | `Tool` interface, impact tiers, optional interfaces |
-| `internal/agent/tools/registry.go` | the in-process registry (source + enabled) |
-| `internal/agent/tools/toolmessage.go` | the `ToolMessage` envelope + constructors |
-| `internal/agent/tools/decoders.go` | `web_fetch` binary-decoder + reader-fallback seams |
-| `internal/tools/*.go` | the built-in tool implementations |
+| `agent/toolapi/skill.go` | `Tool` interface, impact tiers, optional interfaces |
+| `agent/toolapi/registry.go` | the in-process registry (source + enabled) |
+| `agent/toolapi/toolmessage.go` | the `ToolMessage` envelope + constructors |
+| `agent/toolapi/decoders.go` | `web_fetch` binary-decoder + reader-fallback seams |
+| `tools/*.go` | the built-in tool implementations |
 | `internal/agent/builtin_compute.go` / `builtin_edit_file.go` / `builtin_debug.go` / `builtin_vision.go` | the agent-bound tools |
 | `cmd/kaiju/main.go` (~L389–510) | registration + config gates |

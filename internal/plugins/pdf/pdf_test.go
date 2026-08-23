@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttools "github.com/Compdeep/kaiju/internal/agent/tools"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 	"github.com/Compdeep/kaiju/internal/plugins"
 )
 
@@ -17,14 +17,14 @@ import (
 // contributes through Register — both its tools and its seams.
 type captureHost struct {
 	ws       string
-	tools    []agenttools.Tool
+	tools    []toolapi.Tool
 	decoders map[string]func([]byte) (string, error)
 }
 
 var _ plugins.Host = (*captureHost)(nil)
 
-func (h *captureHost) Workspace() string         { return h.ws }
-func (h *captureHost) AddTool(t agenttools.Tool) { h.tools = append(h.tools, t) }
+func (h *captureHost) Workspace() string      { return h.ws }
+func (h *captureHost) AddTool(t toolapi.Tool) { h.tools = append(h.tools, t) }
 func (h *captureHost) RegisterBinaryDecoder(mime string, fn func([]byte) (string, error)) {
 	if h.decoders == nil {
 		h.decoders = map[string]func([]byte) (string, error){}
@@ -44,8 +44,8 @@ func TestPluginRegistersToolAndSeam(t *testing.T) {
 		t.Fatalf("Register added tools %v, want one pdf_extract", h.tools)
 	}
 	tool := h.tools[0]
-	if tool.Impact(nil) != agenttools.ImpactObserve {
-		t.Errorf("Impact = %d, want observe (%d)", tool.Impact(nil), agenttools.ImpactObserve)
+	if tool.Impact(nil) != toolapi.ImpactObserve {
+		t.Errorf("Impact = %d, want observe (%d)", tool.Impact(nil), toolapi.ImpactObserve)
 	}
 	if len(tool.Parameters()) == 0 || !strings.Contains(string(tool.Parameters()), "path") {
 		t.Errorf("Parameters missing 'path': %s", tool.Parameters())

@@ -125,7 +125,11 @@ export async function switchSession(id) {
     try {
       const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
       ss.messages = (msgs || []).map(m => {
-        const msg = { id: m.id, role: m.role, content: m.content }
+        // compacted_into is the id of the summary that now stands for this
+        // message. Carried so the view can fold it under that summary instead
+        // of showing it inline — it is still part of the record, just no
+        // longer part of what a model is sent.
+        const msg = { id: m.id, role: m.role, content: m.content, compactedInto: m.compacted_into || 0 }
         if (m.dag_trace) {
           try { msg.trace = JSON.parse(m.dag_trace) } catch {}
         }
@@ -158,7 +162,7 @@ export async function refreshMessages(id) {
   try {
     const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
     ss.messages = (msgs || []).map(m => {
-      const msg = { id: m.id, role: m.role, content: m.content }
+      const msg = { id: m.id, role: m.role, content: m.content, compactedInto: m.compacted_into || 0 }
       if (m.dag_trace) { try { msg.trace = JSON.parse(m.dag_trace) } catch {} }
       return msg
     })
@@ -315,7 +319,7 @@ export async function send(text) {
       session_id: sendingSid,
       intent: s.intent,
       // The chat toggle picks the lane. ON ⇒ chat_mode ⇒ the chat lane: a direct
-      // reply from the chat model (e.g. a roleplay tune). OFF ⇒ the agent — but we
+      // reply from the chat model (e.g. an unrestricted tune). OFF ⇒ the agent — but we
       // do NOT force a plan on every message. We pass the execution-mode toggle
       // (default "interactive"), which lets preflight classify each query: chatter
       // gets a quick conversational reply, a real task gets the planner + tools +

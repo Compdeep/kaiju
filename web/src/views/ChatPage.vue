@@ -3,7 +3,11 @@
     <!-- Col 1: Session sidebar -->
     <div class="sidebar" :style="{ width: sidebarW + 'px' }" :class="{ collapsed: sidebarCollapsed }">
       <router-link to="/chat" class="col-header sidebar-header">
-        <svg viewBox="0 11 100 100" width="26" height="26" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" class="kaiju-logo" :class="{ dark: settings.theme === 'dark' }">
+        <!-- A supplied logo replaces the drawn mark. The drawn one recolours
+             itself by mode; an image cannot, so an application supplying one
+             supplies a mark that reads in both. -->
+        <img v-if="brandLogo()" :src="brandLogo()" :alt="brandName()" width="38" height="38" class="brand-logo" />
+        <svg v-else viewBox="0 11 100 100" width="38" height="38" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" class="kaiju-logo" :class="{ dark: settings.theme === 'dark' }">
           <g class="k-body">
             <g transform="translate(50,44) rotate(180)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
             <g transform="translate(29,57) rotate(90)"><polyline points="-16,0 -8,14 0,0 8,14 16,0"/></g>
@@ -14,7 +18,6 @@
           <line x1="42" y1="52" x2="42" y2="60" class="k-eye" stroke-width="3"/>
           <line x1="58" y1="52" x2="58" y2="60" class="k-eye" stroke-width="3"/>
         </svg>
-        <span v-if="!sidebarCollapsed" class="wordmark">KAIJU</span>
       </router-link>
       <template v-if="!sidebarCollapsed">
         <button class="sidebar-new" @click="chat.createSession()">
@@ -54,8 +57,11 @@
       <div class="col-header chat-header">
         <div class="chat-title" :title="currentTitle">{{ currentTitle }}</div>
         <div class="chat-header-actions">
+          <IntentSelector ref="intentSelectorRef" />
           <ModelSelector ref="modelSelectorRef" />
-          <button class="hdr-btn" :class="{ active: panel.open }" @click="panel.toggle()" :title="panel.open ? 'Close panel' : 'Open panel'">
+          <!-- Only where the workspace section exists: its routes are not
+               registered when it does not, and the panel would open empty. -->
+          <button v-if="sectionOn('workspace')" class="hdr-btn" :class="{ active: panel.open }" @click="panel.toggle()" :title="panel.open ? 'Close panel' : 'Open panel'">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
           </button>
           <!-- Utility cluster: lives here only while the panel is CLOSED; when the
@@ -90,19 +96,42 @@
         </div>
 
         <template v-for="(msg, i) in sessions.messages" :key="i">
+          <!-- A message a summary now stands for. Still in the record, so it is
+               rendered, but folded away until its summary is opened. -->
+          <div
+            v-if="msg.compactedInto"
+            v-show="opened[msg.compactedInto]"
+            :class="['msg', msg.role, 'msg-folded']"
+          >
+            <div class="msg-meta">
+              <span class="msg-author">{{ msg.role === 'user' ? 'you' : brandName() }}</span>
+            </div>
+            <div class="msg-content md" v-html="renderMd(msg.content)"></div>
+          </div>
+
+          <!-- The summary itself, in place of everything above it that it replaced. -->
+          <div v-else-if="foldedCount(msg.id)" class="summary-mark">
+            <button class="summary-toggle" @click="opened[msg.id] = !opened[msg.id]">
+              <span class="summary-caret">{{ opened[msg.id] ? '▾' : '▸' }}</span>
+              context summarised from here
+              <span class="summary-count">{{ foldedCount(msg.id) }} earlier messages</span>
+            </button>
+            <div v-if="opened[msg.id]" class="summary-body md" v-html="renderMd(summaryText(msg.content))"></div>
+          </div>
+
           <!-- Show saved trace above its assistant message -->
           <DAGTrace
-            v-if="msg.role === 'assistant' && msg.trace && msg.trace.length"
+            v-else-if="msg.role === 'assistant' && msg.trace && msg.trace.length"
             :nodes="msg.trace"
             :running="false"
           />
-          <div v-if="msg.gaps && msg.gaps.length" class="gaps-strip">
+          <div v-if="!msg.compactedInto && !foldedCount(msg.id) && msg.gaps && msg.gaps.length" class="gaps-strip">
             <span class="gaps-icon">!</span>
             <span v-for="(gap, gi) in msg.gaps" :key="gi" class="gap-tag">{{ gap }}</span>
           </div>
-          <div :class="['msg', msg.role]">
+          <div v-if="!msg.compactedInto && !foldedCount(msg.id)" :class="['msg', msg.role]">
             <div class="msg-meta">
-              <span class="msg-author">{{ msg.role === 'user' ? 'you' : 'kaiju' }}</span>
+              <span class="msg-author">{{ msg.role === 'user' ? 'you' : brandName() }}</span>
               <span class="msg-tools" v-if="editing !== i">
                 <button v-if="msg.id && !sessions.loading" class="msg-tool" title="Edit this message" @click="startEdit(i, msg)">✎</button>
                 <button v-if="msg.role === 'assistant' && i === lastAssistantIndex && !sessions.loading" class="msg-tool" title="Regenerate reply" @click="chat.regenerate()">↻</button>
@@ -130,7 +159,7 @@
 
         <div v-if="sessions.loading" class="msg assistant">
           <div class="msg-meta">
-            <span class="msg-author">kaiju</span>
+            <span class="msg-author">{{ brandName() }}</span>
             <span v-if="!dag.streamingVerdict" class="thinking-scan"></span>
           </div>
           <details v-if="dag.streamingReasoning" class="thinking-panel" :open="!dag.streamingVerdict">
@@ -208,7 +237,7 @@
 
     <!-- Col 3: Composable panel. The utility cluster hops into its header (via
          the #header-actions slot) whenever the panel is open. -->
-    <ComposablePanel v-if="panel.open">
+    <ComposablePanel v-if="panel.open && sectionOn('workspace')">
       <template #header-actions>
         <HeaderTools
           @open-tools="showTools = true"
@@ -222,7 +251,7 @@
     <!-- Modals (moved here from App.vue with the header removal — opened from the
          chat-header gear and the panel-header Tools / Users&Scopes buttons) -->
     <transition name="modal">
-      <AdminModal v-if="showAdmin" :initial-tab="adminTab" @close="showAdmin = false" />
+      <AdminModal v-if="showAdmin && sectionOn('users')" :initial-tab="adminTab" @close="showAdmin = false" />
     </transition>
     <transition name="modal">
       <SettingsModal v-if="showSettings" @close="onSettingsClose" />
@@ -264,9 +293,12 @@ import DAGTrace from '../components/DAGTrace.vue'
 import ComposablePanel from '../components/ComposablePanel.vue'
 import UploadButton from '../components/UploadButton.vue'
 import UploadChip from '../components/UploadChip.vue'
+import IntentSelector from '../components/IntentSelector.vue'
 import ModelSelector from '../components/ModelSelector.vue'
 import HeaderTools from '../components/HeaderTools.vue'
 import AdminModal from '../components/AdminModal.vue'
+import { brandName, brandLogo, sectionOn } from '../uiconfig'
+import { renderMarkdown } from '../markdown'
 import SettingsModal from '../components/SettingsModal.vue'
 import ToolsModal from '../components/ToolsModal.vue'
 import * as uploads from '../services/uploads'
@@ -316,6 +348,7 @@ const auth = useAuthStore()
 const settings = useSettingsStore()
 const input = ref('')
 const composeInput = ref(null)     // <textarea> ref, for auto-grow
+const intentSelectorRef = ref(null) // <IntentSelector> ref, to re-sync after Advanced settings
 const modelSelectorRef = ref(null) // <ModelSelector> ref, to re-sync after Advanced settings
 
 // ── Chat-header state ──
@@ -356,9 +389,30 @@ function doLogout() { auth.logout(); router.push('/login') }
 function onSettingsClose() {
   showSettings.value = false
   modelSelectorRef.value?.reload()
+  intentSelectorRef.value?.reload()
 }
 
 // ── Inline message editing / regenerate ──
+// Summaries the reader has opened, keyed by the summary's message id. Opening
+// one reveals the messages it stands for, which are otherwise folded away.
+const opened = ref({})
+
+/** desc: how many messages a given summary stands for (0 if it is not a summary). */
+function foldedCount(id) {
+  if (!id) return 0
+  let n = 0
+  for (const m of sessions.messages) if (m.compactedInto === id) n++
+  return n
+}
+
+const summaryPrefix = '[Conversation summary]: '
+
+/** desc: the summary without the marker the compactor writes in front of it. */
+function summaryText(content) {
+  const c = content || ''
+  return c.startsWith(summaryPrefix) ? c.slice(summaryPrefix.length) : c
+}
+
 const editing = ref(null)   // index of the message being edited, or null
 const editBuf = ref('')     // edit textarea buffer
 const lastAssistantIndex = computed(() => {
@@ -553,13 +607,13 @@ function scrollToBottom(delay = 60) {
 
 
 /**
- * desc: Convert markdown-formatted text to HTML using marked + highlight.js
+ * desc: Convert markdown-formatted text to HTML using marked + highlight.js.
+ * The sanitising lives in ../markdown.js, which explains why it has to.
  * @param {string} text - Raw markdown text
  * @returns {string} HTML string with syntax-highlighted code blocks
  */
 function renderMd(text) {
-  if (!text) return ''
-  return marked.parse(text)
+  return renderMarkdown(text)
 }
 
 // Watch for route changes (e.g. clicking a session in sidebar or browser back/forward)
@@ -589,17 +643,14 @@ watch(() => sessions.sessionId, (newId) => {
 /* Base .col-header (height / border / layout) is in global.css so all three
    columns line up. Per-column tweaks live here. */
 
-/* Sidebar header: logo + wordmark */
+/* Sidebar header: logo only */
 .sidebar-header {
   gap: 8px; justify-content: flex-start;
   text-decoration: none; cursor: pointer;
 }
 .sidebar.collapsed .sidebar-header { justify-content: center; padding: 0; }
-.wordmark {
-  font-family: var(--display); font-size: 15px; font-weight: 600;
-  letter-spacing: 0.14em; color: var(--text);
-}
 /* Logo colours — mirror the old AppHeader brand (cyan light / indigo+pink dark) */
+.brand-logo { width: 38px; height: 38px; object-fit: contain; flex-shrink: 0; }
 .kaiju-logo { transition: filter 0.2s ease, transform 0.2s ease; flex-shrink: 0; }
 .kaiju-logo .k-body { stroke: #4FC3F7; }
 .kaiju-logo .k-eye { stroke: #4FC3F7; }
@@ -709,7 +760,8 @@ watch(() => sessions.sessionId, (newId) => {
   flex: 1; color: var(--text-muted); font-size: 14px;
 }
 
-.msg { display: flex; flex-direction: column; gap: 4px; max-width: 740px; }
+.msg { display: flex; flex-direction: column; gap: 4px; max-width: min(740px, 100%); min-width: 0; }
+.msg-content { max-width: 100%; overflow-wrap: anywhere; }
 .msg-meta { display: flex; align-items: center; gap: 6px; }
 .msg-tools { display: inline-flex; gap: 4px; opacity: 0; transition: opacity .12s; }
 .msg:hover .msg-tools { opacity: 1; }
@@ -718,6 +770,18 @@ watch(() => sessions.sessionId, (newId) => {
 .msg-edit { display: flex; flex-direction: column; gap: 6px; }
 .msg-edit-area { width: 100%; resize: vertical; font: inherit; font-size: 14px; line-height: 1.6; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 .msg-edit-actions { display: flex; gap: 6px; }
+
+/* A summary and the messages it stands for. The marker is quiet by default so a
+   long thread still reads as a thread; opening it shows the summary text and
+   unfolds the messages above it. */
+.summary-mark { display: flex; flex-direction: column; gap: 8px; max-width: min(740px, 100%); }
+.summary-toggle { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: none; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; padding: 7px 2px; text-align: left; }
+.summary-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.summary-caret { font-size: 10px; width: 9px; }
+.summary-count { margin-left: auto; opacity: .75; }
+.summary-body { font-size: 13px; line-height: 1.6; color: var(--text-muted); background: var(--surface); border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; padding: 10px 12px; }
+.msg-folded { opacity: .62; }
+.msg-folded:hover { opacity: 1; }
 .msg-edit-save, .msg-edit-cancel { font-size: 12px; padding: 3px 10px; border-radius: 5px; border: 1px solid var(--line); cursor: pointer; background: var(--surface); color: var(--text); }
 .msg-edit-save { background: var(--accent); color: #fff; border-color: var(--accent); }
 .msg-author {

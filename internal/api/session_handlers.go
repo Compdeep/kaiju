@@ -149,7 +149,8 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 /*
  * handleGetMessages returns messages for a session owned by the authenticated user.
- * desc: Verifies session ownership, then returns up to 500 messages including DAG trace entries.
+ * desc: Verifies session ownership, then returns the thread including messages a
+ *       summary now stands for, paged by limit and offset.
  * param: w - HTTP response writer
  * param: r - HTTP request with JWT claims in context and an id path parameter
  */
@@ -168,8 +169,27 @@ func (a *API) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return raw db messages (includes dag_trace entries)
-	msgs, err := a.db.GetMessages(id, 500)
+	// The whole thread, compacted messages included, since this is what a person
+	// reads rather than what a model is sent. Each row carries compacted_into, so
+	// a summary can be shown in place of what it stands for and the reader can
+	// still open it. Paged, because a long session is more than a view wants at
+	// once — limit and offset are read from the query, with a ceiling so a large
+	// value cannot ask for the whole of a very long conversation in one response.
+	limit, offset := 200, 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			offset = n
+		}
+	}
+	msgs, err := a.db.GetFullTranscript(id, limit, offset)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return

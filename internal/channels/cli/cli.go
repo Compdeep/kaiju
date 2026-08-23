@@ -849,7 +849,6 @@ func termCols() int {
 	return cols
 }
 
-
 // logTimestampRe strips Go's default log timestamp prefix (e.g. "2026/04/06 22:50:16 ").
 var logTimestampRe = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)
 

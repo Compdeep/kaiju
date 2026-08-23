@@ -1,0 +1,3 @@
+{"core": true, "query": "add a nullable TEXT column named phone to the users table, keeping every existing column", "check": "grep -qi 'phone' $FILE && grep -q 'email       TEXT NOT NULL UNIQUE' $FILE && grep -q 'active      BOOLEAN NOT NULL DEFAULT true' $FILE && grep -q 'CREATE TABLE orders' $FILE"}
+{"query": "add an index on orders(status) named orders_status_idx, keeping the existing index", "check": "grep -q 'orders_status_idx' $FILE && grep -q 'orders_user_id_idx' $FILE && grep -qi 'ON orders' $FILE"}
+{"query": "change the default order status from 'pending' to 'created', changing nothing else", "check": "grep -q \\\"DEFAULT 'created'\\\" $FILE && ! grep -q \\\"'pending'\\\" $FILE && grep -q 'total_cents INTEGER NOT NULL' $FILE"}

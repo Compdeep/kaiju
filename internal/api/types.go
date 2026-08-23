@@ -56,7 +56,7 @@ type ActionInfo struct {
 
 // ExecuteResponse is returned from POST /api/v1/execute.
 type ExecuteResponse struct {
-	Verdict    string       `json:"verdict"`
+	Outcome    string       `json:"outcome"`
 	Actions    []ActionInfo `json:"actions,omitempty"` // recommended follow-up actions (caller decides)
 	Gaps       []string     `json:"gaps,omitempty"`    // capability gaps (missing tools)
 	DAGID      string       `json:"dag_id,omitempty"`
@@ -76,6 +76,11 @@ type ToolInfo struct {
 	Impact      int    `json:"default_impact"`
 	Enabled     bool   `json:"enabled"`
 	Source      string `json:"source"` // "builtin", "custom", "skillmd:path"
+	// Reach is how far this tool may be called from: off, local, or
+	// everywhere. Carried because the interface shows it and, where the
+	// application allows, changes it — and a panel that cannot see the state
+	// cannot offer to change it.
+	Reach string `json:"reach"`
 }
 
 // StatusResponse is returned from GET /api/v1/status.

@@ -10,7 +10,10 @@
     <button class="hdr-btn" title="Tools &amp; Skills" @click="$emit('open-tools')">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
     </button>
-    <button class="hdr-btn" title="Users &amp; Scopes" @click="$emit('open-admin')">
+    <!-- Only where the users section exists. The routes behind it are not
+         registered when it does not, so this button would open a modal whose
+         every request answers 404. -->
+    <button v-if="sectionOn('users')" class="hdr-btn" title="Users &amp; Scopes" @click="$emit('open-admin')">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
     </button>
     <div class="popover-wrap">
@@ -40,6 +43,8 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import SettingsPopover from './SettingsPopover.vue'
+
+import { sectionOn } from '../uiconfig'
 
 const emit = defineEmits(['open-tools', 'open-admin', 'open-advanced', 'logout'])
 const settings = useSettingsStore()

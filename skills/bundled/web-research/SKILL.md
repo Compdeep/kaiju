@@ -1,35 +1,94 @@
 ---
 name: web_research_guide
-description: Teaches the planner how to conduct multi-phase web research using search and fetch tools
+description: Teaches the planner how to research with web_search, web_fetch and web_research — choosing a shape, following a trail, and working on whole pages
 ---
 
-## Planning Guidance
+## Purpose
 
-Web research has two valid shapes — use whichever fits:
+Use web research when the answer needs current information, outside evidence, or precise attribution.
 
-1. **The wired chain (default for control):** step 0 `web_search`, then a step 1+ `web_fetch` for each result URL you want to read, wired with `${step.0.results.0.url}`, `${step.0.results.1.url}`, … and `depends_on:[0]`. This is the normal multi-step plan — plan one fetch per source you need.
-2. **`web_research` (convenience):** one node that searches AND reads the top results in one step. Good for a quick single angle. It does not replace the wired chain; it bundles it.
+Answer only from page content that was actually retrieved. Not from search snippets, not from a remembered URL.
 
-Either way: a URL you fetch MUST come from a search result — never invent one, never stop at snippets.
+## Choosing a shape
 
-- Plan 2–4 research angles (a wired search→fetch chain, or a `web_research` call, per angle).
-- Use plain KEYWORD queries, not search operators. "sovereign AI infrastructure market size 2026", NOT `site:… OR site:… filetype:pdf …`. Stacked `site:`/`filetype:` operators over-filter and return nothing — the engine ranks good sources without them.
-- `max_sources` = how many top results to read per angle (default 4). `recency_days` biases to recent results for time-sensitive figures. `focus` names the exact facts/figures to pull from each page.
-- Each source `web_research` returns shows its **return code** and its content. Answer ONLY from sources that actually returned content — if a source shows a 4xx/blocked code with no content, it was NOT read: do not cite it, and never present an unread or invented URL as a source.
+Use the smallest shape that answers the question.
 
-### Focus Parameter Examples
-Good focus values (specific, covers multiple needs):
-- "company name, pricing tiers, key features, target customers, competitive advantages"
-- "GDPR requirements, data residency rules, enforcement examples"
-- "market size, growth rate, key players, pricing trends"
+**Wired chain** — the default when source choice or traceability matters.
 
-Bad focus values (too narrow, causes duplicate fetches):
-- "pricing" (too narrow — combine with features and customers)
+1. A `web_search` step for one angle.
+2. A `web_fetch` step for each result worth reading. Each takes its URL from the search output, declares that search in `depends_on`, and names the facts to extract in `focus`.
 
-`web_search` (URLs only) wired into `web_fetch` (`${step.0.results.0.url}`) is the precise, controllable chain; `web_research` bundles the same two steps into one node. Pick whichever fits — never paste a URL from memory.
+**`web_research`** — one node that searches and reads for a single angle. Same evidence rules. Use it when picking sources individually adds nothing.
 
-### What NOT to do
-- Don't use `memory_store` to save intermediate results — evidence is automatic
-- Don't over-filter — no stacked `site:`/`filetype:` operators or long `OR` chains; they return nothing
-- Don't answer from snippets, or cite a URL that didn't actually return content (check its return code)
-- Don't type a URL from memory — `web_research` only reads URLs a real search returned
+Never type a URL from memory. A URL you fetch comes from a search result.
+
+## Planning angles
+
+Plan by distinct question, not by a source count.
+
+- A simple factual question: one angle.
+- A comparison or recommendation: two or three.
+- A broad or disputed question: three or four.
+
+Avoid angles that will return the same evidence twice.
+
+Per angle: a plain keyword query, `max_sources` of 3–5, `focus` naming every fact needed from a page, and `recency_days` only when freshness matters.
+
+## Following a trail
+
+Some answers cannot be planned in advance. You have to see one result before you can write the next step — find the API endpoint, then call it; find the filing, then pull a figure out of it.
+
+Plan the steps you can know now. Do not invent the ones you cannot: an endpoint, a URL or a file path you have not seen is a guess, and the step built on it fails.
+
+When a step reveals what comes next, you will be asked to plan again with its result in view. Write the next step then.
+
+## Whole pages
+
+`web_fetch` returns two forms of the same page:
+
+- `content` — shortened so it fits in a prompt. On a long page this is only the opening.
+- `full_content_path` — the whole page, saved to disk. `bytes` is its size.
+
+Compare `bytes` with the length of `content` to see how much you were given.
+
+To count, search or total across a whole page, pass `full_content_path` to a `bash` or `compute` step and open the file there. Counting inside `content` gives a number for the opening, not for the page.
+
+Never paste a document into a parameter. It goes into a prompt, and a large one does not fit.
+
+## Queries
+
+Plain keywords: `sovereign AI infrastructure market size 2026`.
+
+Not stacked operators: `site:… OR site:… filetype:pdf`. They over-filter and return nothing. One `site:` is acceptable when the task names an official source.
+
+## Focus
+
+Name every related fact you need from a page, so it is read once.
+
+- Good: `pricing tiers, key features, target customers, competitive advantages`
+- Good: `market size, forecast period, growth rate, methodology, named competitors`
+- Too narrow: `pricing`, `market size`
+
+## Choosing sources
+
+Prefer primary sources — official documentation, filings, legislation, papers, datasets, company announcements. Then secondary sources that show where their figures came from. Others only when no primary evidence exists.
+
+For a disputed claim, look for independent corroboration rather than several pages repeating one original. Drop syndicated copies of the same article.
+
+## When a source cannot be read
+
+A page counts as evidence only if content came back. If it did not, discard it, then either fetch another result from the same search or run a narrower search.
+
+Never cite a page that returned nothing.
+
+## When to stop
+
+Stop when every material part of the question is supported, disputed claims have corroboration, and further sources would repeat what you have.
+
+Do not add steps to reach a number.
+
+## Do not
+
+- Save intermediate results with `memory_store` — evidence is kept automatically.
+- Fetch the same page repeatedly for facts a single `focus` could have gathered.
+- Answer from snippets, or cite a page whose content was not retrieved.

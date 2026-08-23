@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 const compactPrompt = `Summarize the following conversation history in 2-3 concise paragraphs.
@@ -86,16 +86,18 @@ func (m *Manager) Compact(ctx context.Context, sessionID string) (string, error)
 
 	summary := resp.Choices[0].Message.Content
 
-	// Delete old messages, keep newest
-	if err := m.db.DeleteOldestMessages(sessionID, CompactKeepRecent); err != nil {
-		return "", fmt.Errorf("memory: delete old messages: %w", err)
-	}
-
-	// Insert summary as system message before the remaining messages
+	// The summary is written first, because what follows records which summary
+	// each older message is now stood for, and that needs its id. Nothing is
+	// deleted: the messages stop being loaded for a model and stay readable and
+	// searchable, so whatever the summary left out is still recoverable.
 	earliestKeepTime := keep[0].CreatedAt
 	summaryContent := "[Conversation summary]: " + summary
-	if err := m.db.PrependMessage(sessionID, "system", summaryContent, earliestKeepTime-1); err != nil {
+	summaryID, err := m.db.PrependMessage(sessionID, "system", summaryContent, earliestKeepTime-1)
+	if err != nil {
 		return "", fmt.Errorf("memory: insert summary: %w", err)
+	}
+	if err := m.db.MarkCompacted(sessionID, CompactKeepRecent, summaryID); err != nil {
+		return "", fmt.Errorf("memory: mark compacted messages: %w", err)
 	}
 
 	log.Printf("[memory] compacted session %s: %d messages → summary + %d recent", sessionID, len(toSummarize), CompactKeepRecent)

@@ -85,11 +85,15 @@ func (d *DB) migrate() error {
 		)`,
 
 		// Scopes
+		// No max_intent column. One was here, holding 2 for every scope on a scale
+		// that runs 0, 100, 200 — a leftover from an older scale of 0, 1, 2 — and no
+		// code ever read it. The ceiling a scope allows is intent_cap, added below.
+		// A database made before this keeps the old column; nothing reads it and
+		// SQLite makes dropping one awkward, so it is left alone.
 		`CREATE TABLE IF NOT EXISTS scopes (
 			name        TEXT PRIMARY KEY,
 			description TEXT NOT NULL DEFAULT '',
-			tools       TEXT NOT NULL DEFAULT '{}',
-			max_intent  INTEGER NOT NULL DEFAULT 2
+			tools       TEXT NOT NULL DEFAULT '{}'
 		)`,
 
 		// Sessions (conversation history)
@@ -113,22 +117,6 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)`,
 
-		// Audit log (IGX gate decisions)
-		`CREATE TABLE IF NOT EXISTS audit_log (
-			id          INTEGER PRIMARY KEY AUTOINCREMENT,
-			timestamp   INTEGER NOT NULL,
-			username    TEXT NOT NULL DEFAULT '',
-			skill       TEXT NOT NULL,
-			params      TEXT NOT NULL DEFAULT '',
-			intent      INTEGER NOT NULL DEFAULT 0,
-			impact      INTEGER NOT NULL DEFAULT 0,
-			result      TEXT NOT NULL DEFAULT '',
-			error       TEXT NOT NULL DEFAULT '',
-			alert_id    TEXT NOT NULL DEFAULT ''
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_log(username)`,
-
 		// Investigations (DAG execution records)
 		`CREATE TABLE IF NOT EXISTS investigations (
 			id              TEXT PRIMARY KEY,
@@ -143,7 +131,7 @@ func (d *DB) migrate() error {
 			llm_calls       INTEGER NOT NULL DEFAULT 0,
 			reflection_count INTEGER NOT NULL DEFAULT 0,
 			replan_count    INTEGER NOT NULL DEFAULT 0,
-			verdict         TEXT NOT NULL DEFAULT '',
+			outcome         TEXT NOT NULL DEFAULT '',
 			status          TEXT NOT NULL DEFAULT ''
 		)`,
 
@@ -217,8 +205,26 @@ func (d *DB) migrate() error {
 		`ALTER TABLE users ADD COLUMN profiles TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE users ADD COLUMN groups TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE messages ADD COLUMN dag_trace TEXT NOT NULL DEFAULT ''`,
+		// Compaction used to delete what it summarised, so a conversation older
+		// than the window was gone: not from the model's view, from the record.
+		// It is now marked with the id of the summary that stands for it, so the
+		// thread can still be read and searched, and a summary can say which
+		// messages it replaced. Zero means the message is still live.
+		`ALTER TABLE messages ADD COLUMN compacted_into INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE scopes ADD COLUMN cap TEXT NOT NULL DEFAULT '{}'`,
+		// How far a run may go for someone holding this scope. Existing scopes
+		// default to the top of the scale, so adding the column takes nothing away
+		// from anybody who already has it — an administrator lowers it deliberately.
+		`ALTER TABLE scopes ADD COLUMN intent_cap INTEGER NOT NULL DEFAULT 200`,
 		`ALTER TABLE intents ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`,
+		// runs.verdict became runs.outcome. A database created before the
+		// rename has the old column and CREATE TABLE IF NOT EXISTS will not
+		// touch it, so the insert would fail on a column that is not there.
+		// Both statements are attempted and both are allowed to fail: on a new
+		// database the rename finds nothing, on an old one the add finds the
+		// column already present.
+		`ALTER TABLE runs RENAME COLUMN verdict TO outcome`,
+		`ALTER TABLE runs ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, m := range alterMigrations {
 		d.conn.Exec(m) // ignore duplicate column errors
@@ -228,5 +234,11 @@ func (d *DB) migrate() error {
 	d.conn.Exec(`DELETE FROM messages WHERE role = 'dag_trace'`)
 
 	// Seed default profiles
+	// The full-text index over messages, after the tables it reads and the
+	// columns the alters added.
+	if err := d.migrateMessageSearch(); err != nil {
+		return err
+	}
+
 	return d.SeedDefaultScopes()
 }

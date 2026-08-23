@@ -13,26 +13,22 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Compdeep/kaiju/agent"
+	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/docs"
-	"github.com/Compdeep/kaiju/internal/agent"
-	"github.com/Compdeep/kaiju/internal/agent/llm"
-	"github.com/Compdeep/kaiju/internal/agent/uploads"
-	"github.com/Compdeep/kaiju/internal/api"
-	"github.com/Compdeep/kaiju/internal/auth"
 	"github.com/Compdeep/kaiju/internal/channels"
 	"github.com/Compdeep/kaiju/internal/channels/cli"
 	"github.com/Compdeep/kaiju/internal/channels/web"
-	kaijuclr "github.com/Compdeep/kaiju/internal/clearance"
-	"github.com/Compdeep/kaiju/internal/compat/ipc"
-	"github.com/Compdeep/kaiju/internal/compat/protocol"
 	"github.com/Compdeep/kaiju/internal/config"
+	"github.com/Compdeep/kaiju/internal/configapi"
 	kaijudb "github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
 	"github.com/Compdeep/kaiju/internal/memory"
 	"github.com/Compdeep/kaiju/internal/plugins"
 	"github.com/Compdeep/kaiju/internal/skillhub"
-	kaijutools "github.com/Compdeep/kaiju/internal/tools"
 	"github.com/Compdeep/kaiju/internal/workspace"
+	"github.com/Compdeep/kaiju/tools"
+	"github.com/Compdeep/kaiju/ui"
 )
 
 var version = "dev"
@@ -315,36 +311,51 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	}
 
 	agentCfg := agent.Config{
-		LLMEndpoint:                 cfg.LLM.Endpoint,
-		LLMAPIKey:                   cfg.LLM.APIKey,
-		LLMModel:                    cfg.LLM.Model,
-		Providers:                   buildProviderCreds(cfg.Providers),
-		MaxTurns:                    cfg.Agent.MaxTurns,
-		Temperature:                 cfg.LLM.Temperature,
-		MaxTokens:                   cfg.LLM.MaxTokens,
-		RateLimit:                   cfg.Agent.RateLimit,
-		NodeClearance:               cfg.Agent.SafetyLevel,
-		NodeRole:                    "node",
-		DataDir:                     cfg.Agent.DataDir,
-		Workspace:                   cfg.Agent.Workspace,
-		MetadataDir:                 cfg.Agent.MetadataDir,
-		CLIMode:                     cfg.Agent.CLIMode,
-		NodeID:                      "kaiju-local",
-		DAGEnabled:                  cfg.Agent.DAGEnabled,
-		DAGMode:                     cfg.Agent.DAGMode,
-		MaxNodes:                    cfg.Agent.MaxNodes,
-		MaxPerSkill:                 cfg.Agent.MaxPerSkill,
-		MaxLLMCalls:                 cfg.Agent.MaxLLMCalls,
-		MaxObserverCalls:            cfg.Agent.MaxObserverCalls,
-		BatchSize:                   cfg.Agent.BatchSize,
-		MaxInvestigations:           cfg.Agent.MaxInvestigations,
-		MaxReplans:                  cfg.Agent.MaxReplans,
-		MaxConcurrentInvestigations: cfg.Agent.MaxConcurrent,
-		DisableCoding:               cfg.Agent.DisableCoding,
-		ExecutionMode:               cfg.Agent.ExecutionMode,
-		DAGWallClock:                time.Duration(cfg.Agent.WallClockSec) * time.Second,
-		ComputeTimeout:              time.Duration(cfg.Tools.Compute.TimeoutSec) * time.Second,
-		ClassifierEnabled:           classifierEnabled,
+		ModelConfig: agent.ModelConfig{
+			LLMEndpoint: cfg.LLM.Endpoint,
+			LLMAPIKey:   cfg.LLM.APIKey,
+			LLMModel:    cfg.LLM.Model,
+			Providers:   buildProviderCreds(cfg.Providers),
+			Temperature: cfg.LLM.Temperature,
+			MaxTokens:   cfg.LLM.MaxTokens,
+			RateLimit:   cfg.Agent.RateLimit,
+			// The model catalog is the application's, so the engine asks for the
+			// limits rather than carrying a copy of them.
+			Limits: configapi.ModelLimits,
+		},
+		PathConfig: agent.PathConfig{
+			DataDir:     cfg.Agent.DataDir,
+			Workspace:   cfg.Agent.Workspace,
+			MetadataDir: cfg.Agent.MetadataDir,
+			CLIMode:     cfg.Agent.CLIMode,
+		},
+		IdentityConfig: agent.IdentityConfig{
+			NodeID:        "kaiju-local",
+			NodeRole:      "node",
+			NodeClearance: cfg.Agent.SafetyLevel,
+		},
+		DAGConfig: agent.DAGConfig{
+			DAGEnabled:                  cfg.Agent.DAGEnabled,
+			DAGMode:                     cfg.Agent.DAGMode,
+			MaxTurns:                    cfg.Agent.MaxTurns,
+			MaxNodes:                    cfg.Agent.MaxNodes,
+			MaxPerSkill:                 cfg.Agent.MaxPerSkill,
+			MaxLLMCalls:                 cfg.Agent.MaxLLMCalls,
+			MaxObserverCalls:            cfg.Agent.MaxObserverCalls,
+			BatchSize:                   cfg.Agent.BatchSize,
+			MaxInvestigations:           cfg.Agent.MaxInvestigations,
+			MaxReplans:                  cfg.Agent.MaxReplans,
+			MaxConcurrentInvestigations: cfg.Agent.MaxConcurrent,
+			ExecutionMode:               cfg.Agent.ExecutionMode,
+			DAGWallClock:                time.Duration(cfg.Agent.WallClockSec) * time.Second,
+		},
+		RoutingConfig: agent.RoutingConfig{
+			ClassifierEnabled: classifierEnabled,
+		},
+		ComputeConfig: agent.ComputeConfig{
+			ComputeTimeout: time.Duration(cfg.Tools.Compute.TimeoutSec) * time.Second,
+			DisableCoding:  cfg.Agent.DisableCoding,
+		},
 	}
 
 	// Bootstrap workspace on first run
@@ -358,7 +369,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		}
 	}
 
-	ag, err := agent.New(agentCfg, noopGossip{}, noopIPC{}, "kaiju-local")
+	ag, err := agent.New(agentCfg)
 	if err != nil {
 		log.Fatalf("agent: %v", err)
 	}
@@ -389,44 +400,57 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	// Register kaiju tools
 	reg := ag.Registry()
 	if cfg.Tools.Sysinfo.Enabled {
-		reg.Replace(kaijutools.NewSysinfo(cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewSysinfo(cfg.Agent.Workspace), "builtin")
 	}
-	// Coding tools (compute + edit_file). disable_coding is the master switch for
-	// the whole coding module — when set, these tools aren't even registered, so
-	// the planner never sees them.
-	if cfg.Tools.Compute.Enabled && !cfg.Agent.DisableCoding {
+	// Coding tools (compute + edit_file), on the tool switch alone.
+	//
+	// disable_coding is NOT part of this condition any more. It is documented,
+	// here and on agent.Config, as refusing deep compute — codebase building —
+	// while leaving shallow analytical compute alone, and compute.go enforces
+	// exactly that: with the flag set an unstated mode defaults to shallow and
+	// only "deep" is refused. Including the flag here meant the tool was never
+	// registered, so that chokepoint never ran and shallow arithmetic went with
+	// codebase building. A deployment that wants no compute at all sets
+	// tools.compute.enabled to false; a caller that wants none for one request
+	// leaves it out of the tool list on its token.
+	if cfg.Tools.Compute.Enabled {
 		reg.Replace(agent.NewComputeTool(ag), "builtin")
-		// edit_file rides the same Coder pipeline as compute(shallow) so
-		// gate it on the same config flag. Decouple later if we want file
-		// edits without full compute capability.
+		// edit_file rides the same Coder pipeline as compute(shallow), so it
+		// follows the same switch.
 		reg.Replace(agent.NewEditFileTool(ag), "builtin")
-		// debug is the REPAIR super-tool (Holmes RCA → microplanner fix →
-		// validators). Its fix rides the same Coder pipeline, so gate it on the
-		// same flag — with coding disabled there's nothing to fix. Unlike the
-		// agent tool it IS visible to the planner: the executive plans a `debug`
-		// step when a re-plan is triggered by a failure.
-		reg.Replace(agent.NewDebugTool(ag), "builtin")
 	}
+	// debug is the REPAIR super-tool and the only door to Holmes: the executive
+	// plans a `debug` step after a failure and the scheduler grafts the first
+	// Holmes iteration onto it. Registered unconditionally.
+	//
+	// It used to sit inside the block above, which meant a deployment with
+	// coding off had no root-cause analysis at all — the guard in rca.go that
+	// keeps Holmes and drops only the code-fix graft was guarding a path nothing
+	// could enter. Diagnosis is not code generation, and turning the second off
+	// should not take the first with it.
+	reg.Replace(agent.NewDebugTool(ag), "builtin")
 	if cfg.Tools.Bash.Enabled {
-		reg.Replace(kaijutools.NewBash(cfg.Tools.Bash.Shell, cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewBash(cfg.Tools.Bash.Shell, cfg.Agent.Workspace), "builtin")
 	}
 	if cfg.Tools.File.Enabled {
-		reg.Replace(kaijutools.NewFileRead(cfg.Agent.Workspace), "builtin")
-		reg.Replace(kaijutools.NewFileWrite(cfg.Agent.Workspace), "builtin")
-		reg.Replace(kaijutools.NewFileList(cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewFileRead(cfg.Agent.Workspace), "builtin")
+		reg.Replace(tools.NewFileWrite(tools.WorkspaceDefault(cfg.Agent.Workspace)), "builtin")
+		reg.Replace(tools.NewFileList(cfg.Agent.Workspace), "builtin")
 	}
 	if cfg.Tools.Web.Enabled {
-		reg.Replace(kaijutools.NewWebFetchWithLLM(ag.ExecutorClient()), "builtin")
-		searchCfg := kaijutools.SearchConfig{
+		// The workspace so a fetched page is kept and can be read in full later;
+		// the zero limits so this deployment takes the package's own.
+		reg.Replace(tools.NewWebFetchIn(cfg.Agent.Workspace, ag.ExecutorClient(), tools.FetchLimits{}), "builtin")
+		searchCfg := tools.SearchConfig{
 			Provider: cfg.Tools.Web.SearchProvider,
 			DelaySec: cfg.Tools.Web.SearchDelaySec,
 		}
-		reg.Replace(kaijutools.NewWebSearchWithConfig(searchCfg), "builtin")
+		reg.Replace(tools.NewWebSearchWithConfig(searchCfg), "builtin")
 		// web_research = search + auto-fetch the top results in one step, so the
 		// planner never picks a URL to fetch (can't invent) or decides to fetch
 		// (can't skip). The preferred research path; web_search/web_fetch stay for
 		// the cases that genuinely need just URLs or a specific known page.
-		reg.Replace(kaijutools.NewWebResearch(searchCfg, ag.ExecutorClient()), "builtin")
+		reg.Replace(tools.NewWebResearch(searchCfg, ag.ExecutorClient()), "builtin")
 	}
 
 	// Vision tool: lets the planner read an image mid-plan (a fetched screenshot,
@@ -437,41 +461,41 @@ func createAgent(cfg *config.Config) *agent.Agent {
 	}
 
 	// System tools (always enabled)
-	reg.Replace(kaijutools.NewProcessList(), "builtin")
-	reg.Replace(kaijutools.NewProcessKill(), "builtin")
-	svc := kaijutools.NewService(cfg.Agent.Workspace)
+	reg.Replace(tools.NewProcessList(), "builtin")
+	reg.Replace(tools.NewProcessKill(), "builtin")
+	svc := tools.NewService(cfg.Agent.Workspace)
 	reg.Replace(svc, "builtin")
 	// office_extract: Word/PowerPoint/Excel (.docx/.pptx/.xlsx) reading. Built-in
 	// (not a plugin) because it's pure stdlib — no third-party dependency to gate.
-	reg.Replace(kaijutools.NewOfficeExtract(cfg.Agent.Workspace), "builtin")
-	kaijutools.RegisterOfficeDecoders() // let web_fetch read linked Office files too
-	reg.Replace(kaijutools.NewNetInfo(), "builtin")
-	reg.Replace(kaijutools.NewEnvList(), "builtin")
-	reg.Replace(kaijutools.NewDiskUsage(), "builtin")
-	reg.Replace(kaijutools.NewClipboard(), "builtin")
-	reg.Replace(kaijutools.NewArchive(), "builtin")
-	reg.Replace(kaijutools.NewGit(), "builtin")
-	reg.Replace(kaijutools.NewPanelPush(), "builtin")
+	reg.Replace(tools.NewOfficeExtract(cfg.Agent.Workspace), "builtin")
+	tools.RegisterOfficeDecoders() // let web_fetch read linked Office files too
+	reg.Replace(tools.NewNetInfo(), "builtin")
+	reg.Replace(tools.NewEnvList(), "builtin")
+	reg.Replace(tools.NewDiskUsage(), "builtin")
+	reg.Replace(tools.NewClipboard(), "builtin")
+	reg.Replace(tools.NewArchive(), "builtin")
+	reg.Replace(tools.NewGit(), "builtin")
+	reg.Replace(tools.NewPanelPush(), "builtin")
 
 	// Memory tools
 	mem := ag.Memory()
 	if mem != nil {
-		reg.Replace(kaijutools.NewMemoryStore(mem), "builtin")
-		reg.Replace(kaijutools.NewMemoryRecall(mem), "builtin")
-		reg.Replace(kaijutools.NewMemorySearch(mem), "builtin")
+		reg.Replace(tools.NewMemoryStore(mem), "builtin")
+		reg.Replace(tools.NewMemoryRecall(mem), "builtin")
+		reg.Replace(tools.NewMemorySearch(mem), "builtin")
 	}
 
 	// plugin_list lets the agent report which optional plugins are built in and
 	// which are active (read-only) — only worth registering when at least one
 	// plugin is compiled in. plugin_enable (runtime activation) is offered ONLY
 	// when the host opts in via AllowRuntimePluginActivation.
-	var pluginEnable *kaijutools.PluginEnable
+	var pluginEnable *tools.PluginEnable
 	if len(plugins.Compiled()) > 0 {
-		reg.Replace(kaijutools.NewPluginList(), "builtin")
+		reg.Replace(tools.NewPluginList(), "builtin")
 		if cfg.AllowRuntimePluginActivation {
-			pluginEnable = kaijutools.NewPluginEnable(reg, cfg, svc)
+			pluginEnable = tools.NewPluginEnable(reg, cfg, svc)
 			reg.Replace(pluginEnable, "builtin")
-			reg.Replace(kaijutools.NewPluginOption(cfg), "builtin")
+			reg.Replace(tools.NewPluginOption(cfg), "builtin")
 		}
 	}
 
@@ -550,9 +574,14 @@ func runChat() {
 	chatDB, dbErr := kaijudb.Open(filepath.Join(cfg.Agent.DataDir, "kaiju.db"))
 	if dbErr == nil {
 		defer chatDB.Close()
-		if err := ag.LoadIntentRegistry(chatDB); err != nil {
+		if err := ag.LoadIntentRegistry(intentsFrom(chatDB)); err != nil {
 			log.Printf("[chat] intent registry load failed: %v", err)
 		}
+		// message_search, now there is a transcript to search. Registered here rather
+		// than beside the other tools because the agent is built before the database
+		// is open, and a tool with no store to read would only ever say so.
+		ag.Registry().Replace(tools.NewMessageSearch(chatDB), "builtin")
+		ag.SetMessageStore(chatDB)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -682,7 +711,7 @@ func runChat() {
 				Model:     cm,
 				History:   history,
 				Query:     msg.Text,
-				AlertID:   fmt.Sprintf("cli-%d", time.Now().UnixNano()),
+				TriggerID: fmt.Sprintf("cli-%d", time.Now().UnixNano()),
 				SessionID: sessionID,
 				// Base is copied for an escalated agent sub-run. Carry the session,
 				// history, and intent; leave models empty so it uses the configured
@@ -726,6 +755,15 @@ func runServe() {
 	defer kaijuDB.Close()
 	log.Printf("[kaiju] database opened: %s/kaiju.db", cfg.Agent.DataDir)
 
+	// message_search, now there is a transcript to search. Registered here rather
+	// than beside the other tools because the agent is built before the database
+	// is open, and a tool with no store to read would only ever say so.
+	ag.Registry().Replace(tools.NewMessageSearch(kaijuDB), "builtin")
+	// And the same store to the agent itself, which is what the chat lane reads
+	// through when the router says a turn needs something said earlier. The agent
+	// side needs no such wiring: message_search above is a tool it can call.
+	ag.SetMessageStore(kaijuDB)
+
 	// Safeguard: a run killed by a restart/crash leaves a user turn with no reply,
 	// which the UI reads as "still running" and spins a progress bar forever. On
 	// startup, close out any such dangling turn so no session comes back stuck.
@@ -757,7 +795,7 @@ func runServe() {
 	}
 
 	// Load intent registry from DB (seeded with defaults on first run)
-	if err := ag.LoadIntentRegistry(kaijuDB); err != nil {
+	if err := ag.LoadIntentRegistry(intentsFrom(kaijuDB)); err != nil {
 		log.Fatalf("[kaiju] load intent registry: %v", err)
 	}
 	log.Printf("[kaiju] intent registry loaded (%d intents)", len(ag.Intents().List()))
@@ -786,97 +824,35 @@ func runServe() {
 		mux.HandleFunc("/ws", webCh.Handler())
 	}
 
-	// Auth + JWT (always available when web UI is served)
-	jwtSvc, err := auth.NewJWTService(cfg.API.JWTSecret, cfg.Agent.DataDir, 24)
-	if err != nil {
-		log.Fatalf("[kaiju] JWT service: %v", err)
-	}
-
-	// SSE endpoint for DAG events — JWT-authenticated and filtered per-principal:
-	// a caller only receives events for sessions it owns (isolation enforced in
-	// SSEHandler). Browsers pass the token via ?token= since an EventSource can't
-	// set an Authorization header.
-	mux.Handle("/events", gateway.WithJWTAuthOrQuery(jwtSvc)(gateway.SSEHandler(ag, kaijuDB)))
-
-	// Auth endpoints (unprotected — login doesn't need a token)
-	authAPI := api.NewAuthAPI(kaijuDB, jwtSvc)
-	authMux := http.NewServeMux()
-	authAPI.RegisterRoutes(authMux)
-	// Login doesn't need JWT; /me does
-	mux.Handle("/api/v1/auth/login", authMux)
-	mux.Handle("/api/v1/auth/me", gateway.WithJWTAuth(jwtSvc)(authMux))
-
-	// Management APIs (JWT-protected — scopes, groups, users, intents)
-	scopeAPI := api.NewScopeAPI(kaijuDB)
-	groupAPI := api.NewGroupAPI(kaijuDB)
-	userAPI := api.NewUserAPI(kaijuDB)
-	intentAPI := api.NewIntentAPI(kaijuDB, ag)
-
-	mgmtMux := http.NewServeMux()
-	scopeAPI.RegisterRoutes(mgmtMux)
-	groupAPI.RegisterRoutes(mgmtMux)
-	userAPI.RegisterRoutes(mgmtMux)
-	intentAPI.RegisterRoutes(mgmtMux)
-
-	mux.Handle("/api/v1/scopes", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/scopes/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/groups", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/groups/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/users", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/users/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/intents", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/intents/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/tool-intents", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-	mux.Handle("/api/v1/tool-intents/", gateway.WithJWTAuth(jwtSvc)(mgmtMux))
-
-	// Clearance checker — load endpoints from DB, register with agent
-	clrChecker := kaijuclr.NewChecker()
-	if endpoints, err := kaijuDB.ListClearanceEndpoints(); err == nil {
-		for _, ep := range endpoints {
-			clrChecker.SetEndpoint(kaijuclr.Endpoint{
-				ToolName: ep.ToolName, URL: ep.URL,
-				TimeoutMs: ep.TimeoutMs, Headers: ep.Headers,
-			})
-		}
-		if len(endpoints) > 0 {
-			log.Printf("[kaiju] loaded %d clearance endpoints", len(endpoints))
-		}
-	}
-	ag.SetClearanceChecker(clrChecker)
-
-	// Execution API routes (always available — JWT-protected)
-	apiHandler := api.New(ag, cfg.Agent.SafetyLevel, kaijuDB, ag.LLMClient(), clrChecker)
-	// Uploads pipeline — uses the executor client for synchronous summaries.
-	apiHandler.SetUploadProcessor(uploads.New(ag, ag.ExecutorClient()))
-	// Vision lane — the model that answers image questions directly.
+	// The agent's model lanes. Not the interface's business: these decide which
+	// model answers what, and they are set whether or not anything is served.
 	ag.SetVisionModel(cfg.Vision.Provider, cfg.Vision.Model)
-	// Chat lane — direct completion, no planner (empty ⇒ reasoning model).
 	ag.SetChatModel(cfg.Chat.Provider, cfg.Chat.Model)
-	ag.SetChatTools(cfg.Chat.Tools)
 	ag.SetRouteModel(cfg.Agent.RouteProvider, cfg.Agent.RouteModel)
 	ag.SetAnswerModel(cfg.Agent.AnswerProvider, cfg.Agent.AnswerModel)
-	execMux := http.NewServeMux()
-	apiHandler.RegisterRoutes(execMux)
-	mux.Handle("/api/v1/execute", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/oneshot", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/interject", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/stop", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/tools", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/status", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/usage", gateway.WithJWTAuth(jwtSvc)(execMux))
-	// Session + memory + clearance routes (JWT-protected)
-	mux.Handle("/api/v1/sessions", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/sessions/", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/memories", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/memories/", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/clearance", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/clearance/", gateway.WithJWTAuth(jwtSvc)(execMux))
-	mux.Handle("/api/v1/workspace/files", gateway.WithJWTAuth(jwtSvc)(execMux))
-	// Serve uses token query param since browser <img>/<video>/iframes can't send Auth headers
-	mux.Handle("/api/v1/workspace/serve", gateway.WithJWTAuthOrQuery(jwtSvc)(execMux))
-	// Live preview serves from workspace/code/ — sub-resources (JS, CSS, images) can't carry auth tokens,
-	// so live preview is served without JWT. The main app is already authenticated.
-	mux.Handle("/api/v1/workspace/live/", execMux)
+
+	// The interface and every route it calls, in one call.
+	//
+	// This used to be a hundred and thirty lines here, and an application
+	// embedding the interface would have had to copy them. Now the same
+	// function serves both, so a route added for one is there for the other and
+	// they cannot drift apart. What kaiju's daemon adds below — its own
+	// documentation, its health check, its configuration editor — is what
+	// belongs to the daemon rather than to the interface.
+	authenticator, err := ui.NewAuthenticator(cfg.API.JWTSecret, cfg.Agent.DataDir, 24)
+	if err != nil {
+		log.Fatalf("[kaiju] token service: %v", err)
+	}
+	uiHandler, err := ui.Handler(ui.Options{
+		Agent:         ag,
+		Store:         ui.StoreOf(kaijuDB),
+		Auth:          authenticator,
+		Config:        cfg.UI,
+		DefaultIntent: cfg.Agent.SafetyLevel,
+	})
+	if err != nil {
+		log.Fatalf("[kaiju] %v", err)
+	}
 
 	// Config API (available without JWT — needed for initial setup via UI)
 	cfgPath := ""
@@ -886,7 +862,7 @@ func runServe() {
 			break
 		}
 	}
-	configAPI := api.NewConfigAPI(cfg, cfgPath, ag)
+	configAPI := configapi.New(cfg, cfgPath, ag)
 	configAPI.RegisterRoutes(mux)
 
 	// Health check
@@ -895,12 +871,16 @@ func runServe() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Web UI (embedded static files)
-	// Docs — the architecture overview + markdown reference docs, served public
-	// (no auth) at /docs/, before the SPA catch-all below.
+	// kaiju's own documentation, which is the daemon's and not the interface's:
+	// an application embedding the interface has no reason to serve kaiju's
+	// architecture page under its own name. Public, and registered before the
+	// interface below.
 	mux.Handle("/docs/", docs.Handler())
 
-	mux.Handle("/", gateway.WebUIHandler())
+	// The interface, at the root. Every pattern registered above is more
+	// specific, so Go's mux still prefers those and only what none of them
+	// matches reaches here.
+	mux.Handle("/", uiHandler)
 
 	// Message router goroutine
 	go func() {
@@ -908,18 +888,18 @@ func runServe() {
 			go func(msg channels.InboundMessage) {
 				trigger := agent.Trigger{
 					Type:    "chat_query",
-					AlertID: fmt.Sprintf("%s-%d", msg.ChannelID, time.Now().UnixNano()),
+					ID:      fmt.Sprintf("%s-%d", msg.ChannelID, time.Now().UnixNano()),
 					Data:    mustJSON(map[string]string{"query": msg.Text}),
 					Source:  msg.ChannelID,
 					AggMode: -1, // auto: let reflector + compute carve-out decide
 				}
 
 				result, err := ag.Kernel().SubmitSync(ctx, trigger)
-				verdictText := ""
+				outcomeText := ""
 				if err != nil {
-					verdictText = fmt.Sprintf("[error] %v", err)
+					outcomeText = fmt.Sprintf("[error] %v", err)
 				} else {
-					verdictText = result.Verdict
+					outcomeText = result.Outcome
 				}
 
 				ch, ok := chanReg.Get(msg.ChannelID)
@@ -928,7 +908,7 @@ func runServe() {
 						ChannelID:   msg.ChannelID,
 						SessionID:   msg.SessionID,
 						RecipientID: msg.SenderID,
-						Text:        verdictText,
+						Text:        outcomeText,
 					})
 				}
 			}(msg)
@@ -992,7 +972,7 @@ func runOnce(query string) {
 
 	trigger := agent.Trigger{
 		Type:      "chat_query",
-		AlertID:   fmt.Sprintf("run-%d", time.Now().UnixNano()),
+		ID:        fmt.Sprintf("run-%d", time.Now().UnixNano()),
 		Data:      mustJSON(map[string]string{"query": query}),
 		Source:    "cli",
 		AggMode:   -1, // auto: let reflector + compute carve-out decide
@@ -1004,7 +984,7 @@ func runOnce(query string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println(result.Verdict)
+	fmt.Println(result.Outcome)
 }
 
 func mustJSON(v any) json.RawMessage {
@@ -1029,7 +1009,7 @@ func intentStringToRank(s string, registry *agent.IntentRegistry) int {
 // Used by CLI commands that need to parse intent names without standing up a full agent.
 func loadIntentRegistry(database *kaijudb.DB) *agent.IntentRegistry {
 	reg := agent.NewIntentRegistry()
-	_ = reg.Load(database) // errors are logged inside; fall back to empty registry
+	_ = reg.Load(intentsFrom(database)) // errors are logged inside; fall back to empty registry
 	return reg
 }
 
@@ -1334,19 +1314,3 @@ func runSkillCmd() {
 		os.Exit(1)
 	}
 }
-
-// ─── No-op implementations for fleet interfaces ─────────────────────────────
-
-type noopGossip struct{}
-
-func (noopGossip) PublishAlert(context.Context, []byte) error  { return nil }
-func (noopGossip) PublishMurmur(context.Context, []byte) error { return nil }
-func (noopGossip) Sequencer() *protocol.Sequencer              { return protocol.NewSequencer("builtin") }
-
-type noopIPC struct{}
-
-func (noopIPC) Send(ipc.Envelope) error { return nil }
-
-// Ensure these satisfy the agent's interfaces at compile time.
-var _ agent.GossipPublisher = noopGossip{}
-var _ agent.IPCSender = noopIPC{}

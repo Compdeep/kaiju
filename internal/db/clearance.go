@@ -12,7 +12,7 @@ import (
 type ClearanceEndpoint struct {
 	ToolName  string            `json:"tool_name"`
 	URL       string            `json:"url"`
-	TimeoutMs int              `json:"timeout_ms"`
+	TimeoutMs int               `json:"timeout_ms"`
 	Headers   map[string]string `json:"headers,omitempty"`
 }
 

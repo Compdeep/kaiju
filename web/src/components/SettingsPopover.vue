@@ -64,7 +64,7 @@
       </div>
       <div class="pop-opt" :class="{ active: sessions.chatMode }" @click="setChat(true)">
         <span class="pop-opt-name">Direct</span>
-        <span class="pop-opt-desc">Reply only, for roleplay models.</span>
+        <span class="pop-opt-desc">Reply only, for chat models.</span>
       </div>
     </div>
 

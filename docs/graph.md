@@ -109,7 +109,7 @@ Nodes can be grafted onto the Graph at runtime — the architect grafts coder/ba
 
 `internal/agent/preflight.go`. Two separable jobs run at the front of every interactive investigation.
 
-**Stage 1 — routeQuery (the cheap first pass).** `routeQuery` fires the `ROUTE` prompt (`prompt.Route`) as a tiny forced `route()` tool call: `ToolChoice: "required"`, `Temperature: 0.0`, `MaxTokens: 16`, on the dedicated route lane (falls back to the executor/light lane). It classifies the *latest* message into one mode and nothing else:
+**Stage 1 — routeQuery (the cheap first pass).** `routeQuery` fires the `ROUTE` prompt (`prompt.Route`) as a tiny forced `route()` tool call: `ToolChoice: "required"`, `Temperature: 0.0`, `MaxTokens: 16`, on the dedicated route lane (falls back to the executor/light lane — see [model-calls.md](model-calls.md)). It classifies the *latest* message into one mode and nothing else:
 
 ```
 mode: "chat" | "meta" | "investigate"
@@ -223,7 +223,7 @@ Decisions steer the scheduler:
 - **replan** — the graph needs to GROW and the goal isn't answered yet. Two shapes, same decision:
   - *a success revealed the next move* — e.g. searches returned URLs → "fetch the 3 URLs the searches surfaced".
   - *a step FAILED and needs fixing* — describe the failure (exact error text, file paths, module names) in `next`. The Executive then plans a `debug` step; the reflector names the move, the Executive plans HOW.
-- **conclude** — the goal is met, OR the request is too vague/underspecified to act on (ask the user to clarify instead of guessing). If `aggregate=false` the reflector's `verdict` is the final answer verbatim; if `aggregate=true` the Aggregator runs. A `conclude` still passes the **conclusion floor** first — a structural precondition (e.g. found search URLs but read none) grafts remediation and defers the conclusion once (see [Edges — anti-fabrication layer](#edges--anti-fabrication-layer)).
+- **conclude** — the goal is met, OR the request is too vague/underspecified to act on (ask the user to clarify instead of guessing). If `aggregate=false` the reflector's `verdict` is the final answer verbatim; if `aggregate=true` the Aggregator runs. A `conclude` stands: nothing overrules it. What the reflector is holding and never followed is reported to it in the block the reframe prepends, and the decision is its own.
 
 The prompt leans hard on the anti-hallucination rule: conclude ONLY when the evidence *answers* the goal — an unfetched URL or an un-followed lead is `replan`, never a confident guess from memory. Transient tool output (empty fetch, HTTP 5xx, timeout, rate limit), out-of-scope failures, and truly-unfixable environment failures are `conclude`, not `replan` — they don't belong in the debugger.
 
@@ -301,7 +301,9 @@ The aggregator is exempt from the budget — it always runs to give the user a r
 
 An *edge* frames a hand-off between two steps: it gets the previous step's output ready to be the next step's input. It FRAMES — it does not verify or police. A **code edge** is structural (it reads the shape of what ran — envelope Status signals, failed nodes, declared output schemas — and interprets no meaning); an **LLM edge** reframes that structural fact against the request in words. Kaiju layers several such edges over the graph whose one job is to keep a run from *fabricating* — inventing a URL, vouching for a source it never read, concluding from memory. Every one is **gated**: it inspects the structural signal first and returns `""` when the run is clean, so the common path pays nothing. Where an edge calls an LLM it **fails open** to the structural note alone — a reframe never blocks the run.
 
-The composition is the same throughout: **code decides WHETHER** the edge fires (and supplies the hard facts); **the LLM decides WHAT** they mean against the request. The generator/hook prompt pairs live in `prompts.md` (`COVERAGE_GEN`/`COVERAGE_HOOK`, `GROUNDING_GEN`/`GROUNDING_HOOK`), host-overridable without a rebuild.
+Two of these — `coverageEdge` and `groundingEdge` — were removed. Each added a small model call to the reflector, both fired on the same condition so neither could fire alone, and both prepended a block to the same prompt: three calls to answer one question, with the second and third describing the same situation twice. The grounding one also spoke in one application's vocabulary, telling every run it had "real URLs from a search" whatever its tools actually returned.
+
+What survives of them is what the scheduler reads rather than what a model was told. The block the reframe prepends reports what a run is holding and never followed, and the reflector decides what to do about it; nothing overrules that decision.
 
 - **`validatePlanEdges`** (`executive.go`) — runs at plan time, BEFORE any node fires, over every `${step.N.field}` reference in the plan. It rejects the three ways the planner mis-wires a hand-off, generically for any tool, from the declared output schemas:
   - **self-reference** — a step reads its own output (`${step.i…}` inside step `i`); a step cannot consume itself.
@@ -309,11 +311,6 @@ The composition is the same throughout: **code decides WHETHER** the edge fires 
   - **wrong-producer** — a top-level field the producing tool never emits, classically `${step.N.results.0.url}` off a `web_fetch` when a `results[]` list only comes from `web_search`. Only a tool that DECLARES an output schema is checked, and only its top-level field (`fieldExistsInSchema`), so an incomplete deep schema can't false-reject.
   Any broken edge becomes **one re-plan** carrying the exact fault as feedback, rather than a doomed run — a self/out-of-range ref would leak its literal placeholder into the tool (an "invalid URL …"), and a wrong-producer ref would dangle a dead edge the reflector then re-plans forever.
 
-- **`coverageEdge`** (`edge_coverage.go`) — frames the hand-off INTO the aggregator. `collectGaps` reads the graph for gather steps that came back empty or failed (envelope Status `empty`/`error`, plus `FailedNodes`); when any exist it emits a `## Coverage` checklist so absence is explicit and the aggregator acknowledges the gap instead of fabricating to fill the shape of the request. A second, deterministic part — `## Referenced but not retrieved` — lists URLs a search surfaced that no fetch ever read, so the aggregator can't present a merely-referenced source as one it verified. Clean gathering ⇒ `""`.
-
-- **`groundingEdge`** (`edge_grounding.go`) — frames the hand-off FROM gathering INTO the reflector / next plan, the moment a planner staring at a thin result is tempted to fill the gap with URLs from memory. `collectGrounded` is the only set of URLs a real `web_search` returned; subtracting `collectFetched` (what `web_fetch` already read) gives the found-but-unread leads. The edge biases toward READING: when unread grounded URLs exist it says FETCH those before searching again; only with no unread leads does it say re-search — and always, *only a URL a search returned may be fetched or cited*. Gated on gaps: clean gathering pays nothing.
-
-- **`conclusionFloor`** (`edge_grounding.go`) — a hard structural precondition the scheduler consults before it lets a reflection CONCLUDE. Today's one floor is grounding: a run that found real search URLs but read NONE of them must read some first, or the answer rests on snippets or invention. It returns deterministic `web_fetch` steps for the top unread URLs (sourced from the search, never model-invented); the scheduler grafts them and loops ONCE (`floorForced`), then lets the conclusion stand. The scheduler stays domain-agnostic — it grafts whatever steps come back, knowing nothing about them — so a future floor adds a branch HERE, never in the scheduler. Self-limiting: a run with no search has no grounded URLs and nothing fires.
 
 - **`NeedsSynthesis` / `decideAutoAggMode`** — the aggregator-mode decision (see Aggregator above) is made at **preflight over structural signals**, not left to the model at the end. `NeedsSynthesis` is a preflight flag ("this run must end with a written synthesis"); a run also counts as *complex* when it structurally fanned out to ≥ `complexFanoutFloor` (6) resolved tool nodes. In auto mode (`agg_mode -1`), `decideAutoAggMode` then picks the lane purely over `{compute, complex, evidence, reflector-wants}`:
   - **compute present** → executor lane (a compute run always needs a formatted answer).
@@ -466,9 +463,8 @@ The priority queue, worker pool, preemption, stop/cancel, and interject machiner
 | `internal/agent/builtin_debug.go` | `debug` super-tool — the door that grafts Holmes |
 | `internal/agent/rca.go` | Holmes ReAct root-cause investigator + `spawnFirstHolmes` + RCAReport |
 | `internal/agent/microplanner.go` | clean-room debugger — RCA → fix plan |
-| `internal/agent/aggregator.go` | final answer synthesis + `coverageEdge` hook + `decideAutoAggMode` |
+| `internal/agent/aggregator.go` | final answer synthesis + `decideAutoAggMode` |
 | `internal/agent/edge_coverage.go` | coverage edge — frames empty/failed gathers so the aggregator acknowledges absence |
-| `internal/agent/edge_grounding.go` | grounding edge + conclusion floor — only-real-search URLs; blocks a conclude that read no sources |
 | `internal/agent/compute.go` | runCompute, computePlan, computeCode |
 | `internal/agent/builtin_compute.go` | ComputeTool schema + dispatch wrapper |
 | `internal/agent/builtin_edit_file.go` | EditFileTool — task_files-required wrapper over the coder |

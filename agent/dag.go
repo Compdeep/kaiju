@@ -1,0 +1,1695 @@
+package agent
+
+import (
+	"encoding/json"
+	"fmt"
+	"github.com/Compdeep/kaiju/agent/toolapi"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+/*
+ * DAG execution modes control how the investigation adapts during execution.
+ *
+ *   reflect:        Forced serialization. Reflection nodes are injected structurally
+ *                   between depth batches, gating all downstream nodes. The executive's
+ *                   depends_on edges get rewritten through reflection barriers.
+ *                   Most conservative — pauses everything between each "layer" of work.
+ *
+ *   nReflect:       True DAG scheduling (nodes fire when individual deps resolve).
+ *                   A blocking reflection is injected every N skill completions
+ *                   (configurable via BatchSize). Balances parallelism with oversight.
+ *                   Default for autonomous operation.
+ *
+ *   orchestrator:   True DAG scheduling + a lightweight per-node LLM "orchestrator" that
+ *                   evaluates each skill result and can inject/cancel/escalate without
+ *                   blocking the DAG. Orchestrators use a separate budget (MaxObserverCalls).
+ *                   Most powerful but most expensive. Default for interactive chat.
+ */
+const (
+	DAGModeReflect      = "reflect"
+	DAGModeNReflect     = "nReflect"
+	DAGModeOrchestrator = "orchestrator"
+)
+
+/*
+ * NodeType classifies what a DAG node does.
+ * desc: Enum type representing the kind of work a node performs in the investigation DAG.
+ */
+type NodeType int
+
+const (
+	NodeTool         NodeType = iota // executes a registered tool
+	NodeCompute                      // LLM-powered code generation + execution
+	NodeExecutive                    // initial plan LLM call
+	NodeMicroPlanner                 // scoped failure-repair LLM call
+	NodeAggregator                   // final synthesis LLM call
+	NodeActuator                     // terminal action after aggregator
+	NodeReflection                   // inter-batch reflection checkpoint
+	NodeObserver                     // per-node completion observer (observer mode)
+	NodeInterjection                 // human-triggered reflection (operator message)
+	NodeHolmes                       // ReAct investigator iteration (root-cause analysis)
+)
+
+/*
+ * String converts a NodeType to its string representation.
+ * desc: Returns a human-readable label for the node type.
+ * return: string label such as "tool", "executive", "aggregator", etc.
+ */
+func (t NodeType) String() string {
+	switch t {
+	case NodeTool:
+		return "tool"
+	case NodeCompute:
+		return "compute"
+	case NodeExecutive:
+		return "executive"
+	case NodeMicroPlanner:
+		return "micro_planner"
+	case NodeAggregator:
+		return "aggregator"
+	case NodeActuator:
+		return "actuator"
+	case NodeReflection:
+		return "reflection"
+	case NodeObserver:
+		return "observer"
+	case NodeInterjection:
+		return "interjection"
+	case NodeHolmes:
+		return "holmes"
+	default:
+		return "unknown"
+	}
+}
+
+/*
+ * NodeState tracks a node's lifecycle.
+ * desc: Enum type representing the current execution state of a DAG node.
+ */
+type NodeState int
+
+const (
+	StatePending  NodeState = iota // waiting for dependencies
+	StateRunning                   // goroutine executing
+	StateResolved                  // completed successfully
+	StateFailed                    // execution error
+	StateSkipped                   // cascaded skip from failed dependency
+)
+
+/*
+ * String converts a NodeState to its string representation.
+ * desc: Returns a human-readable label for the node state.
+ * return: string label such as "pending", "running", "resolved", etc.
+ */
+func (s NodeState) String() string {
+	switch s {
+	case StatePending:
+		return "pending"
+	case StateRunning:
+		return "running"
+	case StateResolved:
+		return "resolved"
+	case StateFailed:
+		return "failed"
+	case StateSkipped:
+		return "skipped"
+	default:
+		return "unknown"
+	}
+}
+
+/*
+ * Node is a single vertex in the investigation DAG.
+ * desc: Contains all metadata for one unit of work: its type, state,
+ *       tool binding, parameters, dependency edges, result, and timing.
+ */
+type Node struct {
+	ID string
+	// Round is the planning round this node was added in. Stamped by AddNode,
+	// read by the sources that describe the run so that earlier rounds can be
+	// presented as history rather than as the current situation.
+	Round     int
+	Type      NodeType
+	State     NodeState
+	ToolName  string
+	Params    map[string]any // may embed ${node.<id>(.path)?} templates resolved by the dispatcher before execution
+	DependsOn []string       // node IDs that must resolve before this fires
+	// Target names the machine this node runs on; empty means here. Opaque to
+	// this package and passed through exactly as the planner set it — see
+	// remote.go.
+	Target    string
+	Result    string
+	Body      NodeBody // typed output; Result is a cached render of this during the migration
+	Error     error
+	Children  []string // node IDs spawned by this node
+	SpawnedBy string   // parent node ID (empty for executive-created nodes)
+	Tag       string   // human-readable label from executive
+	// OperatorMessage, on an interjection node, is the human's injected query
+	// text. Kept on the node so the trace can show what the operator asked,
+	// distinct from the reflection decision that message produced.
+	OperatorMessage string
+	Source          string       // tool source: "builtin", "skillmd", "custom"
+	Actions         []NodeAction // side-effects from tool execution
+	Skills          []string     // skill cards names whose sections shaped this node's prompts (compute only)
+	StartedAt       time.Time
+	EndedAt         time.Time
+	TokensIn        int // prompt tokens consumed by this node's LLM call
+	TokensOut       int // completion tokens generated by this node's LLM call
+
+	// SupersededByDebug is set when a debugger cycle successfully addressed this
+	// failed node. Filtered out of FailedNodes() so the reflector doesn't keep
+	// re-reporting fixed failures.
+	SupersededByDebug bool
+
+	// AddressesFailures snapshots the IDs of failed nodes this debugger was
+	// dispatched to fix. When the debugger's grafted children all resolve
+	// successfully, those failed nodes get marked SupersededByDebug.
+	// Only set on NodeMicroPlanner nodes.
+	AddressesFailures []string
+}
+
+/*
+ * IsTerminal returns true if the node is in a final state.
+ * desc: Checks whether the node has reached a terminal lifecycle state
+ *       (resolved, failed, or skipped).
+ * return: true if the node will not transition to another state.
+ */
+func (n *Node) IsTerminal() bool {
+	return n.State == StateResolved || n.State == StateFailed || n.State == StateSkipped
+}
+
+/*
+ * DAGEvent is emitted by Graph whenever node state changes.
+ * desc: Serializable event sent to SSE subscribers for live dashboard updates.
+ */
+type DAGEvent struct {
+	Type   string      `json:"type"` // "start", "node", "add", "done", "outcome"
+	NodeID string      `json:"id,omitempty"`
+	Node   *NodeInfo   `json:"node,omitempty"`  // for "node" and "add"
+	Nodes  []*NodeInfo `json:"nodes,omitempty"` // for "start"/"done" (full snapshot)
+	// TriggerID is the caller's reference, shown to a person. RunID is what a
+	// consumer groups a run's events by: one reference can produce several
+	// runs, and grouping by it draws the second run into the first one's view.
+	TriggerID string   `json:"trigger_id,omitempty"` // for "start"
+	RunID     string   `json:"run_id,omitempty"`
+	SessionID string   `json:"session_id,omitempty"` // session this event belongs to (for frontend routing)
+	Targets   []string `json:"targets,omitempty"`    // for "start": the machines this run concerns, so a frontend can show each as busy
+	Text      string   `json:"text,omitempty"`       // for "outcome" (streaming token chunk)
+}
+
+/*
+ * NodeAction is a side-effect emitted by a tool alongside its result.
+ * desc: Actions are first-class on the API — frontends and external consumers
+ *       read node.actions to decide what to display, navigate, notify, etc.
+ */
+type NodeAction struct {
+	Type    string `json:"type"`             // "panel_show", "notify", etc.
+	Plugin  string `json:"plugin,omitempty"` // panel plugin id
+	Title   string `json:"title,omitempty"`
+	Path    string `json:"path,omitempty"`    // file path
+	Content string `json:"content,omitempty"` // inline content
+	Mime    string `json:"mime,omitempty"`    // content type hint
+	Line    int    `json:"line,omitempty"`    // scroll-to line
+	Message string `json:"message,omitempty"` // for notify actions
+}
+
+/*
+ * NodeInfo is a serializable snapshot of a single DAG node.
+ * desc: JSON-safe representation of a node's current state, used for
+ *       SSE events and dashboard display.
+ */
+type NodeInfo struct {
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	State      string          `json:"state"`
+	Tag        string          `json:"tag"`
+	Tool       string          `json:"tool,omitempty"`
+	DependsOn  []string        `json:"deps,omitempty"`
+	SpawnedBy  string          `json:"spawn,omitempty"`
+	Ms         int64           `json:"ms,omitempty"` // elapsed ms
+	Error      string          `json:"err,omitempty"`
+	ResultSize int             `json:"result_size,omitempty"` // bytes of result
+	Result     string          `json:"result,omitempty"`      // truncated result for frontend display
+	Payload    json.RawMessage `json:"payload,omitempty"`     // the tool's own fields, long values shortened
+	Summary    string          `json:"summary,omitempty"`     // short human-readable summary line
+	Params     string          `json:"params,omitempty"`      // compact params summary
+	Impact     int             `json:"impact,omitempty"`      // tool impact level for this call
+	ErrType    string          `json:"err_type,omitempty"`    // "gate", "clearance", "timeout", "exec"
+	Source     string          `json:"source,omitempty"`      // "builtin", "skillmd", "custom"
+	Actions    []NodeAction    `json:"actions,omitempty"`     // side-effects: panel_show, notify, etc.
+	Skills     []string        `json:"skills,omitempty"`      // skill cards whose sections shaped this node's prompts
+	TokensIn   int             `json:"tokens_in,omitempty"`   // prompt tokens
+	TokensOut  int             `json:"tokens_out,omitempty"`  // completion tokens
+	StartedAt  string          `json:"started_at,omitempty"`  // "Apr 13 11:30:05"
+	// OperatorMessage is the human's injected query on an interjection node.
+	OperatorMessage string `json:"operator_message,omitempty"`
+}
+
+/*
+ * Graph is a concurrency-safe DAG of investigation nodes.
+ * desc: Thread-safe container for the investigation graph. Supports observer
+ *       channels for live event streaming and monotonic node ID assignment.
+ */
+// ValidatorDef is a stored validation check from the architect's plan.
+// The scheduler re-grafts these after reflector replans complete to verify
+// that fixes actually worked, without needing a new LLM call.
+type ValidatorDef struct {
+	Name  string
+	Check string
+}
+
+type Graph struct {
+	mu        sync.RWMutex
+	nodes     map[string]*Node
+	counter   int
+	round     int // which planning round nodes added now belong to; see BeginRound
+	observer  chan<- DAGEvent
+	Gaps      []string // capability gaps declared by the executive (not mutex-protected — set once after planning)
+	SessionID string   // conversation session for per-session state (blueprints + interfaces.json)
+
+	// RunID identifies this run, and only this run. Distinct from the trigger's
+	// correlation id, which identifies what CAUSED the run and is shared by
+	// every attempt at it: an event that could not be acted on and is tried
+	// again later is one cause and two runs, with two sets of actions and two
+	// outcomes to record.
+	RunID       string
+	ProjectRoot string           // project root path set by the architect (e.g. "project/kaiju_webapp"); empty means legacy "project/"
+	Validators  []ValidatorDef   // architect-declared validation checks, stored for replay after replans
+	Context     *ContextGate     // per-investigation context API; constructed at investigation start
+	ActiveCards []string         // skill card keys selected by preflight; read by skill_guidance source and DAG-path callers
+	Preflight   *PreflightResult // preflight result (mode/intent/skills/compute-mode); per-investigation, read by the planner
+	replanLog   []string         // one compact line per completed replan round, for the reflector's ## History (mu-protected)
+}
+
+// AddReplanRecord appends a one-line record of a replan round, so a later
+// reflection can see what earlier rounds already tried and not repeat a move
+// that returned nothing / was blocked.
+func (g *Graph) AddReplanRecord(s string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.replanLog = append(g.replanLog, s)
+}
+
+// ReplanRecords returns a copy of the per-round replan history.
+func (g *Graph) ReplanRecords() []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	out := make([]string, len(g.replanLog))
+	copy(out, g.replanLog)
+	return out
+}
+
+/*
+ * NewGraph creates an empty graph.
+ * desc: Initializes a Graph with an empty node map and zero counter.
+ * return: pointer to the new Graph.
+ */
+func NewGraph() *Graph {
+	return &Graph{
+		nodes: make(map[string]*Node),
+	}
+}
+
+/*
+ * SetObserver sets the channel that receives DAGEvents on state mutations.
+ * desc: Assigns the observer channel used for live event streaming.
+ *       Only one observer is supported; subsequent calls replace the previous one.
+ * param: ch - channel to receive DAGEvent values.
+ */
+func (g *Graph) SetObserver(ch chan<- DAGEvent) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.observer = ch
+}
+
+/*
+ * emit sends an event to the observer channel (non-blocking).
+ * desc: Pushes a DAGEvent to the observer. Drops the event if the channel
+ *       is full — dashboard streaming is non-critical. Must be called while
+ *       g.mu is held (write lock).
+ * param: evt - the DAGEvent to send.
+ */
+func (g *Graph) emit(evt DAGEvent) {
+	if g.observer == nil {
+		return
+	}
+	select {
+	case g.observer <- evt:
+	default: // drop if full — dashboard is non-critical
+	}
+}
+
+/*
+ * Snapshot returns a thread-safe snapshot of all nodes.
+ * desc: Acquires a read lock and copies every node into a NodeInfo slice.
+ * return: slice of NodeInfo pointers representing the current graph state.
+ */
+func (g *Graph) Snapshot() []*NodeInfo {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	infos := make([]*NodeInfo, 0, len(g.nodes))
+	for _, n := range g.nodes {
+		infos = append(infos, g.nodeInfo(n))
+	}
+	return infos
+}
+
+/*
+ * nodeInfo converts a Node to a serializable NodeInfo.
+ * desc: Builds a JSON-safe snapshot of a single node including timing,
+ *       truncated result, summary, params, actions, and error classification.
+ *       Caller must hold the graph lock.
+ * param: n - the Node to convert.
+ * return: pointer to the populated NodeInfo.
+ */
+func (g *Graph) nodeInfo(n *Node) *NodeInfo {
+	info := &NodeInfo{
+		ID:        n.ID,
+		Type:      n.Type.String(),
+		State:     n.State.String(),
+		Tag:       n.Tag,
+		Tool:      n.ToolName,
+		DependsOn: n.DependsOn,
+		SpawnedBy: n.SpawnedBy,
+		Source:    n.Source,
+	}
+	// Interjection nodes carry the operator's query so the trace can show it
+	// even before the reflection decision lands (Result is still empty then).
+	if n.OperatorMessage != "" {
+		info.OperatorMessage = n.OperatorMessage
+	}
+	if !n.StartedAt.IsZero() {
+		end := n.EndedAt
+		if end.IsZero() {
+			end = time.Now()
+		}
+		info.Ms = end.Sub(n.StartedAt).Milliseconds()
+		info.StartedAt = n.StartedAt.UTC().Format(llmTimeFormat)
+	}
+	if n.Result != "" {
+		info.ResultSize = len(n.Result)
+		// Truncate result for frontend display (keep first 512 chars)
+		if len(n.Result) <= 512 {
+			info.Result = n.Result
+		} else {
+			info.Result = n.Result[:512] + "…"
+		}
+		// Generate a short summary line for the trace header. Prefer the typed
+		// body's summary (reflection decision, compute files, tool kind/status);
+		// RawTextBody (opaque/legacy) keeps the richer nodeSummary heuristics.
+		info.Payload = nodePayload(n)
+		info.Summary = nodeSummary(n)
+		if n.Body != nil {
+			if _, raw := n.Body.(RawTextBody); !raw {
+				info.Summary = n.Body.Summary()
+			}
+		}
+	}
+	if n.Params != nil {
+		info.Params = compactParams(n.Params)
+	}
+	if len(n.Actions) > 0 {
+		info.Actions = n.Actions
+	}
+	if len(n.Skills) > 0 {
+		info.Skills = n.Skills
+	}
+	if n.TokensIn > 0 || n.TokensOut > 0 {
+		info.TokensIn = n.TokensIn
+		info.TokensOut = n.TokensOut
+	}
+	if n.Error != nil {
+		errStr := n.Error.Error()
+		info.Error = errStr
+		// Classify error type
+		if strings.HasPrefix(errStr, "gate:") {
+			info.ErrType = "gate"
+		} else if strings.HasPrefix(errStr, "clearance:") {
+			info.ErrType = "clearance"
+		} else if strings.Contains(errStr, "timed out") || strings.Contains(errStr, "deadline exceeded") {
+			info.ErrType = "timeout"
+		} else {
+			info.ErrType = "exec"
+		}
+	}
+	return info
+}
+
+// compactParams builds the short params line shown in the trace tree. It LEADS with
+// the identifying value (a web_fetch's url, a web_search's query) so it survives the
+// length cap — json.Marshal sorts keys alphabetically, which otherwise buries the
+// url behind "focus" and the frontend shows only the tool name. Falls back to
+// compact JSON for tools without a url/query.
+func compactParams(params map[string]any) string {
+	if u, ok := params["url"].(string); ok && u != "" {
+		return capStr(u, 200)
+	}
+	if q, ok := params["query"].(string); ok && q != "" {
+		return `"query":"` + capStr(q, 160) + `"`
+	}
+	if b, err := json.Marshal(params); err == nil {
+		return capStr(string(b), 120)
+	}
+	return ""
+}
+
+// capStr caps s to n runes (rune-safe so it never splits a multi-byte char),
+// appending an ellipsis when truncated.
+func capStr(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+/*
+ * nodeSummary generates a short human-readable summary from a node's result.
+ * desc: For reflection/observer nodes, extracts decision + reason from JSON.
+ *       For tool nodes, extracts the first meaningful line (title, status, etc).
+ * param: n - the Node whose result to summarize.
+ * return: a short summary string, or empty string if no result.
+ */
+func nodeSummary(n *Node) string {
+	if n.Result == "" {
+		return ""
+	}
+
+	// Reflection / interjection / observer — parse JSON decision
+	if n.Type == NodeReflection || n.Type == NodeInterjection || n.Type == NodeObserver {
+		var parsed struct {
+			Decision string `json:"decision"`
+			Action   string `json:"action"`
+			Reason   string `json:"reason"`
+		}
+		if TryParseLLMJSON(n.Result, &parsed) {
+			decision := parsed.Decision
+			if decision == "" {
+				decision = parsed.Action
+			}
+			reason := parsed.Reason
+			if len(reason) > 80 {
+				reason = reason[:80] + "…"
+			}
+			if decision != "" && reason != "" {
+				return decision + ": " + reason
+			}
+			if decision != "" {
+				return decision
+			}
+		}
+	}
+
+	// Validator nodes — show clear PASS/FAIL with evidence
+	if strings.HasPrefix(n.Tag, "verify_") || strings.HasPrefix(n.Tag, "revalidate_") {
+		if n.State == StateFailed || n.Error != nil {
+			errMsg := ""
+			if n.Error != nil {
+				errMsg = n.Error.Error()
+			}
+			if len(errMsg) > 100 {
+				errMsg = errMsg[:100] + "…"
+			}
+			return "FAIL: " + errMsg
+		}
+		result := strings.TrimSpace(n.Result)
+		if result == "" {
+			return "FAIL: empty response"
+		}
+		if len(result) > 80 {
+			result = result[:80] + "…"
+		}
+		return "PASS: " + result
+	}
+
+	// Tool nodes — try structured extraction, then first-line fallback
+	r := n.Result
+
+	// Try JSON: look for common summary fields
+	if len(r) > 0 && (r[0] == '{' || r[0] == '[') {
+		var obj map[string]any
+		if json.Unmarshal([]byte(r), &obj) == nil {
+			for _, key := range []string{"result", "output", "message", "status", "content", "title", "name"} {
+				if v, ok := obj[key]; ok {
+					if s, ok := v.(string); ok && s != "" {
+						if len(s) > 80 {
+							s = s[:80] + "…"
+						}
+						return s
+					}
+				}
+			}
+		}
+	}
+
+	// Skip HTTP status prefix if present (e.g. "HTTP 200 200 OK\n")
+	if strings.HasPrefix(r, "HTTP ") {
+		if idx := strings.Index(r, "\n"); idx > 0 {
+			status := strings.TrimSpace(r[:idx])
+			rest := strings.TrimSpace(r[idx+1:])
+			// Look for a Title: line
+			if strings.HasPrefix(rest, "Title: ") {
+				if end := strings.Index(rest, "\n"); end > 0 {
+					title := rest[7:end]
+					if len(title) > 60 {
+						title = title[:60] + "…"
+					}
+					return status + " — " + title
+				}
+				title := rest[7:]
+				if len(title) > 60 {
+					title = title[:60] + "…"
+				}
+				return status + " — " + title
+			}
+			if len(status) > 80 {
+				status = status[:80] + "…"
+			}
+			return status
+		}
+	}
+
+	// Generic: first non-empty line
+	for _, line := range strings.SplitN(r, "\n", 5) {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			if len(line) > 80 {
+				line = line[:80] + "…"
+			}
+			return line
+		}
+	}
+	return ""
+}
+
+/*
+ * SnapshotNode returns a serializable snapshot of a single node.
+ * desc: Looks up a node by ID and returns its NodeInfo representation.
+ * param: id - the node ID to look up.
+ * return: pointer to NodeInfo, or nil if the node is not found.
+ */
+func (g *Graph) SnapshotNode(id string) *NodeInfo {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, n := range g.nodes {
+		if n.ID == id {
+			return g.nodeInfo(n)
+		}
+	}
+	return nil
+}
+
+/*
+ * AddNode inserts a node with StatePending and assigns a monotonic ID.
+ * desc: Adds the node to the graph, sets its state to pending, assigns
+ *       a unique "nN" ID, and emits an "add" event.
+ * param: n - the Node to insert.
+ * return: the assigned node ID string.
+ */
+func (g *Graph) AddNode(n *Node) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.counter++
+	n.ID = fmt.Sprintf("n%d", g.counter)
+	n.State = StatePending
+	n.Round = g.round
+	g.nodes[n.ID] = n
+	g.emit(DAGEvent{Type: "add", NodeID: n.ID, Node: g.nodeInfo(n)})
+	return n.ID
+}
+
+/*
+ * BeginRound starts a new planning round.
+ * desc: Nodes added from here on carry the new number, so a stage reading the
+ *       run can tell what it just did from what it did earlier. Without it every
+ *       step of a long run is presented as equally current, and a problem solved
+ *       in the first round is still described as the situation in the fifth.
+ *
+ *       Called once where the round counter moves. Nothing else sets it, and a
+ *       run that never replans leaves every node in round 0.
+ */
+func (g *Graph) BeginRound() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.round++
+}
+
+/*
+ * Round reports the round a graph is currently adding nodes in.
+ */
+func (g *Graph) Round() int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.round
+}
+
+/*
+ * Get returns a node by ID (nil if not found).
+ * desc: Thread-safe lookup of a node. Caller must not mutate the returned node.
+ * param: id - the node ID to look up.
+ * return: pointer to the Node, or nil.
+ */
+func (g *Graph) Get(id string) *Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.nodes[id]
+}
+
+/*
+ * ReadyNodes returns pending nodes whose dependencies are all resolved or skipped.
+ * desc: Scans all pending nodes and returns those whose every dependency
+ *       has reached a terminal state.
+ * return: slice of Node pointers that are ready to fire.
+ */
+func (g *Graph) ReadyNodes() []*Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	var ready []*Node
+	for _, n := range g.nodes {
+		if n.State != StatePending {
+			continue
+		}
+		allDepsReady := true
+		for _, depID := range n.DependsOn {
+			dep, ok := g.nodes[depID]
+			if !ok || !dep.IsTerminal() {
+				allDepsReady = false
+				break
+			}
+		}
+		if allDepsReady {
+			ready = append(ready, n)
+		}
+	}
+	return ready
+}
+
+/*
+ * HasPendingDependents returns true if any pending node lists nodeID in its
+ * DependsOn. Used to decide whether a failed node should use the retry proxy
+ * pattern (hold open for dependents) or just fail normally.
+ */
+func (g *Graph) HasPendingDependents(nodeID string) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, n := range g.nodes {
+		if n.State != StatePending {
+			continue
+		}
+		for _, dep := range n.DependsOn {
+			if dep == nodeID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+/*
+ * PruneBranch marks all transitive dependents of nodeID as StateSkipped.
+ * desc: BFS traversal from nodeID outward, skipping every pending node
+ *       that directly or transitively depends on the failed node.
+ * param: nodeID - the root node whose dependents should be skipped.
+ */
+func (g *Graph) PruneBranch(nodeID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// BFS through dependents
+	queue := []string{nodeID}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		for _, n := range g.nodes {
+			if n.State != StatePending {
+				continue
+			}
+			for _, dep := range n.DependsOn {
+				if dep == current {
+					n.State = StateSkipped
+					g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+					queue = append(queue, n.ID)
+					break
+				}
+			}
+		}
+	}
+}
+
+/*
+ * SetState updates a node's state.
+ * desc: Sets the node's lifecycle state and emits a "node" event.
+ *       Only the scheduler should call this.
+ * param: nodeID - the ID of the node to update.
+ * param: state - the new NodeState value.
+ */
+func (g *Graph) SetState(nodeID string, state NodeState) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if n, ok := g.nodes[nodeID]; ok {
+		n.State = state
+		g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+	}
+}
+
+// A trace has to show what a tool returned, and a tool that returns a page
+// returns more than a trace can hold — so values are shortened and the shape is
+// not.
+const (
+	payloadValueChars = 400   // per string value
+	payloadWholeChars = 12000 // the whole structure, after shortening
+)
+
+/*
+ * nodePayload renders a node's own fields for the trace.
+ * desc: The trace carried only the rendered evidence text, cut at 512
+ *       characters. A tool whose evidence is short showed every field. A tool
+ *       whose evidence is long showed the opening of one value and none of its
+ *       other fields, so a file it had written was invisible to anyone reading
+ *       the run. Which fields a reader can see should not depend on how much
+ *       text one of them happens to hold, so every field is sent and long
+ *       values are cut rather than the structure around them.
+ * param: n - the node whose body to render
+ * return: the fields as JSON, or nil when there is no body or it will not marshal
+ */
+func nodePayload(n *Node) json.RawMessage {
+	if n == nil || n.Body == nil {
+		return nil
+	}
+	whole, ok := n.Body.Field("")
+	if !ok || whole == nil {
+		return nil
+	}
+	b, err := json.Marshal(shortenPayloadValues(whole, payloadValueChars))
+	if err != nil || len(b) > payloadWholeChars {
+		return nil
+	}
+	return b
+}
+
+// shortenPayloadValues walks a decoded payload and cuts long strings, leaving
+// every key, every nesting level and every list length as they were. What is
+// lost is the middle of a long value; what survives is which fields exist.
+func shortenPayloadValues(v any, max int) any {
+	switch t := v.(type) {
+	case string:
+		if len(t) <= max {
+			return t
+		}
+		return t[:max] + fmt.Sprintf("… (%d chars)", len(t))
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, inner := range t {
+			out[k] = shortenPayloadValues(inner, max)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, inner := range t {
+			out[i] = shortenPayloadValues(inner, max)
+		}
+		return out
+	}
+	return v
+}
+
+/*
+ * SetResult sets a node's result and marks it resolved.
+ * desc: Records the result string, transitions state to StateResolved,
+ *       stamps EndedAt, and emits a "node" event.
+ * param: nodeID - the ID of the node to update.
+ * param: result - the result string from tool execution.
+ */
+func (g *Graph) SetResult(nodeID, result string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if n, ok := g.nodes[nodeID]; ok {
+		n.Result = result
+		n.Body = RawText(result)
+		n.State = StateResolved
+		n.EndedAt = time.Now()
+		g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+	}
+}
+
+/*
+ * SetBody sets a node's typed body and marks it resolved.
+ * desc: Records the typed NodeBody, keeps Result as a cached render (Evidence)
+ *       of it for the frontend/persistence contract during the typed-body
+ *       migration, transitions state to StateResolved, stamps EndedAt, and
+ *       emits a "node" event.
+ * param: nodeID - the ID of the node to update.
+ * param: body - the typed output produced by the node.
+ */
+func (g *Graph) SetBody(nodeID string, body NodeBody) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if n, ok := g.nodes[nodeID]; ok {
+		n.Body = body
+		n.Result = body.Evidence()
+		n.State = StateResolved
+		n.EndedAt = time.Now()
+		g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+	}
+}
+
+/*
+ * SetError sets a node's error and marks it failed.
+ * desc: Records the error, transitions state to StateFailed,
+ *       stamps EndedAt, and emits a "node" event.
+ * param: nodeID - the ID of the node to update.
+ * param: err - the error from tool execution.
+ */
+func (g *Graph) SetError(nodeID string, err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if n, ok := g.nodes[nodeID]; ok {
+		n.Error = err
+		n.State = StateFailed
+		n.EndedAt = time.Now()
+		g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+	}
+}
+
+/*
+ * AddChild records that parentID spawned childID.
+ * desc: Appends childID to the parent node's Children slice.
+ * param: parentID - the ID of the parent node.
+ * param: childID - the ID of the child node.
+ */
+/*
+ * WaitAlsoOn makes pending nodes that read a field off parentID wait for childID.
+ * desc: A field a node produces AFTER it resolves cannot be read by a dependent
+ *       that becomes ready the moment it resolves. compute is the case: it
+ *       resolves, an exec child is grafted to run the script it wrote, and only
+ *       when that child finishes is its stdout merged onto the parent as
+ *       `output`. A step wired to ${node.<compute>.output} depends on the
+ *       compute node, so it and the child become ready together and the step can
+ *       be dispatched first — reading a field that has not arrived and failing
+ *       with "field \"output\" absent".
+ *
+ *       Adding the child as a second dependency lets the graph do the ordering,
+ *       with no waiting, retrying or new state. Only nodes that actually name
+ *       the field are touched, so anything else keeps the edges it had.
+ * param: parentID - the node producing the field late
+ * param: childID - the node whose completion produces it
+ * param: field - the field name those dependents must wait for
+ * return: the ids of the nodes given the extra dependency
+ */
+func (g *Graph) WaitAlsoOn(parentID, childID, field string) []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	var waited []string
+	for id, n := range g.nodes {
+		if id == childID || n.State != StatePending || !slices.Contains(n.DependsOn, parentID) {
+			continue
+		}
+		if slices.Contains(n.DependsOn, childID) {
+			continue
+		}
+		for _, ref := range FindRefs(n.Params) {
+			if ref.Type != "node" || ref.NodeID != parentID || len(ref.Path) == 0 || ref.Path[0] != field {
+				continue
+			}
+			n.DependsOn = append(n.DependsOn, childID)
+			waited = append(waited, id)
+			break
+		}
+	}
+	sort.Strings(waited)
+	return waited
+}
+
+func (g *Graph) AddChild(parentID, childID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if n, ok := g.nodes[parentID]; ok {
+		n.Children = append(n.Children, childID)
+	}
+}
+
+/*
+ * NodeCount returns the total number of nodes.
+ * desc: Thread-safe count of all nodes in the graph regardless of state.
+ * return: the number of nodes.
+ */
+func (g *Graph) NodeCount() int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return len(g.nodes)
+}
+
+/*
+ * ReflectionStats counts the points a run stopped to reconsider, and how many
+ * of those went on to do more work.
+ * desc: A reflection did more work when it has children — whatever was grafted
+ *       after it. The second return was called `replans`, which is a different
+ *       thing in this package: a replan is one kind of follow-up, and the
+ *       count includes the others.
+ * return: reflections - reflection and interjection nodes.
+ * return: followUps - how many of those grafted further work.
+ */
+func (g *Graph) ReflectionStats() (reflections, followUps int) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, n := range g.nodes {
+		if n.Type == NodeReflection || n.Type == NodeInterjection {
+			reflections++
+			if len(n.Children) > 0 {
+				followUps++
+			}
+		}
+	}
+	return
+}
+
+/*
+ * AllDone returns true when no nodes are pending or running.
+ * desc: Checks whether every node in the graph has reached a terminal state.
+ * return: true if all nodes are resolved, failed, or skipped.
+ */
+func (g *Graph) AllDone() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, n := range g.nodes {
+		if n.State == StatePending || n.State == StateRunning {
+			return false
+		}
+	}
+	return true
+}
+
+/*
+ * ResolvedResultsSoFar returns resolved results from tool and reflection nodes.
+ * desc: Used by reflection checkpoints to see all evidence gathered so far.
+ *       Results are keyed by tag or tool name, with deduplication suffixes.
+ * return: map of label to truncated result string.
+ */
+/*
+ * ResolvedResultsByRound splits the resolved results into what the current
+ * planning round produced and what earlier rounds did.
+ * desc: Same results and the same labels as ResolvedResultsSoFar, in two maps
+ *       instead of one, so a stage describing the run can say which of it is
+ *       the situation now and which is how it got here. Presenting them as one
+ *       list is how a step from the first round goes on being read as the
+ *       current state for the rest of the run.
+ * return: this round's results, and every earlier round's.
+ */
+func (g *Graph) ResolvedResultsByRound() (current, earlier map[string]string) {
+	round := g.Round()
+	current, earlier = map[string]string{}, map[string]string{}
+	for label, n := range g.resolvedResultNodes() {
+		into := current
+		if n.Round < round {
+			into = earlier
+		}
+		into[label] = Text.TruncateEvidence(n.Result)
+	}
+	return current, earlier
+}
+
+func (g *Graph) ResolvedResultsSoFar() map[string]string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	results := make(map[string]string)
+	for _, n := range g.nodes {
+		if n.State != StateResolved {
+			continue
+		}
+		// Only tool and compute results — skip reflections, micro-planners,
+		// aggregators, observers. The Type check above already excludes
+		// them (they're NodeReflection/NodeObserver/etc., not NodeTool).
+		// The old `n.Source == "builtin"` filter was dead weight that
+		// accidentally excluded web_search / bash / file_read / web_fetch
+		// results — the primary evidence — from every reflector and
+		// aggregator call. Removed 2026-04-18.
+		if n.Type != NodeTool && n.Type != NodeCompute {
+			continue
+		}
+		// Label with tool and key param for clarity
+		label := formatNodeLabel(n)
+		if _, exists := results[label]; exists {
+			label = fmt.Sprintf("%s (%s)", label, n.ID)
+		}
+		results[label] = Text.TruncateEvidence(n.Result)
+	}
+	return results
+}
+
+/*
+ * resolvedResultNodes is the labelling ResolvedResultsSoFar does, keeping the
+ * node so a caller can ask it something the result text cannot answer.
+ * desc: Same rule for which nodes count and the same labels, written once so
+ *       the two readers cannot disagree about either.
+ * return: label to node, for every resolved tool or compute node.
+ */
+func (g *Graph) resolvedResultNodes() map[string]*Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	out := make(map[string]*Node)
+	for _, n := range g.nodes {
+		if n.State != StateResolved {
+			continue
+		}
+		if n.Type != NodeTool && n.Type != NodeCompute {
+			continue
+		}
+		label := formatNodeLabel(n)
+		if _, exists := out[label]; exists {
+			label = fmt.Sprintf("%s (%s)", label, n.ID)
+		}
+		out[label] = n
+	}
+	return out
+}
+
+// formatNodeLabel creates a descriptive label like "file_read(project/frontend/package.json)"
+// or "bash(cd project/frontend && npm install)" for evidence and log readability.
+func formatNodeLabel(n *Node) string {
+	tag := n.Tag
+	tool := n.ToolName
+	if tag == "" {
+		tag = tool
+	}
+	// Extract the most useful param for context
+	detail := ""
+	switch tool {
+	case "file_read", "file_write", "file_list":
+		if p, ok := n.Params["path"].(string); ok {
+			detail = p
+		}
+	case "bash":
+		if c, ok := n.Params["command"].(string); ok {
+			if len(c) > 60 {
+				c = c[:60] + "..."
+			}
+			detail = c
+		}
+	case "service":
+		if name, ok := n.Params["name"].(string); ok {
+			action, _ := n.Params["action"].(string)
+			detail = action + " " + name
+		}
+	case "compute":
+		if g, ok := n.Params["goal"].(string); ok {
+			if len(g) > 60 {
+				g = g[:60] + "..."
+			}
+			detail = g
+		}
+	}
+	if detail != "" {
+		return fmt.Sprintf("%s — %s(%s)", tag, tool, detail)
+	}
+	return fmt.Sprintf("%s — %s", tag, tool)
+}
+
+// ResolvedByType returns all resolved nodes of a given type.
+func (g *Graph) ResolvedByType(t NodeType) []*Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	var out []*Node
+	for _, n := range g.nodes {
+		if n.Type == t && n.State == StateResolved {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+/*
+ * PendingNodes returns all nodes in StatePending.
+ * desc: Scans the graph and returns nodes that are waiting for dependencies.
+ * return: slice of Node pointers in the pending state.
+ */
+func (g *Graph) PendingNodes() []*Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	var pending []*Node
+	for _, n := range g.nodes {
+		if n.State == StatePending {
+			pending = append(pending, n)
+		}
+	}
+	return pending
+}
+
+/*
+ * SkippedNodes returns all nodes in the skipped state.
+ * desc: Used by the reflector to surface cascade-skipped work.
+ */
+func (g *Graph) SkippedNodes() []*Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	var out []*Node
+	for _, n := range g.nodes {
+		if n.State == StateSkipped {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+/*
+ * FailedNodes returns all nodes in the failed state.
+ * desc: Used by the reflector to surface permanent failures.
+ */
+func (g *Graph) FailedNodes() []*Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	var out []*Node
+	for _, n := range g.nodes {
+		if n.State == StateFailed && !n.SupersededByDebug {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// SupersedeFailuresIfDebugSucceeded walks debugger nodes; for each one whose
+// grafted children have all terminated without failures, it marks the failures
+// it was addressing as SupersededByDebug. This prevents future reflectors from
+// re-reporting failures that have already been fixed.
+//
+// Returns the number of failed nodes newly marked as superseded, plus the
+// debugger nodes that just completed a successful cycle in this call (so the
+// caller can write FIXED markers to the worklog).
+func (g *Graph) SupersedeFailuresIfDebugSucceeded() (int, []*Node) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	marked := 0
+	var newlyFixed []*Node
+	for _, dbg := range g.nodes {
+		if dbg.Type != NodeMicroPlanner {
+			continue
+		}
+		if len(dbg.AddressesFailures) == 0 {
+			continue
+		}
+		// Find children of this debugger
+		if len(dbg.Children) == 0 {
+			continue
+		}
+		// All children must be terminal, and none failed (other than builtin
+		// validators which are expected to re-fail if the real fix didn't land).
+		allDone := true
+		anyFailed := false
+		sawRealFix := false
+		for _, cid := range dbg.Children {
+			child := g.nodes[cid]
+			if child == nil {
+				continue
+			}
+			if !child.IsTerminal() {
+				allDone = false
+				break
+			}
+			// Validators (re-grafted after debug) can fail without invalidating
+			// the debug cycle — they might catch a fresh issue. Only count
+			// compute/coder/user-tool failures.
+			if child.Source == "builtin" && (strings.HasPrefix(child.Tag, "revalidate_") || strings.HasPrefix(child.Tag, "verify_")) {
+				continue
+			}
+			sawRealFix = true
+			if child.State == StateFailed {
+				anyFailed = true
+			}
+		}
+		if !allDone || anyFailed || !sawRealFix {
+			continue
+		}
+		// Supersede the failures this debugger addressed
+		newMarks := 0
+		for _, fid := range dbg.AddressesFailures {
+			if fn := g.nodes[fid]; fn != nil && fn.State == StateFailed && !fn.SupersededByDebug {
+				fn.SupersededByDebug = true
+				marked++
+				newMarks++
+			}
+		}
+		// Only announce a debugger as "newly fixed" if it actually transitioned
+		// failures in this call. Otherwise repeated calls would re-announce the
+		// same fix.
+		if newMarks > 0 {
+			newlyFixed = append(newlyFixed, dbg)
+		}
+	}
+	return marked, newlyFixed
+}
+
+/*
+ * HasNodeOfType returns true if the graph contains at least one node of the given type.
+ * desc: Scans all nodes checking for a matching NodeType.
+ * param: t - the NodeType to search for.
+ * return: true if at least one node matches.
+ */
+func (g *Graph) HasNodeOfType(t NodeType) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, n := range g.nodes {
+		if n.Type == t {
+			return true
+		}
+	}
+	return false
+}
+
+/*
+ * ExecutedTool records a tool+params combination that has been executed.
+ * desc: Used by reflection to avoid replanning with identical tool calls.
+ */
+type ExecutedTool struct {
+	Tool       string
+	Params     map[string]any
+	ResultSize int
+}
+
+/*
+ * ExecutedTools returns a list of tool+params combinations that have been
+ * executed (resolved, failed, or skipped).
+ * desc: Used by reflection to avoid replanning with identical tool calls.
+ * return: slice of ExecutedTool records for all terminal tool nodes.
+ */
+func (g *Graph) ExecutedTools() []ExecutedTool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	var out []ExecutedTool
+	for _, n := range g.nodes {
+		if n.Type != NodeTool && n.Type != NodeCompute {
+			continue
+		}
+		if n.State == StatePending || n.State == StateRunning {
+			continue
+		}
+		out = append(out, ExecutedTool{
+			Tool:       n.ToolName,
+			Params:     n.Params,
+			ResultSize: len(n.Result),
+		})
+	}
+	return out
+}
+
+/*
+ * GatePending adds gateID as a dependency to all currently pending nodes.
+ * desc: Forces pending nodes to wait for the gate node before they can fire.
+ *       Nodes already running are not affected.
+ * param: gateID - the ID of the gating node.
+ * return: the number of nodes that were gated.
+ */
+func (g *Graph) GatePending(gateID string) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	gated := 0
+	for _, n := range g.nodes {
+		if n.State != StatePending || n.ID == gateID {
+			continue
+		}
+		// Check if already depends on this gate
+		alreadyDeps := false
+		for _, d := range n.DependsOn {
+			if d == gateID {
+				alreadyDeps = true
+				break
+			}
+		}
+		if !alreadyDeps {
+			n.DependsOn = append(n.DependsOn, gateID)
+			gated++
+		}
+	}
+	return gated
+}
+
+/*
+ * CancelByTags marks pending nodes matching any of the given tags as StateSkipped.
+ * desc: Used by observers to cancel planned steps that are no longer needed.
+ * param: tags - slice of tag strings or node IDs to match.
+ * return: the count of nodes cancelled.
+ */
+func (g *Graph) CancelByTags(tags []string) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	tagSet := make(map[string]bool, len(tags))
+	for _, t := range tags {
+		tagSet[t] = true
+	}
+
+	cancelled := 0
+	for _, n := range g.nodes {
+		if n.State != StatePending {
+			continue
+		}
+		if tagSet[n.Tag] || tagSet[n.ID] {
+			n.State = StateSkipped
+			g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+			cancelled++
+		}
+	}
+	return cancelled
+}
+
+/*
+ * SkipAllPending marks all pending nodes as StateSkipped.
+ * desc: Used when reflection concludes early or replans (old pending nodes
+ *       are replaced).
+ * return: the number of nodes skipped.
+ */
+func (g *Graph) SkipAllPending() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	count := 0
+	for _, n := range g.nodes {
+		if n.State == StatePending {
+			n.State = StateSkipped
+			g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+			count++
+		}
+	}
+	return count
+}
+
+/*
+ * Budget enforces resource limits on the DAG execution.
+ * desc: Tracks total nodes, LLM calls, observer calls, and per-tool batch
+ *       counters using atomic operations for concurrency safety.
+ */
+type Budget struct {
+	MaxNodes         int32
+	MaxPerSkill      int32
+	MaxLLMCalls      int32
+	MaxObserverCalls int32 // separate budget for observer LLM calls
+	WallClock        time.Duration
+
+	nodeCount     atomic.Int32
+	llmCount      atomic.Int32
+	observerCount atomic.Int32 // observer calls used
+	perSkill      sync.Map     // string → *atomic.Int32 (total across investigation)
+	batchPerSkill sync.Map     // string → *atomic.Int32 (resets at reflection boundaries)
+}
+
+/*
+ * NewBudget creates a budget with the given limits.
+ * desc: Initializes a Budget struct with the specified maximum values.
+ * param: maxNodes - maximum total nodes allowed.
+ * param: maxPerSkill - maximum calls per skill per batch.
+ * param: maxLLMCalls - maximum LLM calls allowed.
+ * param: maxObserverCalls - maximum observer LLM calls allowed.
+ * param: wallClock - maximum wall-clock duration.
+ * return: pointer to the new Budget.
+ */
+func NewBudget(maxNodes, maxPerSkill, maxLLMCalls, maxObserverCalls int, wallClock time.Duration) *Budget {
+	return &Budget{
+		MaxNodes:         int32(maxNodes),
+		MaxPerSkill:      int32(maxPerSkill),
+		MaxLLMCalls:      int32(maxLLMCalls),
+		MaxObserverCalls: int32(maxObserverCalls),
+		WallClock:        wallClock,
+	}
+}
+
+/*
+ * TryObserverCall atomically checks and increments the observer counter.
+ * desc: Uses a CAS loop to prevent races where two goroutines both see budget
+ *       available and both increment, overshooting the limit.
+ * return: false if the observer budget is exhausted.
+ */
+func (b *Budget) TryObserverCall() bool {
+	for {
+		cur := b.observerCount.Load()
+		if cur >= b.MaxObserverCalls {
+			return false
+		}
+		if b.observerCount.CompareAndSwap(cur, cur+1) {
+			return true
+		}
+	}
+}
+
+/*
+ * ObserverCount returns the current number of observer calls used.
+ * desc: Atomic read of the observer call counter.
+ * return: current observer call count.
+ */
+func (b *Budget) ObserverCount() int32 {
+	return b.observerCount.Load()
+}
+
+/*
+ * LLMRemaining returns the number of LLM calls left in the budget.
+ * desc: Subtracts current usage from the maximum.
+ * return: remaining LLM call budget.
+ */
+func (b *Budget) LLMRemaining() int32 {
+	return b.MaxLLMCalls - b.llmCount.Load()
+}
+
+/*
+ * TrySpawnNode atomically checks and increments counters.
+ * desc: Enforces total node, LLM, and per-skill batch limits using CAS loops.
+ *       Pass skillName="" to skip per-skill batch limits (used at plan time).
+ *       Budget enforcement uses CAS loops on nodeCount and llmCount to prevent
+ *       races. The per-skill batch counter uses optimistic increment since
+ *       overshooting the soft per-batch limit by 1-2 is acceptable.
+ * param: skillName - the skill name for per-skill tracking ("" to skip).
+ * param: isLLM - true if this node consumes an LLM call.
+ * return: false if any limit would be exceeded.
+ */
+func (b *Budget) TrySpawnNode(skillName string, isLLM bool) bool {
+	// Infrastructure LLM calls (preflight, executive, reflections, aggregator)
+	// pass skillName="" and isLLM=true. These only count against the LLM
+	// budget, not the node budget — the node budget is for actual work nodes.
+	infraOnly := skillName == "" && isLLM
+
+	if !infraOnly {
+		// CAS loop for total node budget
+		for {
+			cur := b.nodeCount.Load()
+			if cur >= b.MaxNodes {
+				return false
+			}
+			if b.nodeCount.CompareAndSwap(cur, cur+1) {
+				break
+			}
+		}
+	}
+
+	// CAS loop for LLM budget
+	if isLLM {
+		for {
+			cur := b.llmCount.Load()
+			if cur >= b.MaxLLMCalls {
+				// Roll back node count since we can't proceed
+				if !infraOnly {
+					b.nodeCount.Add(-1)
+				}
+				return false
+			}
+			if b.llmCount.CompareAndSwap(cur, cur+1) {
+				break
+			}
+		}
+	}
+
+	// Per-skill batch counter (soft limit — optimistic increment is acceptable
+	// since this only caps batching, not correctness)
+	if skillName != "" {
+		batchCounter := b.getBatchSkillCounter(skillName)
+		if batchCounter.Load() >= b.MaxPerSkill {
+			// Roll back counters
+			if !infraOnly {
+				b.nodeCount.Add(-1)
+			}
+			if isLLM {
+				b.llmCount.Add(-1)
+			}
+			return false
+		}
+		b.getSkillCounter(skillName).Add(1)
+		batchCounter.Add(1)
+	}
+	return true
+}
+
+/*
+ * ResetBatchCounters clears the per-batch skill counters.
+ * desc: Called at reflection boundaries so the next batch gets a fresh per-skill budget.
+ */
+func (b *Budget) ResetBatchCounters() {
+	b.batchPerSkill.Range(func(key, _ any) bool {
+		b.batchPerSkill.Delete(key)
+		return true
+	})
+}
+
+/*
+ * NodeCount returns the current number of spawned nodes.
+ * desc: Atomic read of the total node counter.
+ * return: current node count.
+ */
+func (b *Budget) NodeCount() int32 {
+	return b.nodeCount.Load()
+}
+
+/*
+ * LLMCount returns the current number of LLM calls used.
+ * desc: Atomic read of the LLM call counter.
+ * return: current LLM call count.
+ */
+func (b *Budget) LLMCount() int32 {
+	return b.llmCount.Load()
+}
+
+/*
+ * getSkillCounter returns the atomic counter for total calls to a skill.
+ * desc: Lazily initializes a per-skill counter in the perSkill sync.Map.
+ * param: name - the skill name.
+ * return: pointer to the atomic counter for this skill.
+ */
+func (b *Budget) getSkillCounter(name string) *atomic.Int32 {
+	if v, ok := b.perSkill.Load(name); ok {
+		return v.(*atomic.Int32)
+	}
+	counter := &atomic.Int32{}
+	actual, _ := b.perSkill.LoadOrStore(name, counter)
+	return actual.(*atomic.Int32)
+}
+
+/*
+ * getBatchSkillCounter returns the atomic counter for per-batch calls to a skill.
+ * desc: Lazily initializes a per-skill batch counter in the batchPerSkill sync.Map.
+ * param: name - the skill name.
+ * return: pointer to the atomic counter for this skill's current batch.
+ */
+func (b *Budget) getBatchSkillCounter(name string) *atomic.Int32 {
+	if v, ok := b.batchPerSkill.Load(name); ok {
+		return v.(*atomic.Int32)
+	}
+	counter := &atomic.Int32{}
+	actual, _ := b.batchPerSkill.LoadOrStore(name, counter)
+	return actual.(*atomic.Int32)
+}
+
+/*
+ * ActuatorAction describes a terminal action to execute after aggregation.
+ * desc: Contains tool name and parameters for post-aggregation side-effects.
+ */
+type ActuatorAction struct {
+	Tool   string         `json:"tool"`
+	Params map[string]any `json:"params"`
+}
+
+/*
+ * nodeCompletion is sent from a worker goroutine to the scheduler.
+ * desc: Carries the node ID, result string, and optional error from execution.
+ */
+type nodeCompletion struct {
+	NodeID    string
+	Result    string
+	Body      NodeBody // typed output when the tool used ExecuteTyped; nil for legacy string tools
+	Err       error
+	TokensIn  int
+	TokensOut int
+}
+
+// EvidenceStats summarises how much usable evidence the investigation's TOOLS
+// gathered: how many terminal tool nodes ran, how many failed, and how many
+// resolved with a non-empty result. The outcome gate uses this to refuse a
+// "malicious" call that has no evidence behind it (unreachable node, tool errors)
+// — deterministic, rather than trusting the model to notice its tools failed.
+func (g *Graph) EvidenceStats() (toolNodes, failed, withResult int) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, n := range g.nodes {
+		if n.Type != NodeTool || !n.IsTerminal() {
+			continue
+		}
+		toolNodes++
+		switch {
+		case n.State == StateFailed:
+			failed++
+		case n.State == StateResolved && strings.TrimSpace(n.Result) != "":
+			withResult++
+		}
+	}
+	return
+}
+
+// HasComputeWork reports whether this investigation is a compute/coder task —
+// either preflight classified it as one (ComputeMode set) or a compute node has
+// been planned. The context gate uses this to keep coding-only context
+// (blueprint, workspace, function map) out of non-coding investigations.
+func (g *Graph) HasComputeWork() bool {
+	if g == nil {
+		return false
+	}
+	if g.Preflight != nil && g.Preflight.ComputeMode != "" {
+		return true
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, n := range g.nodes {
+		if n.Type == NodeCompute {
+			return true
+		}
+	}
+	return false
+}
+
+// Two questions the scheduler asks about how much a run actually gathered,
+// before it chooses how to write the answer.
+
+// runFanout counts how many tool nodes actually resolved — a structural proxy for
+// how complex the run turned out to be, independent of the preflight's guess. A
+// query that fanned out to many gather steps earned a real synthesis even if
+// preflight underestimated it.
+func (a *Agent) runFanout(graph *Graph) int {
+	if graph == nil {
+		return 0
+	}
+	return len(graph.ResolvedByType(NodeTool))
+}
+
+// hasUsableEvidence reports whether any resolved tool node returned a successful
+// (ok) result. A run that gathered nothing usable has nothing to synthesize — the
+// reflector's honest "couldn't get the data" outcome is the right answer, not an
+// aggregator pass over emptiness.
+func (a *Agent) hasUsableEvidence(graph *Graph) bool {
+	if graph == nil {
+		return false
+	}
+	for _, n := range graph.ResolvedByType(NodeTool) {
+		tb, ok := n.Body.(toolMessageBody)
+		if !ok {
+			continue
+		}
+		switch tb.Envelope().Status {
+		case toolapi.StatusOK, toolapi.StatusUnclassified:
+			// Unclassified counts. The tool ran and returned something readable;
+			// all that is missing is its own word on whether that counts as
+			// evidence. Excluding it would tell decideAutoAggMode there is nothing
+			// to aggregate on a run whose evidence came entirely from tools that
+			// do not declare an outcome — which, until the tools are migrated, is
+			// most of them.
+			return true
+		}
+	}
+	return false
+}

@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/Compdeep/kaiju/internal/agent/uploads"
+	"github.com/Compdeep/kaiju/agent/uploads"
 	"github.com/Compdeep/kaiju/internal/gateway"
 )
 

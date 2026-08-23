@@ -8,14 +8,14 @@
 // Memory belongs at the CHAT BOUNDARY only. The two legitimate access points
 // are:
 //
-//   1. Chat input  (internal/api/api.go handleChat)
-//        - Loads conversation history into Trigger.History
-//        - Calls InjectLongTermContext to prepend semantic + episodic facts
-//        - Stores the user's incoming message
+//  1. Chat input  (internal/api/api.go handleChat)
+//     - Loads conversation history into Trigger.History
+//     - Calls InjectLongTermContext to prepend semantic + episodic facts
+//     - Stores the user's incoming message
 //
-//   2. Chat output (after the aggregator runs, also in api.go)
-//        - Stores the assistant's verdict as the next message
-//        - Optionally extracts new semantic / episodic facts
+//  2. Chat output (after the aggregator runs, also in api.go)
+//     - Stores the assistant's outcome as the next message
+//     - Optionally extracts new semantic / episodic facts
 //
 // The agent's EXECUTION LAYER must never query or write memory:
 //   - ContextGate has no memory source by design
@@ -58,9 +58,9 @@ import (
 	"log"
 	"strings"
 
-	"github.com/google/uuid"
-	"github.com/Compdeep/kaiju/internal/agent/llm"
+	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/internal/db"
+	"github.com/google/uuid"
 )
 
 const (
@@ -163,7 +163,7 @@ func (m *Manager) LoadHistory(ctx context.Context, sessionID string, maxMessages
 			continue
 		}
 		// Truncate history messages to avoid flooding the executive with
-		// full aggregator verdicts and long user messages from prior turns.
+		// full aggregator outcomes and long user messages from prior turns.
 		content := dm.Content
 		switch dm.Role {
 		case "assistant":

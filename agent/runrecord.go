@@ -1,0 +1,239 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/Compdeep/kaiju/agent/gates"
+)
+
+// Recording what a run did — including when it did not finish.
+//
+// A run that fails is a fact about the system, not an absence of one. An
+// operator asking "why did nothing happen at 3am" needs the row that says the
+// budget ran out, or the planner never produced a plan. Broadcasting a failed
+// node to a live view is not the same thing: nobody is watching at 3am, and the
+// view is gone by morning.
+//
+// So every exit records, with a status saying which kind of exit it was.
+
+/*
+ * recordRun writes one run to the application's store, if it supplied one.
+ * desc: Called at every exit from a run, successful or not. Nothing depends on
+ *       the write succeeding — a record that cannot be written must not fail
+ *       the work it describes.
+ * param: trigger - what started the run.
+ * param: startTime - when it started, for the duration.
+ * param: graph - the run's graph; nil is tolerated for very early failures.
+ * param: budget - the run's budget; nil is tolerated likewise.
+ * param: intent - the intent it was gated at.
+ * param: c - what the run concluded, or the reason it concluded nothing.
+ */
+func (a *Agent) recordRun(trigger Trigger, startTime time.Time, graph *Graph, budget *Budget,
+	intent gates.Intent, c Conclusion) {
+	if a == nil || a.eventStore == nil {
+		return
+	}
+
+	mode := a.cfg.DAGMode
+	if trigger.DAGMode != "" {
+		mode = trigger.DAGMode
+	}
+
+	var nodes, llmCalls, reflections, followUps int
+	if graph != nil {
+		nodes = graph.NodeCount()
+		reflections, followUps = graph.ReflectionStats()
+	}
+	if budget != nil {
+		llmCalls = int(budget.LLMCount())
+	}
+	if graph == nil && budget == nil {
+		nodes, llmCalls = c.Nodes, c.LLMCalls
+	}
+
+	runID := trigger.ID
+	if graph != nil && graph.RunID != "" {
+		runID = graph.RunID
+	}
+
+	a.storeRun(Run{
+		ID:              runID,
+		NodeID:          a.cfg.NodeID,
+		TriggerType:     trigger.Type,
+		CorrelationID:   trigger.ID,
+		Source:          trigger.Source,
+		Target:          trigger.Target,
+		StartedAt:       startTime.Unix(),
+		CompletedAt:     time.Now().Unix(),
+		DurationMs:      time.Since(startTime).Milliseconds(),
+		Intent:          intent.String(),
+		DAGMode:         mode,
+		NodesCount:      nodes,
+		LLMCalls:        llmCalls,
+		ReflectionCount: reflections,
+		FollowUpCount:   followUps,
+		Outcome:         c.Outcome,
+		Labels:          c.Labels,
+		Status:          c.Status,
+	})
+}
+
+// Conclusion is what a run ended with.
+//
+// A struct rather than a pair of strings, because "aggregator_failed", "failed"
+// at a call site says nothing about which is which, and because an application
+// that writes its own answer adds labels of its own — see AnswerResult.
+type Conclusion struct {
+	// Outcome is the answer, or the reason there is none.
+	Outcome string
+	// Labels are the application's own labels for the answer, empty unless it
+	// supplied an Answer handler. Passed through untouched.
+	Labels map[string]string
+	// Status is "completed", "failed", "timeout" or "not_admitted".
+	Status string
+
+	// Nodes and LLMCalls are what the run did, for a run that has no graph and
+	// no budget to be counted from. The ReAct loop is the only one: it is a flat
+	// loop rather than a graph, and it keeps its own tallies.
+	//
+	// Read only when graph and budget are nil, so there is one source for these
+	// numbers and it is the graph wherever a graph exists.
+	Nodes    int
+	LLMCalls int
+}
+
+/*
+ * newRunID makes an identifier for one run.
+ * desc: The correlation id with the moment the run began, so a retry of the
+ *       same cause is a different run and both are recorded. Readable on
+ *       purpose: an operator reading an audit row can see which cause it
+ *       belongs to without a join.
+ * param: correlationID - what caused the run; may be empty.
+ * return: the run identifier.
+ */
+func newRunID(correlationID string) string {
+	if correlationID == "" {
+		return fmt.Sprintf("run-%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%d", correlationID, time.Now().UnixNano())
+}
+
+/*
+ * actionRunID returns the run an action belongs to, or empty outside one.
+ * desc: The graph first, because a run stamps it before any node fires and it
+ *       is what every dispatched call has. Then the context, for the ReAct
+ *       loop, which builds no graph and stamps its run there instead — without
+ *       this its audit lines and its actions would be filed under nothing.
+ *
+ *       Never the caller's reference. Falling back to it grouped two runs'
+ *       actions under one id, which for a state-changing call is the difference
+ *       between "this ran once" and "this ran twice", and is the fault this
+ *       pair of identifiers exists to keep apart.
+ * param: ctx - the run's context.
+ * param: graph - the run, or nil.
+ * param: triggerID - unused, kept so the call site reads as a choice between
+ *        the two identifiers rather than a bare field access.
+ * return: the run identifier, or empty.
+ */
+func actionRunID(ctx context.Context, graph *Graph, triggerID string) string {
+	if graph != nil && graph.RunID != "" {
+		return graph.RunID
+	}
+	return runIDFrom(ctx)
+}
+
+// AuditFunc receives one gate decision, for an application keeping its own
+// record of them.
+//
+// The entry is gates.AuditEntry unchanged — the same value the engine writes to
+// its own file, passed on rather than translated, so an application reads the
+// fields this package documents rather than a second shape of them.
+type AuditFunc func(gates.AuditEntry)
+
+/*
+ * audit records one gate decision, to the file and to the application.
+ * desc: Both, not either. The file is this package's, named and formatted by
+ *       it, and an application cannot read it; the application's copy is the
+ *       one a person looks at. Every gate decision goes through here, so
+ *       neither destination can be given a line the other was not.
+ *
+ *       A record that crashed loses its line and nothing else. A tool call
+ *       failing because the writing of its audit line failed is a worse trade
+ *       in both directions.
+ * param: e - the decision.
+ */
+func (a *Agent) audit(e gates.AuditEntry) {
+	if a == nil {
+		return
+	}
+	// Stamped here rather than left to the gate, which fills it on its own copy
+	// — the application would otherwise receive a line with no time on it while
+	// the file's line has one.
+	if e.Time == "" {
+		e.Time = time.Now().UTC().Format(time.RFC3339)
+	}
+	if a.gate != nil {
+		a.gate.Audit(e)
+	}
+	if a.auditFn == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[agent] the application's audit write panicked, the line is lost: %v", r)
+		}
+	}()
+	a.auditFn(e)
+}
+
+// Writing to the application's store.
+//
+// The store is the application's code and it is called at the end of a run, when
+// the answer already exists and the graph is finished. So a store that crashes
+// costs a row and nothing else — failing the run would throw away work that
+// succeeded because the bookkeeping for it did not, which is the same reasoning
+// writeAnswer applies when the answering callback crashes.
+//
+// Both writers log and continue. An application that wants a failed write to be
+// loud can make its own implementation say so; this package has no answer worth
+// giving beyond the line.
+
+/*
+ * storeRun files a finished run, if the application supplied a store.
+ * param: r - the run.
+ */
+func (a *Agent) storeRun(r Run) {
+	if a == nil || a.eventStore == nil {
+		return
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("[agent] the run store panicked recording %s, continuing: %v", r.ID, p)
+		}
+	}()
+	if err := a.eventStore.InsertRun(r); err != nil {
+		log.Printf("[agent] could not record run %s: %v", r.ID, err)
+	}
+}
+
+/*
+ * storeAction files one state-changing tool call, if the application supplied a
+ * store.
+ * param: act - the call that was made.
+ */
+func (a *Agent) storeAction(act Action) {
+	if a == nil || a.eventStore == nil {
+		return
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			log.Printf("[agent] the action store panicked recording %s, continuing: %v", act.ActionType, p)
+		}
+	}()
+	if err := a.eventStore.InsertAction(act); err != nil {
+		log.Printf("[agent] could not record action %s: %v", act.ActionType, err)
+	}
+}

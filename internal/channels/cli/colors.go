@@ -1,7 +1,5 @@
 package cli
 
-import "fmt"
-
 // ANSI escape codes
 const (
 	reset     = "\033[0m"
@@ -49,10 +47,10 @@ type Theme struct {
 	PromptIntent string // [operate] tag
 
 	// Messages
-	UserLabel     string // "you" label
+	UserLabel      string // "you" label
 	AssistantLabel string // "kaiju" label
-	UserText      string // user message body
-	AssistantText string // assistant response body
+	UserText       string // user message body
+	AssistantText  string // assistant response body
 
 	// Trace
 	TraceLabel string // node labels
@@ -66,11 +64,11 @@ type Theme struct {
 	StatusText string // text on status line
 
 	// System
-	Accent   string
-	Muted    string
-	Error    string
-	Success  string
-	Warning  string
+	Accent  string
+	Muted   string
+	Error   string
+	Success string
+	Warning string
 }
 
 var darkTheme = Theme{
@@ -78,7 +76,7 @@ var darkTheme = Theme{
 	PromptBrand:    "\033[38;5;141m", // purple
 	PromptArrow:    "\033[38;5;245m", // gray
 	PromptIntent:   "\033[38;5;110m", // blue
-	UserLabel:      "\033[38;5;45m", // cyan
+	UserLabel:      "\033[38;5;45m",  // cyan
 	AssistantLabel: "\033[38;5;141m", // purple
 	UserText:       "\033[38;5;253m", // bright white
 	AssistantText:  "\033[38;5;253m", // bright white
@@ -101,7 +99,7 @@ var lightTheme = Theme{
 	PromptBrand:    "\033[38;5;62m",  // deep purple
 	PromptArrow:    "\033[38;5;245m", // gray
 	PromptIntent:   "\033[38;5;25m",  // deep blue
-	UserLabel:      "\033[38;5;31m", // dark cyan
+	UserLabel:      "\033[38;5;31m",  // dark cyan
 	AssistantLabel: "\033[38;5;62m",  // deep purple
 	UserText:       "\033[38;5;235m", // dark
 	AssistantText:  "\033[38;5;235m", // dark
@@ -127,9 +125,4 @@ func clr(color, text string) string {
 // cb wraps text in bold + color + reset
 func cb(color, text string) string {
 	return bold + color + text + reset
-}
-
-// statusLine renders a single-line status that can be overwritten
-func statusLine(theme *Theme, text string) string {
-	return fmt.Sprintf("\r%s%s %s %s", clearLine, theme.StatusBg, theme.StatusText+text, reset)
 }

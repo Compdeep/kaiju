@@ -23,7 +23,7 @@ var AllowedZones = []string{"project", "media", "canvas", "blueprints", "uploads
 //
 // This is the last line of defense against the planner/coder writing to the
 // agent's own infrastructure. Prompt-level rules alone have proven
-// insufficient — see the cmd/kaiju/main.go incident 2026-04-18.
+// insufficient — a coder step overwrote cmd/kaiju/main.go on 2026-04-18.
 func SafeJoin(workspace, relPath string) (string, error) {
 	if filepath.IsAbs(relPath) {
 		return "", fmt.Errorf("absolute paths are not allowed (got %q) — use a workspace-relative path under %v", relPath, AllowedZones)
@@ -52,4 +52,42 @@ func SafeJoin(workspace, relPath string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("path not in allowed zones %v: %q lands at %q", AllowedZones, relPath, rel)
+}
+
+// Resolve is SafeJoin with the workspace treated as a default location rather
+// than a boundary.
+//
+// A relative path is resolved exactly as SafeJoin resolves it: under the
+// workspace, no escapes, inside an allowed zone. A path with a root is taken as
+// given — but only once it is established to be outside the workspace. One that
+// lands inside gets the zone rules too, so the protection that motivated them
+// cannot be stepped around by writing the same file absolutely.
+//
+// Why the boundary moved: a request to change something that already exists
+// elsewhere — a service configuration, a repository, a file the user named by
+// its full path — was refused, and the refusal told the caller to write a
+// workspace-relative path instead, which for that request produces a file that
+// does nothing. Meanwhile bash could write the same location unexamined, so the
+// rule bound the route that records what it touched and left the one that does
+// not. A write outside the workspace is graded by the gate, which can see the
+// intent and clearance a path rule cannot.
+func Resolve(workspace, path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return SafeJoin(workspace, path)
+	}
+	abs := filepath.Clean(path)
+	if workspace == "" {
+		return abs, nil
+	}
+	wsClean := filepath.Clean(workspace)
+	if abs == wsClean || strings.HasPrefix(abs, wsClean+string(filepath.Separator)) {
+		// Inside the workspace: same rules as any other workspace path, so the
+		// agent cannot reach its own source tree by spelling the path in full.
+		rel, err := filepath.Rel(wsClean, abs)
+		if err != nil {
+			return "", fmt.Errorf("compute relative path: %w", err)
+		}
+		return SafeJoin(workspace, filepath.ToSlash(rel))
+	}
+	return abs, nil
 }

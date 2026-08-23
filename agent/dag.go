@@ -880,6 +880,27 @@ func (g *Graph) SetError(nodeID string, err error) {
 }
 
 /*
+ * SetBlocked marks a node as skipped, keeping the reason it never ran.
+ * desc: A step whose dependency failed without leaving anything to read did
+ *       not fail — nothing about it was attempted. SetError would record it as
+ *       a failure, which reports one broken step twice and gives the reflector
+ *       and the aggregator a second thing to explain. The reason is kept on the
+ *       node so the trace still says why the step did not run.
+ * param: nodeID - the node that never ran.
+ * param: reason - what blocked it.
+ */
+func (g *Graph) SetBlocked(nodeID string, reason error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if n, ok := g.nodes[nodeID]; ok {
+		n.Error = reason
+		n.State = StateSkipped
+		n.EndedAt = time.Now()
+		g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+	}
+}
+
+/*
  * AddChild records that parentID spawned childID.
  * desc: Appends childID to the parent node's Children slice.
  * param: parentID - the ID of the parent node.

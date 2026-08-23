@@ -429,7 +429,7 @@ func substituteTemplates(n *Node, graph *Graph, reg *toolapi.Registry) error {
 				}
 				return match
 			}
-			return fmt.Sprint(val)
+			return injectedString(val)
 		})
 		if out != s {
 			return out, true
@@ -502,12 +502,40 @@ func resolveTemplateFieldCached(graph *Graph, cache map[string]any, depID, field
 	return v, nil
 }
 
+// blockedByDep says a step never ran because the step it reads from failed
+// without leaving anything to read.
+//
+// Nothing about this step was tried, so calling it a failure reports one broken
+// step twice — the run that ended this way showed "2 failed" for a single
+// cause, and gave the reflector a second thing to account for. It carries a
+// type rather than only a message so the scheduler can tell it apart from the
+// step's own errors and mark the node skipped instead.
+//
+// A dependency that failed but still produced output is not this: its output is
+// injected as it always was, because a command that exits non-zero has its
+// stderr in the result and the next step often wants it.
+type blockedByDep struct {
+	Owner string
+	DepID string
+	State NodeState
+}
+
+func (e *blockedByDep) Error() string {
+	return fmt.Sprintf("template on %s: dep %s has empty result (%s)", e.Owner, e.DepID, e.State)
+}
+
 func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error) {
 	dep := graph.Get(depID)
 	if dep == nil {
 		return nil, fmt.Errorf("template on %s: dep node %s not found", owner, depID)
 	}
 	if dep.Result == "" {
+		// A dependency that reached a terminal state with nothing to show
+		// blocks this step. One that resolved empty is a different thing — the
+		// wiring named a step that produces nothing — and stays a failure.
+		if dep.State == StateFailed || dep.State == StateSkipped {
+			return nil, &blockedByDep{Owner: owner, DepID: depID, State: dep.State}
+		}
 		return nil, fmt.Errorf("template on %s: dep %s has empty result (%s)", owner, depID, dep.State)
 	}
 	if dep.State == StateFailed {
@@ -552,6 +580,33 @@ func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error)
 		return dep.Result, nil
 	}
 	return nil, fmt.Errorf("template on %s: field %q absent in dep %s", owner, field, depID)
+}
+
+// injectedString renders a resolved value for a placeholder sitting inside a
+// larger string.
+//
+// fmt.Sprint was used, which writes Go's own debug syntax. A directory entry
+// reached file_read as the path map[name:kaiju-prompts size:4096 type:dir], and
+// a number as large as a million arrives as 1e+06. Neither is a value any tool
+// can act on, and neither reads as anything a person can diagnose — the first
+// looks like the memory was corrupted rather than like an object was put where a
+// filename goes.
+//
+// JSON is what every producer in a run already speaks, so a step embedding a
+// structure into a shell command gets something jq can read instead of something
+// nothing can. Where it is still the wrong value for the slot, the tool fails on
+// a string that says what it is.
+//
+// A string is passed through as it is: it is already text, and a path is /tmp/x
+// rather than "/tmp/x" with the quotes JSON would add.
+func injectedString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	if b, err := json.Marshal(v); err == nil {
+		return string(b)
+	}
+	return fmt.Sprint(v)
 }
 
 /*

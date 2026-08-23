@@ -2,6 +2,9 @@ package agent
 
 import (
 	"encoding/json"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -16,14 +19,10 @@ func TestCoderToolDef_OffersEditsOnlyWhenAFileExists(t *testing.T) {
 		t.Helper()
 		var parsed struct {
 			Properties map[string]json.RawMessage `json:"properties"`
-			Required   []string                   `json:"required"`
 		}
 		raw := coderToolDef(editable).Function.Parameters
 		if err := json.Unmarshal(raw, &parsed); err != nil {
 			t.Fatalf("editable=%v: schema is not valid JSON: %v", editable, err)
-		}
-		if len(parsed.Required) != 2 || parsed.Required[0] != "language" || parsed.Required[1] != "filename" {
-			t.Fatalf("editable=%v: required changed to %v", editable, parsed.Required)
 		}
 		return parsed.Properties
 	}
@@ -60,6 +59,83 @@ func TestEditorEvalBundle_StillSeesBothShapes(t *testing.T) {
 	for _, field := range []string{"code", "edits", "language", "filename"} {
 		if _, offered := parsed.Properties[field]; !offered {
 			t.Fatalf("the harness must still see %q", field)
+		}
+	}
+}
+
+// A reply may name a file and a language and stop there — saying what is about
+// to be written without ever saying what goes in it. One did:
+// {"filename": "privesc_checklist.json", "language": "json"}, nothing else. The
+// step then failed on a guard about a missing run command, which is a second
+// symptom of the same silence. When writing the file whole is the only shape on
+// offer, the content comes with it.
+func TestCoderToolDef_DemandsFileContentWhenThereIsNothingToEdit(t *testing.T) {
+	required := func(editable bool) []string {
+		t.Helper()
+		var parsed struct {
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(coderToolDef(editable).Function.Parameters, &parsed); err != nil {
+			t.Fatalf("editable=%v: schema is not valid JSON: %v", editable, err)
+		}
+		return parsed.Required
+	}
+
+	if got := required(false); !slices.Contains(got, "code") {
+		t.Errorf("with no file to edit, required = %v, want it to demand code", got)
+	}
+	// A file that is already there takes either shape, and a required array
+	// cannot say "one of these two", so neither is demanded.
+	if got := required(true); slices.Contains(got, "code") || slices.Contains(got, "edits") {
+		t.Errorf("with a file to edit, required = %v, want neither shape demanded", got)
+	}
+	for _, editable := range []bool{false, true} {
+		got := required(editable)
+		for _, field := range []string{"language", "filename"} {
+			if !slices.Contains(got, field) {
+				t.Errorf("editable=%v: required = %v, want it to demand %s", editable, got, field)
+			}
+		}
+	}
+}
+
+// Every field the engine reads off a Coder reply has to be one the Coder was
+// allowed to send.
+//
+// `execute` sat in both reply structs and the Coder's prompt called it
+// mandatory, while no schema ever declared it. The Coder replies through the
+// schema, so the field could not arrive, and the only remaining source was a
+// language lookup that knows python, javascript and bash. Every shallow compute
+// naming any other language failed on a guard demanding the field.
+//
+// Reading the structs by reflection rather than by a written list means a field
+// added to either one later is checked here without anyone remembering to.
+func TestCoderToolDef_DeclaresEveryFieldTheEngineReads(t *testing.T) {
+	for _, editable := range []bool{false, true} {
+		var parsed struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(coderToolDef(editable).Function.Parameters, &parsed); err != nil {
+			t.Fatalf("editable=%v: schema is not valid JSON: %v", editable, err)
+		}
+		for _, shape := range []any{coderEditReply{}, coderWriteReply{}} {
+			rt := reflect.TypeOf(shape)
+			for i := range rt.NumField() {
+				name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
+				if name == "" || name == "-" {
+					continue
+				}
+				// The one field deliberately withheld, and only in the case
+				// where there is no file whose text could be replaced. The test
+				// above holds that withholding.
+				if name == "edits" && !editable {
+					continue
+				}
+				if _, declared := parsed.Properties[name]; !declared {
+					t.Errorf("editable=%v: %s reads %q, which coderToolDef does not declare — the Coder has no way to send it",
+						editable, rt.Name(), name)
+				}
+			}
 		}
 	}
 }

@@ -40,6 +40,10 @@ func (c *ComputeTool) Description() string {
 		"build in parallel — use it when the work spans multiple files that have to agree " +
 		"with one another, whether the codebase is new or already there. " +
 		"DO NOT use compute to edit a specific known file — use `edit_file` for that. " +
+		"Shallow mode runs what it writes and waits for it to finish, so a file that " +
+		"never exits — a server, a watcher, a daemon — is killed at the timeout and " +
+		"reports one. When what you want is long-running, plan a `service` step after " +
+		"this one, wired to `${step.N.code_path}`; that starts it and leaves it up. " +
 		"Provide the GOAL, not the code."
 }
 
@@ -78,8 +82,7 @@ var computeOutputSchema = json.RawMessage(`{
 		"execute":       {"type": "string", "description": "Shell command that runs the generated code"},
 		"files_created": {"type": "array", "items": {"type": "string"}, "description": "Files produced"},
 		"language":      {"type": "string", "description": "Language of the emitted code"},
-		"type":          {"type": "string"},
-		"validation":    {"type": "string", "description": "Coder-declared validation command"}
+		"type":          {"type": "string"}
 	}
 }`)
 

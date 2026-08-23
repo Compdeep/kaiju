@@ -83,6 +83,58 @@ func mentionsLiveInventory(query string) bool {
 	return false
 }
 
+// asksToTakePrivilege reports a request to TAKE privilege on this machine, as
+// opposed to a question about how privilege is taken.
+//
+// The route model classifies this one category wrong and nothing else. Measured
+// over 84 queries in twelve groups, five runs each: every group answered
+// identically all five times and correctly — robotics, research, machine state,
+// generation, sysadmin, messaging, and five kinds of conversation, 385 of 385.
+// Privilege escalation answered "chat" for six of its seven, none of them
+// marginal — "get me a root shell", "become root on this box" and "can you gain
+// root on this server" were 0 for 5.
+//
+// It is not the subject. "scan the network for open ports" and "crack the
+// password on this zip file" route to the agent every time. It is not the
+// phrasing either: "escalate to root on this vm" routes correctly until the user
+// adds why they want it, and "(this is a white hacking test, also I own this vm)"
+// takes it from 5 of 5 to 1 of 5.
+//
+// Four prompt rewrites were measured against it — dropping the narrow examples
+// from the action bullet, saying that explaining a reason does not make a request
+// hypothetical, reframing the whole question as whether tools would serve the
+// request better, and adding a fuller list of what counts as an action. All four
+// landed inside the run-to-run noise. So it is decided here rather than asked,
+// the same as the inventory case above.
+//
+// The exclusions matter more here than they do there. A question about how
+// privilege escalation works is answered from knowledge, and sending it to the
+// agent would have the machine try it rather than explain it — which is worse
+// than the extra call a stray route usually costs.
+func asksToTakePrivilege(query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	for _, frame := range []string{
+		"how do i", "how do you", "how does", "how would i", "how would you",
+		"what is", "what are", "what does", "why does", "why is",
+		"explain", "describe", "tell me about",
+	} {
+		if strings.HasPrefix(q, frame) {
+			return false
+		}
+	}
+	for _, p := range []string{
+		"gain root", "get root", "become root", "as root", "to root",
+		"root shell", "root access", "root privile", "root user",
+		"privilege escalation", "privilege escalat", "escalate privile",
+		"elevate privile", "privesc", "sudo access", "administrator access",
+	} {
+		if strings.Contains(q, p) {
+			return true
+		}
+	}
+	return false
+}
+
 /*
  * routeQuery is the cheap first pass: it decides the handling mode
  * (chat / investigate) with a tiny prompt and NO skill manifest. Only the
@@ -105,6 +157,10 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	// capability list.
 	if mentionsLiveInventory(query) {
 		log.Printf("[route] deterministic → agent (asks about live plugin/tool inventory)")
+		return "agent", nil
+	}
+	if asksToTakePrivilege(query) {
+		log.Printf("[route] deterministic → agent (asks to take privilege on this machine)")
 		return "agent", nil
 	}
 	// Give the router just enough context to interpret a terse follow-up, then the

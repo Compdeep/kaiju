@@ -60,8 +60,8 @@ var frozenPromptOrder = []string{
 
 var frozenPrompts = map[string]frozenPrompt{
 	"SOUL":         {"ed330645ec6a4e06", 4889},
-	"ROUTE":        {"dc4c3e54fc6fa520", 2262},
-	"PREFLIGHT":    {"6bfa4528251eb9c6", 10264},
+	"ROUTE":        {"4e8fabcf0237bdb3", 2280},
+	"PREFLIGHT":    {"2088337b97975bd4", 9172},
 	"EXECUTIVE":    {"110d83a88e66c638", 4726},
 	"AGGREGATOR":   {"a782c5558ef001d0", 3631},
 	"REFRAME":      {"bbcd502243bc157f", 3819},

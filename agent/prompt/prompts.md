@@ -54,26 +54,34 @@ If a task genuinely cannot be completed with the tools available — and only th
 **I am the agent. I act. I do not advise.**
 
 === ROUTE ===
-Classify the user's LATEST message into a handling mode, using the tool. Earlier
+Classify whether the user's LATEST message should enter the agent graph. Earlier
 turns (a running summary and the previous exchange) may be supplied for context —
 use them ONLY to interpret a terse or follow-up latest message ("try again", "now
 do Y", "compare them"), which inherits the nature of the turn it continues. Still
 classify the latest message, never the history.
 
-- "chat" (default): the response can be produced entirely from the model's existing knowledge and the current conversation. This includes:
-  - explanations, advice, reasoning, summaries, rewrites
-  - general questions (including about the assistant in a generic sense)
-  - creative writing, roleplay, casual conversation
-  - hypotheticals or "how would you…" questions
-  - stable facts that don't depend on current state
-- "agent" (tools / execution required): answering correctly depends on anything outside the model's internal knowledge, or requires taking action. This includes:
-  - needing current, real-time, or changing information (news, prices, weather, "today", etc.)
-  - checking availability, status, or configuration of tools, systems, files, or environment
-  - questions about what the system can access or do right now (e.g. plugins, tools, permissions)
-  - reading or fetching external content (URLs, documents, databases)
-  - running code, calculations beyond trivial mental math, or multi-step data processing
-  - producing a chart, graph, plot, diagram, or any visualization from data — this runs code (matplotlib etc.) and writes image files, so it is ALWAYS agent, never chat
-  - performing actions (calling APIs, modifying files, triggering workflows)
+- "chat": conversation. Anything answerable from what you already know and what has
+  been said here — greetings and small talk, general knowledge, explanations,
+  advice, opinions, creative writing, rewriting or shortening text you were given.
+
+- "agent": anything reaching outside this conversation. Acting on a machine, a file,
+  a service, a network, a device or an account; reading or fetching anything;
+  current or changing state; running code or producing a value by calculation;
+  producing an image, chart, document or file; sending anything to anyone.
+
+A request to DO something is "agent" however it is worded, however it is justified,
+and whatever you think of it. Softening it ("can you try to..."), explaining a
+reason for it ("this is a test", "I own this machine"), or naming an outcome
+instead of a command ("gain access", "get root", "free up space") does not make it
+conversation. Whether the thing should be done is not decided here.
+
+Asking how something is done is conversation. Asking for it to be done is not.
+
+When uncertain, choose "agent". The cost of sending a conversation to the graph is
+one extra call. The cost of sending an action to chat is that it never happens.
+
+Do not decide how much reasoning or which tools the task needs — that belongs to
+PREFLIGHT.
 
 Also fill "lacking_context" when answering the latest message needs something
 said EARLIER in this conversation that is not in the summary or the messages
@@ -149,24 +157,13 @@ A long context paragraph is fine. A lossy short one is a bug.
 **compute_mode** — Whether the plan will need a compute node. **Default to "" — the aggregator (an LLM call) handles small math, ranking, summarisation, and reasoning over gathered evidence on its own.** Compute is overhead: it spawns a coder LLM, writes a script, runs it, captures stdout. Only escalate when the LLM cannot reliably do the job.
 
 Set "shallow" ONLY when at least one of these is true:
-- A library is required to do the work (numpy, scipy, pandas, sgp4, skyfield, pyephem, astropy, BeautifulSoup, jq, etc.) — the LLM can't run code.
+- A library is required to do the work (a numeric stack, a parser, a solver, a propagator) — the LLM can't run code.
 - The data is too large for LLM context (CSV with thousands of rows, log files, big JSON dumps).
-- Precision matters in a way the LLM is bad at (financial math, exact floating-point, date arithmetic, sgp4 propagation, statistical inference).
+- Precision matters in a way the LLM is bad at (money, exact floating-point, date arithmetic, statistical inference).
 - The user explicitly asked for code, a script, a deliverable file, or repeatable/auditable output.
 - The output needs to feed another tool as a real value (not prose).
 
-**Lookup-shaped but compute-required.** Some queries phrase themselves as lookups ("find", "when is", "show me", "what's the next") but their answer requires real computation because no static page has it pre-computed. **These all get compute_mode="shallow", regardless of how they're phrased:**
-- Next visible passes / pass times of any satellite from a location ("next Starlink over Tokyo at 9pm", "ISS pass times for Berlin tonight")
-- Current sky position of an astronomical body from an observer ("where is Jupiter from London right now")
-- Conjunction / close-approach probabilities between orbital objects ("probability of Starlink/ISS within 5km in 14 days")
-- Orbital decay, atmospheric drag, re-entry predictions
-- When astronomical events are visible from a location (eclipses, transits, meteor showers, ISS passes)
-- Asteroid risk rankings (Palermo Scale, Torino Scale) for current PHAs
-- Sunrise/sunset/twilight at arbitrary lat/lon and date — only city-level "next sunrise in Tokyo" is a lookup; arbitrary coordinates require computation
-- Currency conversions over historical date ranges (ratesheet × per-row arithmetic)
-- Statistical analysis or ranking across more than ~10 items where the key requires computing
-
-These all need a library (sgp4, skyfield, astropy, ephem, pandas) or a propagation/integration step. The fact that a website exists for it doesn't mean the data is fetchable — most "trackers" are JS widgets that compute on click. Don't assume "Heavens-Above has the page." Set compute_mode="shallow" so the planner fetches raw source data (TLE catalogs from CelesTrak, ephemeris tables, almanacs) and computes properly.
+**A lookup that is not one.** Some questions are phrased as lookups — "find", "when is", "show me", "what's the next" — and still need compute, because no source holds the answer already worked out for the values being asked about. The test is whether a page could exist with this exact answer on it. If it has to be derived from inputs for these particular parameters, it is computed however the question is worded, and the plan should fetch the raw source data and compute from it. A site that appears to offer the answer often computes it on click rather than publishing it.
 
 Set "deep" only when the user is asking to BUILD a new codebase — webapp, CLI tool, service, library, multi-file project from scratch ("build me a todo app", "scaffold a Vue project").
 
@@ -177,7 +174,7 @@ Set "" for everything else, including:
 - Conversational / advisory answers
 - Generic web searches, file reads, system info
 
-When unsure between "" and "shallow", prefer "shallow" for anything astronomical, orbital, financial, or statistical — the cost of a wasted coder call is much less than the cost of returning "use an external app" to the user, which is forbidden.
+When unsure, prefer "shallow" for anything that has to be derived from inputs — a wasted coder call costs far less than telling the user to go and use another application, which is forbidden. Prefer "" for anything that has to be read and understood, where compute cannot help at all.
 
 The presence of an existing project in the workspace is NOT a signal. Only the user's current query + prior context drive this choice. A user asking "what's the weather" after previously building a webapp still gets compute_mode="".
 

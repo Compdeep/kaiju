@@ -761,6 +761,29 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 			if comp.Err != nil {
 				errMsg := comp.Err.Error()
+
+				// A step that never ran because the step it reads from failed
+				// without leaving anything to read. It is not a failure of its
+				// own — nothing about it was attempted — and recording it as
+				// one reported a single broken step twice, in the trace and in
+				// the list the aggregator is told to account for.
+				//
+				// Only this node, and only when it actually needed a value it
+				// could not get. Its own dependents reach the same branch on
+				// their own turn, so the graph settles one node at a time
+				// without a prune, which the failure path below deliberately
+				// does not do either.
+				var blocked *blockedByDep
+				if errors.As(comp.Err, &blocked) {
+					log.Printf("[dag] node %s (%s) never ran: %v", comp.NodeID, node.ToolName, comp.Err)
+					graph.SetBlocked(comp.NodeID, comp.Err)
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BLOCKED", errMsg)
+					workSinceReflection++
+					a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
+					launchReady()
+					continue
+				}
+
 				log.Printf("[dag] node %s (%s) failed: %v", comp.NodeID, node.ToolName, comp.Err)
 				// debuggerInflight is cleared by the next reflection that
 				// fires (Fix 4 — reflector is the sync point), so no need
@@ -1844,15 +1867,14 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					// through Phase 3 above.
 					if node.SpawnedBy == "" {
 						var res struct {
-							Execute    string `json:"execute,omitempty"`
-							Validation string `json:"validation,omitempty"`
-							Type       string `json:"type,omitempty"`
+							Execute string `json:"execute,omitempty"`
+							Type    string `json:"type,omitempty"`
 						}
 						if json.Unmarshal([]byte(computePayload(comp.Result)), &res) == nil && res.Type == "result" && res.Execute != "" {
-							grafted := a.graftComputeExecution(graph, node, comp.NodeID, res.Execute, res.Validation, budget)
+							grafted := a.graftComputeExecution(graph, node, comp.NodeID, res.Execute, budget)
 							if len(grafted) > 0 {
 								rewriteDependentsMultiExcluding(graph, comp.NodeID, grafted)
-								log.Printf("[dag] shallow compute → grafted %d exec/verify nodes", len(grafted))
+								log.Printf("[dag] shallow compute → grafted %d exec nodes", len(grafted))
 							}
 						}
 					}
@@ -2464,17 +2486,12 @@ func (a *Agent) execBashParams(ctx context.Context, node *Node, comp nodeComplet
 	}
 }
 
-// graftComputeExecution wires an execute bash node (running the generated
-// code) and a verify bash node (running a content check) downstream of a
-// shallow-mode top-level compute node. Returns the grafted nodes so the
-// caller can rewire downstream deps.
+// graftComputeExecution wires an execute bash node — the one that runs the
+// code compute just generated — downstream of a shallow-mode top-level compute
+// node. Returns the grafted nodes so the caller can rewire downstream deps.
 //
-// The execute node tees its combined output to /tmp/kaiju_<node>.out; the
-// verify command gets that path as $OUT. If the coder did not emit an
-// explicit validation expression, we fall back to a generic check: output
-// non-empty, no bare Python/JS traceback, minimum size.
-func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd, validation string, budget *Budget) []*Node {
-	_ = validation // legacy param — coder no longer emits validators; the reflector judges output downstream
+// The execute node tees its combined output to /tmp/kaiju_<node>.out.
+func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd string, budget *Budget) []*Node {
 	var grafted []*Node
 	if execCmd == "" {
 		return grafted

@@ -426,6 +426,11 @@ func architectToolDef() llm.ToolDef {
 // replies.
 func coderToolDef(editable bool) llm.ToolDef {
 	editsField := ""
+	// Writing the file whole is the only shape on offer when nothing exists to
+	// edit, so the content field is demanded. A reply naming a file and a
+	// language and nothing else is schema-valid without this, and says what is
+	// about to be written without ever saying what goes in it.
+	required := `["language", "filename", "code"]`
 	description := "Submit code for a new file, in 'code'."
 	if editable {
 		editsField = `,
@@ -441,6 +446,10 @@ func coderToolDef(editable bool) llm.ToolDef {
 							"required": ["old_content", "new_content"]
 						}
 					}`
+		// Both shapes apply to a file that is already there, and a JSON Schema
+		// "required" array cannot say "one of these two" — so neither is
+		// demanded and the caller reads whichever arrived.
+		required = `["language", "filename"]`
 		description = "Submit code to write or edit. Use 'code' to replace a file wholesale, 'edits' for text replacements within an existing one."
 	}
 	return llm.ToolDef{
@@ -462,9 +471,13 @@ func coderToolDef(editable bool) llm.ToolDef {
 					"code": {
 						"type": "string",
 						"description": "Complete file content."
+					},
+					"execute": {
+						"type": "string",
+						"description": "Shell command that runs the file you just wrote, relative to the workspace project root — for example: python3 compute.py. Give it whenever the printed output of the file is the answer; without it the file is written and never runs."
 					}` + editsField + `
 				},
-				"required": ["language", "filename"]
+				"required": ` + required + `
 			}`),
 		},
 	}

@@ -111,7 +111,6 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 		taskFiles:  taskFiles,
 		interfaces: params["interfaces"],
 		execute:    execute,
-		service:    params["service"],
 	}
 
 	// Guidance sections come from ec.SkillCards, resolved by the dispatcher
@@ -549,7 +548,25 @@ type computeCodeContext struct {
 	taskFiles  []string // files this coder is responsible for
 	interfaces any      // API, types, database schemas from architect
 	execute    string   // one-shot shell command to run after files are written
-	service    any      // long-running service: {"command": "...", "name": "..."}
+}
+
+// The two shapes the Coder may reply with, named so what the engine expects of
+// a reply and what coderToolDef offers can be checked against one another. They
+// were anonymous structs inside computeCode, where nothing outside that function
+// could see them and `execute` sat in both for months while no schema declared
+// it — the Coder was asked for a field it had no way to return.
+type coderEditReply struct {
+	Language string   `json:"language"`
+	Filename string   `json:"filename"`
+	Edits    []EditOp `json:"edits"`
+	Execute  string   `json:"execute,omitempty"`
+}
+
+type coderWriteReply struct {
+	Language string          `json:"language"`
+	Filename string          `json:"filename"`
+	Code     json.RawMessage `json:"code"`
+	Execute  string          `json:"execute,omitempty"`
 }
 
 /*
@@ -707,13 +724,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	}
 
 	// Try edit format first (text-match replacements)
-	var editResp struct {
-		Language   string   `json:"language"`
-		Filename   string   `json:"filename"`
-		Edits      []EditOp `json:"edits"`
-		Execute    string   `json:"execute,omitempty"`
-		Validation string   `json:"validation,omitempty"`
-	}
+	var editResp coderEditReply
 	if TryParseLLMJSON(raw, &editResp) && len(editResp.Edits) > 0 {
 		destPath := editResp.Filename
 		if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
@@ -749,13 +760,8 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			"code_path":    codePath,
 			"language":     editResp.Language,
 		}
-		if codeCtx != nil {
-			if codeCtx.execute != "" {
-				result["execute"] = codeCtx.execute
-			}
-			if codeCtx.service != nil {
-				result["service"] = codeCtx.service
-			}
+		if codeCtx != nil && codeCtx.execute != "" {
+			result["execute"] = codeCtx.execute
 		}
 		// Coder-declared execute wins over the architect default when set —
 		// it has the freshest knowledge of how to run the edited file.
@@ -767,53 +773,46 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 				result["execute"] = guess
 			}
 		}
-		if editResp.Validation != "" {
-			result["validation"] = editResp.Validation
-		}
 		out, _ := json.Marshal(result)
 		return string(out), nil
 	}
 
 	// Write mode — full file
-	var codeResp struct {
-		Language   string          `json:"language"`
-		Filename   string          `json:"filename"`
-		Code       json.RawMessage `json:"code"`
-		Execute    string          `json:"execute,omitempty"`
-		Validation string          `json:"validation,omitempty"`
-	}
+	var codeResp coderWriteReply
 	if err := ParseLLMJSON(raw, &codeResp); err != nil {
 		return "", fmt.Errorf("parse code response: %w (raw: %.300s)", err, raw)
 	}
 
-	// Phase B enforcement — compute(shallow) write-mode invariant.
+	// Whether anything can run what is about to be written.
 	//
-	// When the caller didn't set task_files, this compute step is implicitly
-	// a value-computation intent: the Coder emits a runnable script, the
-	// script runs, stdout is captured on .output so downstream steps can
-	// read it via ${step.N.output}. If the Coder returns write-mode output
-	// WITHOUT an execute command, there's no exec graft, no captured stdout,
-	// and no .output field on the result. Downstream steps that reference
-	// .output then hit the dispatcher's silent fallback and receive the
-	// compute metadata JSON
-	// instead of the intended content — which clobbers target files (the
-	// brace_json bug).
+	// A step that named no task_files used to be required to produce something
+	// runnable, and was failed outright when it did not: no execute from the
+	// Coder and no default runner for the language meant the file was never
+	// written at all. But naming no task_files is the ordinary shape of a
+	// planner-called compute — the field is deprecated on that schema — and
+	// plenty of what compute is asked for is not a program. A checklist, a
+	// document, a page: there is nothing to run and nothing wrong.
 	//
-	// Reject here so the Executive gets a loud error rather than silent
-	// corruption. For known-path file operations the Executive should be
-	// using edit_file (which always sets task_files and takes this branch
-	// in edit-mode, not write-mode). Architect-spawned coder grafts always
-	// set task_files per sub-task, so they're unaffected.
+	// The rejection existed because a later step reading .output would then
+	// "hit the dispatcher's silent fallback and receive the compute metadata
+	// JSON instead of the intended content". That fallback is gone.
+	// resolveTemplateField now degrades only when a result is not JSON at all,
+	// and compute's always is — so a reference to a field this node does not
+	// carry fails by name, at the step that got it wrong, instead of quietly
+	// injecting the wrong value (dispatcher.go, "field %q absent in dep %s").
+	//
+	// So the file is written whether or not it can be run. With a run command
+	// the scheduler grafts the exec child that produces .output; without one it
+	// does not, and .output is simply not a field this node has.
 	effectiveExecute := codeResp.Execute
 	if effectiveExecute == "" && codeCtx != nil {
 		effectiveExecute = codeCtx.execute
 	}
-	// If the Coder forgot `execute`, try the language-based default before
-	// rejecting. This is the same fallback used downstream during result
-	// assembly (line ~897); applying it earlier means the common case where
-	// the LLM emits a Python/JS/Bash script without explicit `execute`
-	// auto-recovers instead of failing the whole step. The Phase-B reject
-	// stays as the last-resort guard for languages we don't know how to run.
+	// A Coder that wrote a script and did not say how to run it still gets one,
+	// from the language. Result assembly below asks the same question again, of
+	// the absolute path it has by then; asking here as well settles `execute`
+	// against the path the run command should carry — the one under the project
+	// prefix, not the one under the workspace root.
 	if effectiveExecute == "" && (codeCtx == nil || len(codeCtx.taskFiles) == 0) {
 		probePath := codeResp.Filename
 		if probePath == "" {
@@ -827,9 +826,6 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			codeResp.Execute = guess // surfaces to the result-assembly path below
 			log.Printf("[dag] compute %s: Coder omitted execute; inferred %q from language=%s", tag, guess, codeResp.Language)
 		}
-	}
-	if (codeCtx == nil || len(codeCtx.taskFiles) == 0) && effectiveExecute == "" {
-		return "", fmt.Errorf("compute(shallow) write-mode without task_files requires `execute` on the Coder response so .output can be captured; the Coder omitted it AND the language %q has no known default runner (raw: %.200s)", codeResp.Language, raw)
 	}
 	// Normalize code to string — unwrap JSON string quotes, or re-marshal object to string
 	var codeStr string
@@ -915,12 +911,6 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			execCmd = "KAIJU_CONTEXT=" + shQuote(ctxPath) + " " + execCmd
 		}
 		result["execute"] = execCmd
-	}
-	if codeCtx != nil && codeCtx.service != nil {
-		result["service"] = codeCtx.service
-	}
-	if codeResp.Validation != "" {
-		result["validation"] = codeResp.Validation
 	}
 
 	out, _ := json.Marshal(result)

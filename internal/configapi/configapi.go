@@ -9,7 +9,6 @@
 package configapi
 
 import (
-	_ "embed"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/internal/config"
+	"github.com/Compdeep/kaiju/models"
 )
 
 /*
@@ -284,59 +284,15 @@ func (c *API) saveToDisk() error {
 }
 
 // ─── Model Catalog ──────────────────────────────────────────────────────────
-
-/*
- * modelInfo describes a supported LLM model for the catalog.
- * desc: Contains the model ID, display name, provider, and optional context window size.
- */
-type modelInfo struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Family   string `json:"family,omitempty"`  // e.g. "qwen3", "gpt-4.1", "gemini"
-	Params   string `json:"params,omitempty"`  // e.g. "30B-A3B", "8B", "235B-A22B"
-	Version  string `json:"version,omitempty"` // e.g. "2507", "3.3"
-	Provider string `json:"provider"`
-	Context  string `json:"context,omitempty"`
-	// ContextTokens and MaxOutputTokens are the same limits the provider
-	// publishes, in tokens, for arithmetic — Context above is a label for the
-	// picker and cannot be computed with. Zero means the catalog does not know,
-	// and a caller must keep whatever cap it would otherwise have used.
-	ContextTokens   int `json:"context_tokens,omitempty"`
-	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
-	// Thinking marks a reasoning model that emits hidden reasoning tokens before
-	// its output. Fine for open-ended generation (answer/chat), but it starves on
-	// small forced tool calls — see ToolCallOK.
-	Thinking bool `json:"thinking"`
-	// Tools reports whether the model can call tools at all.
-	Tools bool `json:"tools"`
-	// ToolCallOK reports whether the model reliably emits a SMALL forced tool call
-	// (router @16 tok / executor @256 tok). This is the router/executor-lane gate:
-	// a thinking model usually fails it (burns the budget reasoning → no tool call).
-	ToolCallOK bool `json:"tool_call_ok"`
-	// Verified is true when ToolCallOK was measured by the bench (docs/router-model-bench.md)
-	// rather than inferred from the model family.
-	Verified bool `json:"verified"`
-	// Available reports whether this model's provider is configured with a key
-	// in kaiju's providers block. Computed at serve time, not stored in the catalog.
-	Available bool `json:"available"`
-	// Vision reports whether the model accepts image input.
-	Vision bool `json:"vision,omitempty"`
-	// Chat marks a model suited to the chat lane (conversation / roleplay tunes).
-	Chat bool `json:"chat,omitempty"`
-	// Roles lists the lanes this model is suitable for: answer, planner, executor,
-	// router, chat, vision. The UI filters each lane's picker by role.
-	Roles []string `json:"roles,omitempty"`
-}
-
-// modelCatalog is the on-disk shape of models.json.
-type modelCatalog struct {
-	Version int         `json:"version"`
-	Models  []modelInfo `json:"models"`
-}
+//
+// The catalog itself now lives in package models, outside internal/, so an
+// application embedding kaiju can read the same list instead of keeping a
+// second hand-maintained copy. This file only serves it.
 
 /*
  * handleListModels returns the supported model catalog.
- * desc: Returns the static list of all known LLM models across providers.
+ * desc: Returns the static list of all known LLM models across providers,
+ *       each marked available or not for this host's configured keys.
  * param: w - HTTP response writer
  */
 func (c *API) handleListModels(w http.ResponseWriter, _ *http.Request) {
@@ -352,50 +308,22 @@ func (c *API) handleListModels(w http.ResponseWriter, _ *http.Request) {
 	if c.cfg.LLM.Provider != "" && c.cfg.LLM.APIKey != "" {
 		configured[c.cfg.LLM.Provider] = true
 	}
-	out := make([]modelInfo, len(allModels))
-	for i, m := range allModels {
-		m.Available = configured[m.Provider]
-		out[i] = m
+	out := models.All()
+	for i := range out {
+		out[i].Available = configured[out[i].Provider]
 	}
 	jsonResponse(w, out, http.StatusOK)
 }
 
-// allModels is the supported model catalog, loaded from the embedded models.json.
-// Operators may override the file from data_dir/models.json in a future revision;
-// for now the embedded JSON is the single source of truth (edit models.json).
-//
-//go:embed models.json
-var modelsJSON []byte
-
-var allModels = loadModels()
-
-// loadModels parses the embedded model catalog. On a malformed file it returns an
-// empty list (handleListModels then serves nothing) rather than panicking at init.
-func loadModels() []modelInfo {
-	var cat modelCatalog
-	if err := json.Unmarshal(modelsJSON, &cat); err != nil {
-		log.Printf("[api] model catalog: parse failed, catalog empty: %v", err)
-		return nil
-	}
-	return cat.Models
-}
-
 /*
  * ModelLimits reports what a model can take in and give back, in tokens.
- * desc: Reads the two numeric fields of the catalog entry. Both are zero when
- *       the id is not in the catalog, or when the catalog carries no numbers
- *       for it — the caller then keeps the cap it would otherwise have used.
- *       Suitable as agent.Config.ModelLimits.
+ * desc: Kept as a shim so cmd/kaiju keeps one import for its agent config.
+ *       models.Limits is the implementation.
  * param: id - the model id as configured for a lane, e.g. "openai/gpt-4.1".
  * return: the context window and the largest reply the provider will produce.
  */
 func ModelLimits(id string) (contextTokens, maxOutputTokens int) {
-	for _, m := range allModels {
-		if m.ID == id {
-			return m.ContextTokens, m.MaxOutputTokens
-		}
-	}
-	return 0, 0
+	return models.Limits(id)
 }
 
 /*

@@ -379,6 +379,56 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	log.Printf("[dag] scheduler mode: %s, intent: %s", dagMode, intent)
 
 	// launchReady fires all ready nodes.
+	// retryOnce gives a step that failed one repair attempt, and says whether it
+	// made one.
+	//
+	// A tool reports failure two ways — a Go error, or an envelope whose status is
+	// error — and only the first reached this. bash reports the second, so the
+	// engine's most-used tool was also its only unrepairable one: a run asking for
+	// privilege escalation had eight bash steps fail and not one of them was tried
+	// again. Both ways arrive here now, because a tool that says it failed in the
+	// second way is no less repairable than one that said it in the first.
+	//
+	// detail is what the step actually reported, not the sentence the engine wrote
+	// about it. "command failed: exit 1: exit status 1" says nothing a fixer can
+	// act on; the stderr beside it said "the input device is not a TTY", which
+	// names the flag to drop.
+	retryOnce := func(node *Node, comp nodeCompletion, detail string) bool {
+		tier := classifyRetryTier(detail)
+		if tier == "skip" || strings.Contains(node.Tag, "[") {
+			return false
+		}
+		if node.Type != NodeTool || node.ToolName == "service" || node.Source == "holmes" {
+			// Holmes is investigating: a failure is an observation, and rewriting
+			// the command would invalidate what it was asking.
+			return false
+		}
+		switch tier {
+		case "blind":
+			node.Tag += " [blind_retry]"
+			node.Error = nil
+			graph.SetState(comp.NodeID, StatePending)
+			log.Printf("[dag] blind retry for %s: %s", comp.NodeID, Text.TruncateLog(detail, 200))
+			appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BLIND_RETRY", detail)
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
+			return true
+		case "oneshot":
+			if budget.LLMRemaining() <= 0 {
+				return false
+			}
+			// The node stays failed while the retry runs, so dependents are not
+			// held up by a repair that may not come.
+			node.Tag += " [oneshot_retry]"
+			inflight++
+			go a.oneshotRetry(ctx, node, comp, graph, budget, completionCh, detail, intent, trigger.Scope)
+			log.Printf("[dag] oneshot retry for %s: %s", comp.NodeID, Text.TruncateLog(detail, 200))
+			appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "ONESHOT_RETRY", detail)
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
+			return true
+		}
+		return false
+	}
+
 	launchReady := func() {
 		for _, n := range graph.ReadyNodes() {
 			graph.SetState(n.ID, StateRunning)
@@ -814,42 +864,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				}
 
 				// ── Three-tier retry ──
-				// Tier 1: skip — structural error, no retry will help
-				// Tier 2: blind — transient error, rerun same command
-				// Tier 3: oneshot — executor LLM fix with tiny context
-				tier := classifyRetryTier(errMsg)
-				alreadyRetried := strings.Contains(node.Tag, "[")
-
-				// Holmes-spawned action nodes are exempt from retry. Holmes
-				// is investigating; failure observations are signal, not bugs to
-				// fix. Rewriting the command would invalidate the experiment.
-				if tier != "skip" && !alreadyRetried && node.Type == NodeTool && node.ToolName != "service" && node.Source != "holmes" {
-					if tier == "blind" {
-						node.Tag = node.Tag + " [blind_retry]"
-						node.Error = nil
-						graph.SetState(comp.NodeID, StatePending)
-						log.Printf("[dag] blind retry for %s", comp.NodeID)
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BLIND_RETRY", errMsg)
-						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
-						launchReady()
-						continue
-					}
-					if tier == "oneshot" && budget.LLMRemaining() > 0 {
-						// Fire a tiny executor call: just command + error → fixed command.
-						// Keep node in failed state so dependents can proceed.
-						// Track inflight so scheduler doesn't exit early.
-						// If retry succeeds, resolve the node and dependents will
-						// see the result on the next launchReady cycle.
-						graph.SetError(comp.NodeID, comp.Err)
-						node.Tag = node.Tag + " [oneshot_retry]"
-						inflight++ // track the async retry
-						go a.oneshotRetry(ctx, node, comp, graph, budget, completionCh, errMsg, intent, trigger.Scope)
-						log.Printf("[dag] oneshot retry for %s", comp.NodeID)
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "ONESHOT_RETRY", errMsg)
-						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
-						launchReady() // let dependents proceed with failed dep
-						continue
-					}
+				// One attempt: skip (nothing to fix), blind (rerun as it was), or
+				// oneshot (a cheap LLM rewrite). retryOnce is shared with the
+				// branch that handles a tool reporting failure in its envelope.
+				graph.SetError(comp.NodeID, comp.Err)
+				if retryOnce(node, comp, retryDetail(node, errMsg)) {
+					launchReady() // dependents proceed meanwhile, on a failed dep
+					continue
 				}
 
 				// No retry — fail and prune
@@ -1347,6 +1368,14 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					// whether to investigate. Without this, single-step bash plans
 					// that fail get no reflection → no Holmes → no fix loop.
 					workSinceReflection++
+
+					// The same one repair attempt a Go error gets. A tool saying it
+					// failed in its envelope is no less repairable than one saying
+					// it by returning an error, and bash says it this way.
+					if retryOnce(node, comp, retryDetail(node, comp.Result)) {
+						launchReady()
+						continue
+					}
 
 					// No cascade prune — the reflector will catch this
 					injectInterjection()
@@ -2329,6 +2358,25 @@ func mergeJSONField(raw, key, value string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// retryDetail is what a failed step reported, for the code deciding whether to
+// try it again and for the fixer that rewrites the command.
+//
+// The engine's own sentence for a failed command is "command failed: exit 1:
+// exit status 1", which names no cause and gives a fixer nothing to change. The
+// step had already said why: beside that exit code sat "the input device is not
+// a TTY", naming the one flag that had to go. A run spent three replans and
+// concluded the machine was locked down, on a command that needed a flag
+// removed.
+//
+// The node's own account is preferred where it has one, and the engine's is the
+// fallback for a failure that carries nothing else.
+func retryDetail(n *Node, fallback string) string {
+	if d := strings.TrimSpace(extractFailureDetail(n)); d != "" {
+		return d
+	}
+	return fallback
 }
 
 // classifyRetryTier determines what kind of retry (if any) is appropriate.

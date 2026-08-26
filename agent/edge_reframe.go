@@ -270,7 +270,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request, reader s
 		Messages: BuildMessagesWithResults(
 			fmt.Sprintf(prompt.Reframe, reader), material, nil, graph.Arcs()),
 		Temperature: 0.2,
-		MaxTokens:   400,
+		MaxTokens:   a.replyBudget(replyEdgeBudget),
 	})
 	// An edge carries; this is what it carried. Recorded whether the model
 	// answered or not, because a reframe that fell back to passing the material

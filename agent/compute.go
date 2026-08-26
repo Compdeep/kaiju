@@ -383,7 +383,7 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 		Tools:       []llm.ToolDef{architectToolDef()},
 		ToolChoice:  "required",
 		Temperature: 0.3,
-		MaxTokens:   8192,
+		MaxTokens:   a.replyBudget(replyAnalysisBudget),
 	})
 
 	if err != nil {
@@ -706,7 +706,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		Tools:       []llm.ToolDef{coderToolDef(editable)},
 		ToolChoice:  "required",
 		Temperature: 0.2,
-		MaxTokens:   16384,
+		MaxTokens:   a.replyBudget(replyCodeBudget),
 	}
 	// Checked, like the architect above. A coder reply cut off at MaxTokens is a
 	// half-written program, and plain ask does not notice: the fragment was

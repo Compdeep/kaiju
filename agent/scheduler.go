@@ -147,6 +147,70 @@ func triggerIsAwaited(t Trigger) bool {
 	return false
 }
 
+/*
+ * isModelStage reports whether a node's failure could be OUR credentials being
+ * rejected.
+ * desc: A stage that called a model can report an auth failure about this
+ *       deployment. A tool cannot: its 401 or 403 belongs to whatever it was
+ *       talking to, and reading it as ours stops the run on somebody else's
+ *       access control.
+ * param: n - the node that failed.
+ * return: true when the failure could be about our own credentials.
+ */
+func isModelStage(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	switch n.Type {
+	case NodeTool, NodeActuator:
+		return false
+	}
+	return true
+}
+
+/*
+ * aggregatorWillWriteTheAnswer reports whether a stage after the reflector will
+ * produce the reply, so the reflector need not.
+ * desc: The reflector is asked for an "outcome" — the final answer for the user
+ *       — every time it concludes. On the paths where the aggregator runs, that
+ *       answer is then thrown away and the aggregator's is used instead. On an
+ *       interactive query that is EVERY time: decideAutoAggMode's first branch
+ *       is "someone is waiting on this answer, so it is synthesised whatever the
+ *       reflector said".
+ *
+ *       So the reflector spends its reply budget, and the seconds with it,
+ *       writing something nothing reads. Asked before the call, this says
+ *       whether that is about to happen.
+ *
+ *       It answers only when it is CERTAIN. A pinned agg_mode of 0 means the
+ *       reflector's outcome IS the answer — an embedding application that reads
+ *       the run's outcome directly depends on it being written — and in auto
+ *       mode the reflector's own aggregate flag has not been written yet, so
+ *       decideAutoAggMode is asked with nil and its fallback is 0. Both resolve
+ *       to "no", which keeps the answer being written. Only a mode already
+ *       committed to aggregating returns true.
+ * param: trigger - the run's trigger, which may pin the mode.
+ * param: graph - the run so far.
+ * return: true when the reply is certainly being written by a later stage.
+ */
+func (a *Agent) aggregatorWillWriteTheAnswer(trigger Trigger, graph *Graph) bool {
+	switch mode := trigger.AggMode; {
+	case mode == 0:
+		return false // the reflector's outcome is the answer
+	case mode > 0:
+		return true // pinned to an aggregator lane
+	}
+	// Auto. Every input but the reflector's own flag is already settled, and
+	// that flag is consulted last — so asking now, with nil, gives the same
+	// answer as asking later on every branch that does not depend on it.
+	needsSynthesis := graph.Preflight != nil && graph.Preflight.NeedsSynthesis
+	complex := needsSynthesis || a.runFanout(graph) >= complexFanoutFloor
+	mode, _ := decideAutoAggMode(
+		graph.HasNodeOfType(NodeCompute), complex, a.hasUsableEvidence(graph),
+		triggerIsAwaited(trigger), nil)
+	return mode > 0
+}
+
 // decideAutoAggMode picks the aggregator lane in auto mode (agg_mode -1): 0=skip
 // (use the reflector's outcome), 1=executor model, 2=reasoning model. Pure over the
 // structural signals so it is unit-tested directly (TestDecideAutoAggMode).
@@ -923,7 +987,25 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// a transient one. Retrying every remaining node against the
 				// same rejected key spends the whole budget to arrive at the
 				// same place, so stop here and say what is wrong.
-				if llm.IsAuthFailure(errMsg) {
+				// Only OUR credentials, not a site refusing a fetch.
+				//
+				// IsAuthFailure matches "http 403" and "forbidden", which is
+				// right for a provider rejecting an API key and wrong for every
+				// tool that talks to the wider world. A single 403 from a public
+				// page therefore ended the whole run: this branch sets
+				// reflectionConcluded, skips every pending node and zeroes
+				// inflight, and the loop condition is !reflectionConcluded — so
+				// the reflector never ran, nothing decided whether a refused
+				// source was the end of the search, and the user was told the
+				// credentials had been rejected.
+				//
+				// Observed live on a fetch of etherscan.io, which answers 403 to
+				// datacenter addresses. Four nodes, no reflect, straight to
+				// synthesis.
+				//
+				// A tool's failure is a fact about the world. Only a stage that
+				// called a model can report that the model refused us.
+				if isModelStage(node) && llm.IsAuthFailure(errMsg) {
 					log.Printf("[dag] the model rejected our credentials, stopping this run: %v", comp.Err)
 					reflectionConcluded = true
 					reflectionOutcome = "The model rejected the credentials it was given: the API key is missing, invalid, or has no access to the configured model. Nothing further was attempted on this run."
@@ -1370,6 +1452,24 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							if errors.As(rerr, &convErr) {
 								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: planID, Node: &NodeInfo{ID: planID, Type: "executive", State: "resolved", Tag: "replan direct"}})
 								concludeReplan("executive answered directly", convErr.Text)
+								break
+							}
+							// The planner had nothing to add and the reflector had
+							// asked for more. They disagree, and the run is done —
+							// which is an ending, not a failure. Shown as a failed
+							// step it read as a broken run to anyone looking at the
+							// trace, for something that simply stopped.
+							var noMove *ExecutiveNoMoveError
+							if errors.As(rerr, &noMove) {
+								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: planID, Node: &NodeInfo{
+									ID: planID, Type: "executive", State: "resolved", Tag: "no further steps",
+									Summary: "the planner had no move the reflector's request could be met with"}})
+								// Its answer is NOT the outcome. The planner reached
+								// for one instead of planning, and it is recalled
+								// rather than computed — the reflector's account of
+								// what actually ran is what the user gets. See
+								// TestAnEmptyRePlanIsRefused.
+								concludeReplan("the planner had no further step to add", "")
 								break
 							}
 							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: planID, Node: &NodeInfo{ID: planID, Type: "executive", State: "failed", Tag: fmt.Sprintf("replan %d", replanCount), Error: rerr.Error()}})

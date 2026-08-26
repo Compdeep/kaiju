@@ -249,6 +249,7 @@ const activity = computed(() => {
   if (!live.length) return 'working'
   if (live.length > 1) return `${live.length} steps running`
   const n = live[0]
+  if (n.type === 'chat') return 'answering'
   if (n.type === 'executive') return n.tag === 'replan' ? 're-planning' : 'planning'
   if (n.type === 'tool') {
     const target = firstParam(n.params)
@@ -337,17 +338,19 @@ const latestTag = computed(() => {
  * @returns {Array<Object>} Layout items for rendering (node, batch-open, batch-close, dep, spawn, error)
  */
 const layout = computed(() => {
+  // The order they arrived in, which is the order they ran. Both writers hand
+  // it over that way already: the live stream appends each node as its event
+  // lands, and a reloaded trace is the graph's own insertion order.
+  //
+  // This was sorted — every `executive` pinned to the front, the aggregator to
+  // the back, then by the digits in the node id. Two things went wrong with
+  // that. Planning nodes are not one bookend but one per replan, so a run with
+  // three replans showed four planning rows stacked at the top and every tool
+  // below them, which reads as four plans that ran back to back. And the ids do
+  // not share a numbering: a tool is n1, n2, n3 while a replan is
+  // executive-r1, so the digits collide and the tie is decided by whatever
+  // order the array happened to be in.
   const nodes = [...props.nodes]
-  // Sort by node ID (chronological creation order). IDs are "n1", "n2", etc.
-  // Executive and aggregator are pinned to start/end.
-  nodes.sort((a, b) => {
-    const aIsBookend = a.type === 'executive' ? -1 : a.type === 'aggregator' ? 1 : 0
-    const bIsBookend = b.type === 'executive' ? -1 : b.type === 'aggregator' ? 1 : 0
-    if (aIsBookend !== bIsBookend) return aIsBookend - bIsBookend
-    const aNum = parseInt((a.id || '').replace(/\D/g, '')) || 0
-    const bNum = parseInt((b.id || '').replace(/\D/g, '')) || 0
-    return aNum - bNum
-  })
 
   // Depth is the length of the longest chain of dependencies behind a node, so
   // indentation follows the plan's own wiring rather than the order steps
@@ -530,7 +533,15 @@ function stChr(s) { return { running: '\u25B8', resolved: '\u2713', failed: '\u2
  * @param {string} t - Node type (planner, aggregator, skill, etc.)
  * @returns {string} Three-letter type label
  */
-function tyLabel(t) { return { executive:'EXE', aggregator:'AGG', tool:'TOOL', compute:'CMP', reflection:'RFL', observer:'OBS', micro_planner:'MPL', interjection:'INJ', actuator:'ACT', holmes:'🕵️' }[t] || '???' }
+// Every type NodeType.String() can return. A missing one renders as '???',
+// which is what the chat lane's own node did — it is a real node with a real
+// answer in it, labelled as though the trace did not know what it was.
+const TY_LABEL = {
+  executive: 'EXE', aggregator: 'AGG', tool: 'TOOL', compute: 'CMP',
+  reflection: 'RFL', observer: 'OBS', micro_planner: 'MPL',
+  interjection: 'INJ', actuator: 'ACT', holmes: '🕵️', chat: 'CHAT',
+}
+function tyLabel (t) { return TY_LABEL[t] || (t ? t.slice(0, 4).toUpperCase() : '???') }
 
 /**
  * desc: Truncate a string to a maximum length, appending an ellipsis if needed
@@ -582,6 +593,7 @@ function parseRCA(result) {
   --card-edge:   rgba(8, 145, 178, 0.22);
   --card-top:    rgba(255, 255, 255, 0.55);
   --card-shadow: 0 1px 1px rgba(15, 23, 42, 0.05), 0 10px 24px -16px rgba(15, 23, 42, 0.35);
+  --card-sweep:  rgba(8, 145, 178, 0.10);
 
   /* The chip marking the tool the planner led with. The sage green below is
      what dark uses, and on near-black under cyan text it glows. On white under
@@ -616,6 +628,7 @@ function parseRCA(result) {
   --card-edge:   rgba(34, 211, 238, 0.26);
   --card-top:    rgba(255, 255, 255, 0.10);
   --card-shadow: 0 1px 1px rgba(0, 0, 0, 0.30), 0 12px 28px -18px rgba(0, 0, 0, 0.8);
+  --card-sweep:  rgba(34, 211, 238, 0.13);
 
   /* Unchanged: this green is what dark looked like, and it works there. */
   --chip-lead-bg:   rgba(127, 156, 151, 0.12);
@@ -635,6 +648,9 @@ function parseRCA(result) {
   font-size: 11px;
   line-height: 1.2;
   padding: 9px 12px 10px;
+  /* Softened corners, not a card. The wash ends in a straight cut otherwise,
+     which is the one part of the border treatment worth keeping. */
+  border-radius: 10px;
   /* The wash and nothing else. A border, a radius and a shadow made this a card
      sitting ON the conversation; the trace is part of the reply, not an object
      beside it. The gradient alone still separates it — brightest at the top-left
@@ -645,15 +661,22 @@ function parseRCA(result) {
   background-size: 100% 100%;
   background-repeat: no-repeat;
 }
-/* While the run is live the wash drifts, slowly and only a little — enough
-   that a trace waiting on a silent step is visibly still a live thing. */
+/* While the run is live a soft band travels across the wash — the signal the
+   separate scan line used to carry, moved onto the thing it was describing.
+   Low contrast on purpose: it passes UNDER eleven rows of text that have to stay
+   readable while it moves, so it is a lightening rather than a highlight.
+   Settled, the trace keeps only the static wash. */
 .trace.live {
-  background-size: 210% 100%;
-  animation: trace-drift 9s ease-in-out infinite;
+  background-image:
+    linear-gradient(100deg, transparent 0%, var(--card-sweep) 50%, transparent 100%),
+    linear-gradient(105deg, var(--card-bg) 0%, var(--card-tint) 26%, transparent 68%);
+  background-size: 55% 100%, 100% 100%;
+  background-repeat: no-repeat, no-repeat;
+  animation: trace-sweep 3.2s ease-in-out infinite;
 }
-@keyframes trace-drift {
-  0%, 100% { background-position: 0% 0; }
-  50%      { background-position: 24% 0; }
+@keyframes trace-sweep {
+  0%   { background-position: -60% 0, 0 0; }
+  100% { background-position: 170% 0, 0 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .trace.live { animation: none; }
@@ -705,7 +728,7 @@ function parseRCA(result) {
   flex-shrink: 0; width: 2px; align-self: stretch; min-height: 12px;
   border-radius: 1px; background: var(--border); margin-right: 3px;
 }
-.t-rail.executive, .t-rail.aggregator { background: var(--n-plan); }
+.t-rail.executive, .t-rail.aggregator, .t-rail.chat { background: var(--n-plan); }
 .t-rail.reflection, .t-rail.observer, .t-rail.micro_planner { background: var(--n-think); }
 .t-rail.tool { background: var(--n-tool); }
 .t-rail.compute { background: var(--n-compute); }
@@ -723,13 +746,13 @@ function parseRCA(result) {
 
 /* Type — now before name */
 .t-ty { width: 34px; flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-.t-ty.executive, .t-ty.aggregator { color: var(--n-plan); }
+.t-ty.executive, .t-ty.aggregator, .t-ty.chat { color: var(--n-plan); }
 .t-ty.reflection, .t-ty.observer, .t-ty.micro_planner { color: var(--n-think); }
 .t-ty.tool { color: var(--n-tool); }
 .t-ty.compute { color: var(--n-compute); }
 .t-ty.holmes { color: var(--n-rca); }
-.t-ty.is-skill { color: #a98496; }
-.t-name.is-skill { color: #a98496; font-style: italic; }
+.t-ty.is-skill { color: var(--chip-skill-fg); }
+.t-name.is-skill { color: var(--chip-skill-fg); font-style: italic; }
 .t-ty.interjection { color: var(--n-human); }
 .t-ty.actuator { color: var(--n-danger); }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/gates"
@@ -247,6 +248,10 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 		log.Printf("[route] deterministic → agent (asks to take privilege on this machine)")
 		return "agent", nil
 	}
+	if asksForAnAction(query) {
+		log.Printf("[route] deterministic → agent (names an action to take)")
+		return "agent", nil
+	}
 	// Give the router just enough context to interpret a terse follow-up, then the
 	// current message. See routeContext for what's included (summary + last turn).
 	msgs := []llm.Message{{Role: "system", Content: prompt.Route}}
@@ -294,6 +299,36 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	default:
 		return "chat", lacking
 	}
+}
+
+// actionVerbs are the words a person uses to ask for something to be DONE.
+//
+// Matched at the start of the message or right after a polite opener, so "check
+// online" and "can you check online" both count and "I was checking my email"
+// does not.
+var actionVerbs = regexp.MustCompile(`(?i)^\s*(?:(?:can|could|will|would|please|hey|ok|now)\s+(?:you\s+)?)*` +
+	`(check|look|search|find|fetch|get|read|open|run|execute|build|make|create|write|edit|fix|` +
+	`install|download|upload|list|show|scan|test|deploy|restart|start|stop|kill|delete|remove|` +
+	`update|change|add|try|retry|verify|confirm|count|compare|analyse|analyze|calculate|compute)\b`)
+
+/*
+ * asksForAnAction reports whether a message names something to DO.
+ * desc: The router is told that an imperative is agent — "if the user mentions a
+ *       task, an output, a tool, a file, a website... it is agent" and "when in
+ *       doubt, ALWAYS choose agent". It does not always follow that. Observed:
+ *       "check online" was routed to chat, so the turn had no tools and the
+ *       model answered by promising to search; in the same session a QUESTION
+ *       about a blockchain was routed to agent and did get tools. The two were
+ *       the wrong way round.
+ *
+ *       So this is decided here rather than asked, like the two checks above it
+ *       and for the same stated reason: over-routing costs one extra LLM call,
+ *       under-routing hands the user a turn that cannot do anything.
+ * param: query - the user's message.
+ * return: true when the message opens with a verb asking for work.
+ */
+func asksForAnAction(query string) bool {
+	return actionVerbs.MatchString(query)
 }
 
 // cleanTerms drops the blanks and the repeats from what the router asked for.
@@ -404,7 +439,7 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 		// told to quote every URL, path and selector verbatim. The cap is
 		// stated to the model (see stateBudget), so it is not only a limit but
 		// a length the reply is planned against.
-		MaxTokens: 2048,
+		MaxTokens: a.replyBudget(replyStructuredBudget),
 	})
 	if err != nil {
 		log.Printf("[dag] preflight failed, using defaults: %v", err)

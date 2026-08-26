@@ -1151,8 +1151,8 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		// Its answer then had to be walked back by the stage that writes the
 		// reply, which said plainly that no calculation had been performed.
 		if len(steps) == 0 && len(replanFrame) > 0 {
-			log.Printf("[dag] executive returned no steps on a re-plan; the reflector asked for work, so this is refused")
-			return nil, fmt.Errorf("re-plan returned no steps: the reflector decided work remains, and stopping is its decision, not the planner's")
+			log.Printf("[dag] warning: the planner has no further step to add; the reflector had asked for more work, so the run stops here")
+			return nil, &ExecutiveNoMoveError{Answer: payload.Answer}
 		}
 		if len(steps) == 0 {
 			if payload.Answer != "" {
@@ -1342,6 +1342,26 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
  * param: trigger - the original trigger for scope checking.
  * return: validated PlanResult or error.
  */
+// ExecutiveNoMoveError says the planner had nothing to add to a re-plan.
+//
+// Not a failure. The reflector asked for more work and the planner has no step
+// that would produce it — the two disagree, and the run is done. That is a
+// legitimate end to a run, and reporting it as a failed step showed the user a
+// broken row for something that simply stopped.
+//
+// It stays a distinct outcome rather than an ordinary empty plan, because an
+// empty plan on a FIRST plan means something else entirely: a question that
+// needed no tools, whose answer is in Answer.
+type ExecutiveNoMoveError struct {
+	// Answer is whatever the planner wrote instead of steps, which is usually a
+	// description of what is still missing. Empty when it wrote none.
+	Answer string
+}
+
+func (e *ExecutiveNoMoveError) Error() string {
+	return "the planner disagrees with the reflector's re-plan: it has no further step to add"
+}
+
 // unknownToolNames returns the distinct step tools that don't exist in the
 // registry (skipping the "gap" pseudo-tool). It's the pre-execution existence
 // check: a non-empty result means the planner named something callable that

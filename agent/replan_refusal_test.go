@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -49,5 +50,49 @@ func TestAnEmptyRePlanIsRefused(t *testing.T) {
 	}
 	if strings.Contains(res.Outcome, recalled) {
 		t.Errorf("the planner's recalled answer became the run's outcome, so it overturned the reflector:\n%s", res.Outcome)
+	}
+}
+
+// It is an ending, not a failure.
+//
+// The planner having no move and the reflector wanting more is two stages
+// disagreeing, and the run stops. Reported as a failed step it showed a broken
+// row in the trace for something that simply finished — and "re-plan returned no
+// steps: the reflector decided work remains, and stopping is its decision, not
+// the planner's" describes which component owns a decision rather than what
+// happened.
+func TestAnEmptyRePlanEndsTheRunWithoutFailingIt(t *testing.T) {
+	err := error(&ExecutiveNoMoveError{Answer: "recalled text"})
+
+	var noMove *ExecutiveNoMoveError
+	if !errors.As(err, &noMove) {
+		t.Fatal("the outcome is not distinguishable from an ordinary error, so the " +
+			"scheduler cannot tell a stop from a failure")
+	}
+	if got := err.Error(); !strings.Contains(got, "no further step") {
+		t.Errorf("the message does not say what happened: %q", got)
+	}
+	if strings.Contains(err.Error(), "stopping is its decision") {
+		t.Error("the message still argues about which component owns the decision " +
+			"instead of describing the situation")
+	}
+}
+
+// The scheduler resolves that node rather than failing it, and does NOT take the
+// planner's answer as the run's outcome.
+func TestTheSchedulerTreatsNoMoveAsAStop(t *testing.T) {
+	src := readSource(t, "scheduler.go")
+	i := strings.Index(src, "ExecutiveNoMoveError")
+	if i < 0 {
+		t.Fatal("the scheduler does not recognise the outcome, so it falls through " +
+			"to the failure branch and shows a broken step")
+	}
+	branch := src[i:min(i+900, len(src))]
+	if !strings.Contains(branch, `State: "resolved"`) {
+		t.Error("the planning node is still marked failed for a run that simply stopped")
+	}
+	if strings.Contains(branch, "noMove.Answer)") {
+		t.Error("the planner's recalled answer is being used as the run's outcome — " +
+			"see TestAnEmptyRePlanIsRefused")
 	}
 }

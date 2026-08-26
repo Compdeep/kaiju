@@ -79,6 +79,102 @@ var (
 	}
 )
 
+// ── What a stage may WRITE ──────────────────────────────────────────────────
+//
+// The same shape, on the return leg. These were left out of the table when it
+// was built, on the boundary "caps on content going INTO a prompt" — which put
+// half the problem outside it. Both decide how much of a run reaches a model.
+//
+// Measured across 600 runs, tokens out per stage against its cap:
+//
+//	reflector    p50 214   p90 1024   max 1024   cap 1024   ← the p90 IS the cap
+//	reframe      p50 188   p90  242   max  351   cap  400
+//	holmes       p50 252   p90  443   max  443   cap 1024
+//	coder        p50 422   p90 1008   max 1008   cap 16384
+//
+// More than one reflection in ten was being cut off mid-reply. The cap had no
+// comment and no commit that chose it — it arrived in a wholesale move and was
+// never revisited when the reflector was given the user's answer to write.
+//
+// Share is of the window in TOKENS here, not characters: what a model may write
+// and what it can read are both counted the same way on the wire.
+var (
+	// replyDecisionBudget bounds a stage that returns a decision and, on the
+	// paths where no aggregator follows, the answer with it. The largest of
+	// these, because it is the only one that can be the whole reply to a user.
+	replyDecisionBudget = budgetSpec{
+		Base: 2048, Share: 64, Ceiling: 8192,
+		Bounds: "one reflection's decision, and its answer when nothing follows",
+	}
+
+	// replyBriefBudget bounds a stage that reports a judgement in a sentence or
+	// two: an observer deciding whether a step is worth acting on, a validator
+	// saying whether output means what it claims.
+	replyBriefBudget = budgetSpec{
+		Base: 1024, Share: 128, Ceiling: 4096,
+		Bounds: "one stage's judgement, in a sentence or two",
+	}
+
+	// replyEdgeBudget bounds an edge. It carries; it does not add, so it should
+	// be the smallest of these — and a paragraph that ran into the cap is short
+	// rather than wrong, which is why this stage does not report truncation.
+	replyEdgeBudget = budgetSpec{
+		Base: 600, Share: 256, Ceiling: 2000,
+		Bounds: "one edge's framing paragraph",
+	}
+
+	// replyAnalysisBudget bounds a stage that reasons at length before deciding:
+	// Holmes across its iterations, the debugger writing a fix plan.
+	replyAnalysisBudget = budgetSpec{
+		Base: 4096, Share: 32, Ceiling: 16384,
+		Bounds: "one investigation's reasoning and its conclusion",
+	}
+
+	// replyCodeBudget bounds a stage that writes a program. The largest, because
+	// a truncated program is not a shorter program — it is a broken one, and the
+	// coder used plain ask rather than the checked variant, so a fragment was
+	// written to disk and three Holmes iterations went into discovering that it
+	// had been cut rather than being wrong.
+	replyCodeBudget = budgetSpec{
+		Base: 16384, Share: 16, Ceiling: 65536,
+		Bounds: "one generated program",
+	}
+
+	// replyStructuredBudget bounds a stage filling a declared shape rather than
+	// writing prose — preflight's classification, the curator's selection.
+	replyStructuredBudget = budgetSpec{
+		Base: 2048, Share: 128, Ceiling: 8192,
+		Bounds: "one stage's reply into a declared schema",
+	}
+)
+
+/*
+ * replyBudget resolves how much a stage may write, against the model's window.
+ * desc: budget's sibling for the return leg. It does NOT multiply by
+ *       charsPerToken: a reply cap is counted in tokens, which is what the
+ *       window is counted in, so the conversion budget applies would give a cap
+ *       four times too large.
+ * param: s - which cap.
+ * return: the cap, in tokens.
+ */
+func (a *Agent) replyBudget(s budgetSpec) int {
+	if a == nil {
+		return s.Base
+	}
+	window := a.smallestKnownWindow()
+	if window <= 0 {
+		return s.Base
+	}
+	got := window / s.Share
+	if got < s.Base {
+		return s.Base
+	}
+	if got > s.Ceiling {
+		return s.Ceiling
+	}
+	return got
+}
+
 /*
  * budget resolves one cap against the deployed model's window.
  * desc: Base ≤ window/Share ≤ Ceiling. An unknown window gives Base, so this is

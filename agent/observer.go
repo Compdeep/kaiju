@@ -141,7 +141,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 		Tools:       []llm.ToolDef{observerToolDef()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   1024,
+		MaxTokens:   a.replyBudget(replyBriefBudget),
 	})
 
 	if err != nil {

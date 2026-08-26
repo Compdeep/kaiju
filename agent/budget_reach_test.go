@@ -46,7 +46,13 @@ func TestEveryDeclaredBudgetIsRead(t *testing.T) {
 				case *ast.CallExpr:
 					// a.budget(x) — whatever a is called.
 					sel, ok := x.Fun.(*ast.SelectorExpr)
-					if !ok || sel.Sel.Name != "budget" || len(x.Args) != 1 {
+					if !ok || len(x.Args) != 1 {
+						return true
+					}
+					// Both resolvers. replyBudget was added later, for the caps
+					// on what a stage WRITES, and a guard that only knew about
+					// budget would report every one of those as dead.
+					if sel.Sel.Name != "budget" && sel.Sel.Name != "replyBudget" {
 						return true
 					}
 					id, ok := x.Args[0].(*ast.Ident)
@@ -77,4 +83,63 @@ func isBudgetSpec(v ast.Expr) bool {
 	}
 	id, ok := lit.Type.(*ast.Ident)
 	return ok && id.Name == "budgetSpec"
+}
+
+// A stage that writes to a model must take its ceiling from the table, not from
+// a literal.
+//
+// The table was built on the boundary "caps on content going INTO a prompt",
+// which put every output cap outside it. Measured across 600 runs: the
+// reflector's ceiling was 1024 and its p90 was 1024 — more than one reflection
+// in ten was cut off mid-reply, on a number with no comment and no commit that
+// chose it. It arrived in a wholesale move and was never revisited when the
+// reflector was given the user's answer to write.
+//
+// Both halves decide how much of a run reaches a model. One does it on the
+// return leg.
+func TestNoStageSetsItsOwnReplyCeiling(t *testing.T) {
+	fset := token.NewFileSet()
+	pkg, err := parser.ParseDir(fset, ".", func(f fs.FileInfo) bool {
+		return !strings.HasSuffix(f.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parse the package: %v", err)
+	}
+
+	// Exempt, with the reason. A literal here is a decision about the SHAPE of
+	// the reply rather than its size, and the table would obscure that.
+	exempt := map[string]string{
+		"preflight.go":     "the router answers with a mode and a handful of words; 96 states that",
+		"scheduler.go":     "a one-line label",
+		"validator_llm.go": "a yes or no with a reason",
+	}
+
+	for _, p := range pkg {
+		for path, file := range p.Files {
+			base := path[strings.LastIndex(path, "/")+1:]
+			ast.Inspect(file, func(n ast.Node) bool {
+				kv, ok := n.(*ast.KeyValueExpr)
+				if !ok {
+					return true
+				}
+				key, ok := kv.Key.(*ast.Ident)
+				if !ok || key.Name != "MaxTokens" {
+					return true
+				}
+				lit, ok := kv.Value.(*ast.BasicLit)
+				if !ok {
+					return true // a call or a field: already resolved somewhere
+				}
+				if _, ok := exempt[base]; ok {
+					return true
+				}
+				t.Errorf("%s sets MaxTokens to the literal %s. Every other cap on how much "+
+					"of a run reaches a model is in budgets.go and scales with the window; "+
+					"a literal here does not, so a 1M-context deployment gets the same "+
+					"ceiling as an 8K one — and nothing shows the number next to its siblings.",
+					base, lit.Value)
+				return true
+			})
+		}
+	}
 }

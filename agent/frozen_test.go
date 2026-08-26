@@ -59,14 +59,14 @@ var frozenPromptOrder = []string{
 }
 
 var frozenPrompts = map[string]frozenPrompt{
-	"SOUL":         {"262edacb610fce42", 6358},
+	"SOUL":         {"03802a1782d4ffb3", 6524},
 	"ROUTE":        {"4e8fabcf0237bdb3", 2280},
 	"PREFLIGHT":    {"a1fc1618bf8b74d9", 9935},
 	"EXECUTIVE":    {"510518ad94eff79a", 6217},
 	"AGGREGATOR":   {"a782c5558ef001d0", 3631},
 	"REFRAME":      {"bbcd502243bc157f", 3819},
 	"REFRAME_HOOK": {"2066afe67efca674", 329},
-	"HOLMES":       {"b97dfdc6253fa8ad", 6900},
+	"HOLMES":       {"beb3647df8d28a23", 6996},
 	"MICROPLANNER": {"dc48772ada445d93", 4598},
 	"OBSERVER":     {"2ab11100a1203b92", 1040},
 	"REFLECTOR":    {"0a5f87c27060d5b0", 6024},

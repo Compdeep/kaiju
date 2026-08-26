@@ -49,6 +49,29 @@ func TestBudgets_TheTable(t *testing.T) {
 		}
 		sb.WriteString("  " + s.spec.Bounds + "\n")
 	}
+
+	// What a stage may WRITE, in tokens. The same table, on the return leg —
+	// left out when this was built, on a boundary that put half the problem
+	// outside it. The reflector's was 1024, its p90 across 600 runs was 1024,
+	// and more than one reflection in ten was cut off mid-reply.
+	replies := []struct {
+		name string
+		spec budgetSpec
+	}{
+		{"reply: edge", replyEdgeBudget},
+		{"reply: brief", replyBriefBudget},
+		{"reply: structured", replyStructuredBudget},
+		{"reply: decision", replyDecisionBudget},
+		{"reply: analysis", replyAnalysisBudget},
+	}
+	sb.WriteString("\n                    ── tokens out ──\n")
+	for _, s := range replies {
+		sb.WriteString(pad(s.name, 18))
+		for _, w := range windows {
+			sb.WriteString(pad(commas(agentWithWindow(w).replyBudget(s.spec)), 10))
+		}
+		sb.WriteString("  " + s.spec.Bounds + "\n")
+	}
 	t.Log(sb.String())
 
 	// The order has to hold at every window. A cap on ONE step's result must

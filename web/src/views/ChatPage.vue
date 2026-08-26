@@ -104,8 +104,7 @@
             :class="['msg', msg.role, 'msg-folded']"
           >
             <div class="msg-meta">
-              <span v-if="msg.role === 'user'" class="msg-author">you</span>
-            </div>
+                          </div>
             <div class="msg-content md" v-html="renderMd(msg.content)"></div>
           </div>
 
@@ -131,8 +130,7 @@
           </div>
           <div v-if="!msg.compactedInto && !foldedCount(msg.id)" :class="['msg', msg.role]">
             <div class="msg-meta">
-              <span v-if="msg.role === 'user'" class="msg-author">you</span>
-              <span class="msg-tools" v-if="editing !== i">
+                            <span class="msg-tools" v-if="editing !== i">
                 <button v-if="msg.id && !sessions.loading" class="msg-tool" title="Edit this message" @click="startEdit(i, msg)">✎</button>
                 <button v-if="msg.role === 'assistant' && i === lastAssistantIndex && !sessions.loading" class="msg-tool" title="Regenerate reply" @click="chat.regenerate()">↻</button>
                 <button v-if="msg.id" class="msg-tool" title="Delete this message (and everything after)" @click="deleteMsg(msg)">🗑</button>
@@ -158,9 +156,6 @@
         </div>
 
         <div v-if="sessions.loading" class="msg assistant" :class="{ 'under-trace': dag.nodes.length > 0 }">
-          <div class="msg-meta">
-            <span v-if="!dag.streamingVerdict" class="thinking-scan"></span>
-          </div>
           <details v-if="dag.streamingReasoning" class="thinking-panel" :open="!dag.streamingVerdict">
             <summary><span class="think-dot"></span> thinking</summary>
             <div class="thinking-body">{{ dag.streamingReasoning }}</div>

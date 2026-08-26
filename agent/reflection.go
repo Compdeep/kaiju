@@ -107,6 +107,20 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	budgetLine, _ := rNode.Params["budget"].(string)
 	userPrompt := a.assembleReflectorPrompt(graph, gateCtx, trigger, budgetLine)
 
+	// Said in the prompt rather than by removing the field from the schema. The
+	// two drifted once already — the prompt asked for "verdict" while the schema
+	// declared "outcome", so three quarters of concluding reflections had their
+	// answer dropped on the floor — and keeping one shape with one instruction
+	// beside it is what stops that happening again.
+	if a.aggregatorWillWriteTheAnswer(trigger, graph) {
+		userPrompt += "\n\n## Do not write the answer\n\n" +
+			"Another stage writes the reply this user reads, and it is given the same " +
+			"evidence you have. Whatever you put in `outcome` is discarded on this run.\n\n" +
+			"Leave `outcome` empty and decide. Your `summary` is what carries forward: " +
+			"say what happened, what state the run is in, and the exact error text of " +
+			"anything that failed."
+	}
+
 	// What the run has done so far, in the words of the request rather than as
 	// a list of steps. The reader below is choosing between more work and
 	// stopping, and the thing it most needs told is what is already in hand and
@@ -147,7 +161,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 		Tools:       []llm.ToolDef{reflectorToolDef()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   1024,
+		MaxTokens:   a.replyBudget(replyDecisionBudget),
 	})
 
 	if err != nil {
@@ -324,7 +338,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 		Tools:       []llm.ToolDef{reflectorToolDef()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   1024,
+		MaxTokens:   a.replyBudget(replyDecisionBudget),
 	})
 
 	if err != nil {

@@ -97,7 +97,7 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 		Tools:       []llm.ToolDef{debuggerToolDef()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   4096,
+		MaxTokens:   a.replyBudget(replyAnalysisBudget),
 	})
 
 	if err != nil {

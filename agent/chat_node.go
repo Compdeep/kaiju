@@ -54,11 +54,22 @@ func (a *Agent) runChatNode(ctx context.Context, trigger Trigger, graph *Graph, 
 	graph.SetState(id, StateRunning)
 	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: id, Node: graph.SnapshotNode(id)})
 
+	// Streamed, like every other stage that writes something a person reads.
+	// This used completeHeavy — one blocking call — so a conversational turn
+	// produced nothing until the whole reply had been generated, and then
+	// arrived at once. The other chat entry point (chat.go) already streamed on
+	// the same channel; this path, the one the graph takes, did not.
 	ctx = withTrace(ctx, TraceID{NodeID: id, NodeType: "chat", Tag: chatNodeTag})
-	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
+	resp, err := a.askStreamResp(ctx, Answer, &llm.ChatRequest{
 		Messages:    BuildMessagesWithHistory(prompt, query, trigger.History),
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.cfg.MaxTokens,
+	}, func(chunk, kind string) {
+		evType := "outcome"
+		if kind == "reasoning" {
+			evType = "reasoning"
+		}
+		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
 	})
 	if err != nil || len(resp.Choices) == 0 {
 		if err == nil {
@@ -147,7 +158,7 @@ func chatQuery(trigger Trigger) string {
  *       message.
  * param: ctx - the run context.
  * param: trigger - the turn, for its history.
- * param: graph - the run's graph (unused today; the nodes are already recorded).
+ * param: graph - the run's graph, for the session this streams to.
  * param: intent - the run's intent, for the lane.
  * param: query - the original message.
  * param: answer - what the chat node replied.
@@ -174,10 +185,19 @@ typed.`
 		"\n\nReply written before the follow-up arrived:\n" + answer +
 		"\n\nFollow-up:\n" + steer
 
-	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
+	// Streamed for the same reason the first reply is: this REPLACES what the
+	// user was reading, so arriving whole means the screen sits still and then
+	// jumps.
+	resp, err := a.askStreamResp(ctx, Answer, &llm.ChatRequest{
 		Messages:    BuildMessagesWithHistory(sys, user, trigger.History),
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.cfg.MaxTokens,
+	}, func(chunk, kind string) {
+		evType := "outcome"
+		if kind == "reasoning" {
+			evType = "reasoning"
+		}
+		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
 	})
 	if err != nil {
 		return "", err

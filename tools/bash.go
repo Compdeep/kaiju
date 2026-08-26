@@ -86,7 +86,19 @@ func (b *Bash) Name() string { return "bash" }
 
 /*
  * Description returns a human-readable description of the tool.
- * desc: Explains that bash is a general-purpose command execution tool.
+ * desc: Names the shell this deployment actually runs, and gives it a sentence
+ *       of its own vocabulary.
+ *
+ *       The tool is called "bash" on every platform — the name is an identity a
+ *       plan writes, not an executable — and on Windows NewBash runs PowerShell
+ *       behind it. A description that says only "execute any command" therefore
+ *       tells a planner nothing about which language to write in, and the name
+ *       tells it something false: it writes grep and sed, and PowerShell
+ *       receives them.
+ *
+ *       This is the only place that knows. The shell is chosen per deployment,
+ *       and a prompt cannot be right about it for every host at once, so the
+ *       vocabulary belongs to the tool and travels with it into the tool index.
  * return: description string
  */
 func (b *Bash) Description() string {
@@ -96,8 +108,31 @@ func (b *Bash) Description() string {
 		"where a command already answers the question, running it is the whole step, and reading " +
 		"what a host is doing (listening sockets, open connections and who holds them, running " +
 		"processes, disk and memory) is exactly that. " +
+		b.shellSentence() + " " +
 		"To kill or signal a process, prefer process_kill: it records which process and why, " +
 		"which a bare kill does not."
+}
+
+/*
+ * shellSentence says which shell runs here and names a few of its verbs.
+ * desc: Enough vocabulary to settle the language, not a manual. A planner that
+ *       knows it is writing PowerShell writes PowerShell; the examples are there
+ *       so it does not have to infer the dialect from the word "shell".
+ * return: one sentence, always non-empty.
+ */
+func (b *Bash) shellSentence() string {
+	switch b.shell {
+	case "powershell":
+		return "Commands run through POWERSHELL on this host, so write PowerShell, not bash: " +
+			"Get-Content, Select-String, Where-Object, Measure-Object, Get-ChildItem, Invoke-WebRequest. " +
+			"POSIX tools (grep, sed, awk, ls, cat) are not present."
+	case "cmd":
+		return "Commands run through the WINDOWS COMMAND PROMPT (cmd.exe) on this host, so write cmd " +
+			"syntax: dir, type, findstr, for /f. POSIX tools (grep, sed, awk, ls, cat) are not present."
+	default:
+		return "Commands run through a POSIX SHELL (sh) on this host: grep, sed, awk, jq, " +
+			"ls, cat, curl and a python3 one-liner are all available."
+	}
 }
 
 /*
@@ -135,12 +170,12 @@ func (b *Bash) OutputSchema() json.RawMessage {
  * return: JSON schema as raw bytes
  */
 func (b *Bash) Parameters() json.RawMessage {
-	return json.RawMessage(`{
+	return json.RawMessage(fmt.Sprintf(`{
 		"type": "object",
 		"properties": {
 			"command": {
 				"type": "string",
-				"description": "The shell command to execute"
+				"description": "The command to execute, written for %s."
 			},
 			"timeout_sec": {
 				"type": "integer",
@@ -149,7 +184,25 @@ func (b *Bash) Parameters() json.RawMessage {
 		},
 		"required": ["command"],
 		"additionalProperties": false
-	}`)
+	}`, b.shellName()))
+}
+
+/*
+ * shellName is what to call this deployment's shell in one or two words.
+ * desc: For the parameter description, where a sentence would not fit. The
+ *       schema is what a planner reads when it writes the parameter, so it is
+ *       the closest place to the mistake.
+ * return: the shell's name.
+ */
+func (b *Bash) shellName() string {
+	switch b.shell {
+	case "powershell":
+		return "PowerShell (NOT bash)"
+	case "cmd":
+		return "the Windows command prompt, cmd.exe (NOT bash)"
+	default:
+		return "a POSIX shell (sh)"
+	}
 }
 
 /*

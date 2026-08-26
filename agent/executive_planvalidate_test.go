@@ -9,7 +9,7 @@ import (
 )
 
 // outputTool is a test tool that declares an OutputSchema (implements Outputter),
-// so validatePlanEdges can read its output shape. fakeTool can't — it has no
+// so validatePlanReferences can read its output shape. fakeTool can't — it has no
 // output schema — so it can't exercise the wrong-producer / field-existence path.
 type outputTool struct {
 	name   string
@@ -60,7 +60,7 @@ func TestValidatePlanEdges_SearchFetchEnvelope(t *testing.T) {
 		{Tool: "web_search", Params: map[string]any{"query": "last winter olympics"}},
 		{Tool: "web_fetch", Params: map[string]any{"url": "${step.0.results.0.url}"}},
 	}
-	if errs := validatePlanEdges(valid, reg); len(errs) != 0 {
+	if errs := validatePlanReferences(valid, reg); len(errs) != 0 {
 		t.Fatalf("valid search→fetch was flagged as broken: %v", errs)
 	}
 
@@ -70,7 +70,7 @@ func TestValidatePlanEdges_SearchFetchEnvelope(t *testing.T) {
 		{Tool: "web_fetch", Params: map[string]any{"url": "http://x"}},
 		{Tool: "web_fetch", Params: map[string]any{"url": "${step.0.results.0.url}"}},
 	}
-	if errs := validatePlanEdges(broken, reg); len(errs) == 0 {
+	if errs := validatePlanReferences(broken, reg); len(errs) == 0 {
 		t.Fatalf("reading results[] off web_fetch should be flagged, but was not")
 	}
 }

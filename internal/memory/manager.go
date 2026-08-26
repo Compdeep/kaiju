@@ -77,6 +77,20 @@ const (
 	CompactKeepRecent = 10
 	// DefaultMaxHistory is the default maximum number of messages to load for history.
 	DefaultMaxHistory = 50
+
+	// How much of one prior turn survives into the next.
+	//
+	// These were 700 and 1300, which is shorter than most answers this engine
+	// writes — so nearly every assistant turn reached the planner with its
+	// middle replaced by "...". A reader cannot tell that from a summary, and
+	// the run behaves as though the earlier turn had been summarised when it was
+	// merely cut.
+	//
+	// Raised to roughly three times, which still bounds the worst case: fifty
+	// messages at these sizes is under 150k characters, and a conversation only
+	// approaches that if every turn is long.
+	historyAssistantChars = 2000
+	historyUserChars      = 3000
 )
 
 /*
@@ -136,6 +150,31 @@ func (m *Manager) ListSessions(limit int) ([]db.Session, error) {
  * param: maxMessages - maximum number of messages to retrieve
  * return: the message list and any error
  */
+/*
+ * headTail keeps the beginning and the end of a message, marking the gap.
+ * desc: The middle is what a later turn is least likely to need — a reply opens
+ *       with what it found and closes with what it concluded, and the working
+ *       is in between.
+ *
+ *       The marker names the cut and the whole size, so a stage reading this can
+ *       tell a message that was shortened from one that ended there. A bare
+ *       "..." cannot be told apart from text, which cost this engine three wrong
+ *       diagnoses in one run.
+ * param: s - the message.
+ * param: max - the most to keep, in characters.
+ * return: the message, or its two ends with the gap named.
+ */
+func headTail(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	head := max * 3 / 4
+	tail := max - head
+	return s[:head] +
+		fmt.Sprintf("\n…[cut %d of %d chars from the middle]\n", len(s)-max, len(s)) +
+		s[len(s)-tail:]
+}
+
 func (m *Manager) LoadHistory(ctx context.Context, sessionID string, maxMessages int) ([]llm.Message, error) {
 	// Verify ownership
 	_, err := m.db.GetSessionForUser(sessionID, m.userID)
@@ -147,7 +186,11 @@ func (m *Manager) LoadHistory(ctx context.Context, sessionID string, maxMessages
 		maxMessages = DefaultMaxHistory
 	}
 
-	dbMsgs, err := m.db.GetMessages(sessionID, maxMessages)
+	// The TAIL, not the head. GetMessages is ORDER BY created_at LIMIT — the
+	// OLDEST N — so a long conversation handed the planner its opening and
+	// dropped everything since, including the turn the user is replying to. A
+	// thread only has to pass fifty messages for the recent ones to disappear.
+	dbMsgs, err := m.db.GetRecentMessages(sessionID, maxMessages)
 	if err != nil {
 		return nil, fmt.Errorf("memory: load history: %w", err)
 	}
@@ -167,17 +210,9 @@ func (m *Manager) LoadHistory(ctx context.Context, sessionID string, maxMessages
 		content := dm.Content
 		switch dm.Role {
 		case "assistant":
-			if len(content) > 700 {
-				head := content[:500]
-				tail := content[len(content)-200:]
-				content = head + "\n...\n" + tail
-			}
+			content = headTail(content, historyAssistantChars)
 		case "user":
-			if len(content) > 1300 {
-				head := content[:1000]
-				tail := content[len(content)-300:]
-				content = head + "\n...\n" + tail
-			}
+			content = headTail(content, historyUserChars)
 		}
 		msgs = append(msgs, llm.Message{
 			Role:    dm.Role,

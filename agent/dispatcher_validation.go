@@ -209,7 +209,7 @@ func missingRequiredParams(schema parsedSchema, params map[string]any) []missing
 	var missing []missingRequirement
 	reported := make(map[string]bool)
 	add := func(key, when string) {
-		if reported[key] || suppliedParam(params, key) {
+		if reported[key] || suppliedParam(params, key, schema.allowsEmpty(key)) {
 			return
 		}
 		reported[key] = true
@@ -229,18 +229,48 @@ func missingRequiredParams(schema parsedSchema, params map[string]any) []missing
 	return missing
 }
 
-// suppliedParam reports whether params carries a usable value for key. Absent,
-// nil, or a string empty once trimmed is not usable; false and 0 are values a
-// caller chose, not absences.
-func suppliedParam(params map[string]any, key string) bool {
+// suppliedParam reports whether params carries a usable value for key. Absent
+// or nil is never usable; false and 0 are values a caller chose, not absences.
+//
+// An empty string is the one case the caller decides, via allowEmpty. For most
+// parameters an empty string is a planner that left the value blank — a search
+// with no query, a command with no command — and treating it as missing gets a
+// correction instead of a step that runs and answers nothing. But for a few it
+// is the value: file_write with content "" creates an empty file, and truncates
+// one. There the blanket rule is unwinnable, because the correction asks for a
+// value the planner already supplied and the only other move — inventing file
+// contents — its own prompt forbids. The schema says which kind a parameter is;
+// see parsedSchema.allowsEmpty.
+//
+// Whitespace still trims to empty, so allowEmpty also admits content that is
+// exactly a newline — a real file, and one the trimming rule alone rejected.
+func suppliedParam(params map[string]any, key string, allowEmpty bool) bool {
 	v, present := params[key]
 	if !present || v == nil {
 		return false
 	}
 	if str, isStr := v.(string); isStr && strings.TrimSpace(str) == "" {
-		return false
+		return allowEmpty
 	}
 	return true
+}
+
+// allowsEmpty reports whether the schema explicitly permits an empty string for
+// key, by declaring "minLength": 0 on that property. Opt-in and per-parameter:
+// a property that says nothing keeps the default, so this widens only the
+// parameters a tool author has marked, and never a whole tool.
+func (s parsedSchema) allowsEmpty(key string) bool {
+	raw, ok := s.Properties[key]
+	if !ok {
+		return false
+	}
+	var prop struct {
+		MinLength *int `json:"minLength"`
+	}
+	if json.Unmarshal(raw, &prop) != nil || prop.MinLength == nil {
+		return false
+	}
+	return *prop.MinLength == 0
 }
 
 // names reduces the requirements to bare parameter names, for messages that list
@@ -372,15 +402,15 @@ func hasNonEmptyTaskFiles(params map[string]any) bool {
 //  8192. These bound what goes into the envelope and are the only ones a
 //     tool author controls.
 //
-//  2. maxToolResultLen, below, applied by this function when a step finishes.
+//  2. toolResultBudget, applied by this function when a step finishes.
 //     It bounds ONE step's result. On the ReAct path it applies to every tool.
 //     On the DAG path it applies only to a tool that returned a plain string:
 //     a tool implementing TypedExecutor takes the typed branch, which sets
 //     isContextual and skips this — see dispatcher.go.
 //
-//  3. Text.TruncateEvidence, 8000, applied when results are assembled into a
-//     prompt. It bounds ONE step's contribution to the evidence, not the
-//     whole. A run with twenty steps sends twenty of these.
+//  3. evidenceBudget, applied when results are assembled into a prompt. It
+//     bounds ONE step's contribution to the evidence, not the whole. A run with
+//     twenty steps sends twenty of these.
 //
 //  4. The context gate's budget, defaultMaxBudget 32000 unless a caller sets
 //     MaxBudget. This one bounds the WHOLE prompt rather than one step, and it
@@ -399,10 +429,10 @@ func hasNonEmptyTaskFiles(params map[string]any) bool {
 // it is 4096 here. Neither is in the tool's file, and both are ahead of the
 // gate's 32000, which is about the whole prompt rather than this result.
 //
-// maxToolResultLen lives here rather than in loop_react.go, where it was
-// declared, because the DAG read the ReAct loop's constant — one execution
-// mode's number governing the other, with nothing saying so.
-const maxToolResultLen = 4096
+// The number itself lives in budgets.go as toolResultBudget, with the other
+// three caps on content, so a change to one is visibly a change relative to the
+// rest. It was declared in loop_react.go and read by the DAG — one execution
+// mode's constant governing the other, with nothing saying so.
 
 // truncateToolResult caps an oversized tool Result while preserving
 // JSON structure when the Result is itself JSON. Byte-splicing (old

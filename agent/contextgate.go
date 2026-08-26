@@ -1083,17 +1083,28 @@ func (s *nodeReturnsSource) Load(g *Graph, t *Trigger, a *Agent, params map[stri
 			return "", nil
 		}
 
+		// How much of one result reaches a prompt is the model's business, and
+		// the graph that holds it does not know which model will read it.
+		budget := a.budget(evidenceBudget)
+		// The cut itself is a pure function; what was lost is a fact about this
+		// run, so it is noted here where the run is.
+		cut := func(s string) string {
+			out := Text.TruncateEvidenceTo(s, budget)
+			g.recordCut("evidence", len(s), len(out))
+			return out
+		}
+
 		if len(resolved) > 0 {
 			sb.WriteString("### Resolved\n\n")
 			for label, result := range resolved {
-				sb.WriteString(fmt.Sprintf("**%s:**\n%s\n\n", label, result))
+				sb.WriteString(fmt.Sprintf("**%s:**\n%s\n\n", label, cut(result)))
 			}
 		}
 
 		if len(earlier) > 0 {
 			sb.WriteString("### Resolved in earlier rounds\n\n")
 			for label, result := range earlier {
-				sb.WriteString(fmt.Sprintf("**%s:**\n%s\n\n", label, result))
+				sb.WriteString(fmt.Sprintf("**%s:**\n%s\n\n", label, cut(result)))
 			}
 		}
 

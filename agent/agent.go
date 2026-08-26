@@ -14,6 +14,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/prompt"
 	"github.com/Compdeep/kaiju/agent/skillmd"
 	"github.com/Compdeep/kaiju/agent/toolapi"
+	"github.com/Compdeep/kaiju/agent/toolfind"
 )
 
 /*
@@ -92,11 +93,95 @@ type Trigger struct {
  * return: ordered slice of LLM messages.
  */
 func BuildMessagesWithHistory(system, userQuery string, history []llm.Message) []llm.Message {
-	msgs := make([]llm.Message, 0, 2+len(history))
+	return BuildMessagesWithResults(system, userQuery, history, nil)
+}
+
+/*
+ * BuildMessagesWithResults is BuildMessagesWithHistory with what the run has
+ * already produced, carried as the calls that produced it.
+ * desc: Each arc becomes an assistant turn naming the calls, then one tool
+ *       message per call holding what it returned. A stage reads a value from
+ *       a field rather than from a sentence somebody wrote about it.
+ *
+ *       The assistant turn is constructed here, not emitted by a model. No
+ *       model made those calls — a plan did, and the engine dispatched it. It
+ *       is still the truthful shape: the plan really is the decision to call
+ *       those tools, and it is the shape every provider is trained to read a
+ *       return value in.
+ *
+ *       Ordering is the protocol's, not a preference: every tool message must
+ *       follow the assistant turn that declared its id, with nothing between
+ *       them. Arcs are emitted oldest first, then the objective last, so the
+ *       thing being asked is the final thing read.
+ * param: system - the system prompt.
+ * param: userQuery - the objective, sent last.
+ * param: history - prior conversation, sent before the results.
+ * param: arcs - what each arc produced, oldest first. Empty arcs are skipped.
+ * return: the messages, ready to send.
+ */
+func BuildMessagesWithResults(system, userQuery string, history []llm.Message, arcs [][]StepResult) []llm.Message {
+	msgs := make([]llm.Message, 0, 2+len(history)+len(arcs)*4)
 	msgs = append(msgs, llm.Message{Role: "system", Content: system})
 	msgs = append(msgs, history...)
+
+	for _, arc := range arcs {
+		calls := make([]llm.ToolCall, 0, len(arc))
+		for _, r := range arc {
+			args, err := json.Marshal(r.Params)
+			if err != nil {
+				args = []byte("{}")
+			}
+			calls = append(calls, llm.ToolCall{
+				ID:       stepCallID(r.NodeID),
+				Type:     "function",
+				Function: llm.FunctionCall{Name: r.Tool, Arguments: string(args)},
+			})
+		}
+		if len(calls) == 0 {
+			continue
+		}
+		msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: calls})
+		for _, r := range arc {
+			msgs = append(msgs, llm.Message{
+				Role:       "tool",
+				ToolCallID: stepCallID(r.NodeID),
+				Name:       r.Tool,
+				Content:    stepResultContent(r),
+			})
+		}
+	}
+
 	msgs = append(msgs, llm.Message{Role: "user", Content: userQuery})
 	return msgs
+}
+
+// stepCallID is the id pairing a tool message with the call that produced it.
+// Node ids are unique within a graph, so no two calls collide and the same
+// messages are built the same way twice.
+func stepCallID(nodeID string) string { return "call_" + nodeID }
+
+// stepResultContent is what one tool message carries: the step's fields when it
+// declared any, its text when it did not, and why it failed when it did.
+//
+// A failure is a result. A stage deciding what to do next needs the error more
+// than it needs the successes, and a step that failed still says what it was
+// called with — which is in the assistant turn above it.
+func stepResultContent(r StepResult) string {
+	if r.Err != "" {
+		out := map[string]any{"error": r.Err}
+		if len(r.Payload) > 0 {
+			out["data"] = json.RawMessage(r.Payload)
+		}
+		b, err := json.Marshal(out)
+		if err != nil {
+			return r.Err
+		}
+		return string(b)
+	}
+	if len(r.Payload) > 0 {
+		return string(r.Payload)
+	}
+	return r.Content
 }
 
 /*
@@ -222,10 +307,12 @@ type Agent struct {
 	memory            *Memory
 	// messages is where the chat lane reads earlier conversation from when the
 	// router says the answer needs it. Nil leaves recall off.
-	messages    toolapi.MessageStore
-	triggers    chan Trigger
-	embedStore  *EmbeddingStore // nil if embeddings disabled
-	embedClient *llm.Client     // nil if embeddings disabled
+	messages toolapi.MessageStore
+	triggers chan Trigger
+	// toolIndex ranks the registry against what a run is trying to do. Never
+	// nil after New: without an embedding endpoint it ranks on words, which is
+	// all a registry small enough to show whole needs.
+	toolIndex toolfind.Index
 
 	soulPrompt    string                      // from SOUL.md → BOOT.md body → default
 	skillGuidance map[string]*skillmd.SkillMD // guidance-only skills (no CommandDispatch)
@@ -359,10 +446,50 @@ func New(cfg Config) (*Agent, error) {
 		intentRegistry:    NewIntentRegistry(),
 	}
 
+	// The tool index, built here rather than by a call the application has to
+	// remember. It re-reads the registry whenever the registry changes, so
+	// building it before a single tool is registered is correct — and it is the
+	// only order New can offer, since tools are registered against the agent it
+	// returns.
+	a.toolIndex = a.openToolIndex()
+
 	// Wire the handlers the application supplied, so the agent is
 	// fully formed when New returns rather than after a dozen further calls.
 	a.applyHandlers(cfg)
 	return a, nil
+}
+
+/*
+ * openToolIndex builds the index relevantTools ranks with.
+ * desc: An embedding client only when one is configured — the index ranks on
+ *       words without it, which is what every deployment gets before anyone
+ *       sets an endpoint. Embeddings are computed in the background and cached
+ *       under the agent's data directory, so a boot is never delayed by them
+ *       and a restart does not pay for them again.
+ * return: the index. Never nil: a failure to open is logged and answered with
+ *         an index over the registry alone, because a run with no ranking is
+ *         better than a run with no tools.
+ */
+func (a *Agent) openToolIndex() toolfind.Index {
+	var embed *llm.Client
+	if a.cfg.EmbeddingsEnabled {
+		endpoint := a.cfg.EmbedEndpoint
+		if endpoint == "" {
+			endpoint = a.cfg.LLMEndpoint
+		}
+		apiKey := a.cfg.EmbedAPIKey
+		if apiKey == "" {
+			apiKey = a.cfg.LLMAPIKey
+		}
+		embed = llm.NewClient(endpoint, apiKey, a.cfg.EmbedModel).Transport(a.cfg.LLMTransport)
+		log.Printf("[agent] tool ranking: embeddings on (%s)", a.cfg.EmbedModel)
+	}
+	ix, err := toolfind.Open(a.cfg.DataDir, a.registry, embed)
+	if err != nil {
+		log.Printf("[agent] tool index unavailable, ranking on registry order: %v", err)
+		return nil
+	}
+	return ix
 }
 
 /*
@@ -517,6 +644,30 @@ func (a *Agent) Start(ctx context.Context) {
 	// the two orders are both real.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// Warm the tool index now that the tools are in it.
+	//
+	// New builds the index before an application has registered anything, which
+	// is the only order it can offer — tools are registered against the agent it
+	// returns. The index catches up by itself on its first use, but "its first
+	// use" is the first plan of the first run, which would then be ranked on
+	// words while the embeddings were still being fetched. Doing it here costs a
+	// boot nothing and means the first query is ranked like the thousandth.
+	//
+	// After the cancel above, not before: this goroutine reads ctx, and the line
+	// above REASSIGNS it. Started earlier, the two race — one goroutine reading
+	// the variable while another writes it — and the warming would also outlive
+	// a stopped agent, since it held the context from before the cancel was
+	// derived.
+	if a.toolIndex != nil {
+		warmCtx := ctx
+		go func() {
+			a.toolIndex.Rank(warmCtx, "")
+			if indexed, total := a.toolIndex.Ready(); total > 0 && indexed < total {
+				log.Printf("[agent] tool index warming: %d of %d tools", indexed, total)
+			}
+		}()
+	}
 	go func() {
 		select {
 		case <-a.stopped:
@@ -554,52 +705,14 @@ func (a *Agent) Kernel() *Kernel {
 	return a.kernel
 }
 
-/*
- * InitEmbeddings initializes the embedding store if embeddings are enabled.
- * desc: Must be called after all skills are registered and before Start().
- *       Gracefully falls back to no semantic routing on failure.
- * param: ctx - context for the embedding API call.
- * return: error (currently always nil due to graceful fallback).
- */
-func (a *Agent) InitEmbeddings(ctx context.Context) error {
-	if !a.cfg.EmbeddingsEnabled {
-		return nil
-	}
-
-	endpoint := a.cfg.EmbedEndpoint
-	if endpoint == "" {
-		endpoint = a.cfg.LLMEndpoint
-	}
-	model := a.cfg.EmbedModel
-	apiKey := a.cfg.EmbedAPIKey
-	if apiKey == "" {
-		apiKey = a.cfg.LLMAPIKey
-	}
-
-	a.embedClient = llm.NewClient(endpoint, apiKey, model).Transport(a.cfg.LLMTransport)
-
-	topK := a.cfg.EmbedTopK
-	if topK <= 0 {
-		topK = 8
-	}
-	thresh := a.cfg.EmbedThreshold
-	if thresh <= 0 {
-		thresh = 0.3
-	}
-
-	a.embedStore = NewEmbeddingStore(topK, thresh, a.cfg.AlwaysInclude)
-
-	if err := a.embedStore.Load(ctx, a.embedClient, a.registry); err != nil {
-		log.Printf("[agent] embedding load failed, routing disabled: %v", err)
-		a.embedStore = nil
-		a.embedClient = nil
-		return nil // graceful fallback
-	}
-
-	log.Printf("[agent] semantic skill routing enabled (topK=%d, threshold=%.2f, always=%v)",
-		topK, thresh, a.cfg.AlwaysInclude)
-	return nil
-}
+// InitEmbeddings is retained for applications that called it. It does nothing:
+// the tool index is built by New and warms itself in the background, so there
+// is no longer a call an application has to remember to make after registering
+// its tools — which was the failure mode, since nothing in this repository ever
+// made it.
+//
+// Deprecated: remove the call. It will be deleted.
+func (a *Agent) InitEmbeddings(context.Context) error { return nil }
 
 /*
  * relevantTools returns the ranked list of executable tools (registry entries
@@ -615,19 +728,17 @@ func (a *Agent) InitEmbeddings(ctx context.Context) error {
  * param: scope - resolved tool access scope (nil for full access).
  * return: ordered slice of tool names visible to the executive.
  */
-func (a *Agent) relevantTools(ctx context.Context, trigger Trigger) []string {
-	triggerText, scope := a.formatTrigger(trigger), trigger.Scope
+func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger, objective string) []string {
+	scope := trigger.Scope
+	if objective == "" {
+		objective = a.formatTrigger(trigger)
+	}
+
 	var base []string
-	if a.embedStore == nil || a.embedClient == nil {
-		base = a.registry.List()
+	if a.toolIndex != nil {
+		base = a.toolIndex.Rank(ctx, objective)
 	} else {
-		ranked, err := a.embedStore.RankTools(ctx, a.embedClient, triggerText, a.registry)
-		if err != nil {
-			log.Printf("[agent] tool ranking failed, using all: %v", err)
-			base = a.registry.List()
-		} else {
-			base = ranked
-		}
+		base = a.registry.List()
 	}
 
 	// The agent tool is never offered to the executive/planner — that would let
@@ -642,6 +753,16 @@ func (a *Agent) relevantTools(ctx context.Context, trigger Trigger) []string {
 		}
 		base = pruned
 	}
+
+	// The shell goes first, whatever the ranking made of it.
+	//
+	// It is the one tool that covers what no other tool does, and a search over
+	// descriptions has no way to know that: asked for the latest transactions on
+	// a blockchain, the ranking put the three web tools at the top and the shell
+	// fourteenth, when reading an RPC endpoint with curl is a route to the
+	// answer. Ranking answers "what is this task about"; the shell is there for
+	// when the answer to that question turns out to be wrong.
+	base = shellFirst(base)
 
 	// A run with nobody watching does not get the tools that exist to be asked
 	// for. A tool says so itself (toolapi.InteractiveOnly); this package only
@@ -661,16 +782,72 @@ func (a *Agent) relevantTools(ctx context.Context, trigger Trigger) []string {
 	// Apply scope filtering — tools not in scope are invisible to the executive.
 	// nil scope = full access (CLI local user).
 	// Wildcard "*" in AllowedTools means all tools.
-	if scope == nil || scope.AllowedTools["*"] {
-		return base
+	if scope != nil && !scope.AllowedTools["*"] {
+		filtered := base[:0]
+		for _, name := range base {
+			if scope.AllowedTools[name] {
+				filtered = append(filtered, name)
+			}
+		}
+		base = filtered
 	}
-	filtered := base[:0]
-	for _, name := range base {
-		if scope.AllowedTools[name] {
-			filtered = append(filtered, name)
+
+	// Last, and only here, does the list get shorter for reasons of size. The
+	// planner is shown a signature and a return shape per tool, and that is what
+	// stops fitting once a registry is large. Trimming after the visibility
+	// rules means the budget is spent on tools this run could actually call.
+	return a.fitToolIndex(graph, base)
+}
+
+// shellFirst moves the shell to the front, leaving everything else in order.
+// A registry without one is returned untouched.
+func shellFirst(names []string) []string {
+	for i, n := range names {
+		if n != shellToolName {
+			continue
+		}
+		if i == 0 {
+			return names
+		}
+		out := make([]string, 0, len(names))
+		out = append(out, n)
+		out = append(out, names[:i]...)
+		return append(out, names[i+1:]...)
+	}
+	return names
+}
+
+// fitToolIndex drops from the end of names until the planner's tool index fits
+// toolIndexBudgetChars.
+//
+// A registry small enough to show whole is shown whole, which is the case this
+// engine has shipped in so far: twenty-seven tools compile to roughly seventeen
+// thousand characters. Narrowing is what a large registry costs, not a thing
+// done to a small one, and the caller has already put the tools most likely to
+// be needed at the front.
+func (a *Agent) fitToolIndex(graph *Graph, names []string) []string {
+	if a == nil || a.registry == nil || len(names) == 0 {
+		return names
+	}
+	indexCap := a.budget(toolIndexBudget)
+	total := 0
+	for i, n := range names {
+		total += toolIndexEntrySize(a.registry, n)
+		if total > indexCap {
+			// Never return nothing: one tool too large for the budget is still
+			// the tool this run was told to use.
+			if i == 0 {
+				i = 1
+			}
+			log.Printf("[agent] tool index over budget: showing %d of %d tools (%d chars)",
+				i, len(names), indexCap)
+			// Counted in tools rather than characters: what a planner lost here
+			// is not part of a value, it is a tool it cannot see at all.
+			graph.recordCut("tool index", len(names), i)
+			return names[:i]
 		}
 	}
-	return filtered
+	return names
 }
 
 // toolSectionLines appends the body of an "## Available Tools" section to sb — one

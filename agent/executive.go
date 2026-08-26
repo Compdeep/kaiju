@@ -14,6 +14,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/skillmd"
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
@@ -54,25 +55,44 @@ func compileToolIndex(registry *toolapi.Registry, names []string) string {
 	sb.WriteString("## Tools (* = required param)\n")
 	sb.WriteString("The parameters shown for each tool are the only ones available — use only the parameters listed.\n")
 	for _, name := range names {
-		skill, ok := registry.Get(name)
-		if !ok {
-			continue
+		sb.WriteString(toolIndexEntry(registry, name))
+	}
+	return sb.String()
+}
+
+// toolIndexEntry is one tool's lines of the index: its signature and
+// description, then the shape it returns and the wiring it declared.
+//
+// Split out of compileToolIndex so the size of an entry can be asked for
+// without assembling the whole index — relevantTools has to know what a tool
+// costs before it decides to show it. Returns "" for a name the registry does
+// not hold, so an entry always costs what it is worth.
+func toolIndexEntry(registry *toolapi.Registry, name string) string {
+	skill, ok := registry.Get(name)
+	if !ok {
+		return ""
+	}
+	var sb strings.Builder
+	sig := compactParamSignature(skill.Parameters())
+	sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, skill.Description()))
+	if outSchema := toolapi.GetOutputSchema(skill); outSchema != nil {
+		if shape := compactOutputShape(outSchema); shape != "" {
+			sb.WriteString("  → returns: " + shape + "\n")
 		}
-		sig := compactParamSignature(skill.Parameters())
-		sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, skill.Description()))
-		if outSchema := toolapi.GetOutputSchema(skill); outSchema != nil {
-			if shape := compactOutputShape(outSchema); shape != "" {
-				sb.WriteString("  → returns: " + shape + "\n")
-			}
-			// Wiring the tool itself declared. Generated rather than written
-			// into a description, so it cannot drift from what the edges read
-			// afterwards to check whether the wiring happened.
-			for _, hint := range chainHints(outSchema) {
-				sb.WriteString("  → chain: " + hint + "\n")
-			}
+		// Wiring the tool itself declared. Generated rather than written
+		// into a description, so it cannot drift from what the references read
+		// afterwards to check whether the wiring happened.
+		for _, hint := range chainHints(outSchema) {
+			sb.WriteString("  → chain: " + hint + "\n")
 		}
 	}
 	return sb.String()
+}
+
+// toolIndexEntrySize is what showing one tool to the planner costs, in
+// characters of its index.
+func toolIndexEntrySize(registry *toolapi.Registry, name string) int {
+	return len(toolIndexEntry(registry, name))
 }
 
 /*
@@ -307,7 +327,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	// if a skill says "use compute deep", the planner must follow that,
 	// not substitute file_list/file_read.
 	var guidance []string
-	plannerHeadings := []string{"## Planning Guidance", "## RULES"}
+	plannerHeadings := skillmd.PlannerHeadings
 	// The keys this run selected, or every key when it selected none — the
 	// planner has always fallen back to all of them rather than to nothing.
 	//
@@ -422,7 +442,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 				sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss astrodynamics / financial / statistical / ephemeris queries that *sound* like lookups. If the question requires a library (sgp4, pandas, scipy, skyfield, ephem) or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — where a script could produce the answer, a compute step costs far less than refusing the task. Where one could not, it costs more than doing nothing: compute writes a program and runs it, and a program cannot tell you what a page says. Reading sources and reporting what they hold is the aggregator's work, and it already sees every result this run gathered.\n\n")
 			}
 			sb.WriteString("Level reference:\n")
-			sb.WriteString("- **Direct tools** (bash, service, file_read, web_search): default for downloads, searches, restarts, reads.\n")
+			sb.WriteString("- **Direct tools** (bash, service, file_read): default for downloads, searches, restarts, reads.\n")
 			sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or injected via `${step.N.field}` from an upstream step).\n")
 			sb.WriteString("- **edit_file**: LLM-backed edit or create of a specific file. Use whenever you know the path and want the Coder to produce the content. task_files is REQUIRED.\n")
 			sb.WriteString("- **compute(shallow)**: compute a VALUE for downstream use — analytics, rankings, scores, derived constants. The Coder emits a runnable script, the script runs, stdout is captured on `.output` so downstream steps can read it via `${step.N.output}`. NOT for editing files you already know the path of — use edit_file for that.\n")
@@ -454,9 +474,12 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("ALWAYS use the compute mode preflight selected — see the Compute Nodes section above. Workspace contents do NOT influence this choice.\n")
 		sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\", port=NNNN) spawns in the background and returns immediately. ALWAYS include the port parameter so health checks know which port to verify.\n")
 		sb.WriteString("ALWAYS use bash only for commands that terminate: ls, grep, git, npm install, curl, node script.js, etc.\n")
-		sb.WriteString("ALWAYS use web_search for questions needing current data.\n")
-		sb.WriteString("ALWAYS gather required data before grafting compute. Every compute node must have its inputs supplied by prior gathering steps (web_search/web_fetch/file_read/bash) wired via `${step.N.field}` placeholders — never compute over inputs that don't exist yet.\n")
+		sb.WriteString("ALWAYS gather current data from the web when the question needs it, using whichever tool in the index above does that. Never answer a question about the present from memory.\n")
+		sb.WriteString("ALWAYS gather required data before grafting compute. Every compute node must have its inputs supplied by prior gathering steps wired via `${step.N.field}` placeholders — never compute over inputs that don't exist yet.\n")
 		sb.WriteString("ALWAYS plan and complete the full action the user asked for. A worklog showing prior failures is NOT a reason to plan a timid probe (e.g. just file_read) instead of the real edit/build — the user is asking again, plan the action. Imperatives ('do it', 'fix it', 'just do it') force action; never stop partway or ask for permission.\n")
+		sb.WriteString("ALWAYS settle what you do not know BEFORE you plan around it. Read the objective and name the concrete values the plan needs — a path, a directory, a host, a user, a port, a process id, a version, a filename, an address — then ask of each one: have I been given this, or am I supplying it myself? A value you have not seen is a guess. It will look right and the step built on it fails on the value, not on the tool, so the failure teaches nothing and the retry guesses again.\n")
+		sb.WriteString("ALWAYS treat this machine as unknown. You do not know its user, its home directory, its working directory, what is installed, what is running, what any path contains, or what any of its addresses answer — unless a step in THIS plan returned it, or it is stated above. A default that is usually right elsewhere is still a guess here. When the objective names something you cannot see (\"the home directory\", \"the config\", \"the service\", \"the latest one\"), that name is the question, not the answer.\n")
+		sb.WriteString("ALWAYS plan the lookup as its own first step and wire its result forward with `${step.N.field}`. The tool list holds tools that report the environment, the filesystem and the process table; choosing one costs a step and settles the value for the whole plan. Plan the steps you can know now, not the ones you cannot: when a step reveals what comes next, you will be asked to plan again with its result in view — so a plan that stops at the lookup is complete, and a plan that guesses past it is not.\n")
 		sb.WriteString("NEVER plan when context is genuinely incomplete — emit `[{\"tool\":\"gap\",\"gap\":\"<question>\"}]` only for unresolvable references, ambiguous key terms, or information only the user has. Not an escape hatch for tool choice or gatherable data.\n")
 		sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
 		sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
@@ -526,6 +549,16 @@ type PlanResult struct {
 	Gaps           []string     // capability gaps declared by the planner
 	InferredIntent gates.Intent // only set when intent was auto-inferred
 	WasAuto        bool         // true if the planner inferred intent
+
+	// Tools is what the planner was shown, in the order it was shown them, and
+	// Objective is the text they were ranked against.
+	//
+	// Carried out of the planner so the trace can show them. A plan that
+	// reaches for the wrong tool and a plan that was never shown the right one
+	// look identical from the outside, and the difference is the first thing
+	// anyone reading a bad run needs.
+	Tools     []string
+	Objective string
 }
 
 /*
@@ -592,13 +625,13 @@ var executiveToolSchemaTemplate = `{
 			"type": "array",
 			"items": {
 				"type": "object",
-				"required": ["tool", "params", "depends_on", "tag"],
+				"required": ["tool", "params", "tag"],
 				"properties": {
 					"type":       {"type": "string", "enum": ["tool","compute"], "description": "Node type: tool (default) or compute (LLM code generation)"},
 					"tool":       {"type": "string", "description": "Tool name from the Tools list"},
-					"params":     {"type": "object", "description": "Tool input params as key-value pairs. ALWAYS populate for tools with required params marked *. Use ${step.N.field} placeholders inside string values to inject results from upstream steps. Example: for web_search use {\"query\": \"search terms\"}, for web_fetch chained off step 0 use {\"url\": \"${step.0.results.0.url}\"}, for bash use {\"command\": \"ls -la\"}. NEVER leave empty."},
-					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Step indices that must complete first"},
-					"tag":        {"type": "string", "description": "Short human-readable label"},
+					"params":     {"type": "object", "description": "Tool input params as key-value pairs. ALWAYS populate for tools with required params marked *. A value is either something you have — {\"query\": \"search terms\"}, {\"command\": \"ls -la\"} — or a REFERENCE to an earlier step's output. Example: a fetch reading the first result of a search tagged find_docs is {\"url\": {\"step\": \"find_docs\", \"field\": \"results.0.url\"}}. NEVER leave empty.", "additionalProperties": {"anyOf": [%s, {"type": "string"}, {"type": "number"}, {"type": "boolean"}, {"type": "array"}, {"type": "object"}]}},
+					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Rarely needed. A step that references another already depends on it, and the wiring is done for you. Use this ONLY to order two steps that pass no data between them."},
+					"tag":        {"type": "string", "description": "This step's name, unique within the plan: letters, digits, _ or - with no spaces. Other steps reference this step by it."},
 					"gap": {"type": "string", "description": "For tool=gap only: describes a missing capability"}
 				}
 			}
@@ -624,12 +657,16 @@ func (a *Agent) executiveToolDef() llm.ToolDef {
 		names = a.intentRegistry.AllowedNames(-1)
 	}
 	enumJSON, _ := json.Marshal(names)
-	schema := json.RawMessage(fmt.Sprintf(executiveToolSchemaTemplate, string(enumJSON)))
+	// The reference shape comes from the Ref struct, not from a copy written
+	// here — see RefSchema. Two descriptions of one shape drift, and a
+	// reference the planner writes to a schema Go no longer recognises is not
+	// an error anywhere: it reaches the tool as a literal object.
+	schema := json.RawMessage(fmt.Sprintf(executiveToolSchemaTemplate, string(enumJSON), RefSchema()))
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
 			Name:        "plan",
-			Description: `Submit an execution plan. Example: {"steps":[{"tool":"web_search","params":{"query":"bitcoin price"},"depends_on":[],"tag":"s1"}]}. Chaining example: {"steps":[{"tool":"web_search","params":{"query":"news"},"depends_on":[],"tag":"s1"},{"tool":"web_fetch","params":{"url":"${step.0.results.0.url}"},"depends_on":[0],"tag":"s2"}]}. Trivial: {"steps":[],"answer":"Paris."}`,
+			Description: `Submit an execution plan. Example: {"steps":[{"tool":"web_search","params":{"query":"bitcoin price"},"tag":"find_price"}]}. Chaining — the second step REFERENCES the first by its tag, and that is the whole wiring: {"steps":[{"tool":"web_search","params":{"query":"news"},"tag":"find_news"},{"tool":"web_fetch","params":{"url":{"step":"find_news","field":"results.0.url"}},"tag":"read_news"}]}. Trivial: {"steps":[],"answer":"Paris."}`,
 			Parameters:  schema,
 		},
 	}
@@ -703,8 +740,49 @@ func linkDependsOnTags(stepsArray json.RawMessage, steps []PlanStep) {
 }
 
 /*
+ * validatePlanNames reports names a reference could not resolve to one step.
+ * desc: The fourth plan-time validator, and the one the other three assume. A
+ *       name is what a reference resolves against, so it has to be unique
+ *       within the plan and has to be something a reference can spell.
+ *
+ *       Neither was checked while a name was only a label on a trace line. Two
+ *       steps could share one, and stepIndexFor would take the first — so a
+ *       reference meant for the second read the first, silently. And a name
+ *       could hold a space or a bracket, which no reference can address at all.
+ * param: steps - the plan
+ * return: one message per unusable name, empty when the plan is clean
+ */
+func validatePlanNames(steps []PlanStep) []string {
+	var errs []string
+	seen := make(map[string]int, len(steps))
+	for i := range steps {
+		name := steps[i].Tag
+		if name == "" {
+			continue // unnamed steps are addressed by position; nothing to clash
+		}
+		if !stepNameRe.MatchString(name) {
+			errs = append(errs, fmt.Sprintf(
+				"step %d (%s): the name %q cannot be referenced — a name is letters, "+
+					"digits, _ or - with no spaces, dots or brackets, because a reference "+
+					"is written ${step.<name>.<field>}",
+				i, steps[i].Tool, name))
+			continue
+		}
+		if first, dup := seen[name]; dup {
+			errs = append(errs, fmt.Sprintf(
+				"step %d (%s): the name %q is already step %d's — a reference naming it "+
+					"cannot say which step it means; give every step its own name",
+				i, steps[i].Tool, name, first))
+			continue
+		}
+		seen[name] = i
+	}
+	return errs
+}
+
+/*
  * validatePlanDeps reports dependencies that name nothing in the plan.
- * desc: The plan-time twin of the other two validators: validatePlanEdges checks
+ * desc: The plan-time twin of the other two validators: validatePlanReferences checks
  *       the values wired between steps, validatePlanParams the parameters of a
  *       step, and this the dependencies of one. A name that matches no tag and
  *       no position is returned so the executive re-plans against it.
@@ -770,6 +848,36 @@ func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
 }
 
 /*
+ * objective is what this run is trying to do, in the words it was given.
+ * desc: The user's request verbatim, then preflight's framing of it — which is
+ *       where the URLs, paths and identifiers from the conversation are — then
+ *       the re-plan frame when the reflector asked for one, which says what the
+ *       plan so far did not achieve.
+ *
+ *       One function because two callers must not disagree: the planner reads
+ *       this text, and the tool search ranks against it. If they were built
+ *       separately the search would drift from the prompt, and the drift would
+ *       show up as a planner reaching for tools it was never shown.
+ * param: trigger - what started the run.
+ * param: graph - the run, for preflight's framing. May be nil.
+ * param: replanFrame - the reflector's next move, when re-planning.
+ * return: the objective text.
+ */
+func (a *Agent) objective(trigger Trigger, graph *Graph, replanFrame ...string) string {
+	out := a.formatTrigger(trigger)
+	if graph != nil && graph.Preflight != nil && !graph.Preflight.Context.Empty() {
+		out += "\n\n## Context\n" + graph.Preflight.Context.Text()
+	}
+	// Appended above the worklog block the caller adds, so the frame's
+	// reference to "the worklog below" stays accurate and the user's goal stays
+	// verbatim at the top.
+	if len(replanFrame) > 0 && replanFrame[0] != "" {
+		out += replanFrame[0]
+	}
+	return out
+}
+
+/*
  * runExecutiveNative makes a single LLM call using native function calling.
  * desc: Sends the plan meta-tool to the LLM. The model calls plan() with the
  *       entire DAG as the argument. No text parsing, no markdown fences.
@@ -778,8 +886,24 @@ func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
  * param: trigger - the investigation trigger.
  * return: PlanResult pointer with steps and intent, or error.
  */
-func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *Graph, replanFrame ...string) (*PlanResult, error) {
-	relevant := a.relevantTools(ctx, trigger)
+func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *Graph, replanFrame ...string) (planOut *PlanResult, errOut error) {
+	// The objective is built before the tools are chosen, and it is the same
+	// text the planner is about to read. That order is the point.
+	//
+	// Tool choice used to come from preflight, which runs once at the top of a
+	// turn. A re-plan therefore got the tools the FIRST plan was given, while
+	// the one piece of text that said what was now missing — the reflector's
+	// next move, inside the frame — went into the prompt and nowhere near the
+	// search. A run that needed a tool it had not been shown could not ask for
+	// one, could not be given one, and concluded the work impossible.
+	objective := a.objective(trigger, graph, replanFrame...)
+	relevant := a.relevantTools(ctx, graph, trigger, objective)
+	// Recorded on whatever plan this call produces — see PlanResult.Tools.
+	defer func() {
+		if planOut != nil {
+			planOut.Tools, planOut.Objective = relevant, objective
+		}
+	}()
 	log.Printf("[dag] executive (native) sees %d tools: %v", len(relevant), relevant)
 	if len(a.skillGuidance) > 0 {
 		log.Printf("[dag] executive (native) has %d skill cards loaded", len(a.skillGuidance))
@@ -801,17 +925,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// One gate call for all runtime context the planner needs: worklog
 	// (system state) plus the tool index (signatures + output schemas so
 	// ${step.N.field} placeholders can be wired against correct result shapes).
-	userQuery := a.formatTrigger(trigger)
-	if graph != nil && graph.Preflight != nil && graph.Preflight.Context != "" {
-		userQuery += "\n\n## Context\n" + graph.Preflight.Context
-	}
-	// Re-plan frame (optional): the reflector chose `replan` and the scheduler
-	// passed a generic frame describing the gap + what's already done. Appended
-	// here — above the worklog block below — so its "worklog below" reference is
-	// accurate and the user's goal stays verbatim at the top.
-	if len(replanFrame) > 0 && replanFrame[0] != "" {
-		userQuery += replanFrame[0]
-	}
+	userQuery := objective
 	var toolIndex string
 	if graph != nil && graph.Context != nil {
 		gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
@@ -819,7 +933,11 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				Worklog(20, "all"),
 				ToolIndex(relevant),
 			),
-			MaxBudget: 8000,
+			// Enough for the tool index relevantTools just sized, plus the
+			// worklog beside it. At 8000 the gate trimmed the index on every
+			// call — the schemas a planner needs to write ${step.N.field}
+			// against were the thing being cut.
+			MaxBudget: a.budget(toolIndexBudget) + 8000,
 		})
 		if gerr != nil {
 			log.Printf("[dag] executive (native) context build failed: %v", gerr)
@@ -837,7 +955,15 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	}
 
 	sysPromptN := a.executiveSystemPrompt(ctx, graph, relevant, dagMode, intent, toolIndex)
-	messages := BuildMessagesWithHistory(sysPromptN, userQuery, executiveHistory)
+	// What the run has already produced, as the calls that produced it.
+	//
+	// The planner is the stage that writes params, and it was the one stage
+	// never shown a value: its context was the worklog and the tool index, and
+	// a node's fields are in neither. The only route from a step to the plan
+	// that followed it was a sentence the reflector retyped — so a path that
+	// was correct and on disk arrived as a placeholder that resolved to
+	// nothing, and the plan used one the model half-remembered.
+	messages := BuildMessagesWithResults(sysPromptN, userQuery, executiveHistory, graph.Arcs())
 
 	ctx = withTrace(ctx, TraceID{
 		NodeID:   "executive",
@@ -860,16 +986,47 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		MaxTokens:   a.planMaxTokens(ctx),
 	})
 
+	// The planner is not a node, so it records itself — see debugrecord.go. The
+	// plan it produced is filled in at the bottom, once it has parsed; a call
+	// that failed records here and stops.
+	planRec := DebugRecord{
+		ID: "executive", Kind: "executive", Label: "plan", Round: graph.Round(),
+		System: sysPromptN, User: userQuery,
+	}
+	if graph.Round() > 0 {
+		planRec.ID = fmt.Sprintf("executive-r%d", graph.Round())
+		planRec.Label = fmt.Sprintf("replan %d", graph.Round())
+	}
+	// One record however this returns. The plan has several exits — two that
+	// succeed, several that fail, and a retry between them — and a record
+	// written at each would be written differently at each.
+	defer func() {
+		if errOut != nil && planRec.Err == "" {
+			planRec.Err = errOut.Error()
+		}
+		if planOut != nil {
+			planRec.Out, _ = json.Marshal(planOut)
+		}
+		graph.recordStage(planRec)
+	}()
+
 	if err != nil {
 		return nil, fmt.Errorf("planner LLM call (native): %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
 		traceFault(ctx, "no choices")
+		planRec.Err = "no choices"
 		return nil, fmt.Errorf("planner LLM returned no choices")
 	}
+	planRec.TokensIn, planRec.TokensOut = resp.Usage.PromptTokens, resp.Usage.CompletionTokens
 
 	choice := resp.Choices[0]
+	if len(choice.Message.ToolCalls) > 0 {
+		planRec.Reply = choice.Message.ToolCalls[0].Function.Arguments
+	} else {
+		planRec.Reply = choice.Message.Content
+	}
 
 	// This call and its retry below use completeHeavy rather than the checked
 	// variant on purpose: this stage does something better than reporting the
@@ -904,8 +1061,41 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// Check if the model called the plan tool
 	if choice.FinishReason == "tool_calls" && len(choice.Message.ToolCalls) > 0 {
 		tc := choice.Message.ToolCalls[0]
+
+		// It named a tool from the index instead of wrapping it in a plan.
+		//
+		// Only one tool is offered on this call and the choice is pinned to it,
+		// so the name it produced is not a tool it could reach — it is a word
+		// it read in the tool index and emitted as a call. A small model does
+		// this occasionally, and it did it more once the index grew from three
+		// tools to twenty-seven.
+		//
+		// It used to end the run. A single slip on a re-plan threw away every
+		// step that had already succeeded, which is what it cost in the Solana
+		// run: seven steps done, the re-plan mistyped its call, and the whole
+		// thing came back as a failure. Ask again, naming the mistake.
 		if tc.Function.Name != "plan" {
-			return nil, fmt.Errorf("planner called unexpected tool %q (expected plan)", tc.Function.Name)
+			log.Printf("[dag] executive called %q instead of plan — asking again", tc.Function.Name)
+			again := append(append([]llm.Message{}, messages...), llm.Message{
+				Role: "user",
+				Content: fmt.Sprintf("You called %q. That is not something you can call here — the only "+
+					"call available is plan(), and %q is a tool for a STEP INSIDE a plan. "+
+					"Call plan() and put that tool in a step.", tc.Function.Name, tc.Function.Name),
+			})
+			retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_wrap"), &llm.ChatRequest{
+				Messages:    again,
+				Tools:       []llm.ToolDef{a.executiveToolDef()},
+				ToolChoice:  llm.ForceToolChoice("plan"),
+				Temperature: a.cfg.Temperature,
+				MaxTokens:   a.planMaxTokens(ctx),
+			})
+			if retryErr != nil || len(retryResp.Choices) == 0 ||
+				len(retryResp.Choices[0].Message.ToolCalls) == 0 ||
+				retryResp.Choices[0].Message.ToolCalls[0].Function.Name != "plan" {
+				return nil, fmt.Errorf("planner called unexpected tool %q (expected plan)", tc.Function.Name)
+			}
+			choice = retryResp.Choices[0]
+			tc = choice.Message.ToolCalls[0]
 		}
 
 		log.Printf("[dag] executive (native) received plan() call, %d bytes: %s", len(tc.Function.Arguments), Text.TruncateLog(tc.Function.Arguments, 500))
@@ -1020,7 +1210,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		// Validate the plan and correct it with feedback before running it. Two
 		// checks, both at plan time, both feeding this one re-plan loop:
 		//
-		//   - validatePlanEdges  — the wiring BETWEEN steps: a ${step.N.field} that
+		//   - validatePlanReferences — the wiring BETWEEN steps: a ${step.N.field} that
 		//     points at its own step, a step index not in the plan, or a field the
 		//     producing tool never emits (classically ${step.0.results.0.url} off a
 		//     web_fetch, when a results[] list only comes from web_search).
@@ -1041,10 +1231,11 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		curToolCalls := choice.Message.ToolCalls
 		curToolCallID := tc.ID
 		for corrections := 0; ; corrections++ {
-			edgeErrs := validatePlanEdges(steps, a.registry)
+			nameErrs := validatePlanNames(steps)
+			refErrs := validatePlanReferences(steps, a.registry)
 			paramErrs := validatePlanParams(steps, a.registry)
 			depErrs := validatePlanDeps(steps)
-			allErrs := append(append(append([]string{}, edgeErrs...), paramErrs...), depErrs...)
+			allErrs := append(append(append(append([]string{}, nameErrs...), refErrs...), paramErrs...), depErrs...)
 			if len(allErrs) == 0 {
 				break // plan is clean — proceed
 			}
@@ -1052,12 +1243,27 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				return nil, fmt.Errorf("executive: plan still invalid after %d corrections: %s",
 					maxPlanCorrections, strings.Join(allErrs, "; "))
 			}
-			log.Printf("[dag] executive plan has %d problem(s) [%d edge, %d param], correction %d/%d: %v",
-				len(allErrs), len(edgeErrs), len(paramErrs), corrections+1, maxPlanCorrections, allErrs)
+			log.Printf("[dag] executive plan has %d problem(s) [%d reference, %d param], correction %d/%d: %v",
+				len(allErrs), len(refErrs), len(paramErrs), corrections+1, maxPlanCorrections, allErrs)
 			correction := "Error: your plan is invalid. Fix EVERY problem below and call plan() again:\n- " +
 				strings.Join(allErrs, "\n- ")
-			if len(edgeErrs) > 0 {
-				correction += "\n\nHow ${step.N.field} works: it reads step N's output, so N must be an EARLIER step whose tool actually produces `field`. To fetch web pages from a search, the plan MUST contain a web_search step first; then web_fetch steps reference ${step.<searchIndex>.results.0.url} with depends_on:[<searchIndex>]. Never point a fetch at its own step or at another fetch's output."
+			if len(refErrs) > 0 {
+				// Guidance for the error at hand. It used to be one paragraph
+				// about web_search → web_fetch whatever the error was, so a
+				// planner told its compute step referenced itself was answered
+				// with advice about fetching pages, and spent all three
+				// corrections none the wiser.
+				correction += "\n\nHow ${step.N.field} works: it reads step N's output, so N must be an EARLIER step whose tool actually produces `field`."
+				joined := strings.Join(refErrs, " ")
+				if strings.Contains(joined, "OWN output") {
+					correction += " A step numbered N cannot read ${step.N…}. If the value comes from work you have not planned, ADD the step that produces it BEFORE this one and reference that index; step numbers are positions in THIS plan, counted from 0."
+				}
+				if strings.Contains(joined, "does not produce") {
+					correction += " Reference a field the producing tool actually returns. `content` is the rendered text of any tool's result; the tool's own fields are listed under `returns:` in the tool index above."
+				}
+				if strings.Contains(joined, "which does not exist") {
+					correction += " Every index must be a step in THIS plan, counted from 0."
+				}
 			}
 			if len(paramErrs) > 0 {
 				correction += "\n\nUse ONLY the parameters each tool declares — never invent a parameter name."
@@ -1279,7 +1485,8 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
  * desc: Always expects a JSON array of steps. If the LLM wraps it in an object
  *       (e.g. {"intent":"...", "steps":[...]}), extracts the array from it.
  *       Validates deps and ${step.N} placeholder ranges, auto-adds missing dep
- *       edges, detects and breaks cycles, and deduplicates wired steps.
+ *       step dependencies, detects and breaks cycles, and deduplicates wired
+ *       steps.
  * param: raw - the raw LLM output string.
  * param: isAuto - true if intent should be extracted from the response.
  * return: parsed PlanStep slice, inferred intent, or error.
@@ -1347,9 +1554,9 @@ func (a *Agent) parseExecutiveOutput(raw string, isAuto bool) ([]PlanStep, gates
 		walkParams(steps[i].Params, func(str string) (any, bool) {
 			matches := stepTemplateRe.FindAllStringSubmatch(str, -1)
 			for _, m := range matches {
-				idx, _ := strconv.Atoi(m[1])
-				if idx < 0 || idx >= len(steps) {
-					log.Printf("[dag] step %d template ${step.%d...} out of range", i, idx)
+				idx, ok := stepIndexFor(m[1], steps)
+				if !ok || idx < 0 || idx >= len(steps) {
+					log.Printf("[dag] step %d template ${step.%s...} names no step", i, m[1])
 					continue
 				}
 				if idx == i {
@@ -1462,9 +1669,11 @@ func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
 				return str, false
 			}
 			if m := stepTemplateRe.FindStringSubmatch(str); m != nil {
-				foundStep, _ = strconv.Atoi(m[1])
-				foundField = m[2]
-				ok = true
+				if idx, found := stepIndexFor(m[1], steps); found {
+					foundStep = idx
+					foundField = m[2]
+					ok = true
+				}
 			}
 			return str, false
 		})
@@ -1526,7 +1735,14 @@ func deduplicateParamRefSteps(steps []PlanStep) []PlanStep {
 		walkParams(result[i].Params, func(s string) (any, bool) {
 			out := stepTemplateRe.ReplaceAllStringFunc(s, func(match string) string {
 				m := stepTemplateRe.FindStringSubmatch(match)
-				old, _ := strconv.Atoi(m[1])
+				old, numeric := strconv.Atoi(m[1])
+				if numeric != nil {
+					// A tag, not a position. Tags are stable across a renumber —
+					// that is the point of them — so this rewrite has nothing to
+					// do. Atoi used to turn it into 0 and remap it to whatever
+					// step 0 became.
+					return match
+				}
 				newIdx, ok := indexMap[old]
 				if !ok {
 					return match // dropped without a survivor — leave placeholder for downstream complaint
@@ -1627,9 +1843,19 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 			}
 		}
 
+		// A declared reference — {"step":"read_csv","field":"content"} — becomes
+		// the node template the dispatcher already resolves, so the change of
+		// shape stops at the graft and nothing downstream of it moves.
+		//
+		// Its dependency comes with it. The plan does not state one: a step
+		// referencing another IS the dependency, and stating it twice is how
+		// the two came to disagree.
+		refDeps := resolveDeclaredRefs(nodes[i], nodeIDs, steps)
+
 		// Walk params, rewrite ${step.N...} → ${node.<id>...}, collect
 		// implicit deps. Logs each substitution for trace visibility.
-		extraDeps := rewriteStepTemplates(nodes[i].Params, nodeIDs, nodes[i].ID, steps, registry)
+		extraDeps := append(refDeps,
+			rewriteStepTemplates(nodes[i].Params, nodeIDs, nodes[i].ID, steps, registry)...)
 		for _, dep := range extraDeps {
 			if dep == nodes[i].ID {
 				continue // never self-depend (defensive; rewriteStepTemplates also guards this)
@@ -1654,6 +1880,42 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 	return nodes, nil
 }
 
+/*
+ * resolveDeclaredRefs turns a step's declared references into node templates.
+ * desc: Each {"step":<name>,"field":<path>} becomes ${node.<id>.<path>}, which
+ *       is what the dispatcher has always resolved. The reference's own
+ *       dependency is returned rather than read from the plan — a step that
+ *       references another depends on it by saying so, and nothing else needs
+ *       to say it again.
+ *
+ *       A reference naming no step in the plan is left as it is. It has already
+ *       been reported by validatePlanReferences, and rewriting it into a
+ *       template pointing nowhere would turn a named fault into a silent one.
+ * param: n - the node being wired.
+ * param: nodeIDs - graph ids, by step position.
+ * param: steps - the plan.
+ * return: the ids this step now depends on.
+ */
+func resolveDeclaredRefs(n *Node, nodeIDs []string, steps []PlanStep) []string {
+	var deps []string
+	walkRefValues(n.Params, func(r Ref) (any, bool) {
+		idx, ok := stepIndexFor(r.Step, steps)
+		if !ok || idx < 0 || idx >= len(nodeIDs) || nodeIDs[idx] == "" {
+			log.Printf("[dag] %s references step %q, which this plan does not have", n.ID, r.Step)
+			return nil, false
+		}
+		depID := nodeIDs[idx]
+		if depID == n.ID {
+			log.Printf("[dag] %s references itself as %q; leaving it unwired", n.ID, r.Step)
+			return nil, false
+		}
+		deps = append(deps, depID)
+		log.Printf("[dag] %s ← %s.%s", n.ID, depID, r.Field)
+		return r.template(depID), true
+	})
+	return deps
+}
+
 // stepTemplateRe matches ${step.N(.path)?} placeholders in param strings.
 // Used at plan time to rewrite step indices to concrete node IDs and to
 // validate field paths against upstream output schemas.
@@ -1667,10 +1929,66 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 // matter because a re-plan renumbers positions and does not rename tags, so a
 // reflector naming an earlier step reaches for the tag — the only form that
 // still means the same step in the next round.
-var stepTemplateRe = regexp.MustCompile(`\$\{step\.([a-zA-Z0-9_-]+)(?:\.([^}]+))?\}`)
+// A step's name may be written in any script. What it may not contain is a
+// delimiter: the dot separates the name from the field, the brace closes the
+// reference, and whitespace makes a name that reads as two.
+//
+// It was [a-zA-Z0-9_-], which is not a rule about references — it is a rule
+// about English. A run held in Chinese names its steps in Chinese, and every
+// one of them was silently unaddressable.
+var stepNameRe = regexp.MustCompile(`^[\p{L}\p{N}_-]+$`)
+
+var stepTemplateRe = regexp.MustCompile(`\$\{step\.([\p{L}\p{N}_-]+)(?:\.([^}]+))?\}`)
+
+// availableStepNames lists what a reference COULD have named, for the message
+// a planner is asked to correct against. A fault that says only what is wrong
+// leaves the next attempt guessing.
+func availableStepNames(steps []PlanStep, except int) string {
+	var names []string
+	for i := range steps {
+		if i != except && steps[i].Tag != "" {
+			names = append(names, strconv.Quote(steps[i].Tag))
+		}
+	}
+	if len(names) == 0 {
+		return "this plan has no other named steps"
+	}
+	return "the steps in this plan are named " + strings.Join(names, ", ")
+}
+
+// fieldNotProduced reports why a tool does not return a field, or "" when it
+// does. Only a tool that DECLARES an output schema is checked, and only the
+// first segment of the path — an incomplete deep schema must not reject a
+// reference that would have worked.
+func fieldNotProduced(tool, field string, registry *toolapi.Registry) string {
+	top := strings.SplitN(field, ".", 2)[0]
+	if isNumericPathSegment(top) {
+		return ""
+	}
+	skill, ok := registry.Get(tool)
+	if !ok {
+		return ""
+	}
+	outSchema := toolapi.GetOutputSchema(skill)
+	if outSchema == nil {
+		return ""
+	}
+	if envelopeFieldExists(outSchema, top) || fieldExistsInSchema(outSchema, top) {
+		return ""
+	}
+	return fmt.Sprintf("reads field %q, which %s does not return", top, tool)
+}
 
 // stepIndexFor resolves the first segment of a step reference to a position.
 // A number is a position. Anything else is a tag, looked up in the plan.
+//
+// It arrived with the reference pipeline and the rewriter, and three places in
+// this file kept the assumption it was written to remove: strconv.Atoi with the
+// error discarded, which turns every tag into step 0. So a reference meant for
+// a fetch read the first step's output, the step that needed the page never got
+// it, and the run re-planned and made the same reference again — or, where the
+// step writing it was step 0, referenced itself. Everything that reads the
+// first segment now comes through here.
 func stepIndexFor(ref string, steps []PlanStep) (int, bool) {
 	if n, err := strconv.Atoi(ref); err == nil {
 		return n, true
@@ -1728,7 +2046,8 @@ func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string,
 					outSchema := toolapi.GetOutputSchema(skill)
 					if outSchema == nil {
 						log.Printf("[dag] warning: template on %s references %s which has no output schema", owner, upstreamTool)
-					} else if !fieldExistsInSchema(outSchema, field) {
+					} else if !envelopeFieldExists(outSchema, strings.SplitN(field, ".", 2)[0]) &&
+						!fieldExistsInSchema(outSchema, field) {
 						log.Printf("[dag] warning: template on %s references field %q not in %s output schema", owner, field, upstreamTool)
 					}
 				}
@@ -1753,11 +2072,16 @@ type stepRef struct {
 }
 
 // stepRefsIn collects every ${step.N(.path)?} reference in a step's params.
-func stepRefsIn(params map[string]any) []stepRef {
+func stepRefsIn(params map[string]any, steps []PlanStep) []stepRef {
 	var refs []stepRef
 	walkParams(params, func(s string) (any, bool) {
 		for _, m := range stepTemplateRe.FindAllStringSubmatch(s, -1) {
-			idx, _ := strconv.Atoi(m[1])
+			idx, ok := stepIndexFor(m[1], steps)
+			if !ok {
+				// Named nothing. Carried as an impossible index so the caller
+				// reports it rather than reading some other step's output.
+				idx = -1
+			}
 			refs = append(refs, stepRef{idx: idx, field: m[2], raw: m[0]})
 		}
 		return s, false
@@ -1765,10 +2089,11 @@ func stepRefsIn(params map[string]any) []stepRef {
 	return refs
 }
 
-// validatePlanEdges checks every ${step.N.field} reference against the plan and
-// the producer tool's declared output, returning one human-readable error per
-// broken edge (empty ⇒ clean). It catches the three ways the planner mis-wires a
-// hand-off between steps — generically, for any tool, from the output schemas:
+// validatePlanReferences checks every ${step.N.field} reference against the plan
+// and the producer tool's declared output, returning one human-readable error
+// per broken reference (empty ⇒ clean). It catches the three ways the planner
+// mis-wires a hand-off between steps — generically, for any tool, from the
+// output schemas:
 //
 //   - SELF-reference: a step reads its own output (${step.i…} inside step i).
 //   - OUT-OF-RANGE: a step reads a step index that isn't in the plan.
@@ -1779,16 +2104,44 @@ func stepRefsIn(params map[string]any) []stepRef {
 // The executive turns these into ONE re-plan with the messages as feedback,
 // rather than running a doomed plan: a self/out-of-range ref leaks its literal
 // placeholder to the tool ("invalid URL …"), and a wrong-producer ref dangles a
-// dead edge the reflector then re-plans forever. Only a tool that DECLARES an
+// dead step dependency the reflector then re-plans forever. Only a tool that DECLARES an
 // output schema is checked, and only its top-level field — so an incomplete deep
 // schema can't cause a false reject.
-func validatePlanEdges(steps []PlanStep, registry *toolapi.Registry) []string {
+func validatePlanReferences(steps []PlanStep, registry *toolapi.Registry) []string {
 	var errs []string
+
+	// Declared references first — {"step":<name>,"field":<path>}. The same
+	// three faults as the string form, told apart by the name rather than by a
+	// position, and reported before the plan runs so the executive re-plans
+	// against them.
+	for i := range steps {
+		for _, r := range refsIn(steps[i].Params) {
+			idx, ok := stepIndexFor(r.Step, steps)
+			switch {
+			case !ok:
+				errs = append(errs, fmt.Sprintf(
+					"step %d (%s): references step %q, which this plan does not have — %s",
+					i, steps[i].Tool, r.Step, availableStepNames(steps, i)))
+			case idx == i:
+				errs = append(errs, fmt.Sprintf(
+					"step %d (%s): references itself as %q — a step cannot consume its own "+
+						"output; reference an EARLIER step, or add the step that produces this value",
+					i, steps[i].Tool, r.Step))
+			case r.Field != "" && registry != nil:
+				if why := fieldNotProduced(steps[idx].Tool, r.Field, registry); why != "" {
+					errs = append(errs, fmt.Sprintf("step %d (%s): %s", i, steps[i].Tool, why))
+				}
+			}
+		}
+	}
+
 	for i, s := range steps {
-		for _, r := range stepRefsIn(s.Params) {
+		for _, r := range stepRefsIn(s.Params, steps) {
 			switch {
 			case r.idx == i:
 				errs = append(errs, fmt.Sprintf("step %d (%s): %s references its OWN output — a step cannot consume itself; reference an EARLIER step, or add the step that produces this value", i, s.Tool, r.raw))
+			case r.idx < 0:
+				errs = append(errs, fmt.Sprintf("step %d (%s): %s names no step in this plan — use a step's position (counted from 0) or its exact tag", i, s.Tool, r.raw))
 			case r.idx < 0 || r.idx >= len(steps):
 				errs = append(errs, fmt.Sprintf("step %d (%s): %s points at step %d, which does not exist (the plan has %d steps)", i, s.Tool, r.raw, r.idx, len(steps)))
 			case r.field != "" && registry != nil:
@@ -1811,12 +2164,17 @@ func validatePlanEdges(steps []PlanStep, registry *toolapi.Registry) []string {
 				// status) OR inside its data (e.g. web_search's results[]). Accept
 				// either — checking only the top level wrongly rejects `results`, which
 				// with the hard-fail loop kills every valid search→fetch plan.
+				if envelopeFieldExists(outSchema, top) {
+					continue
+				}
 				if fieldExistsInSchema(outSchema, top) {
 					continue
 				}
-				if data := envelopeData(outSchema); data != nil && fieldExistsInSchema(data, top) {
-					continue
-				}
+				// Write down what this check saw before rejecting. The message
+				// alone cannot distinguish "the field is absent" from "the
+				// validator and the resolver disagree about it".
+				logRejectedReference(r.raw, top, producer, outSchema)
+
 				hint := ""
 				if top == "results" {
 					hint = fmt.Sprintf(" — a results[] list of URLs comes from web_search, not %s; add a web_search step and reference ITS results", producer)
@@ -1830,7 +2188,7 @@ func validatePlanEdges(steps []PlanStep, registry *toolapi.Registry) []string {
 
 // validatePlanParams checks each step's parameters against its tool's own input
 // schema, returning one human-readable error per fault (empty ⇒ clean). It is the
-// plan-time twin of validatePlanEdges: that checks the wiring BETWEEN steps
+// plan-time twin of validatePlanReferences: that checks the wiring BETWEEN steps
 // (${step.N} references), this checks the parameters OF a step. Two faults:
 //
 //   - a name the schema does not declare — web_search(topn: …), where the count
@@ -1890,6 +2248,33 @@ func validatePlanParams(steps []PlanStep, registry *toolapi.Registry) []string {
 // data:<tool payload>}; a ${step.N.field} reference resolves against the
 // unwrapped payload, so a field like web_search's "results" lives under data,
 // not at the envelope's top level — field checks must look here too.
+// envelopeFieldExists reports whether the envelope ITSELF declares a field —
+// content, status, type, detail — without unwrapping to the payload.
+//
+// It exists because the check beside it does unwrap, deliberately, since most
+// references name a payload field. Both were being called here to mean "the
+// envelope's own level, or inside its data", and because both unwrapped they
+// asked the same question twice: every envelope field was rejected at plan
+// time, `content` among them.
+//
+// `content` is the rendered text of every tool's result and the most common
+// hand-off there is — the planner's own prompt teaches file_read → compute
+// wired on ${step.0.content}. That plan is correct, the dispatcher resolves it
+// (see resolveTemplateField, which walks the real JSON and finds it), and this
+// validator threw it out. The planner then spent its three corrections being
+// told to fix a plan that was right, and ended up dropping steps until one
+// referenced itself.
+func envelopeFieldExists(schemaJSON json.RawMessage, field string) bool {
+	var s struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if json.Unmarshal(schemaJSON, &s) != nil {
+		return false
+	}
+	_, ok := s.Properties[field]
+	return ok
+}
+
 func envelopeData(schemaJSON json.RawMessage) json.RawMessage {
 	var s struct {
 		Properties struct {

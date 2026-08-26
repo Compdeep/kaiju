@@ -121,10 +121,10 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 
 	sysPrompt := ComposeSystemPrompt(a.soulPrompt, prompt.Observer) + toolSection.String() + a.environmentSection()
 	userPrompt := sb.String()
-	messages := []llm.Message{
-		{Role: "system", Content: sysPrompt},
-		{Role: "user", Content: userPrompt},
-	}
+	// One representation across the stages. The observer decides whether a
+	// completed step is worth acting on, and reads the same arcs every other
+	// stage reads rather than a rendering made for it alone.
+	messages := BuildMessagesWithResults(sysPrompt, userPrompt, nil, graph.Arcs())
 
 	ctx = withTrace(ctx, TraceID{
 		NodeID:   obsID,

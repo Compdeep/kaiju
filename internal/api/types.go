@@ -56,17 +56,30 @@ type ActionInfo struct {
 
 // ExecuteResponse is returned from POST /api/v1/execute.
 type ExecuteResponse struct {
-	Outcome    string       `json:"outcome"`
-	Actions    []ActionInfo `json:"actions,omitempty"` // recommended follow-up actions (caller decides)
-	Gaps       []string     `json:"gaps,omitempty"`    // capability gaps (missing tools)
-	DAGID      string       `json:"dag_id,omitempty"`
-	Nodes      int          `json:"nodes"`
-	LLMCalls   int          `json:"llm_calls"`
-	Tokens     int64        `json:"tokens"`     // total LLM tokens for THIS request (non-streamed calls; see llm.CompleteStream)
-	TokensIn   int64        `json:"tokens_in"`  // prompt tokens (for host-side cost split)
-	TokensOut  int64        `json:"tokens_out"` // completion tokens
-	DurationMs int64        `json:"duration_ms"`
-	Error      string       `json:"error,omitempty"`
+	Outcome string       `json:"outcome"`
+	Actions []ActionInfo `json:"actions,omitempty"` // recommended follow-up actions (caller decides)
+	Gaps    []string     `json:"gaps,omitempty"`    // capability gaps (missing tools)
+	// IntentGap is set when the run was refused because the plan needs a rank
+	// the caller did not grant. Nothing ran. A client showing this can offer to
+	// run it again at the rank named, which is why the rank is here as a number
+	// and not only inside the outcome's wording.
+	IntentGap  *IntentGapInfo `json:"intent_gap,omitempty"`
+	DAGID      string         `json:"dag_id,omitempty"`
+	Nodes      int            `json:"nodes"`
+	LLMCalls   int            `json:"llm_calls"`
+	Tokens     int64          `json:"tokens"`     // total LLM tokens for THIS request (non-streamed calls; see llm.CompleteStream)
+	TokensIn   int64          `json:"tokens_in"`  // prompt tokens (for host-side cost split)
+	TokensOut  int64          `json:"tokens_out"` // completion tokens
+	DurationMs int64          `json:"duration_ms"`
+	Error      string         `json:"error,omitempty"`
+}
+
+// IntentGapInfo is a run refused for want of permission: what it needed, what
+// it had, and which steps could not run.
+type IntentGapInfo struct {
+	Needed  int      `json:"needed"`  // the rank the plan requires
+	Allowed int      `json:"allowed"` // the rank the run was given
+	Steps   []string `json:"steps"`   // the steps that need more
 }
 
 // ToolInfo describes a registered tool.

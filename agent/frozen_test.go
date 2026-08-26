@@ -59,20 +59,20 @@ var frozenPromptOrder = []string{
 }
 
 var frozenPrompts = map[string]frozenPrompt{
-	"SOUL":         {"ed330645ec6a4e06", 4889},
+	"SOUL":         {"262edacb610fce42", 6358},
 	"ROUTE":        {"4e8fabcf0237bdb3", 2280},
-	"PREFLIGHT":    {"2088337b97975bd4", 9172},
-	"EXECUTIVE":    {"110d83a88e66c638", 4726},
+	"PREFLIGHT":    {"a1fc1618bf8b74d9", 9935},
+	"EXECUTIVE":    {"510518ad94eff79a", 6217},
 	"AGGREGATOR":   {"a782c5558ef001d0", 3631},
 	"REFRAME":      {"bbcd502243bc157f", 3819},
 	"REFRAME_HOOK": {"2066afe67efca674", 329},
 	"HOLMES":       {"b97dfdc6253fa8ad", 6900},
-	"MICROPLANNER": {"5b32605d997cd5fa", 4619},
+	"MICROPLANNER": {"dc48772ada445d93", 4598},
 	"OBSERVER":     {"2ab11100a1203b92", 1040},
-	"REFLECTOR":    {"994d44d00546eb37", 4929},
-	"INTERJECTION": {"29661ee83d91b1e2", 788},
+	"REFLECTOR":    {"0a5f87c27060d5b0", 6024},
+	"INTERJECTION": {"417d206c70b452b2", 788},
 	"CLASSIFIER":   {"1f813616ac1a9d88", 270},
-	"CURATOR":      {"4231721258e0aa5a", 3199},
+	"CURATOR":      {"7345d945b7f1b76f", 3199},
 	"CHAT":         {"6b5c0b585bffb6bb", 405},
 	"VISION":       {"a34b6cb0dc575294", 218},
 	"REACT":        {"8ac5f1aca3a544d3", 1669},
@@ -142,6 +142,7 @@ func TestFrozen_NoPromptIsEmpty(t *testing.T) {
 var frozenNodeTypes = map[int]string{
 	0: "tool", 1: "compute", 2: "executive", 3: "micro_planner", 4: "aggregator",
 	5: "actuator", 6: "reflection", 7: "observer", 8: "interjection", 9: "holmes",
+	10: "chat",
 }
 
 // The numbers matter, not only the names: a NodeType is an iota and it is

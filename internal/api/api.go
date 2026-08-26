@@ -137,6 +137,15 @@ func execResult(ctx context.Context, triggerID, outcome string, nodes, llmCalls 
 // that cannot complete ALWAYS reports that it failed — never a silent empty — so
 // the user knows the run ended and that nothing was fabricated.
 func failureOutcome(err error) string {
+	// A run refused for want of permission is not a failure to report as one.
+	// It did not go wrong: it was asked for at a rank it cannot be done at, and
+	// the person asking can grant the rank. Its own wording names the steps and
+	// the remedy, so it is passed through rather than wrapped in the apology
+	// below.
+	var gap *agent.IntentGapError
+	if errors.As(err, &gap) {
+		return gap.Message()
+	}
 	switch {
 	case errors.Is(err, context.Canceled):
 		return "This request could not be completed — it was cut off before an answer was ready (a timeout, or the connection dropped). Nothing was fabricated. Please try again; a narrower request will finish faster."
@@ -487,10 +496,19 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		// the answer rather than a bare 500.
 		log.Printf("[api] execute error (%s): %v — reporting failure to user", trigger.ID, err)
 		outcome := failureOutcome(err)
+		var intentGap *IntentGapInfo
+		var gapErr *agent.IntentGapError
+		if errors.As(err, &gapErr) {
+			intentGap = &IntentGapInfo{
+				Needed: int(gapErr.Needed), Allowed: int(gapErr.Allowed), Steps: gapErr.Steps,
+			}
+		}
 		if memMgr != nil && req.SessionID != "" {
 			memMgr.StoreMessage(req.SessionID, "assistant", outcome)
 		}
-		jsonResponse(w, execResult(ctx, trigger.ID, outcome, 0, 0, tokens.RunTotal(ctx), elapsed), http.StatusOK)
+		failed := execResult(ctx, trigger.ID, outcome, 0, 0, tokens.RunTotal(ctx), elapsed)
+		failed.IntentGap = intentGap
+		jsonResponse(w, failed, http.StatusOK)
 		return
 	}
 

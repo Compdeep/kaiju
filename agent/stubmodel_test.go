@@ -52,6 +52,24 @@ type stubCall struct {
 	Function string // the function the stage asked for
 	System   string // the system prompt it sent
 	User     string // the last user message
+	// Messages is every message the request carried, in order.
+	//
+	// System and User are the two a test usually wants and are kept for the
+	// tests that read them. Neither can answer "was this stage GIVEN the value
+	// the step before it produced" — the answer is somewhere in the array, and
+	// once results travel as tool messages it is not in either of them. A test
+	// asserting what a stage was shown has to see the whole request.
+	Messages []stubMessage
+}
+
+// stubMessage is one message of a request, as the engine sent it.
+type stubMessage struct {
+	Role       string
+	Content    string
+	ToolCallID string
+	Name       string
+	// ToolCalls are the function names an assistant message declared, if any.
+	ToolCalls []string
 }
 
 // stubReply is what the model says: either a tool call's arguments, or prose.
@@ -85,11 +103,27 @@ func (s *stubModel) answerNth(fn string, replies ...stubReply) {
 
 func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Messages []struct{ Role, Content string } `json:"messages"`
-		Stream   bool                             `json:"stream"`
-		Tools    []struct {
+		Messages []struct {
+			Role       string `json:"role"`
+			Content    string `json:"content"`
+			ToolCallID string `json:"tool_call_id"`
+			Name       string `json:"name"`
+			ToolCalls  []struct {
+				Function struct{ Name string } `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+		Stream bool `json:"stream"`
+		Tools  []struct {
 			Function struct{ Name string } `json:"function"`
 		} `json:"tools"`
+		// A forced single-tool call goes out as a schema request instead — see
+		// llm/structured.go. The stub answers by function name either way, so it
+		// reads the name from wherever this call carried it.
+		ResponseFormat struct {
+			JSONSchema struct {
+				Name string `json:"name"`
+			} `json:"json_schema"`
+		} `json:"response_format"`
 	}
 	body, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(body, &req)
@@ -97,8 +131,17 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 	fn := ""
 	if len(req.Tools) > 0 {
 		fn = req.Tools[0].Function.Name
+	} else if n := req.ResponseFormat.JSONSchema.Name; n != "" {
+		fn = n
 	}
 	call := stubCall{Function: fn}
+	for _, m := range req.Messages {
+		sm := stubMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID, Name: m.Name}
+		for _, tc := range m.ToolCalls {
+			sm.ToolCalls = append(sm.ToolCalls, tc.Function.Name)
+		}
+		call.Messages = append(call.Messages, sm)
+	}
 	if len(req.Messages) > 0 {
 		call.System = req.Messages[0].Content
 		call.User = req.Messages[len(req.Messages)-1].Content
@@ -196,6 +239,60 @@ func (s *stubModel) callsTo(fn string) int {
 
 // sawSystemContaining reports whether any stage was sent a system prompt
 // carrying the text — how a test checks that framing reached the model.
+// requestsTo returns every request one stage received, in order.
+func (s *stubModel) requestsTo(fn string) []stubCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []stubCall
+	for _, c := range s.calls {
+		if c.Function == fn {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// wasShown reports whether the nth request to a stage carried the text
+// ANYWHERE in it — any message, any role.
+//
+// The question a test about lost values has to ask. sawUserContaining reads one
+// message of one request; a value can be in the system prompt, in an earlier
+// user message, or in a tool result, and "was this stage given it" is true in
+// all of those cases and false only when it is in none.
+func (s *stubModel) wasShown(fn string, nth int, text string) bool {
+	reqs := s.requestsTo(fn)
+	if nth < 0 || nth >= len(reqs) {
+		return false
+	}
+	for _, m := range reqs[nth].Messages {
+		if strings.Contains(m.Content, text) {
+			return true
+		}
+	}
+	return false
+}
+
+// shownTo renders one request for a failure message: role, and the first of
+// each message, so a test that fails says what the stage actually got.
+func (s *stubModel) shownTo(fn string, nth int) string {
+	reqs := s.requestsTo(fn)
+	if nth < 0 || nth >= len(reqs) {
+		return fmt.Sprintf("(no request %d to %s; there were %d)", nth, fn, len(reqs))
+	}
+	var sb strings.Builder
+	for _, m := range reqs[nth].Messages {
+		label := m.Role
+		if len(m.ToolCalls) > 0 {
+			label += " tool_calls=" + strings.Join(m.ToolCalls, ",")
+		}
+		if m.ToolCallID != "" {
+			label += " tool_call_id=" + m.ToolCallID
+		}
+		sb.WriteString(fmt.Sprintf("  %-28s %s\n", label, Text.TruncateLog(m.Content, 160)))
+	}
+	return sb.String()
+}
+
 func (s *stubModel) sawSystemContaining(text string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

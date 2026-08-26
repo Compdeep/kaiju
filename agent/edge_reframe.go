@@ -47,18 +47,53 @@ func (s *stepOutcomesSource) Name() string { return SourceStepOutcomes }
 
 /*
  * Load renders one line per step and one per unused value.
- * desc: Four outcomes, read off the ToolMessage envelope, because three of them
+ * desc: Five outcomes, read off the ToolMessage envelope, because four of them
  *       are invisible everywhere else: the graph counts a search that returned
  *       nothing as resolved, and the node returns list failures and successes
  *       with nothing between.
  *
+ *       Success says "succeeded". It used to share the default wording with a
+ *       body that is not an envelope at all, which made a step that worked and a
+ *       step nobody could read into the same sentence — and left the reader no
+ *       way to tell a finished command from one that died, since a failure's
+ *       opening line is often identical to a success's. Where the tool reports
+ *       an exit status, that number is appended as a fact; see exitCodeOf.
+ *
  *       A step whose body is not an envelope — a tool that returns a plain
- *       string — is recorded as having produced a result, which is all that can
- *       honestly be said about it.
+ *       string — is still recorded as having produced a result, which remains
+ *       all that can honestly be said about it.
  * param: g - the run so far.
  * param: a - the agent, for the registry the unused values are read against.
  * return: the text, empty when nothing has resolved and nothing has failed.
  */
+// exitCodeOf reads a command tool's exit status off its payload, for the tools
+// that carry one.
+//
+// It is reported as a fact, never as a verdict. exit 0 is not proof the goal was
+// met — grep exits 1 on no match, and a command can exit 0 having done nothing
+// useful — so the number is handed over and the reader judges it. Stating it as
+// success would trade a false negative for a false positive, in the one stage
+// whose job is catching work that only looks finished.
+//
+// It is here because dropping it cost a run its result: a clone that finished
+// and a clone that died both open with "Cloning into '/tmp/xyz'...", which git
+// prints before it knows the outcome. With the status word alone, the two were
+// the same string, and the stale failure beside them carried its exit code while
+// the success did not — so the reader resolved the ambiguity against the run.
+func exitCodeOf(b toolMessageBody) (int, bool) {
+	v, ok := b.Field("exit_code")
+	if !ok {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64: // JSON numbers decode as float64
+		return int(n), true
+	case int:
+		return n, true
+	}
+	return 0, false
+}
+
 func (s *stepOutcomesSource) Load(g *Graph, _ *Trigger, a *Agent, _ map[string]any) (string, error) {
 	if g == nil {
 		return "", nil
@@ -79,6 +114,8 @@ func (s *stepOutcomesSource) Load(g *Graph, _ *Trigger, a *Agent, _ map[string]a
 		if tb, ok := n.Body.(toolMessageBody); ok {
 			env := tb.Envelope()
 			switch env.Status {
+			case toolapi.StatusOK:
+				outcome = "succeeded"
 			case toolapi.StatusEmpty:
 				outcome = "returned nothing"
 				if env.Detail != "" {
@@ -91,6 +128,14 @@ func (s *stepOutcomesSource) Load(g *Graph, _ *Trigger, a *Agent, _ map[string]a
 				}
 			case toolapi.StatusUnclassified:
 				outcome = "returned something but did not say whether it found anything"
+			}
+			// The exit status, for the tools that have one. Not on the error
+			// path: that detail already reads "exit 128: exit status 128", and
+			// repeating the number says it twice.
+			if env.Status != toolapi.StatusError {
+				if code, found := exitCodeOf(tb); found {
+					outcome += fmt.Sprintf(" — exit %d", code)
+				}
 			}
 		}
 		line := "- " + stepLabel(n) + ": " + outcome
@@ -212,19 +257,44 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request, reader s
 		Tag:      "reframe",
 		Input:    map[string]string{"reader": reader},
 	}), Light, &llm.ChatRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: fmt.Sprintf(prompt.Reframe, reader)},
-			{Role: "user", Content: material},
-		},
+		// The arcs, not only the prose about them. This stage carries: it takes
+		// what the nodes produced and forms it for the next one to read, and its
+		// paragraph is placed FIRST in that stage's prompt. Given prose alone it
+		// can only pass on what the prose says — so when a worklog line showed a
+		// complete 74-byte result with a truncation marker on it, this stage
+		// reported the data as incomplete and every stage downstream agreed.
+		//
+		// The material stays: it is the summary this stage is asked to rewrite.
+		// The arcs are what let it check that summary against what actually came
+		// back.
+		Messages: BuildMessagesWithResults(
+			fmt.Sprintf(prompt.Reframe, reader), material, nil, graph.Arcs()),
 		Temperature: 0.2,
 		MaxTokens:   400,
 	})
+	// An edge carries; this is what it carried. Recorded whether the model
+	// answered or not, because a reframe that fell back to passing the material
+	// through is exactly the case a reader of these records wants to see — see
+	// debugrecord.go.
+	rec := DebugRecord{
+		ID: "reframe:" + reader, Kind: "edge", Label: reader, Round: graph.Round(),
+		System: fmt.Sprintf(prompt.Reframe, reader), User: material,
+	}
 	if err != nil || resp == nil || len(resp.Choices) == 0 ||
 		strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
 		log.Printf("[reframe] no reframe written, passing the material through: %v", err)
+		if err != nil {
+			rec.Err = err.Error()
+		}
+		rec.Text = material
+		graph.recordStage(rec)
 		return reframeHeading + "\n\n" + material
 	}
-	return reframeHeading + "\n\n" + strings.TrimSpace(resp.Choices[0].Message.Content)
+	written := strings.TrimSpace(resp.Choices[0].Message.Content)
+	rec.Reply, rec.Text = written, written
+	rec.TokensIn, rec.TokensOut = resp.Usage.PromptTokens, resp.Usage.CompletionTokens
+	graph.recordStage(rec)
+	return reframeHeading + "\n\n" + written
 }
 
 /*

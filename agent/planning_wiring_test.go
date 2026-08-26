@@ -38,9 +38,17 @@ func TestExecutivePrompt_TeachesStepWiring(t *testing.T) {
 	p := prompt.Executive
 	for _, want := range []string{
 		"## Wiring data between steps",
-		"${step.0.results.0.url}", // the placeholder used to wire a fetch to a search result
+		// The reference shape, and the search → fetch example that uses it.
+		// It was `${step.0.results.0.url}` — a string, and a POSITION. A
+		// position is counted from the first step of the plan it is in, so a
+		// plan that drops a step renumbers every reference after it.
+		`{"step"`,
+		`"field"`,
+		`"results.0.url"`,
+		"web_fetch",
+		// Still named, because a reference is now the dependency and the
+		// prompt has to say when depends_on is still yours to write.
 		"depends_on",
-		"web_fetch", // the search -> fetch example
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("EXECUTIVE prompt no longer teaches step wiring — missing %q", want)

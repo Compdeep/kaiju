@@ -33,10 +33,17 @@ func TestEvidence_NamesTheFileThePayloadPointsAt(t *testing.T) {
 	if !strings.Contains(ev, "fetched/example_123") {
 		t.Errorf("the file is not named, so a later step cannot know it exists:\n%s", ev)
 	}
-	// The field name, not just the value: a later step reaches the file by
-	// wiring a reference, not by copying a path out of prose.
-	if !strings.Contains(ev, "${step.N.full_content_path}") {
-		t.Errorf("the way to reference it is not shown:\n%s", ev)
+	// The field is named, so a stage that has to wire a reference knows which
+	// one to write. What is NOT here is an instruction to write it.
+	if !strings.Contains(ev, "full_content_path") {
+		t.Errorf("the field is not named:\n%s", ev)
+	}
+	// It used to say "Reference it as ${step.N.full_content_path} in a later
+	// step". Five stages read this text and only the planner can act on that;
+	// the reflector followed it, filled the literal N with the node's tag, and
+	// put a pointer in its summary where the value belonged.
+	if strings.Contains(ev, "${step.") {
+		t.Errorf("evidence carries a wiring instruction meant for the planner:\n%s", ev)
 	}
 }
 
@@ -46,7 +53,7 @@ func TestEvidence_NamesAKeptCommandOutput(t *testing.T) {
 		"output_bytes": 900000,
 	}))
 	ev := b.Evidence()
-	if !strings.Contains(ev, "output/command_123.txt") || !strings.Contains(ev, "${step.N.output_path}") {
+	if !strings.Contains(ev, "output/command_123.txt") || !strings.Contains(ev, "output_path") {
 		t.Errorf("a kept command output is not named:\n%s", ev)
 	}
 }

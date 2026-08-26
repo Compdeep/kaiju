@@ -708,7 +708,12 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		Temperature: 0.2,
 		MaxTokens:   16384,
 	}
-	resp, err := a.ask(ctx, Heavy, coderReq)
+	// Checked, like the architect above. A coder reply cut off at MaxTokens is a
+	// half-written program, and plain ask does not notice: the fragment was
+	// written to disk, run, and failed — and three Holmes iterations went into
+	// working out that the script had been truncated rather than being wrong.
+	// finish_reason says so at the point it happens.
+	resp, err := a.askParsed(ctx, Heavy, coderReq)
 
 	if err != nil {
 		return "", fmt.Errorf("compute code LLM: %w", err)
@@ -772,6 +777,23 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			if guess := defaultExecuteFor(editResp.Language, codePath, tag); guess != "" {
 				result["execute"] = guess
 			}
+		}
+		// The same runtime context the write branch below attaches. An edited
+		// script reads $KAIJU_CONTEXT exactly as a written one does — the
+		// coder's prompt tells it to, and baking values in is the bug that rule
+		// exists to prevent — so an execute line without it runs a correct
+		// script against nothing.
+		//
+		// Observed: a repair edited a parser, the plan ran the execute it was
+		// handed, and the script printed {"error": "KAIJU_CONTEXT not set"} and
+		// exited 0. A step that reported success, a file with an error object in
+		// it, and nothing anywhere naming the missing variable.
+		if cmd, _ := result["execute"].(string); cmd != "" {
+			cmd = rewriteExecutePath(cmd, projectPrefix(graph, codeCtx.taskFiles))
+			if ctxPath := writeContextFile(a.cfg.MetadataDir, computeSessionID(graph), tag, ctxData); ctxPath != "" {
+				cmd = "KAIJU_CONTEXT=" + shQuote(ctxPath) + " " + cmd
+			}
+			result["execute"] = cmd
 		}
 		out, _ := json.Marshal(result)
 		return string(out), nil

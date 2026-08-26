@@ -522,9 +522,22 @@ func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, bo
 	if content == "" {
 		content = article.Content // HTML fallback
 	}
-
-	// Clean up readability output
 	content = strings.TrimSpace(content)
+
+	// A page that rendered nothing. Its own state is usually in the document
+	// already, as JSON in a script tag — see webembedded.go. Reached only from
+	// here, where the page has produced nothing, so a page that extracts
+	// normally never touches it.
+	if content == "" {
+		if data := embeddedJSON(string(body), 512); data != "" {
+			return marshalFetchResult(fetchResult{
+				Status: status, Title: article.Title, Content: data,
+				Format: "markdown",
+				Note:   "the page renders itself; this is the state it carries for its own scripts",
+			})
+		}
+	}
+
 	if len(content) > 12000 {
 		content = content[:12000] + "\n... (truncated)"
 	}

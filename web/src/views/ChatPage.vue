@@ -104,7 +104,7 @@
             :class="['msg', msg.role, 'msg-folded']"
           >
             <div class="msg-meta">
-              <span class="msg-author">{{ msg.role === 'user' ? 'you' : brandName() }}</span>
+              <span v-if="msg.role === 'user'" class="msg-author">you</span>
             </div>
             <div class="msg-content md" v-html="renderMd(msg.content)"></div>
           </div>
@@ -131,7 +131,7 @@
           </div>
           <div v-if="!msg.compactedInto && !foldedCount(msg.id)" :class="['msg', msg.role]">
             <div class="msg-meta">
-              <span class="msg-author">{{ msg.role === 'user' ? 'you' : brandName() }}</span>
+              <span v-if="msg.role === 'user'" class="msg-author">you</span>
               <span class="msg-tools" v-if="editing !== i">
                 <button v-if="msg.id && !sessions.loading" class="msg-tool" title="Edit this message" @click="startEdit(i, msg)">✎</button>
                 <button v-if="msg.role === 'assistant' && i === lastAssistantIndex && !sessions.loading" class="msg-tool" title="Regenerate reply" @click="chat.regenerate()">↻</button>
@@ -157,9 +157,8 @@
           />
         </div>
 
-        <div v-if="sessions.loading" class="msg assistant">
+        <div v-if="sessions.loading" class="msg assistant" :class="{ 'under-trace': dag.nodes.length > 0 }">
           <div class="msg-meta">
-            <span class="msg-author">{{ brandName() }}</span>
             <span v-if="!dag.streamingVerdict" class="thinking-scan"></span>
           </div>
           <details v-if="dag.streamingReasoning" class="thinking-panel" :open="!dag.streamingVerdict">
@@ -672,9 +671,16 @@ watch(() => sessions.sessionId, (newId) => {
 .gutter {
   width: 6px; min-width: 6px;
   cursor: col-resize;
-  /* Invisible at rest; the divider line only appears on hover / while dragging. */
-  background: transparent;
-  transition: background var(--transition);
+  /* Filled with the column colour, not left transparent. Both columns are
+     --surface, so a transparent gutter showed 6px of the page ground between
+     them — read as a hard vertical rule in light mode, where --bg and --surface
+     are furthest apart, and as nothing in dark, where they nearly meet.
+
+     The separation is a shadow instead, so the columns look like two surfaces
+     meeting rather than one surface ruled in half. See --gutter-seam. */
+  background: var(--gutter-fill);
+  box-shadow: var(--gutter-seam);
+  transition: box-shadow var(--transition), background var(--transition);
   position: relative;
   z-index: 2;
 }
@@ -682,8 +688,9 @@ watch(() => sessions.sessionId, (newId) => {
   content: ''; position: absolute;
   top: 0; bottom: 0; left: -3px; right: -3px;
 }
-.gutter:hover, .gutter.active { background: var(--gutter-hover); }
-.gutter.active { background: var(--gutter-active); }
+.gutter:hover { box-shadow: var(--gutter-seam-hover); }
+/* Dragging is the one state that wants a line: it says what is being moved. */
+.gutter.active { background: var(--gutter-active); box-shadow: none; }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────────── */
 .sidebar {
@@ -790,9 +797,61 @@ watch(() => sessions.sessionId, (newId) => {
   color: var(--text-muted);
 }
 .msg.user .msg-author { color: var(--accent-warm); }
-.msg.assistant .msg-author { color: var(--accent); font-family: var(--display); letter-spacing: 0.12em; }
+
+/* The live reply sits directly under the trace, with nothing between them, so
+   the scan line and the wash read as one surface rather than two stacked
+   blocks. Only when a trace is actually there — on the chat lane, or before the
+   first node arrives, it stands on its own and keeps the normal gap. */
+.msg.assistant.under-trace {
+  /* The column sets gap: 24px between siblings, which a zero margin cannot
+     close — the pull has to match it. */
+  margin-top: -24px;
+  padding-top: 4px;
+}
+.msg.assistant.under-trace .msg-meta { min-height: 0; }
+
+/* ── The user's own messages ─────────────────────────────────────────────────
+   Set to the right and filled; Kaiju's replies stay unboxed and full width. Two
+   speakers, two treatments, so a long thread reads as a conversation without
+   anyone checking an author label on every turn — which is why there is no
+   longer one on the replies.
+
+   A wash rather than a flat fill: blue to indigo across the bubble, with a glow
+   the same hue underneath. Flat, either colour reads as a button. */
+.msg.user {
+  align-self: flex-end;
+  align-items: flex-end;
+  max-width: min(560px, 100%);
+}
+.msg.user .msg-meta { flex-direction: row-reverse; }
+
+.msg.user .msg-content {
+  padding: 10px 16px;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--bubble-a), var(--bubble-b));
+  box-shadow: var(--bubble-glow);
+  color: var(--bubble-text);
+}
+
+/* Markdown on a filled ground. The first and last blocks lose their outer
+   margins so the padding is the only spacing, and everything that carried its
+   own colour takes the bubble's instead — a link in the page's accent blue is
+   invisible on this. */
+.msg.user .msg-content > :first-child { margin-top: 0; }
+.msg.user .msg-content > :last-child { margin-bottom: 0; }
+.msg.user .msg-content code,
+.msg.user .msg-content pre { background: var(--bubble-code); border-color: transparent; color: inherit; }
+.msg.user .msg-content a { color: inherit; text-decoration: underline; }
+.msg.user .msg-content em,
+.msg.user .msg-content blockquote { color: inherit; }
+.msg.user .msg-content blockquote { border-left-color: rgba(255, 255, 255, 0.45); }
+
+/* Editing happens in place, so the editor takes the bubble's width rather than
+   collapsing to the textarea's default. */
+.msg.user .msg-edit { width: min(560px, 100%); }
 .msg-content { font-size: 14px; line-height: 1.7; color: var(--text); }
-.msg.user .msg-content { color: var(--text-secondary); }
 
 .thinking-scan {
   display: inline-block;

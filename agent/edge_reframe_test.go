@@ -41,8 +41,10 @@ func withStep(g *Graph, tag, tool string, msg toolapi.ToolMessage) {
 // A step that ran, returned, and produced nothing usable is not a failure — it
 // resolved. Every other account of a run therefore shows it as a success: the
 // graph's own summary counts it as resolved, and the gate's node returns list
-// failures and successes with nothing in between. These four outcomes are the
-// reason this exists.
+// failures and successes with nothing in between. These outcomes are the reason
+// this exists — including the one for a step that simply worked, which shared
+// the default wording with an unreadable body until a clone that succeeded was
+// reported to the user as a failure.
 func TestReframe_EachOutcomeIsNamed(t *testing.T) {
 	a := reframeAgent(t)
 	g := NewGraph()
@@ -53,7 +55,7 @@ func TestReframe_EachOutcomeIsNamed(t *testing.T) {
 	joined := outcomesOf(t, a, g)
 	for _, want := range []string{
 		"look (web_search): returned nothing — no results for that query",
-		"read (file_read): produced a result",
+		"read (file_read): succeeded",
 		"check (lookup_hash): returned something but did not say whether it found anything",
 	} {
 		if !strings.Contains(joined, want) {
@@ -185,7 +187,7 @@ func TestReframe_AStepWithNoLabelIsNamedOnce(t *testing.T) {
 	if !strings.Contains(joined, "- search_records: returned nothing") {
 		t.Errorf("the unlabelled step is not named plainly:\n%s", joined)
 	}
-	if !strings.Contains(joined, "- look for logins (bash): produced a result") {
+	if !strings.Contains(joined, "- look for logins (bash): succeeded") {
 		t.Errorf("a labelled step should carry both:\n%s", joined)
 	}
 }

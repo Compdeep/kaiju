@@ -43,6 +43,29 @@
   --gutter-idle: #E7E5E0;
   --gutter-hover: #D4D2CC;
   --gutter-active: var(--accent);
+
+  /* The seam between two columns. Both columns are --surface, so a transparent
+     gutter let the page ground show through as a 6px stripe — a border nobody
+     drew, and the more visible the further --bg sits from --surface. Light mode
+     is where that gap is widest, which is why it read as a hard line there and
+     as nothing in dark.
+
+     Filled with the surface colour instead, and separated by a shadow cast from
+     the left column onto the right one. Hover deepens it. */
+  --gutter-fill: var(--surface);
+  --gutter-seam: 3px 0 7px -2px rgba(38, 37, 31, 0.24);
+  --gutter-seam-hover: 4px 0 9px -2px rgba(38, 37, 31, 0.48);
+
+  /* The user's own messages, set right and filled. The wash travels blue →
+     indigo across the bubble; a flat fill of either colour reads as a button.
+     Text is white on both themes, so the fill has to stay dark enough to carry
+     it — that is what rules out the light cyan accent here. */
+  --bubble-a: #3B7BF0;
+  --bubble-b: #4F46E5;
+  --bubble-text: #FFFFFF;
+  --bubble-glow: 0 4px 14px -4px rgba(59, 123, 240, 0.55);
+  --bubble-code: rgba(255, 255, 255, 0.16);
+
   --sidebar-w: 220px;
   --sidebar-min: 160px;
   --sidebar-max: 360px;
@@ -91,4 +114,22 @@
   --gutter-idle: #1F1F26;
   --gutter-hover: #2A2A32;
   --gutter-active: var(--accent);
+
+  /* Dark keeps a shadow at rest — a lit line there would be the hard rule this
+     change removes — and reserves light for hover, where the accent picks the
+     seam out. Note the spread: it must stay above -3px, or it shrinks the 6px
+     gutter's shadow box to nothing and the seam silently disappears. */
+  --gutter-fill: var(--surface);
+  --gutter-seam: 3px 0 7px -2px rgba(0, 0, 0, 0.85);
+  --gutter-seam-hover: inset -1px 0 0 rgba(56, 189, 248, 0.45), 0 0 12px -2px rgba(56, 189, 248, 0.30);
+
+  /* Dark does not fill. A bright plate that works on white is a lamp on
+     near-black — it pulls the eye off the reply, which is the thing worth
+     reading. So the bubble becomes a dark plate with a lit edge and a glow
+     under it: the same accent, spent on the outline instead of the surface. */
+  --bubble-a: #141422;
+  --bubble-b: #141422;
+  --bubble-text: #DBEAFE;
+  --bubble-glow: inset 0 0 0 1px rgba(34, 211, 238, 0.55), 0 0 18px -6px rgba(34, 211, 238, 0.45);
+  --bubble-code: rgba(34, 211, 238, 0.12);
 }

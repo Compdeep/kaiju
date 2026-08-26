@@ -25,7 +25,7 @@ var spawned = []struct{ file, fn, guard string }{
 	{"rca.go", "fireHolmes", "guardNodeCompletion"},
 	{"observer.go", "fireObserver", "guardNodeCompletion"},
 	{"microplanner.go", "fireMicroPlanner", "guardNodeCompletion"},
-	{"scheduler.go", "oneshotRetry", "guardNodeCompletion"},
+	{"scheduler.go", "twotimeRetry", "guardNodeCompletion"},
 	{"job_scheduler.go", "runJob", "recover()"},
 	{"agent.go", "dagFanOut", "guardLoop"},
 	{"mod_heartbeat.go", "run", "guardLoop"},

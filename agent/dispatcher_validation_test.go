@@ -330,10 +330,10 @@ func errorsIs(err, target error) bool {
 // reader needs: where it applies, and where it does not.
 
 func TestTheDispatchCapSkipsATypedResult(t *testing.T) {
-	big := `{"type":"text","status":"ok","content":"` + strings.Repeat("x", maxToolResultLen*2) + `"}`
+	big := `{"type":"text","status":"ok","content":"` + strings.Repeat("x", toolResultBudget.Base*2) + `"}`
 
 	// The typed branch marks a result contextual, and the cap is skipped.
-	if got := truncateToolResult(big, maxToolResultLen, Text.HeadTail); len(got) >= len(big) {
+	if got := truncateToolResult(big, toolResultBudget.Base, Text.HeadTail); len(got) >= len(big) {
 		t.Fatalf("truncateToolResult returned %d bytes for %d in — the test's premise is wrong", len(got), len(big))
 	}
 
@@ -341,7 +341,7 @@ func TestTheDispatchCapSkipsATypedResult(t *testing.T) {
 	// a contextual result never reaches truncateToolResult at all. That is read
 	// from the source, because the branch is inside fireNode's tail.
 	body := funcBody(t, readSource(t, "dispatcher.go"), "executeToolNode")
-	if !strings.Contains(body, "if !isContextual && len(result) > maxToolResultLen") {
+	if !strings.Contains(body, "!isContextual && len(result) > cap") {
 		t.Error("the dispatch cap no longer skips contextual results, or the condition moved — " +
 			"the comment at maxToolResultLen describes this line and would now be wrong")
 	}

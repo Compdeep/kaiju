@@ -114,10 +114,22 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	sysPrompt, userPrompt = WithReframe(sysPrompt, userPrompt,
 		a.EdgeReFrame(ctx, graph, a.formatTrigger(trigger),
 			"decide whether this run should do more work or stop and answer"))
-	messages := []llm.Message{
-		{Role: "system", Content: sysPrompt},
-		{Role: "user", Content: userPrompt},
-	}
+	// What each arc produced, as the calls that produced it, alongside the
+	// prose. The two are disjoint by construction: a payload carries a tool's
+	// declared fields and never its content, and ## Node Results carries the
+	// content and never the fields — see NodeBody.Payload and Evidence.
+	//
+	// Not because this stage has to carry a value onward. It does not any more:
+	// the planner is handed the same arcs directly, which is what closed the
+	// gap. Measured against the executor model, a reflector holding a path in a
+	// tool message still wrote "check the correct file path" when asked to name
+	// it — a small model will not retype a value however it is given one, and
+	// the design stopped asking it to.
+	//
+	// It is here because a failure reaches this stage as {"error": …} rather
+	// than as a sentence about a failure, and because one representation across
+	// the stages is one thing to reason about instead of two.
+	messages := BuildMessagesWithResults(sysPrompt, userPrompt, nil, graph.Arcs())
 
 	// Surface the reflection checkpoint as a live node so the UI shows it running
 	// (the executive/tool/aggregator nodes broadcast; reflection didn't until now).

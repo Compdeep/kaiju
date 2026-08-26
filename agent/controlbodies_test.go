@@ -86,8 +86,8 @@ func TestControlBodySummariesAreTruncated(t *testing.T) {
 		"microplanner": parseMicroPlannerBody(`{"summary":"` + long + `"}`).Summary(),
 		"observer":     parseObserverBody(`{"action":"inject","reason":"` + long + `"}`).Summary(),
 	} {
-		if len(got) > 200 {
-			t.Errorf("%s summary is %d chars; it should be cut near 150", name, len(got))
+		if len(got) > 260 {
+			t.Errorf("%s summary is %d chars; it should be cut near 200 plus its marker", name, len(got))
 		}
 	}
 }

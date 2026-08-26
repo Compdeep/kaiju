@@ -114,6 +114,10 @@ func triggerOf(g *Graph) *Trigger {
 // reach it — see CanReachTool.
 const computeToolName = "compute"
 
+// shellToolName is the general-purpose escape hatch. It survives preflight's
+// narrowing unconditionally — see relevantTools.
+const shellToolName = "bash"
+
 /*
  * CanReachTool reports whether one run may call a tool by name.
  * desc: Two questions, both of which have to be yes. The registry must hold it

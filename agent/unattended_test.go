@@ -57,7 +57,7 @@ func TestUnattendedReachesTheToolFilter(t *testing.T) {
 
 	// No ExecutionMode at all — only the application's answer marks this
 	// unattended, so the default would have offered the tool.
-	got := a.relevantTools(context.Background(), Trigger{Type: "event"})
+	got := a.relevantTools(context.Background(), nil, Trigger{Type: "event"}, "list some records")
 	if has(got, "raise_ticket") {
 		t.Errorf("the application said nobody is watching and the tool was offered anyway: %v", got)
 	}

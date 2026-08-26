@@ -1,6 +1,9 @@
 package agent
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // NodeBody is the typed output a node produces. It is the source of truth that
 // replaces the opaque Node.Result string; a rendered form is kept on
@@ -8,7 +11,7 @@ import "strings"
 //
 // The interface is deliberately tiny (deep module, shallow interface): concrete
 // bodies wrap the structs each node already computes, and consumers touch only
-// these three methods instead of re-parsing JSON out of a string.
+// these four methods instead of re-parsing JSON out of a string.
 type NodeBody interface {
 	// Field resolves a dot-path into the body for ${node.<id>.<path>} template
 	// references. Returns (value, true) on a hit, (nil, false) otherwise.
@@ -23,6 +26,23 @@ type NodeBody interface {
 
 	// Summary renders a short one-line form for the frontend trace.
 	Summary() string
+
+	// Payload is the body's fields, as data, for a stage that has to receive a
+	// value rather than read about one. Nil when the body has no structure to
+	// give — an opaque string has none.
+	//
+	// It sits beside Evidence rather than replacing it because the two answer
+	// different questions. Evidence is what a stage READS: the content of a
+	// page, the output of a command, the text an answer gets written from.
+	// Payload is what a stage is GIVEN: the path the page was written to, the
+	// exit status, the fields a later step can be wired to.
+	//
+	// Only Evidence existed, and every stage that needed a value had to find it
+	// in prose. A tool's declared fields reached the next NODE, through Field,
+	// and reached no STAGE at all — so a path that was correct and on disk was
+	// carried to the planner by a sentence a small model retyped, and arrived
+	// as a placeholder that resolved to nothing.
+	Payload() json.RawMessage
 }
 
 // RawTextBody is the fallback body: an opaque string, exactly the pre-refactor
@@ -55,6 +75,11 @@ func (b RawTextBody) Field(path string) (any, bool) {
 
 // Evidence returns the raw text unchanged.
 func (b RawTextBody) Evidence() string { return b.Text }
+
+// Payload is nil: an opaque string has no fields to hand over. A stage reading
+// this body gets its text through Evidence and nothing else, which is the
+// honest answer for a producer that never declared a shape.
+func (b RawTextBody) Payload() json.RawMessage { return nil }
 
 // Summary returns the first non-empty line, matching the frontend's first-line
 // fallback for un-typed results.
@@ -94,3 +119,12 @@ func (b RawBacked) Field(path string) (any, bool) { return RawText(b.Raw).Field(
 
 // Evidence returns the raw JSON unchanged.
 func (b RawBacked) Evidence() string { return b.Raw }
+
+// Payload is the raw JSON, when it is JSON. A body backed by prose has no
+// fields and says so with nil.
+func (b RawBacked) Payload() json.RawMessage {
+	if !json.Valid([]byte(b.Raw)) {
+		return nil
+	}
+	return json.RawMessage(b.Raw)
+}

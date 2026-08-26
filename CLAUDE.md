@@ -48,3 +48,18 @@ why.
 - Favour deep modules with shallow interfaces: a lot of behaviour behind a small
   number of calls. A wide interface over a thin implementation moves the
   complexity to every caller.
+
+## Words this codebase owns
+
+**Arc** — one plan's execution. A replan starts a new arc.
+
+**Step dependency** (`depends_on`) — ordering within a single arc. It says
+which steps must resolve before this one fires. It does not survive a replan,
+because positions restart with the plan. It is not an edge.
+
+**Node** — a stage that acts. It runs a tool, writes code, decides, or
+investigates. It has a body, a payload, timings and a place in the trace.
+
+**Edge** — a stage that carries. It performs no action: it takes what the
+previous node produced and forms it for the next one to read. `EdgeReFrame`
+is one. An edge has no result of its own, only a message it shaped.

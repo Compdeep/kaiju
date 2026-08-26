@@ -47,10 +47,19 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 		a.EdgeReFrame(ctx, graph, userPrompt,
 			"write the final answer a person will read"))
 
-	messages := BuildMessagesWithHistory(
+	// The arcs, alongside the prose. This stage writes the answer a person
+	// reads, and it wrote it from a rendering OF the evidence rather than from
+	// the evidence — so a step that returned {"count":0} reached it as a header
+	// row with no rows, and the answer said the data was unusable.
+	//
+	// The history still leads, and the prose still carries the content: a
+	// payload holds a tool's declared fields and never its text. The two are
+	// disjoint by construction — see NodeBody.Payload and Evidence.
+	messages := BuildMessagesWithResults(
 		ComposeSystemPrompt(a.soulPrompt, rolePrompt),
 		userPrompt,
 		history,
+		graph.Arcs(),
 	)
 
 	// Stream the aggregator response, broadcasting each chunk for live display.
@@ -81,12 +90,27 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
 	})
 
+	// The stage that writes the answer a person reads, recorded like any other —
+	// see debugrecord.go. It is not a node, so it records itself.
+	rec := DebugRecord{
+		ID: "aggregator", Kind: "aggregator", Label: "synthesize", Round: graph.Round(),
+		System: ComposeSystemPrompt(a.soulPrompt, rolePrompt), User: userPrompt,
+	}
+	if gateCtx != nil {
+		rec.Gate = gateCtx.Sources
+	}
 	if err != nil {
+		rec.Err = err.Error()
+		graph.recordStage(rec)
 		return "", nil, fmt.Errorf("aggregator LLM call: %w", err)
 	}
 	if raw == "" {
+		rec.Err = "empty response"
+		graph.recordStage(rec)
 		return "", nil, fmt.Errorf("aggregator LLM returned empty response")
 	}
+	rec.Reply, rec.Text = raw, raw
+	graph.recordStage(rec)
 
 	log.Printf("[dag] aggregator output: %s", Text.TruncateLog(raw, 300))
 

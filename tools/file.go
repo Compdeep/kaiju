@@ -303,7 +303,7 @@ func (f *FileWrite) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "Path to write to"},
-			"content": {"type": "string", "description": "Content to write"},
+			"content": {"type": "string", "minLength": 0, "description": "Content to write. May be empty: \"\" creates an empty file, and truncates an existing one."},
 			"append": {"type": "boolean", "description": "Append instead of overwrite (default: false)"}
 		},
 		"required": ["path", "content"],

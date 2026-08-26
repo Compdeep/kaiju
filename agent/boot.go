@@ -19,12 +19,10 @@ type BootLLMConfig struct {
 
 // BootEmbConfig holds embedding settings from BOOT.md frontmatter.
 type BootEmbConfig struct {
-	Enabled   *bool    `json:"enabled"`
-	Endpoint  string   `json:"endpoint"`
-	Model     string   `json:"model"`
-	APIKey    string   `json:"api_key"`
-	TopK      *int     `json:"top_k"`
-	Threshold *float64 `json:"threshold"`
+	Enabled  *bool  `json:"enabled"`
+	Endpoint string `json:"endpoint"`
+	Model    string `json:"model"`
+	APIKey   string `json:"api_key"`
 }
 
 // BootGatesConfig holds gate settings from BOOT.md frontmatter.
@@ -53,12 +51,11 @@ type BootDAGConfig struct {
 
 // BootConfig is the parsed representation of a BOOT.md file.
 type BootConfig struct {
-	LLM           BootLLMConfig   `json:"llm"`
-	Embeddings    BootEmbConfig   `json:"embeddings"`
-	Gates         BootGatesConfig `json:"gates"`
-	DAG           BootDAGConfig   `json:"dag"`
-	AlwaysInclude []string        `json:"always_include"`
-	SystemPrompt  string          // markdown body after frontmatter
+	LLM          BootLLMConfig   `json:"llm"`
+	Embeddings   BootEmbConfig   `json:"embeddings"`
+	Gates        BootGatesConfig `json:"gates"`
+	DAG          BootDAGConfig   `json:"dag"`
+	SystemPrompt string          // markdown body after frontmatter
 }
 
 // ParseBootMD reads and parses a BOOT.md file.
@@ -155,12 +152,6 @@ func (bc *BootConfig) ApplyToConfig(cfg *Config) {
 	if bc.Embeddings.APIKey != "" {
 		cfg.EmbedAPIKey = bc.Embeddings.APIKey
 	}
-	if bc.Embeddings.TopK != nil {
-		cfg.EmbedTopK = *bc.Embeddings.TopK
-	}
-	if bc.Embeddings.Threshold != nil {
-		cfg.EmbedThreshold = *bc.Embeddings.Threshold
-	}
 
 	// Gates
 	if bc.Gates.RateLimit != nil {
@@ -200,10 +191,6 @@ func (bc *BootConfig) ApplyToConfig(cfg *Config) {
 	}
 	if bc.DAG.WallClockSec != nil {
 		cfg.DAGWallClock = time.Duration(*bc.DAG.WallClockSec) * time.Second
-	}
-
-	if len(bc.AlwaysInclude) > 0 {
-		cfg.AlwaysInclude = bc.AlwaysInclude
 	}
 
 	// System prompt

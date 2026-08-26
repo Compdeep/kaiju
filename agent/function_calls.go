@@ -247,12 +247,17 @@ func debuggerToolDef() llm.ToolDef {
 }
 
 func preflightToolDef() llm.ToolDef {
+	// The context shape comes from PreflightContext, not from a copy written
+	// here — see PreflightContextSchema. It is the field that carries every URL,
+	// path and selector to a planner that cannot see the conversation, so a
+	// description of it that has drifted from what Go reads loses exactly what
+	// it exists to carry.
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
 			Name:        "submit_preflight",
 			Description: "Submit the preflight classification.",
-			Parameters: json.RawMessage(`{
+			Parameters: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
 					"mode": {
@@ -273,10 +278,7 @@ func preflightToolDef() llm.ToolDef {
 						"items": {"type": "string"},
 						"description": "Tool categories the plan MUST include."
 					},
-					"context": {
-						"type": "string",
-						"description": "One sentence framing the user's intent for the executor, based on query + conversation history."
-					},
+					"context": %s,
 					"compute_mode": {
 						"type": "string",
 						"enum": ["", "shallow", "deep"],
@@ -288,7 +290,7 @@ func preflightToolDef() llm.ToolDef {
 					}
 				},
 				"required": ["mode", "intent", "context", "compute_mode"]
-			}`),
+			}`, PreflightContextSchema())),
 		},
 	}
 }

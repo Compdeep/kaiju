@@ -9,6 +9,12 @@ import (
 // node: a diagnosis summary plus fix-plan steps. Raw keeps the original JSON so
 // Field/Evidence match legacy behavior and the scheduler's graft re-parse plus
 // the reflector's debug-history read (both on the raw string) stay unchanged.
+// traceSummaryChars is how much of a control stage's own words the trace line
+// shows. The marker TruncateLog appends is named and counted — see
+// truncationMark — which costs more than the bare "..." it replaced, so the line
+// is given the room rather than the marker being made ambiguous again.
+const traceSummaryChars = 200
+
 type MicroPlannerBody struct {
 	RawBacked
 	Out microPlannerOutput
@@ -22,7 +28,7 @@ func parseMicroPlannerBody(raw string) MicroPlannerBody {
 
 func (b MicroPlannerBody) Summary() string {
 	if b.Out.Summary != "" {
-		return "fix: " + Text.TruncateLog(b.Out.Summary, 150)
+		return "fix: " + Text.TruncateLog(b.Out.Summary, traceSummaryChars)
 	}
 	if len(b.Out.Nodes) > 0 {
 		return fmt.Sprintf("%d fix step(s)", len(b.Out.Nodes))
@@ -49,7 +55,7 @@ func (b ObserverBody) Summary() string {
 		return RawText(b.Raw).Summary()
 	}
 	if b.Out.Reason != "" {
-		return b.Out.Action + ": " + Text.TruncateLog(b.Out.Reason, 150)
+		return b.Out.Action + ": " + Text.TruncateLog(b.Out.Reason, traceSummaryChars)
 	}
 	return b.Out.Action
 }
@@ -73,13 +79,13 @@ func parseHolmesBody(raw string) HolmesBody {
 
 func (b HolmesBody) Summary() string {
 	if b.Out.Conclude && b.Out.RCA != nil && b.Out.RCA.RootCause != "" {
-		return "RCA: " + Text.TruncateLog(b.Out.RCA.RootCause, 150)
+		return "RCA: " + Text.TruncateLog(b.Out.RCA.RootCause, traceSummaryChars)
 	}
 	if b.Out.Hypothesis != "" {
-		return "hypothesis: " + Text.TruncateLog(b.Out.Hypothesis, 150)
+		return "hypothesis: " + Text.TruncateLog(b.Out.Hypothesis, traceSummaryChars)
 	}
 	if b.Out.Reasoning != "" {
-		return Text.TruncateLog(b.Out.Reasoning, 150)
+		return Text.TruncateLog(b.Out.Reasoning, traceSummaryChars)
 	}
 	return RawText(b.Raw).Summary()
 }

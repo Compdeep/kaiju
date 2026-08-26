@@ -351,6 +351,13 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		},
 		RoutingConfig: agent.RoutingConfig{
 			ClassifierEnabled: classifierEnabled,
+			// Tool search. The block was read from the config file and then
+			// dropped here, so agent.embeddings did nothing however it was
+			// set — only a BOOT.md could turn it on, and nothing said so.
+			EmbeddingsEnabled: cfg.Agent.Embeddings.Enabled,
+			EmbedEndpoint:     cfg.Agent.Embeddings.Endpoint,
+			EmbedAPIKey:       cfg.Agent.Embeddings.APIKey,
+			EmbedModel:        cfg.Agent.Embeddings.Model,
 		},
 		ComputeConfig: agent.ComputeConfig{
 			ComputeTimeout: time.Duration(cfg.Tools.Compute.TimeoutSec) * time.Second,

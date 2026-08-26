@@ -16,7 +16,7 @@ This directory holds the detailed reference docs behind that overview.
 ## Engine
 - **[graph.md](graph.md)** — the authoritative DAG engine: route → preflight →
   executive plan → scheduler → dispatcher → reflection → debug/Holmes → aggregator,
-  the `${step.N}` edge wiring, the edges (coverage / grounding / conclusion-floor)
+  the `${step.N}` step-dependency wiring, the edges (coverage / grounding / conclusion-floor)
   anti-fabrication layer, compute, and run cancellation.
 - **[scheduling.md](scheduling.md)** — the priority worker pool, node batches,
   preemption, stop/cancel, and interject.

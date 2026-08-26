@@ -79,6 +79,15 @@ export function connect() {
           }
           break
 
+        // The engine calls this 'outcome' — chat.go, aggregator.go, scheduler.go
+        // and loop_react.go all broadcast that name. This listened for
+        // 'verdict', which nothing sends, so no chunk ever arrived and the
+        // reply appeared in one piece when the POST returned.
+        //
+        // Appending is safe for both shapes the event carries: a streaming
+        // stage sends many chunks, a non-streaming one sends a single whole
+        // text, and no session gets both.
+        case 'outcome':
         case 'verdict':
           {
             const ds = dag.getSession(sid)

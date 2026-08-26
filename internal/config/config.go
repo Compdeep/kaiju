@@ -195,16 +195,20 @@ type IntentSeed struct {
 }
 
 /*
- * EmbedConfig configures the embedding model for semantic memory search.
- * desc: Controls whether embeddings are enabled, the endpoint/key/model to use, and similarity search parameters.
+ * EmbedConfig configures the embedding endpoint used to rank tools.
+ * desc: Whether tool search embeds at all, and the endpoint, key and model it
+ *       embeds with. Empty endpoint or key falls back to the LLM's own.
+ *
+ *       top_k and threshold used to be here. They sized a ranker that returned
+ *       a fixed number of tools above a fixed score; how many the planner can
+ *       be shown is decided by how much of its prompt the tool index fills, not
+ *       by a count. Both were read into config and neither reached the agent.
  */
 type EmbedConfig struct {
-	Enabled   bool    `json:"enabled"`
-	Endpoint  string  `json:"endpoint"`
-	APIKey    string  `json:"api_key"`
-	Model     string  `json:"model"`
-	TopK      int     `json:"top_k"`
-	Threshold float64 `json:"threshold"`
+	Enabled  bool   `json:"enabled"`
+	Endpoint string `json:"endpoint"`
+	APIKey   string `json:"api_key"`
+	Model    string `json:"model"`
 }
 
 /*

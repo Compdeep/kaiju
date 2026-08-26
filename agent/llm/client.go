@@ -126,6 +126,11 @@ type ChatRequest struct {
 	// StreamOptions asks the provider (OpenAI/OpenRouter) to emit a terminal
 	// usage frame during streaming, so streamed calls are billed like normal ones.
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+
+	// ResponseFormat asks the provider to hold the model to a schema. Set by
+	// Complete when a caller declared one forced tool — see structured.go. A
+	// caller may also set it directly.
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 }
 
 // ForceToolChoice returns a tool_choice value that REQUIRES the model to call
@@ -331,6 +336,12 @@ func (c *Client) setAuthHeaders(req *http.Request) {
 // Routes to the appropriate provider backend.
 func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	c.capReply(req)
+
+	// A stage asking for one shape gets the wire that enforces it, and gets its
+	// reply back in the shape it asked for. Nothing above this knows — see
+	// structured.go for what this buys and what it was measured against.
+	replaced := asSchemaRequest(req, c.provider)
+
 	var resp *ChatResponse
 	var err error
 	if c.provider == ProviderAnthropic {
@@ -343,6 +354,7 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 	// principal) tags set upstream. Streamed calls (CompleteStream) currently
 	// carry no Usage and are undercounted — see the note there.
 	if err == nil && resp != nil {
+		asToolReply(resp, replaced)
 		tokens.AddSplit(ctx, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	}
 	// The same chokepoint, for observation rather than accounting. Fires on

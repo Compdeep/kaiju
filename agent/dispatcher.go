@@ -164,7 +164,41 @@ func (a *Agent) finish(n *Node, result string, body NodeBody, err error) nodeCom
 			}
 		}
 	}
-	return nodeCompletion{NodeID: n.ID, Result: result, Body: body, Err: err}
+	return completionOf(n.ID, result, body, err)
+}
+
+/*
+ * completionOf packs a finished tool call, with its failure rolled up.
+ * desc: The one place a tool's outcome becomes a completion, and so the one
+ *       place that has to know a tool has two ways to say it failed: return a Go
+ *       error, or return a result whose status is error. The branches above
+ *       produce both — a typed tool puts the failure in its message, a legacy
+ *       tool returns an error — and they rejoin here.
+ *
+ *       Rolled up rather than left for the reader. Every stage above this reads
+ *       Err, and any stage that forgets the other half turns a failure into a
+ *       success: the completion arrives with no error and no result, the node
+ *       resolves carrying nothing, and the run counts a failed step as work that
+ *       worked. That happened twice — once to the scheduler, once to the retry —
+ *       and the second time was a repair path silently reporting success for
+ *       every tool that is not a shell command.
+ *
+ *       The message is kept as it was. The roll-up adds the failure to Err; it
+ *       does not take it out of the body, which is where the detail lives.
+ * param: nodeID - the node this completes.
+ * param: result - the tool's text output.
+ * param: body - the tool's typed output, nil for a legacy tool.
+ * param: err - the Go error, nil when the tool reported failure in its result.
+ * return: the completion, with Err set whenever the step did not succeed.
+ */
+func completionOf(nodeID, result string, body NodeBody, err error) nodeCompletion {
+	comp := nodeCompletion{NodeID: nodeID, Result: result, Body: body, Err: err}
+	if comp.Err == nil {
+		if toolErr, failed := toolReportedFailure(comp); failed {
+			comp.Err = toolErr
+		}
+	}
+	return comp
 }
 
 func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
@@ -172,6 +206,20 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	throttle *toolThrottle, intent gates.Intent, scope *ResolvedScope) {
 
 	defer a.guardNodeCompletion("fireNode", n.ID, ch)
+
+	// A retry the other end asked us to wait for. Served here, in this node's
+	// own goroutine, rather than in the scheduler: the steps beside this one
+	// keep running, which is the whole point — a plan does not stop because one
+	// host is rate-limiting.
+	if wait := graph.holdFor(n.ID); wait > 0 {
+		log.Printf("[dag] holding %s (%s) for %s before retrying", n.ID, n.ToolName, wait.Round(time.Millisecond))
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			ch <- nodeCompletion{NodeID: n.ID, Err: ctx.Err()}
+			return
+		}
+	}
 
 	// Tag every node with the investigation's active skills so the
 	// frontend can show which skills guided this run. Skills are
@@ -893,8 +941,10 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// string field inside rather than byte-splicing. Byte-splicing a web_fetch
 	// envelope used to corrupt it, so a downstream ${node.X.field} could not
 	// parse what it referenced.
-	if !isContextual && len(result) > maxToolResultLen {
-		result = truncateToolResult(result, maxToolResultLen, Text.HeadTail)
+	if cap := a.budget(toolResultBudget); !isContextual && len(result) > cap {
+		before := len(result)
+		result = truncateToolResult(result, cap, Text.HeadTail)
+		graph.recordCut("tool result", before, len(result))
 	}
 
 	return result, body, nil

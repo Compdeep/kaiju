@@ -78,6 +78,16 @@ func ParseReach(s string) (Reach, bool) {
 type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]*registeredTool
+
+	// version changes whenever the tools do — one added, one removed, one
+	// swapped for another under the same name, one switched off.
+	//
+	// Here rather than derived by a caller because a caller cannot derive it. A
+	// list of names does not change when a hot reload replaces a tool with a
+	// new description under the old name, and anything holding a view of this
+	// registry would go on serving what the tool used to say. See
+	// Registry.Version.
+	version uint64
 }
 
 /*
@@ -115,6 +125,7 @@ func (r *Registry) RegisterWithSource(t Tool, source string) error {
 		return fmt.Errorf("tool %q already registered", t.Name())
 	}
 	r.tools[t.Name()] = &registeredTool{tool: t, source: source, reach: ReachLocal}
+	r.version++
 	return nil
 }
 
@@ -136,6 +147,7 @@ func (r *Registry) Replace(t Tool, source string) {
 		reach = existing.reach
 	}
 	r.tools[t.Name()] = &registeredTool{tool: t, source: source, reach: reach}
+	r.version++
 }
 
 /*
@@ -146,7 +158,11 @@ func (r *Registry) Replace(t Tool, source string) {
 func (r *Registry) Unregister(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, ok := r.tools[name]; !ok {
+		return
+	}
 	delete(r.tools, name)
+	r.version++
 }
 
 /*
@@ -192,6 +208,23 @@ func (r *Registry) IsBuiltin(name string) bool {
 	defer r.mu.RUnlock()
 	rt, ok := r.tools[name]
 	return ok && rt.source == "builtin"
+}
+
+/*
+ * Version reports a number that changes whenever the tools do.
+ * desc: Incremented by every registration, replacement, removal and enable
+ *       toggle. It exists so a component holding a derived view of this
+ *       registry — a search index, a cached prompt fragment — can tell in one
+ *       comparison whether that view is still current, without rebuilding it
+ *       to find out and without missing a tool swapped in under a name it
+ *       already knows.
+ * return: the current version. Only equality is meaningful; the value itself
+ *         means nothing and does not survive a restart.
+ */
+func (r *Registry) Version() uint64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.version
 }
 
 /*
@@ -270,6 +303,7 @@ func (r *Registry) SetEnabled(name string, enabled bool) error {
 	} else {
 		rt.reach = ReachOff
 	}
+	r.version++
 	return nil
 }
 

@@ -185,14 +185,21 @@ type DAGConfig struct {
 // RoutingConfig decides which skills a query reaches, and what the agent is
 // told about itself before it starts.
 type RoutingConfig struct {
-	// Semantic skill routing.
+	// Tool search. When enabled, the engine embeds every registered tool once
+	// and ranks the registry against what each plan is trying to do; without it
+	// the ranking is on words alone, which is all a registry small enough to
+	// show whole needs. Endpoint, key and model fall back to the LLM's own.
+	//
+	// TopK, Threshold and AlwaysInclude used to live here. They configured a
+	// ranker that returned a fixed number of tools above a fixed score, and
+	// both numbers were the wrong shape: what the planner can be shown is
+	// decided by how much of its prompt the tool index fills, not by a count,
+	// and a tool that must always be visible is a property of the tool, not of
+	// a list somebody has to maintain. See agent/toolfind.
 	EmbeddingsEnabled bool
 	EmbedEndpoint     string
 	EmbedAPIKey       string
 	EmbedModel        string
-	EmbedTopK         int
-	EmbedThreshold    float64
-	AlwaysInclude     []string
 	ClassifierEnabled bool // enable per-query skill card classification (extra LLM call)
 
 	// CustomSystemPrompt is prepended to every system prompt the agent sends.

@@ -138,13 +138,25 @@ func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (
 	// it had to carry the line forward as text to name its pid. The rows say the
 	// same thing in fields, and are empty on a platform whose columns are not the
 	// ones parsed, where the table is still complete.
-	return toolapi.ToolOK("processes", strings.Join(result, "\n"), processListData{
+	data := processListData{
 		Count:     count,
 		Limit:     limit,
 		Filter:    filter,
 		AtLimit:   count >= limit,
 		Processes: parsePsRows(result),
-	}), nil
+	}
+	// Nothing matched is not a success with a header on it. A filter naming
+	// something no process is called — a socket state, say — returns the column
+	// row and zero data, which reads downstream exactly like output that was cut
+	// off. Saying it is empty, and why, costs nothing.
+	if count == 0 {
+		detail := "no process is running"
+		if filter != "" {
+			detail = "no process matched " + strconv.Quote(filter)
+		}
+		return toolapi.ToolEmptyWith("processes", detail, data), nil
+	}
+	return toolapi.ToolOK("processes", strings.Join(result, "\n"), data), nil
 }
 
 var _ toolapi.Tool = (*ProcessList)(nil)

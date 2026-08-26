@@ -4,7 +4,7 @@ import "testing"
 
 // classifyRetryTier decides how a failed tool node is retried. The key
 // regression this guards: a dependency-injection failure (a broken
-// ${node.<id>.field} wiring) is STRUCTURAL — routing it to the "oneshot"
+// ${node.<id>.field} wiring) is STRUCTURAL — routing it to the "twotime"
 // shell-fixer LLM only mangles the placeholder into an invalid shell expansion
 // ("sh: Bad substitution") and loops until the wall clock. It must be "skip".
 func TestClassifyRetryTier(t *testing.T) {
@@ -27,7 +27,7 @@ func TestClassifyRetryTier(t *testing.T) {
 		{"rate limit reruns", "provider returned http 429 rate limit", "blind"},
 
 		// Genuine, non-structural command errors still get one LLM fix attempt.
-		{"unknown flag → oneshot", "grep: unrecognized option '--foo'", "oneshot"},
+		{"unknown flag → twotime", "grep: unrecognized option '--foo'", "twotime"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

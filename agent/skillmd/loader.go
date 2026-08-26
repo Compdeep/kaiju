@@ -4,9 +4,31 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
+
+// PlannerHeadings are the section headings the executive extracts from a skill
+// body to build the planner's Skill Guidance block. A skill whose body uses
+// none of them still reaches the planner by name and description, but
+// contributes no guidance: the extraction matches nothing and the body is
+// dropped. The drop is otherwise invisible — one matching skill is enough for
+// the Skill Guidance section to render and look healthy — so LoadDir warns at
+// boot instead of leaving it to be noticed by its absence from a prompt.
+var PlannerHeadings = []string{"## Planning Guidance", "## RULES"}
+
+// hasPlannerGuidance reports whether a body carries a section the executive
+// will extract. Mirrors Text.ExtractSection's plain substring match, so the
+// two agree on what counts as present.
+func hasPlannerGuidance(body string) bool {
+	for _, h := range PlannerHeadings {
+		if strings.Contains(body, h) {
+			return true
+		}
+	}
+	return false
+}
 
 // DefaultDirs returns the standard skill search directories in precedence order.
 // Later directories override earlier ones (same name = last wins).
@@ -67,6 +89,11 @@ func LoadDir(dir string, reg *toolapi.Registry) ([]*SkillMD, error) {
 
 		info, _ := os.Stat(skillPath)
 		modTime := info.ModTime()
+
+		if !hasPlannerGuidance(body) {
+			log.Printf("[skillmd] %s: body has none of %v — it will reach the planner as name+description only, with no guidance (%s)",
+				fm.Name, PlannerHeadings, skillPath)
+		}
 
 		s := NewSkillMD(fm, body, filepath.Join(dir, entry.Name()), skillPath, modTime, reg)
 		loaded = append(loaded, s)

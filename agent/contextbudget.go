@@ -82,6 +82,12 @@ func (a *Agent) scaleBudget(requested int) int {
 // model than the reasoning lane, and a budget that fits the larger one overflows
 // the smaller.
 func (a *Agent) smallestKnownWindow() int {
+	// The catalog is an application's to supply, and most do not. Guarded here
+	// rather than at each caller: it was checked before the one call that
+	// existed, and the second call added later dereferenced a nil func.
+	if a == nil || a.cfg.Limits == nil {
+		return 0
+	}
 	smallest := 0
 	for _, model := range []string{a.cfg.LLMModel, a.cfg.ExecutorModel} {
 		if model == "" {

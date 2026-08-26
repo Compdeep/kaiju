@@ -74,10 +74,10 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 
 	log.Printf("[dag] debugger prompt for %s (%d bytes): %s", mpNode.Tag, len(userPrompt), Text.TruncateLog(userPrompt, 800))
 
-	messages := []llm.Message{
-		{Role: "system", Content: sysPrompt},
-		{Role: "user", Content: userPrompt},
-	}
+	// The debugger writes a fix plan, so it is a stage that has to name values —
+	// a path, a port, a module. Handed the arcs it can read one from a field
+	// rather than out of prose describing the failure.
+	messages := BuildMessagesWithResults(sysPrompt, userPrompt, nil, graph.Arcs())
 
 	log.Printf("[dag] debugger calling reasoning model for %s", mpNode.Tag)
 

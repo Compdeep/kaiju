@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"github.com/Compdeep/kaiju/agent/toolapi"
 	"strconv"
 	"strings"
@@ -33,18 +34,49 @@ func (textNS) Truncate(s string, n int) string {
 }
 
 /*
- * TruncateLog strips newlines then truncates for log output.
- * desc: Replaces newlines with spaces before truncating, producing single-line log entries.
+ * TruncateLog strips newlines then truncates, naming the cut.
+ * desc: Replaces newlines with spaces before truncating, producing single-line
+ *       entries.
+ *
+ *       The marker says what happened and how much is missing, because 46 of
+ *       these calls end up in a prompt and a model cannot tell a bare "..." from
+ *       text that ends in one. Three times in a single run a stage read this
+ *       function's own marker as evidence that the DATA was incomplete:
+ *
+ *         - a 74-byte process list, whole, reported as output that had been cut
+ *         - a 2,772-byte script, whole, diagnosed by Holmes as "truncated during
+ *           generation" — Holmes had cut it here itself, at 1500, then read the
+ *           marker back on its next iteration and promoted it to a high-
+ *           confidence root cause
+ *         - and the repair that followed, of a file that was never broken
+ *
+ *       "…[cut 1500/2772]" cannot be read as the end of a document, and it names
+ *       the whole so a reader can tell "this is all of it" from "this is the
+ *       start of it". Kept short because these also render as one-line trace
+ *       summaries, where a sentence would be longer than the text it marks.
  * param: s - the string to truncate
  * param: n - maximum length before truncation
- * return: the single-line truncated string
+ * return: the single-line string, with the cut named when one was made
  */
 func (textNS) TruncateLog(s string, n int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "..."
+	return s[:n] + truncationMark(len(s), n)
+}
+
+/*
+ * truncationMark says a cut was made here, and how big the whole was.
+ * desc: One wording for every cap, so a reader learns it once. Names the total
+ *       so a stage can tell "this is all of it" from "this is the start of it" —
+ *       which is the distinction every one of these mistakes turned on.
+ * param: total - the size of the whole string, in characters.
+ * param: kept - how much survived.
+ * return: the marker, including its leading space.
+ */
+func truncationMark(total, kept int) string {
+	return fmt.Sprintf(" …[cut %d/%d]", kept, total)
 }
 
 /*
@@ -78,14 +110,23 @@ func (textNS) TailTruncate(s string, n int) string {
  * param: s - the evidence string to truncate
  * return: the original or truncated string
  */
-// evidenceTruncMarker says which cap cut, so a reader of a prompt can tell this
-// one from the dispatch cap, a tool's own cap, and the gate's budget.
-const evidenceTruncMarker = "\n\n...(middle truncated by the 8000-char evidence cap)...\n\n"
+// TruncateEvidence cuts to the compiled default. It is the answer for a caller
+// with no agent to ask; the gate calls TruncateEvidenceTo with the budget the
+// deployed model's window allows.
+func (t textNS) TruncateEvidence(s string) string {
+	return t.TruncateEvidenceTo(s, toolapi.EvidenceBudget)
+}
 
-func (textNS) TruncateEvidence(s string) string {
-	// The budget lives in toolapi, where a tool assembling its own evidence can
-	// read it too.
-	const maxLen = toolapi.EvidenceBudget
+// TruncateEvidenceTo cuts one step's result to a given budget.
+//
+// The budget is a parameter rather than a constant because it depends on the
+// model, and the graph holding a result does not know which model will read it.
+// It was 8000 characters everywhere, chosen when a large window was 32K — see
+// Agent.evidenceBudget.
+func (textNS) TruncateEvidenceTo(s string, maxLen int) string {
+	if maxLen <= 0 {
+		maxLen = toolapi.EvidenceBudget
+	}
 	if len(s) <= maxLen {
 		return s
 	}
@@ -93,10 +134,11 @@ func (textNS) TruncateEvidence(s string) string {
 	// Avoids cutting mid-JSON or mid-sentence.
 	headLen := maxLen * 2 / 3
 	tailLen := maxLen / 3
-	// The marker names which cap cut, following gateTruncMarker's precedent.
-	// Anyone who reads a prompt and sees a cut needs to know which of the five
-	// made it. Raising a tool's own cap changes nothing when this one is next.
-	return s[:headLen] + evidenceTruncMarker + s[len(s)-tailLen:]
+	// The marker names which cap cut, and how big it was — a reader of a prompt
+	// has to tell this one from the dispatch cap, a tool's own cap and the
+	// gate's budget, and the size is no longer the same on every deployment.
+	marker := fmt.Sprintf("\n\n...(middle truncated by the %d-char evidence cap)...\n\n", maxLen)
+	return s[:headLen] + marker + s[len(s)-tailLen:]
 }
 
 /*

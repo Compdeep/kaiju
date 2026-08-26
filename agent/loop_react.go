@@ -54,8 +54,11 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 
 	startTime := time.Now()
 
-	// Get relevant tools and skills — same set the DAG planner sees
-	relevant := a.relevantTools(ctx, trigger)
+	// Get relevant tools and skills — same set the DAG planner sees.
+	// nil preflight: the react loop does not run one, so no narrowing applies
+	// and it keeps seeing every tool, exactly as before.
+	// The ReAct loop builds no graph, so nothing tallies what its caps cut.
+	relevant := a.relevantTools(ctx, nil, trigger, a.formatTrigger(trigger))
 	toolDefs := a.registry.ToolDefsForNames(relevant)
 
 	// Build initial messages — no skill guidance injection (same as native planner).
@@ -271,8 +274,8 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall,
 	// — it goes to the model as a chat message — so it is fitted to the cap like
 	// any other result. truncateToolResult shrinks the longest string inside a
 	// JSON object rather than splicing bytes, so the envelope stays readable.
-	if len(result) > maxToolResultLen {
-		result = truncateToolResult(result, maxToolResultLen, Text.HeadTail)
+	if cap := a.budget(toolResultBudget); len(result) > cap {
+		result = truncateToolResult(result, cap, Text.HeadTail)
 	}
 	return result, nil
 }

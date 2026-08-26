@@ -55,6 +55,9 @@ import (
 func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget, func()) {
 	graph := NewGraph()
 	graph.RunID = runID
+	// Resolved once, here, because every reader of a payload is downstream of
+	// this and none of them has an Agent to ask.
+	graph.payloadCap = a.budget(payloadBudget)
 	budget := NewBudget(
 		a.cfg.MaxNodes,
 		a.cfg.MaxPerSkill,
@@ -260,12 +263,33 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				pf = a.classifyInvestigate(ctx, trigger.ID, query, trigger.History)
 			}
 		}
+		// Preflight's two answers have to agree with each other, and whether it
+		// may adjust one of them depends on the run — so it happens here, where
+		// the trigger is, rather than inside the validation of the model's reply.
+		a.reconcileComputeIntent(trigger, pf)
+
 		// Per-investigation preflight + card list live on the Graph, not the
 		// Agent, so concurrent investigations never clobber each other's state.
 		graph.Preflight = pf
 		graph.ActiveCards = pf.Skills
+
+		// The decision the whole run is gated on, recorded where it lands rather
+		// than where it was made: preflight runs before the graph has a plan,
+		// and this is the first point at which both exist. See debugrecord.go.
+		//
+		// It is the intent that matters most here. A preflight whose reply would
+		// not parse falls back to observe-only, and every compute step in the
+		// plan is then refused — with nothing anywhere saying that a decision was
+		// lost rather than made.
+		if pfOut, mErr := json.Marshal(pf); mErr == nil {
+			graph.recordStage(DebugRecord{
+				ID: "preflight", Kind: "preflight", Label: "classify", Out: pfOut,
+				Text: pf.Context.Text(),
+			})
+		}
+
 		log.Printf("[dag] preflight: mode=%s intent=%s skills=%v categories=%v context=%q",
-			pf.Mode, pf.Intent, pf.Skills, pf.RequiredCategories, Text.TruncateLog(pf.Context, 120))
+			pf.Mode, pf.Intent, pf.Skills, pf.RequiredCategories, Text.TruncateLog(pf.Context.Text(), 120))
 
 		// Short-circuit chat — skip the executive entirely. Interactive only;
 		// autonomous never produces this mode.
@@ -316,11 +340,24 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "failed", Tag: "plan", Error: err.Error()}})
 		return nil, fmt.Errorf("planner failed: %w", err)
 	}
-	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "plan"}})
+	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{
+		ID: "executive", Type: "executive", State: "resolved", Tag: "plan",
+		Tools: planResult.Tools, Objective: planResult.Objective}})
 
 	initialNodes, err := planStepsToNodes(planResult.Steps, graph, budget, a.registry, dagMode)
 	if err != nil {
 		return nil, fmt.Errorf("plan-to-nodes failed: %w", err)
+	}
+
+	// Refused before anything runs, when the caller pinned a rank the plan
+	// cannot be done at. Discovered mid-run it costs every step up to the first
+	// one over the line, and arrives as an arithmetic comparison with no remedy
+	// in it — see IntentGapError.
+	if gap := a.validatePlanIntent(initialNodes, trigger, trigger.Intent()); gap != nil {
+		log.Printf("[dag] %s", gap.Error())
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{
+			ID: "executive", Type: "executive", State: "failed", Tag: "plan", Error: gap.Error()}})
+		return nil, gap
 	}
 
 	// Store capability gaps on the graph for reflection/aggregator context
@@ -395,7 +432,9 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	// names the flag to drop.
 	retryOnce := func(node *Node, comp nodeCompletion, detail string) bool {
 		tier := classifyRetryTier(detail)
-		if tier == "skip" || strings.Contains(node.Tag, "[") {
+		// Once per node. The tier that already ran is on the node, not spelled
+		// into its name — see Node.Retry.
+		if tier == "skip" || node.Retry != "" {
 			return false
 		}
 		if node.Type != NodeTool || node.ToolName == "service" || node.Source == "holmes" {
@@ -405,24 +444,38 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		}
 		switch tier {
 		case "blind":
-			node.Tag += " [blind_retry]"
+			graph.SetRetry(comp.NodeID, "blind")
 			node.Error = nil
+			// A host that said "too many requests" is not rerun on the spot.
+			// The wait is served in the node's own goroutine, so the rest of the
+			// plan carries on meanwhile — see fireNode.
+			graph.HoldUntil(comp.NodeID, retryBackoff(detail))
 			graph.SetState(comp.NodeID, StatePending)
 			log.Printf("[dag] blind retry for %s: %s", comp.NodeID, Text.TruncateLog(detail, 200))
 			appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BLIND_RETRY", detail)
 			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
 			return true
-		case "oneshot":
+		case "twotime":
 			if budget.LLMRemaining() <= 0 {
 				return false
 			}
 			// The node stays failed while the retry runs, so dependents are not
 			// held up by a repair that may not come.
-			node.Tag += " [oneshot_retry]"
+			//
+			// The ERROR is cleared, as the blind tier does. SetResult marks a
+			// node resolved and records its result but leaves Error untouched,
+			// so a retry that succeeds otherwise renders with its own output
+			// beside the failure it just recovered from — observed as a node
+			// showing "command failed: exit 1" next to exit_code 0 and 333
+			// bytes of real output. On the paths where the retry does NOT
+			// recover, twotimeRetry reports the original error explicitly, so
+			// clearing here loses nothing.
+			node.Error = nil
+			graph.SetRetry(comp.NodeID, "twotime")
 			inflight++
-			go a.oneshotRetry(ctx, node, comp, graph, budget, completionCh, detail, intent, trigger.Scope)
-			log.Printf("[dag] oneshot retry for %s: %s", comp.NodeID, Text.TruncateLog(detail, 200))
-			appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "ONESHOT_RETRY", detail)
+			go a.twotimeRetry(ctx, node, comp, graph, budget, completionCh, detail, intent, trigger.Scope)
+			log.Printf("[dag] twotime retry for %s: %s", comp.NodeID, Text.TruncateLog(detail, 200))
+			appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "TWOTIME_RETRY", detail)
 			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
 			return true
 		}
@@ -812,6 +865,22 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			if comp.Err != nil {
 				errMsg := comp.Err.Error()
 
+				// What the tool DID produce, kept before the failure is handled.
+				//
+				// Every path below ends in continue, and the block that stores a
+				// tool's output sits after them, so without this a failed step
+				// loses its own result: no payload in the trace, no evidence for
+				// the reflector, nothing for a reference to read. That matters
+				// more now than it did — a failure reported in the result rather
+				// than as a Go error reaches here too, and its detail is the
+				// whole reason it is worth reading.
+				//
+				// Before the SetError below, not after: SetBody resolves the
+				// node and SetError fails it, so the failure has to land last.
+				if comp.Body != nil {
+					graph.SetBody(comp.NodeID, comp.Body)
+				}
+
 				// A step that never ran because the step it reads from failed
 				// without leaving anything to read. It is not a failure of its
 				// own — nothing about it was attempted — and recording it as
@@ -863,25 +932,38 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					continue
 				}
 
+				// A failed step is work. Without this the reflector is never
+				// reached, so a plan whose only step failed gets no reflection,
+				// no Holmes and no repair loop — it simply stops.
+				if node.Type == NodeTool || node.Type == NodeCompute || node.Type == NodeActuator {
+					workSinceReflection++
+				}
+
 				// ── Three-tier retry ──
 				// One attempt: skip (nothing to fix), blind (rerun as it was), or
-				// oneshot (a cheap LLM rewrite). retryOnce is shared with the
-				// branch that handles a tool reporting failure in its envelope.
+				// twotime (up to two cheap LLM rewrites).
 				graph.SetError(comp.NodeID, comp.Err)
 				if retryOnce(node, comp, retryDetail(node, errMsg)) {
 					launchReady() // dependents proceed meanwhile, on a failed dep
 					continue
 				}
 
-				// No retry — fail and prune
+				// No retry left.
 				graph.SetError(comp.NodeID, comp.Err)
-				if strings.Contains(errMsg, "gate:") {
+				switch {
+				case strings.HasPrefix(node.Tag, "verify_"), strings.HasPrefix(node.Tag, "revalidate_"):
+					// A check that failed says something about what it checked,
+					// not about itself, and the worklog is read by a human
+					// deciding what went wrong.
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_FAIL", errMsg)
+				case strings.Contains(errMsg, "gate:"):
 					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "GATE_BLOCKED", errMsg)
-				} else {
+				default:
 					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "FAILED", errMsg)
 				}
 				// Don't cascade prune — let downstream nodes attempt to run.
 				// The reflector will see the failure and decide what to do.
+				injectInterjection()
 				launchReady()
 				continue
 
@@ -1269,21 +1351,34 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// (worklog) + the reflector's `next`. The executive decides HOW.
 						frame := fmt.Sprintf(replanFrameTemplate, next)
 
-						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "running", Tag: "replan"}})
+						// Its own id, not "executive".
+						//
+						// Every planning round used to broadcast under the same
+						// one, and the frontend keys nodes by id — so a re-plan
+						// overwrote the row the first plan had written. The
+						// tools that plan was shown went with it, the row read
+						// "loading" for as long as the re-plan ran, and the
+						// original reappeared at the end when the final
+						// snapshot was merged. Three rounds of planning are
+						// three things that happened; they are three rows.
+						planID := fmt.Sprintf("executive-r%d", replanCount)
+						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: planID, Node: &NodeInfo{ID: planID, Type: "executive", State: "running", Tag: fmt.Sprintf("replan %d", replanCount)}})
 						replanResult, rerr := a.runExecutive(ctx, trigger, graph, frame)
 						if rerr != nil {
 							// Executive answered directly (no tools needed) → that answer IS the outcome.
 							var convErr *ExecutiveConversationalError
 							if errors.As(rerr, &convErr) {
-								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "replan direct"}})
+								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: planID, Node: &NodeInfo{ID: planID, Type: "executive", State: "resolved", Tag: "replan direct"}})
 								concludeReplan("executive answered directly", convErr.Text)
 								break
 							}
-							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "failed", Tag: "replan", Error: rerr.Error()}})
+							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: planID, Node: &NodeInfo{ID: planID, Type: "executive", State: "failed", Tag: fmt.Sprintf("replan %d", replanCount), Error: rerr.Error()}})
 							concludeReplan(fmt.Sprintf("replan executive failed: %v", rerr), "")
 							break
 						}
-						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{ID: "executive", Type: "executive", State: "resolved", Tag: "replan"}})
+						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: planID, Node: &NodeInfo{
+							ID: planID, Type: "executive", State: "resolved", Tag: fmt.Sprintf("replan %d", replanCount),
+							Tools: replanResult.Tools, Objective: replanResult.Objective}})
 
 						newNodes, gerr := planStepsToNodes(replanResult.Steps, graph, budget, a.registry, dagMode)
 						if gerr != nil {
@@ -1347,42 +1442,6 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					graph.SetResult(comp.NodeID, comp.Result)
 				}
 
-				// ── A tool that reported a failure in its envelope ──
-				//
-				// A tool has two ways to say it failed: return a Go error, or
-				// return an envelope whose status is error. Only the first used
-				// to reach the node, so the second resolved like a success —
-				// its message became evidence, the run's failure list stayed
-				// empty, and nothing could ask for a repair.
-				if toolErr, failed := toolReportedFailure(comp); failed && node.Type == NodeTool {
-					log.Printf("[dag] node %s (%s) completed with error: %s", comp.NodeID, node.ToolName, Text.TruncateLog(comp.Result, 500))
-					graph.SetError(comp.NodeID, toolErr)
-					node.Error = toolErr
-					if strings.HasPrefix(node.Tag, "verify_") || strings.HasPrefix(node.Tag, "revalidate_") {
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_FAIL", comp.Result)
-					} else {
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "TOOL_ERROR", comp.Result)
-					}
-
-					// Count this as work so the reflector sees it and can decide
-					// whether to investigate. Without this, single-step bash plans
-					// that fail get no reflection → no Holmes → no fix loop.
-					workSinceReflection++
-
-					// The same one repair attempt a Go error gets. A tool saying it
-					// failed in its envelope is no less repairable than one saying
-					// it by returning an error, and bash says it this way.
-					if retryOnce(node, comp, retryDetail(node, comp.Result)) {
-						launchReady()
-						continue
-					}
-
-					// No cascade prune — the reflector will catch this
-					injectInterjection()
-					launchReady()
-					continue
-				}
-
 				if node.Type == NodeTool || node.Type == NodeCompute || node.Type == NodeActuator {
 					workSinceReflection++
 					if strings.HasPrefix(node.Tag, "verify_") || strings.HasPrefix(node.Tag, "revalidate_") {
@@ -1405,7 +1464,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						}
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_PASS", Text.TruncateLog(comp.Result, 100))
 					} else {
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "OK", fmt.Sprintf("%s: %s", node.ToolName, Text.TruncateLog(comp.Result, 100)))
+						// The evidence, not comp.Result. For a typed tool comp.Result is the
+						// serialised envelope, so 44 of these 100 characters went to
+						// {"type":…,"status":…,"content":" before any output — and a 74-byte
+						// result came out stamped "..." as though it had been cut. The
+						// reframe then read that marker and told the next stage the data
+						// was incomplete.
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "OK", fmt.Sprintf("%s: %s", node.ToolName, Text.TruncateLog(nodeEvidence(node, comp), 100)))
 					}
 				}
 				log.Printf("[dag] node %s (%s) resolved (%d bytes): %s",
@@ -2072,6 +2137,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 					query = d["query"]
 				}
 			}
+			query = chatQuery(trigger)
 			if query != "" {
 				chatPrompt := a.soulPrompt
 				if graph != nil && graph.Context != nil {
@@ -2089,14 +2155,32 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 				}
 				chatPrompt += "\n\nThis turn is a quick conversational reply — no tools were invoked because the request was classified as chat. If the user is actually asking for an action (run X, fetch Y, build Z, fix this, find that, compute, search, edit a file, restart a service, anything imperative), do NOT refuse on the basis that you can't execute tools. The full toolchain (compute, file_*, bash, web_*, service, edit_file, etc.) IS available — the next turn will route through it. Acknowledge what they're asking for, restate it as an actionable request, and tell them to confirm so the next turn can run it. Never say 'I cannot execute code' or 'I have no tools' — that is false in this system."
 				chatPrompt += "\n\n## Output format\n" + a.FormatRule()
-				resp, llmErr := a.completeHeavy(dagCtx, &llm.ChatRequest{
-					Messages:    BuildMessagesWithHistory(chatPrompt, query, trigger.History),
-					Temperature: a.cfg.Temperature,
-					MaxTokens:   a.cfg.MaxTokens,
-				})
-				if llmErr == nil && len(resp.Choices) > 0 {
+
+				// The answer, as a node. Same call as before; it now has a place
+				// on the graph, which is what gives an interjection somewhere to
+				// land and a trace something to show.
+				answer, chatID, llmErr := a.runChatNode(dagCtx, trigger, graph, query, chatPrompt)
+				if llmErr == nil {
+					// A steer typed while that answer was being written. Recorded
+					// beside the chat node and handed to the aggregator, which
+					// writes the reply the user actually reads — the reflector's
+					// outcome is a capped summary, right for a status line and
+					// wrong for an answer (see chat.go, which forces agg_mode 2
+					// on escalation for the same reason).
+					//
+					// No interjection is the common case and costs nothing extra:
+					// the chat node's own answer is returned as it always was.
+					if msg, ok := pendingInterjection(dagCtx); ok {
+						addInterjectionNode(graph, msg)
+						if coordinated, aggErr := a.coordinateChatAnswer(dagCtx, trigger, graph, resolvedChatIntent(trigger), query, answer, msg); aggErr == nil && coordinated != "" {
+							answer = coordinated
+						} else if aggErr != nil {
+							log.Printf("[dag] chat lane: coordinating the interjection failed, answering without it: %v", aggErr)
+						}
+					}
+					_ = chatID
 					// notrecorded: answered without planning — see TestEveryRunExitRecords
-					return &SyncResult{Outcome: resp.Choices[0].Message.Content}, nil
+					return &SyncResult{Outcome: answer}, nil
 				}
 			}
 			// notrecorded: answered without planning — see TestEveryRunExitRecords
@@ -2207,6 +2291,12 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	}
 
 	elapsed := time.Since(startTime)
+	// What the caps cut, when any did. Silence means the run was not starved,
+	// which is the answer worth having — a cap that never fires costs nothing
+	// however small it looks.
+	if report := graph.CapReport(); report != "" {
+		log.Printf("[dag] caps: %s", report)
+	}
 	log.Printf("[dag] sync run complete in %s (id=%s, nodes=%d, llm=%d)",
 		elapsed.Round(time.Millisecond), trigger.ID, graph.NodeCount(), budget.LLMCount())
 
@@ -2255,6 +2345,55 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 // tried and could not. Both mark the node failed, and only the second is worth
 // a repair. Telling them apart needs a status of its own, which is a change
 // across every tool in this engine and in whatever embeds it.
+/*
+ * retryGaveUp is the completion a retry sends when it will not, or could not,
+ * repair the step.
+ * desc: Two jobs. It never reports success — a retry that declines has not made
+ *       the step work — and it carries back what the tool DID produce, which the
+ *       old bail-out dropped by sending the node id and an error alone.
+ *
+ *       It used to also fold in a failure reported in the tool's result, because
+ *       comp.Err was nil on exactly the path that reached here. completionOf now
+ *       rolls that up where the tool's outcome is packed, so by the time a
+ *       completion exists its failure is in one place. The guard below stays as
+ *       the floor: reporting nil here is what turned a failed step into a
+ *       successful one, and it is worth making impossible rather than unlikely.
+ * param: comp - the completion that arrived at the retry.
+ * return: the same completion, with a failure that is never nil.
+ */
+func retryGaveUp(comp nodeCompletion) nodeCompletion {
+	err := comp.Err
+	if err == nil {
+		err = errors.New("the step did not succeed and no repair was possible")
+	}
+	return nodeCompletion{NodeID: comp.NodeID, Err: err, Body: comp.Body, Result: comp.Result}
+}
+
+/*
+ * toolReportedFailure reports whether a tool said it failed in its result.
+ * desc: Reads the status a typed tool sets, which is how a tool reports a
+ *       failure it recognised rather than one that stopped it running. Called
+ *       once, by completionOf, so the answer is rolled into the completion and
+ *       no later stage has to know there were ever two places to look.
+ * param: comp - the completion to inspect.
+ * return: the failure and true, or nil and false.
+ */
+// nodeEvidence is what a step produced as text, for a human-facing line.
+// Falls back to the raw result for a body that has none.
+func nodeEvidence(n *Node, comp nodeCompletion) string {
+	if n != nil && n.Body != nil {
+		if e := n.Body.Evidence(); e != "" {
+			return e
+		}
+	}
+	if comp.Body != nil {
+		if e := comp.Body.Evidence(); e != "" {
+			return e
+		}
+	}
+	return comp.Result
+}
+
 func toolReportedFailure(comp nodeCompletion) (error, bool) {
 	tb, ok := comp.Body.(toolMessageBody)
 	if !ok {
@@ -2380,7 +2519,8 @@ func retryDetail(n *Node, fallback string) string {
 }
 
 // classifyRetryTier determines what kind of retry (if any) is appropriate.
-// Returns "skip" (no retry), "blind" (rerun same command), or "oneshot" (LLM fix).
+// Returns "skip" (no retry), "blind" (rerun same command), or "twotime" (LLM fix,
+// up to two attempts — the second informed by how the first one failed).
 func classifyRetryTier(errMsg string) string {
 	lower := strings.ToLower(errMsg)
 
@@ -2417,22 +2557,54 @@ func classifyRetryTier(errMsg string) string {
 		}
 	}
 
-	// Tier 3: oneshot — everything else gets a cheap LLM fix attempt
-	return "oneshot"
+	// Tier 3: twotime — everything else gets up to two cheap LLM fix attempts
+	return "twotime"
 }
 
-// oneshotRetry fires a tiny executor LLM call to fix a failed command.
+/*
+ * retryBackoff is how long a blind retry should wait before rerunning.
+ * desc: Most of the blind tier is a condition that may already be gone — a
+ *       refused connection, a reset, a network blip — and rerunning at once is
+ *       right. Two of them are not: 429 and 503 are the other end saying it is
+ *       being asked for too much. Rerunning those immediately is the one thing
+ *       certain to fail, and it spends the node's single retry proving it.
+ *
+ *       Measured: a 429 from explorer.solana.com was reran 51ms later and
+ *       returned 429 again.
+ *
+ *       A fixed pause, not a growing one — there is only ever one retry per
+ *       node, so there is no sequence to back off along. Long enough to outlast
+ *       a per-second limit, short enough that a run waiting on it is still
+ *       answering.
+ * param: errMsg - the failure that classified as blind.
+ * return: how long to wait, or zero to rerun at once.
+ */
+func retryBackoff(errMsg string) time.Duration {
+	lower := strings.ToLower(errMsg)
+	for _, p := range []string{"rate limit", "http 429", "http 503", "too many requests"} {
+		if strings.Contains(lower, p) {
+			return 5 * time.Second
+		}
+	}
+	return 0
+}
+
+// twotimeRetry fixes a failed command with up to two executor LLM calls: the
+// first from the original error, the second from however that fix failed.
 // Context: just the command + error. No worklog, no blueprint, no evidence.
 // The LLM returns a fixed command which is gate-checked and re-executed.
-func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletion,
+func (a *Agent) twotimeRetry(ctx context.Context, node *Node, comp nodeCompletion,
 	graph *Graph, budget *Budget, ch chan nodeCompletion, errMsg string,
 	intent gates.Intent, scope *ResolvedScope) {
 
-	defer a.guardNodeCompletion("oneshotRetry", comp.NodeID, ch)
+	defer a.guardNodeCompletion("twotimeRetry", comp.NodeID, ch)
 
-	command, _ := node.Params["command"].(string)
+	// Through the graph, not the map: the retry below rewrites this parameter
+	// from its own goroutine while the trace reads it. See Graph.SetParam.
+	rawCommand, _ := graph.Param(node.ID, "command")
+	command, _ := rawCommand.(string)
 	if command == "" {
-		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}
+		ch <- retryGaveUp(comp)
 		return
 	}
 
@@ -2447,7 +2619,7 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 	// fail cleanly with the injection error if it genuinely can't resolve. No LLM.
 	if nodeTemplateRe.MatchString(command) {
 		if err := substituteTemplates(node, graph, a.registry); err != nil {
-			log.Printf("[dag] oneshot: %s has unresolved templates (dependency injection, not a shell fix): %v", node.ID, err)
+			log.Printf("[dag] twotime: %s has unresolved templates (dependency injection, not a shell fix): %v", node.ID, err)
 			ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("dependency injection failed: %w", err)}
 			return
 		}
@@ -2456,82 +2628,145 @@ func (a *Agent) oneshotRetry(ctx context.Context, node *Node, comp nodeCompletio
 		return
 	}
 
-	prompt := fmt.Sprintf("Command failed:\n%s\n\nError:\n%s\n\nReturn ONLY the fixed command, nothing else.", command, Text.TruncateLog(errMsg, 300))
+	// Two attempts, not one. The first fix is a guess from the error alone; if
+	// it runs and fails DIFFERENTLY, that new error is information the first
+	// attempt did not have, and a second fix built on it often lands. Asking the
+	// same question twice would not — temperature is 0, so an identical request
+	// returns an identical answer. It is the new error that makes the second
+	// attempt worth its call.
+	//
+	// Bounded at two: a third attempt has diminishing odds and unbounded retry
+	// on a shell command is how a run burns its budget on one broken step.
+	lastCmd, lastErr := command, errMsg
+	for attempt := 1; attempt <= shellFixAttempts; attempt++ {
+		fixed, ok := a.askShellFix(ctx, node.ID, node.Tag, lastCmd, lastErr)
+		if !ok {
+			break // no usable fix; fall through to the original error
+		}
 
+		// Gate-check the fixed command through the normal IGX path. A fix may
+		// be a bigger action than the command it replaces, and the tier that
+		// admitted the first one does not admit the second by inheritance.
+		graph.SetParam(node.ID, "command", fixed)
+		// The fixed command alone, rather than the node's live parameter map.
+		// It is what the gate is being asked about, and reading the map here
+		// would read a value another goroutine may be rendering.
+		fixedImpact := a.intentRegistry.ResolveToolIntent("bash", nil,
+			map[string]any{"command": fixed})
+		scopeCap := -1
+		if scope != nil {
+			if cap, ok := scope.MaxImpact["bash"]; ok {
+				scopeCap = cap
+			}
+		}
+		if gateErr := a.gate.CheckTriadWithScope(intent, "bash", fixedImpact, scopeCap); gateErr != nil {
+			log.Printf("[dag] shell fix blocked by gate: %v", gateErr)
+			graph.SetParam(node.ID, "command", command) // restore original
+			break
+		}
+
+		log.Printf("[dag] shell fix (attempt %d) %q → %q", attempt,
+			Text.TruncateLog(lastCmd, 80), Text.TruncateLog(fixed, 80))
+		appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "SHELL_FIX",
+			fmt.Sprintf("attempt %d: %s → %s", attempt,
+				Text.TruncateLog(lastCmd, 60), Text.TruncateLog(fixed, 60)))
+
+		// Resolve any ${node.<id>.field} templates before executing — exactly
+		// like the dispatcher — so a placeholder can never reach the shell.
+		if err := substituteTemplates(node, graph, a.registry); err != nil {
+			ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("dependency injection failed: %w", err)}
+			return
+		}
+
+		result, execErr := a.runBashParams(ctx, node)
+		if execErr == nil {
+			ch <- nodeCompletion{NodeID: comp.NodeID, Result: result}
+			return
+		}
+		// Failed again. Feed THIS error to the next attempt — the whole reason a
+		// second attempt is worth making.
+		lastCmd, lastErr = fixed, execErr.Error()
+		log.Printf("[dag] shell fix attempt %d still failed: %s", attempt,
+			Text.TruncateLog(lastErr, 120))
+	}
+
+	// Nothing landed. Report the ORIGINAL error: it describes the command the
+	// planner actually wrote, which is what a reader is looking for.
+	graph.SetParam(node.ID, "command", command)
+	ch <- retryGaveUp(comp)
+}
+
+// shellFixAttempts is how many times a failing shell command is rewritten and
+// re-run. Two: the first fix guesses from the original error, the second is
+// informed by how the first one failed.
+const shellFixAttempts = 2
+
+/*
+ * askShellFix asks the model for a corrected command.
+ * desc: One light-lane call. Returns the command and true, or false when
+ *       nothing usable came back — an empty reply, or one that reproduces the
+ *       command it was asked to fix.
+ * param: ctx - the run context.
+ * param: objective - what the step is for; the node's tag.
+ * param: command - the command that failed.
+ * param: errMsg - what it returned.
+ * return: the corrected command, and whether it is usable.
+ */
+func (a *Agent) askShellFix(ctx context.Context, nodeID, objective, command, errMsg string) (string, bool) {
+	// Traced like every other stage that reasons. Without this the retry was the
+	// one LLM call in a run that left no record: the prompt trace showed the
+	// command failing and then a different command succeeding, with nothing in
+	// between to say what was asked or why the answer looked like that.
+	ctx = withTrace(ctx, TraceID{
+		NodeID:   nodeID,
+		NodeType: "twotime",
+		Tag:      "shell fix",
+		Input: map[string]string{
+			"objective": objective,
+			"command":   command,
+			"error":     Text.TruncateLog(errMsg, 300),
+		},
+	})
 	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: "Fix the shell command based on the error. Return ONLY the corrected command, no explanation."},
-			{Role: "user", Content: prompt},
+			{Role: "system", Content: shellFixSystemPrompt},
+			{Role: "user", Content: shellFixPrompt(objective, command, errMsg)},
 		},
 		Temperature: 0.0,
 		MaxTokens:   256,
 	})
 	if err != nil || len(resp.Choices) == 0 {
-		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}
-		return
+		return "", false
 	}
-
-	fixed := strings.TrimSpace(resp.Choices[0].Message.Content)
-	fixed = strings.Trim(fixed, "`")
-	if strings.HasPrefix(fixed, "```") {
-		lines := strings.SplitN(fixed, "\n", 2)
-		if len(lines) > 1 {
-			fixed = strings.TrimSuffix(strings.TrimSpace(lines[1]), "```")
-		}
-	}
-
+	fixed := cleanShellFix(resp.Choices[0].Message.Content)
 	if fixed == "" || fixed == command {
-		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}
-		return
+		return "", false
 	}
-
-	log.Printf("[dag] oneshot fix: %q → %q", Text.TruncateLog(command, 80), Text.TruncateLog(fixed, 80))
-
-	// Gate-check the fixed command through normal IGX path
-	node.Params["command"] = fixed
-	fixedImpact := a.intentRegistry.ResolveToolIntent("bash", nil, node.Params)
-	scopeCap := -1
-	if scope != nil {
-		if cap, ok := scope.MaxImpact["bash"]; ok {
-			scopeCap = cap
-		}
-	}
-	if gateErr := a.gate.CheckTriadWithScope(intent, "bash", fixedImpact, scopeCap); gateErr != nil {
-		log.Printf("[dag] oneshot fix blocked by gate: %v", gateErr)
-		node.Params["command"] = command // restore original
-		ch <- nodeCompletion{NodeID: comp.NodeID, Err: comp.Err}
-		return
-	}
-
-	appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "ONESHOT_FIX", fmt.Sprintf("%s → %s", Text.TruncateLog(command, 60), Text.TruncateLog(fixed, 60)))
-
-	// Resolve any ${node.<id>.field} templates before executing — exactly like
-	// the dispatcher — so a placeholder can never reach the shell. (The LLM fix
-	// shouldn't introduce one, but this keeps the retry path consistent with
-	// normal dispatch and closes the leak for good.)
-	if err := substituteTemplates(node, graph, a.registry); err != nil {
-		ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("dependency injection failed: %w", err)}
-		return
-	}
-	a.execBashParams(ctx, node, comp, ch)
+	return fixed, true
 }
 
 // execBashParams runs the bash tool with the node's current params (same path as
-// normal dispatch) and reports the outcome. Shared by the oneshot retry paths.
+// normal dispatch) and reports the outcome. Shared by the retry paths.
 func (a *Agent) execBashParams(ctx context.Context, node *Node, comp nodeCompletion, ch chan nodeCompletion) {
-	sk, ok := a.registry.Get("bash")
-	if !ok {
-		ch <- nodeCompletion{NodeID: comp.NodeID, Err: fmt.Errorf("bash tool not found")}
-		return
-	}
-	result, execErr := sk.(interface {
-		Execute(context.Context, map[string]any) (string, error)
-	}).Execute(ctx, node.Params)
+	result, execErr := a.runBashParams(ctx, node)
 	if execErr != nil {
 		ch <- nodeCompletion{NodeID: comp.NodeID, Err: execErr}
 	} else {
 		ch <- nodeCompletion{NodeID: comp.NodeID, Result: result}
 	}
+}
+
+// runBashParams runs the bash tool and RETURNS the outcome instead of reporting
+// it. Separated from execBashParams so a caller that wants to act on a failure —
+// the second fix attempt — can see it without racing the completion channel.
+func (a *Agent) runBashParams(ctx context.Context, node *Node) (string, error) {
+	sk, ok := a.registry.Get("bash")
+	if !ok {
+		return "", fmt.Errorf("bash tool not found")
+	}
+	return sk.(interface {
+		Execute(context.Context, map[string]any) (string, error)
+	}).Execute(ctx, node.Params)
 }
 
 // graftComputeExecution wires an execute bash node — the one that runs the
@@ -2598,3 +2833,83 @@ func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd 
 
 // Dispatcher functions (fireNode, resolveInjections, extractJSONField,
 // executeToolNode, toolThrottle) are in dispatcher.go.
+
+// shellFixSystemPrompt asks for a corrected command and nothing else.
+//
+// The objective is included because a command that no longer serves the goal is
+// not a fix: `find / -name x` failing on permission errors can be "fixed" into
+// `find /tmp -name x`, which succeeds and answers a different question.
+const shellFixSystemPrompt = `Fix the shell command based on the error.
+
+You are given a JSON object with three fields: the objective the command
+serves, the command that ran, and the result it produced.
+Return ONLY the corrected command — no JSON, no explanation, no code fence.
+
+The fix must still serve the objective. A command that succeeds by doing
+something narrower or different is not a fix. If the error cannot be fixed by
+changing the command — a permission, a missing host, a network failure — return
+the command unchanged.`
+
+/*
+ * shellFixPrompt renders what the model is shown, as objective/command/result.
+ * desc: The same three things every time, in the same order, so the reply's
+ *       shape is predictable. Extracted from the retry path so it can be tested
+ *       without a model.
+ * param: objective - what the step is for; the node's tag. May be empty.
+ * param: command - the command that failed.
+ * param: errMsg - what it returned; truncated, as the caller's budget requires.
+ * return: the user message.
+ */
+func shellFixPrompt(objective, command, errMsg string) string {
+	obj := strings.TrimSpace(objective)
+	if obj == "" {
+		obj = "(not stated)"
+	}
+	b, err := json.Marshal(shellFixRequest{
+		Objective: obj,
+		Command:   command,
+		Result:    Text.TruncateLog(errMsg, 300),
+	})
+	if err != nil {
+		// Marshalling three strings cannot realistically fail, but a prompt is
+		// worth more than an error here: fall back to the labelled form rather
+		// than send nothing.
+		return fmt.Sprintf("Objective:\n%s\n\nCommand:\n%s\n\nResult:\n%s",
+			obj, command, Text.TruncateLog(errMsg, 300))
+	}
+	return string(b)
+}
+
+// shellFixRequest is what the fixer is shown: what the step is FOR, what was
+// RUN, and what came BACK. Named fields in a fixed order so the reply's shape
+// is predictable, and the same three the tool-side repair would use.
+type shellFixRequest struct {
+	Objective string `json:"objective"`
+	Command   string `json:"command"`
+	Result    string `json:"result"`
+}
+
+/*
+ * cleanShellFix reduces a model reply to a bare command.
+ * desc: Strips a fence or stray backticks the instruction asked it not to send,
+ *       and takes the first line — a reply that explains itself puts the command
+ *       first. Extracted so the shapes a model actually returns can be tested.
+ * param: raw - the reply.
+ * return: the command, or empty when nothing usable came back.
+ */
+func cleanShellFix(raw string) string {
+	s := strings.TrimSpace(raw)
+	if strings.HasPrefix(s, "```") {
+		if _, rest, ok := strings.Cut(s, "\n"); ok {
+			s = rest
+		}
+		if i := strings.LastIndex(s, "```"); i >= 0 {
+			s = s[:i]
+		}
+	}
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(strings.Trim(strings.TrimSpace(s), "`"))
+}

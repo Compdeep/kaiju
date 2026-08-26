@@ -96,6 +96,48 @@ func (b toolMessageBody) envelopeField(path string) (any, bool) {
 	return nil, false
 }
 
+// Payload is the tool's own fields, as data.
+//
+// The declared payload, not the envelope: a stage receiving this wants what
+// THIS tool returned, and the envelope's four keys are the same on every tool.
+// Long string values are cut and every key, every nesting level and every list
+// length is kept — which field exists must not depend on how much text one of
+// them happens to hold.
+//
+// Nil when the tool declared no payload. Such a tool carries its whole result
+// in content, and Evidence is where content lives.
+func (b toolMessageBody) Payload() json.RawMessage {
+	out, _ := b.payloadWithin(payloadWholeChars)
+	return out
+}
+
+// payloadWithin is Payload with the cap named, for the caller that knows which
+// model will read it. NodeBody has no agent to ask, so the interface method
+// uses the compiled floor and a Graph passes the deployment's scaled one.
+//
+// The second return is what the payload needed. Over the cap the payload is
+// dropped whole rather than cut — half a JSON object is not a smaller answer,
+// it is a broken one — and dropping it is the largest loss any cap inflicts, so
+// the size it needed goes back to the caller for the tally rather than
+// vanishing with it.
+func (b toolMessageBody) payloadWithin(cap int) (json.RawMessage, int) {
+	if len(b.msg.Data) == 0 {
+		return nil, 0
+	}
+	var whole any
+	if err := json.Unmarshal(b.msg.Data, &whole); err != nil {
+		return nil, 0
+	}
+	out, err := json.Marshal(shortenPayloadValues(whole, payloadValueChars))
+	if err != nil {
+		return nil, 0
+	}
+	if len(out) > cap {
+		return nil, len(out)
+	}
+	return out, len(out)
+}
+
 // Evidence renders what a downstream LLM node should see: content when present,
 // an explicit absence/failure line otherwise, falling back to the raw payload
 // for pure-data tools.
@@ -174,13 +216,21 @@ func (b toolMessageBody) handleLine() string {
 		if !ok || v == "" {
 			continue
 		}
-		// Both the value and the way to reference it. The value, because a
-		// stage that cannot see the real path invents a plausible one — that is
-		// what happened, and the step after it failed on a file that was never
-		// there. The reference form, because wiring it is what survives a
-		// re-plan, while a path copied out of prose is a literal that goes stale.
-		line := fmt.Sprintf("\n\n[%s: %s — %s. Reference it as ${step.N.%s} in a later step.]",
-			f.key, f.says, v, f.key)
+		// The value, and only the value.
+		//
+		// It used to carry an instruction too — "Reference it as
+		// ${step.N.<field>} in a later step" — with a literal N, because the
+		// tool writing the line does not know its own step number. Five stages
+		// read this text and only the planner can act on that instruction. The
+		// reflector followed it anyway: it filled in the one name it had, the
+		// node's tag, and wrote ${step.fetch_txs_page.full_content_path} into
+		// its summary. That reached the next plan as prose, resolved to
+		// nothing, and the planner invented /mnt/data/fetch_solscan_content.txt
+		// while the real file sat in fetched/ the whole time.
+		//
+		// A stage that needs to wire this reads the field name from the tool
+		// index, which carries it with the step number the plan actually has.
+		line := fmt.Sprintf("\n\n[%s: %s — %s]", f.key, f.says, v)
 		if cut, _ := payload[truncatedFlagFor(f.key)].(bool); cut {
 			line += "\n[it holds the beginning of what was produced, not all of it]"
 		}

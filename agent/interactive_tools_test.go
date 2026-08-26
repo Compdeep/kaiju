@@ -15,6 +15,19 @@ import (
 
 type plainTool struct{ name string }
 
+// wordyTool costs a stated number of characters in the planner's index, so a
+// budget can be exhausted by a handful of tools rather than by hundreds.
+type wordyTool struct{ name, desc string }
+
+func (w *wordyTool) Name() string              { return w.name }
+func (w *wordyTool) Description() string       { return w.desc }
+func (*wordyTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
+func (*wordyTool) Impact(map[string]any) int   { return 0 }
+func (*wordyTool) RequiresTarget() bool        { return false }
+func (*wordyTool) Execute(context.Context, map[string]any) (string, error) {
+	return "", nil
+}
+
 func (p *plainTool) Name() string              { return p.name }
 func (*plainTool) Description() string         { return "a tool" }
 func (*plainTool) Parameters() json.RawMessage { return json.RawMessage(`{}`) }
@@ -50,7 +63,7 @@ func has(list []string, name string) bool {
 }
 
 func TestInteractiveToolsAreOfferedWhenSomeoneIsThere(t *testing.T) {
-	got := agentWithTools(t).relevantTools(context.Background(), Trigger{Type: "chat_query"})
+	got := agentWithTools(t).relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "list some records")
 	if !has(got, "raise_ticket") {
 		t.Errorf("a human-only tool was withheld from an attended run: %v", got)
 	}
@@ -60,8 +73,8 @@ func TestInteractiveToolsAreOfferedWhenSomeoneIsThere(t *testing.T) {
 }
 
 func TestInteractiveToolsAreWithheldFromUnattendedRuns(t *testing.T) {
-	got := agentWithTools(t).relevantTools(context.Background(),
-		Trigger{Type: "event", ExecutionMode: "autonomous"})
+	got := agentWithTools(t).relevantTools(context.Background(), nil,
+		Trigger{Type: "event", ExecutionMode: "autonomous"}, "list some records")
 	if has(got, "raise_ticket") {
 		t.Errorf("a human-only tool was offered to an unattended run: %v", got)
 	}

@@ -157,7 +157,7 @@ Output is validated by `validatePlanSteps`:
 - Unknown tool names → the step is dropped with a log line.
 - All gaps, no valid tools → `ExecutiveConversationalError` surfaces the gap text to the user.
 
-Broken `${step.N.field}` wiring is caught separately by `validatePlanEdges` *before* the plan runs — one re-plan carrying the exact fault, rather than a doomed run. It sits alongside the parse-fail and hallucinated-tool retries as an executive repair round; see [Edges — anti-fabrication layer](#edges--anti-fabrication-layer).
+Broken `${step.N.field}` wiring is caught separately by `validatePlanReferences` *before* the plan runs — one re-plan carrying the exact fault, rather than a doomed run. It sits alongside the parse-fail and hallucinated-tool retries as an executive repair round; see [Edges — anti-fabrication layer](#edges--anti-fabrication-layer).
 
 **The Executive DOES re-plan.** When the reflector returns `replan`, the scheduler re-invokes `runExecutive` with a **replan frame** appended to the user query. That frame is a fresh sandbox: prior results have ALREADY FINISHED and are pasted into the worklog as literal DATA, so the new plan must reference those values *literally* (paste the actual URL/text) and set `depends_on: []` for anything already done. Crucially, `${step.N}` and `depends_on:[N]` indices in a replan are **plan-local** — they address only the NEW steps in *this* plan, never the concluded ones. `planStepsToNodes` / `rewriteStepTemplates` enforce this: an index that would point at a prior-frame node (or at the node itself) is left as an unresolved placeholder rather than wired into a dead/self edge (the old bug where a stale `depends_on:[0]` made a node wait on itself, get skipped, and re-plan the same fetch forever). If the replan move is to fix a failure, the frame instructs the Executive to plan a single `debug` step (a leaf) carrying the failure text.
 
@@ -305,11 +305,11 @@ Two of these — `coverageEdge` and `groundingEdge` — were removed. Each added
 
 What survives of them is what the scheduler reads rather than what a model was told. The block the reframe prepends reports what a run is holding and never followed, and the reflector decides what to do about it; nothing overrules that decision.
 
-- **`validatePlanEdges`** (`executive.go`) — runs at plan time, BEFORE any node fires, over every `${step.N.field}` reference in the plan. It rejects the three ways the planner mis-wires a hand-off, generically for any tool, from the declared output schemas:
+- **`validatePlanReferences`** (`executive.go`) — runs at plan time, BEFORE any node fires, over every `${step.N.field}` reference in the plan. It rejects the three ways the planner mis-wires a hand-off, generically for any tool, from the declared output schemas:
   - **self-reference** — a step reads its own output (`${step.i…}` inside step `i`); a step cannot consume itself.
   - **out-of-range** — the index points at a step the plan does not contain.
   - **wrong-producer** — a top-level field the producing tool never emits, classically `${step.N.results.0.url}` off a `web_fetch` when a `results[]` list only comes from `web_search`. Only a tool that DECLARES an output schema is checked, and only its top-level field (`fieldExistsInSchema`), so an incomplete deep schema can't false-reject.
-  Any broken edge becomes **one re-plan** carrying the exact fault as feedback, rather than a doomed run — a self/out-of-range ref would leak its literal placeholder into the tool (an "invalid URL …"), and a wrong-producer ref would dangle a dead edge the reflector then re-plans forever.
+  Any broken reference becomes **one re-plan** carrying the exact fault as feedback, rather than a doomed run — a self/out-of-range ref would leak its literal placeholder into the tool (an "invalid URL …"), and a wrong-producer ref would dangle a dead dependency the reflector then re-plans forever.
 
 
 - **`NeedsSynthesis` / `decideAutoAggMode`** — the aggregator-mode decision (see Aggregator above) is made at **preflight over structural signals**, not left to the model at the end. `NeedsSynthesis` is a preflight flag ("this run must end with a written synthesis"); a run also counts as *complex* when it structurally fanned out to ≥ `complexFanoutFloor` (6) resolved tool nodes. In auto mode (`agg_mode -1`), `decideAutoAggMode` then picks the lane purely over `{compute, complex, evidence, reflector-wants}`:
@@ -420,7 +420,7 @@ tool.Execute(ctx, n.Params)
 
 Substitution failures (referenced node not in graph, dep has no `Result`) fail the node with a descriptive error. Missing-field paths fall back to the whole `dep.Result` with a `[dispatch:resolve-fallback]` log line. Failures flow through the normal path: reflector `replan` → a `debug` step → Holmes → microplanner. No new recovery machinery.
 
-On a **replan**, `${step.N}` and `depends_on:[N]` indices are plan-local — they address only the NEW steps in that plan. `rewriteStepTemplates` leaves any out-of-range or self-referencing index as an unresolved placeholder (rather than wiring a dead/self edge), because a replan frequently emits a stale `depends_on:[0]` pointing at a prior-frame node this plan can't reach.
+On a **replan**, `${step.N}` and `depends_on:[N]` indices are plan-local — they address only the NEW steps in that plan. `rewriteStepTemplates` leaves any out-of-range or self-referencing index as an unresolved placeholder (rather than wiring a dead/self dependency), because a replan frequently emits a stale `depends_on:[0]` pointing at a prior-frame node this plan can't reach.
 
 Validation rules:
 

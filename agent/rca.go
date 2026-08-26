@@ -370,10 +370,10 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 
 	log.Printf("[dag] holmes iter %d/%d for %s (%d bytes)", state.Iter, state.MaxIter, sNode.Tag, len(userPrompt))
 
-	messages := []llm.Message{
-		{Role: "system", Content: sysPrompt},
-		{Role: "user", Content: userPrompt},
-	}
+	// What the arcs produced, as the calls that produced them. Holmes is
+	// looking for a cause, and a failure reaching it as {"error": …} beside the
+	// call that caused it says more than a sentence about a failure does.
+	messages := BuildMessagesWithResults(sysPrompt, userPrompt, nil, graph.Arcs())
 
 	holmesID := TraceID{
 		NodeID:   sNode.ID,

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 /*
@@ -23,9 +25,20 @@ type PreflightResult struct {
 	Mode               string       // "chat" | "agent"
 	Intent             gates.Intent // inferred intent rank from the registry (used when trigger intent is Auto)
 	RequiredCategories []string     // tool categories the plan must include (network/filesystem/compute/process/info)
-	Context            string       // one-line framing of the user's intent based on conversation history
-	ComputeMode        string       // "" (no compute / no opinion) | "shallow" | "deep" — authoritative for the planner
-	NeedsSynthesis     bool         // true ⇒ the run must end with the aggregator (a written synthesis), not a short reflector summary — set for deep/multi-source research and "build a section/report" tasks
+	// Context is what the run is about, and every concrete thing it needs.
+	//
+	// Framing is a sentence and belongs in one. Identifiers are not: a URL with
+	// query parameters, a selector, an exact constant. Those used to travel in
+	// the same paragraph, and the prompt asked in capital letters for them to
+	// be quoted verbatim into it — which is a rule about wording, enforced by
+	// nothing, on the only channel that carries them to a planner that cannot
+	// see the conversation.
+	//
+	// A field either holds a URL or it does not. There is nowhere to paraphrase
+	// one to.
+	Context        PreflightContext
+	ComputeMode    string // "" (no compute / no opinion) | "shallow" | "deep" — authoritative for the planner
+	NeedsSynthesis bool   // true ⇒ the run must end with the aggregator (a written synthesis), not a short reflector summary — set for deep/multi-source research and "build a section/report" tasks
 
 	// LackingContext is what the router asked to have looked up in the earlier
 	// messages, because answering needs something said before the part the model
@@ -52,17 +65,88 @@ The previous response this system gave to the user was:
 
 Use this context to identify what KIND of project is being worked on and pick appropriate skills. The project type tells you which skills are relevant. Do NOT use this to decide mode or intent — only the user's current query (the user message below) drives those decisions.`
 
+// PreflightContext is what a run is about, with the concrete things it needs
+// held apart from the words describing them.
+type PreflightContext struct {
+	Intent    string   `json:"intent" desc:"what the user wants, in a sentence or two"`
+	URLs      []string `json:"urls,omitempty" desc:"every URL the task needs, complete and character for character, query parameters included"`
+	Paths     []string `json:"paths,omitempty" desc:"every file or directory path the task names"`
+	Selectors []string `json:"selectors,omitempty" desc:"every HTML/CSS selector, table class, column name, API endpoint or field name the task names"`
+	Constants []string `json:"constants,omitempty" desc:"every exact rule or value the task states: a delay, a rounding, a threshold, a row to skip"`
+}
+
+// PreflightContextSchema is the shape preflight returns for context, derived
+// from the struct rather than written beside it — see RefSchema for why.
+func PreflightContextSchema() string { return toolapi.PayloadSchemaOf(PreflightContext{}) }
+
+// Text renders the context for a prompt: the framing, then each identifier on
+// its own line under a heading naming what kind it is.
+//
+// A reader gets the same information either way. What changes is that the
+// identifiers arrived as data, so none of them could be summarised away on the
+// journey.
+func (c PreflightContext) Text() string {
+	var sb strings.Builder
+	sb.WriteString(c.Intent)
+	for _, group := range []struct {
+		label string
+		items []string
+	}{
+		{"URLs", c.URLs},
+		{"Paths", c.Paths},
+		{"Selectors and field names", c.Selectors},
+		{"Exact values and rules", c.Constants},
+	} {
+		if len(group.items) == 0 {
+			continue
+		}
+		sb.WriteString("\n\n" + group.label + ":\n")
+		for _, item := range group.items {
+			sb.WriteString("- " + item + "\n")
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// Empty reports a context that says nothing.
+func (c PreflightContext) Empty() bool {
+	return strings.TrimSpace(c.Intent) == "" && len(c.URLs) == 0 &&
+		len(c.Paths) == 0 && len(c.Selectors) == 0 && len(c.Constants) == 0
+}
+
+// preflightContextRaw accepts both shapes while the model may send either: the
+// object, and the paragraph it used to send. A paragraph becomes the intent,
+// with no identifiers held apart — which is the old behaviour exactly, not a
+// failure.
+type preflightContextRaw struct {
+	PreflightContext
+}
+
+func (r *preflightContextRaw) UnmarshalJSON(b []byte) error {
+	var asObject PreflightContext
+	if err := json.Unmarshal(b, &asObject); err == nil {
+		r.PreflightContext = asObject
+		return nil
+	}
+	var asText string
+	if err := json.Unmarshal(b, &asText); err != nil {
+		return err
+	}
+	r.PreflightContext = PreflightContext{Intent: asText}
+	return nil
+}
+
 /*
  * preflightRaw mirrors the JSON shape emitted by the LLM. Parsed into PreflightResult.
  */
 type preflightRaw struct {
-	Skills             []string `json:"skills"`
-	Mode               string   `json:"mode"`
-	Intent             string   `json:"intent"`
-	RequiredCategories []string `json:"required_categories"`
-	Context            string   `json:"context"`
-	ComputeMode        string   `json:"compute_mode"`
-	NeedsSynthesis     bool     `json:"needs_synthesis"`
+	Skills             []string            `json:"skills"`
+	Mode               string              `json:"mode"`
+	Intent             string              `json:"intent"`
+	RequiredCategories []string            `json:"required_categories"`
+	Context            preflightContextRaw `json:"context"`
+	ComputeMode        string              `json:"compute_mode"`
+	NeedsSynthesis     bool                `json:"needs_synthesis"`
 }
 
 // mentionsLiveInventory reports whether the query asks about the actual plugins
@@ -315,7 +399,12 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 		Tools:       []llm.ToolDef{preflightToolDef()},
 		ToolChoice:  "required",
 		Temperature: 0.0,
-		MaxTokens:   256,
+		// Eight fields share this, and two of them are open-ended: context is
+		// Seven fields share this, and one of them is open-ended: context is
+		// told to quote every URL, path and selector verbatim. The cap is
+		// stated to the model (see stateBudget), so it is not only a limit but
+		// a length the reply is planned against.
+		MaxTokens: 2048,
 	})
 	if err != nil {
 		log.Printf("[dag] preflight failed, using defaults: %v", err)
@@ -328,14 +417,14 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 		traceFault(ctx, "no tool args returned")
 		return defaultPreflight()
 	}
-	var out preflightRaw
-	if err := ParseLLMJSON(raw, &out); err != nil {
+	out, err := parsePreflight(raw)
+	if err != nil {
 		log.Printf("[dag] preflight parse failed (%v), using defaults", err)
 		traceFault(ctx, "parse failed: "+err.Error())
 		return defaultPreflight()
 	}
 
-	return a.validatePreflight(&out)
+	return a.validatePreflight(out)
 }
 
 /*
@@ -430,8 +519,9 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 		}
 	}
 
-	// Context — pass through as-is (freeform text).
-	out.Context = strings.TrimSpace(raw.Context)
+	// Context — the framing and the identifiers it names.
+	out.Context = raw.Context.PreflightContext
+	out.Context.Intent = strings.TrimSpace(out.Context.Intent)
 
 	// ComputeMode — tri-state: "" | "shallow" | "deep". Unknown values drop
 	// to "" so the planner treats it as "no opinion" rather than guessing.
@@ -454,6 +544,54 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 }
 
 /*
+ * reconcileComputeIntent raises a rank that would forbid the compute preflight
+ * just asked for.
+ * desc: Preflight answers what a run NEEDS and what it is PERMITTED in one
+ *       call, and nothing checked the two against each other. It said "this
+ *       needs compute" and "this is read-only" together; the planner planned
+ *       the compute step it was told to, the gate refused it — correctly,
+ *       because read-only means no side effects — and the run lost the one
+ *       step that would have produced an answer.
+ *
+ *       A task that needs code run is not a read-only task, so the rank moves
+ *       to meet the requirement.
+ *
+ *       ONLY when the caller left the intent to this engine. A caller who
+ *       pinned a rank has said what the run may do, and preflight is not
+ *       entitled to a second opinion about it — see runIntentIsAuto. Where the
+ *       intent is pinned and the plan needs more, the run is refused before it
+ *       starts rather than adjusted; that is validatePlanIntent's job.
+ *
+ *       Asks the registry what compute costs rather than naming a number: the
+ *       ladder is the deployment's, and a rank written here would be a second
+ *       copy of it.
+ * param: trigger - what started the run, for whether the intent is the
+ *        caller's or this engine's to decide.
+ * param: pf - the result, adjusted in place.
+ */
+func (a *Agent) reconcileComputeIntent(trigger Trigger, pf *PreflightResult) {
+	if pf == nil || pf.ComputeMode == "" || a == nil || a.registry == nil || a.intentRegistry == nil {
+		return
+	}
+	if trigger.Intent() != gates.IntentAuto {
+		log.Printf("[dag] preflight asked for compute, but the caller pinned intent %s — leaving it",
+			trigger.Intent())
+		return
+	}
+	tool, ok := a.registry.Get(computeToolName)
+	if !ok {
+		return // a deployment without compute cannot be contradicted about it
+	}
+	needed := a.intentRegistry.ResolveToolIntent(computeToolName, tool, nil)
+	if int(pf.Intent) >= needed {
+		return
+	}
+	log.Printf("[dag] preflight asked for compute at intent %s, which forbids it — raising to rank(%d)",
+		pf.Intent, needed)
+	pf.Intent = gates.Intent(needed)
+}
+
+/*
  * defaultPreflight returns a neutral preflight result used when the LLM
  * call fails or returns garbage.
  * desc: Safe defaults: no skills, agent mode, rank 0 intent, no
@@ -461,6 +599,75 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
  *       hints were given.
  * return: neutral PreflightResult.
  */
+/*
+ * parsePreflight reads a preflight reply, keeping whatever fields are readable.
+ * desc: Unmarshalling into the struct is all-or-nothing, so one bad field takes
+ *       the whole reply — and with it the run's intent, its skills and its
+ *       compute mode, which then fall back to observe-only and gate every
+ *       compute step.
+ *
+ *       Observed: a model that answered mode and intent correctly on its first
+ *       two lines, then degenerated inside "context" forty lines later. All of
+ *       it was discarded, so a run that should have been allowed to write files
+ *       was refused.
+ *
+ *       So the object is taken apart first and each field read on its own. A
+ *       field that will not parse is dropped; the rest survive. Only a reply
+ *       that is not an object at all, or that carries no decision, is a failure.
+ * param: raw - the model's reply.
+ * return: what could be read, or an error when nothing could.
+ */
+func parsePreflight(raw string) (*preflightRaw, error) {
+	// Read the object one field at a time and stop where it breaks. Decoding the
+	// whole thing — into the struct OR into a map — is all-or-nothing: both walk
+	// to the end and both fail on the same bad byte, so neither keeps the fields
+	// that were already read correctly.
+	fields := map[string]json.RawMessage{}
+	dec := json.NewDecoder(strings.NewReader(CleanLLMJSON(raw)))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return nil, fmt.Errorf("preflight reply is not an object")
+	}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			break // the key itself is malformed; nothing further is readable
+		}
+		key, ok := t.(string)
+		if !ok {
+			break
+		}
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			break // this field is where it broke; keep what came before it
+		}
+		fields[key] = v
+	}
+	var out preflightRaw
+	// Every field is optional here. validatePreflight already decides what an
+	// absent one means, and that is the same question as a field that could not
+	// be read.
+	get := func(key string, into any) {
+		v, ok := fields[key]
+		if !ok || len(v) == 0 {
+			return
+		}
+		_ = json.Unmarshal(v, into)
+	}
+	get("mode", &out.Mode)
+	get("intent", &out.Intent)
+	get("skills", &out.Skills)
+	get("required_categories", &out.RequiredCategories)
+	get("context", &out.Context)
+	get("compute_mode", &out.ComputeMode)
+	get("needs_synthesis", &out.NeedsSynthesis)
+
+	// A reply that named neither is not a preflight result, however well formed.
+	if out.Mode == "" && out.Intent == "" {
+		return nil, fmt.Errorf("preflight reply carries neither mode nor intent")
+	}
+	return &out, nil
+}
+
 func defaultPreflight() *PreflightResult {
 	return &PreflightResult{
 		Mode:   "agent",

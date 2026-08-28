@@ -352,10 +352,25 @@ func cleanTerms(in []string) []string {
 
 // routeContext returns a MINIMAL slice of chat history for the router: the running
 // "[Conversation summary]" system message (if compaction produced one) plus the
-// previous user↔assistant exchange, the assistant reply capped. History ends with
-// the CURRENT user message, so that last entry is dropped (it's passed separately
-// as the query). Enough to resolve terse follow-ups ("try again", "now compare
-// them") without bloating a 16-token classification.
+// previous user↔assistant exchange, the assistant reply capped. Enough to resolve
+// terse follow-ups ("try again", "now compare them") without bloating a 16-token
+// classification.
+//
+// Whether the current user message is already IN history depends on the caller,
+// and both orderings exist. The chat lane stores the message and then loads, so
+// history ends with it. The agent lane loads and then stores, so history ends with
+// the previous ASSISTANT reply.
+//
+// Assuming the first ordering dropped that reply on the agent path: the router was
+// handed two user messages in a row, a terse follow-up ("yeah, any of them") had
+// nothing left to refer to, and it read as conversation — so the run answered from
+// the chat lane and never reached the planner.
+//
+// The trailing message is therefore dropped only when it IS a user message.
+// Checking the role, rather than comparing against the query, is what keeps this
+// right for a turn carrying attachments: the stored message has had the
+// "[attached files]" preamble stripped and the query still carries it, so the two
+// do not compare equal.
 func routeContext(history []llm.Message) []llm.Message {
 	if len(history) <= 1 {
 		return nil
@@ -367,7 +382,10 @@ func routeContext(history []llm.Message) []llm.Message {
 			break
 		}
 	}
-	prior := history[:len(history)-1] // drop the current user message
+	prior := history
+	if history[len(history)-1].Role == "user" {
+		prior = history[:len(history)-1] // ends with the current user message
+	}
 	start := len(prior) - 2
 	if start < 0 {
 		start = 0

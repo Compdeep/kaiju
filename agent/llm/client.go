@@ -348,6 +348,15 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 		resp, err = c.completeAnthropic(ctx, req)
 	} else {
 		resp, err = c.completeOpenAI(ctx, req)
+		// A model behind this endpoint that has no structured-output support
+		// rejects the rewrite outright. Put the request back the way the caller
+		// wrote it and send it once more: the rewrite buys enforcement, and it
+		// must never cost a stage the ability to run at all.
+		if replaced != nil && rejectsSchemas(err) {
+			asToolRequestAgain(req, replaced)
+			replaced = nil
+			resp, err = c.completeOpenAI(ctx, req)
+		}
 	}
 	// Single token-accounting chokepoint: every non-streamed LLM call for both
 	// providers passes through here, and the ctx carries the (category,

@@ -81,7 +81,7 @@ func TestAStepWhoseDependencyFailedIsSkippedNotFailed(t *testing.T) {
 				"params": map[string]any{"filter": "${step.0.output}"},
 			},
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "the listing failed"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "the listing failed"}},
 	})
 	a := agentWithCompute(t, model, broken, reader)
 

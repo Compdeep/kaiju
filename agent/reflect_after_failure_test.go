@@ -45,7 +45,7 @@ func TestAReflectionFiresAfterTheOnlyStepIsRefused(t *testing.T) {
 		"plan": plan(step("web_fetch", "fetch_tx_page", map[string]any{
 			"url": "https://etherscan.io/",
 		})),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentWithCompute(t, model, tool)
 
@@ -61,7 +61,7 @@ func TestAReflectionFiresAfterTheOnlyStepIsRefused(t *testing.T) {
 		t.Logf("  node %v %v %v", n["type"], n["tag"], n["state"])
 	}
 
-	if model.callsTo("submit_decision") == 0 {
+	if model.callsTo("reflector_decision") == 0 {
 		t.Error("the reflector never ran, so nothing decided whether a refused source " +
 			"was the end of the search — the run concluded by omission")
 	}

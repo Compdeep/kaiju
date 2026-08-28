@@ -1,6 +1,9 @@
 package llm
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Asking the provider to hold the model to the schema.
 //
@@ -50,6 +53,17 @@ type JSONSchema struct {
  *       this engine says "reply in this form". Many tools is the opposite — the
  *       ReAct loop offering what it can do — and converting that would take away
  *       the model's choice of which to call, which is the entire point of it.
+ *
+ *       "Made to call it" has two spellings. tool_choice "required" is one, and
+ *       with a single tool bound it can mean nothing else. Naming that same tool
+ *       — ForceToolChoice — is the other, and it says MORE, not less: call this
+ *       one, by name. The executive spells it that way, to stop a weak model
+ *       answering the plan request with a direct web_search call.
+ *
+ *       Reading only the string missed it, so the stage with the largest schema
+ *       in the engine — the one every other stage plans from — was the only one
+ *       left on unenforced tool calling. Nobody decided that; it fell out of a
+ *       type assertion.
  * param: req - the outgoing request.
  * return: true when the request is a schema in tool clothing.
  */
@@ -57,8 +71,12 @@ func asksForOneShape(req *ChatRequest) bool {
 	if req == nil || len(req.Tools) != 1 || req.ResponseFormat != nil {
 		return false
 	}
-	choice, _ := req.ToolChoice.(string)
-	return choice == "required"
+	if choice, ok := req.ToolChoice.(string); ok {
+		return choice == "required"
+	}
+	// A pin naming some OTHER tool is not this request's shape, so match the
+	// name rather than accepting any forced call.
+	return forcedToolName(req.ToolChoice) == req.Tools[0].Function.Name
 }
 
 /*
@@ -124,6 +142,18 @@ func asToolReply(resp *ChatResponse, tool *ToolDef) {
 		Function: FunctionCall{Name: tool.Function.Name, Arguments: c.Message.Content},
 	}}
 	c.Message.Content = ""
+	// The reason travels with the call. A caller does not read ToolCalls on its
+	// own — it asks whether a tool was called at all, and on this wire the
+	// provider says "stop" because no tool was offered. Moving the arguments and
+	// leaving the reason behind makes a reply that carries a tool call and
+	// denies having one, which every such caller reads as prose.
+	//
+	// "length" is left alone: that reply was cut off mid-JSON, and a stage that
+	// asks for a shorter plan on seeing it must keep seeing it. Rewriting it
+	// here would hand the fragment to the parser as a whole plan.
+	if c.FinishReason != "length" {
+		c.FinishReason = "tool_calls"
+	}
 }
 
 /*
@@ -205,4 +235,45 @@ func keysOf(m map[string]any) []string {
 		}
 	}
 	return out
+}
+
+/*
+ * asToolRequestAgain puts a converted request back the way the caller wrote it.
+ * desc: Not every model behind an OpenAI-compatible endpoint implements
+ *       response_format. Kimi-K2 through Novita answers "model features
+ *       structured outputs not support" with a 400, and a stage whose request
+ *       was rewritten here would fail on a model it used to work on — the
+ *       rewrite is an optimisation, and an optimisation must not take
+ *       capability away.
+ *
+ *       So the 400 is read, not predicted. A capability list would have to be
+ *       maintained against every model on every provider, and would be wrong
+ *       the day either changes; the provider already knows the answer and says
+ *       so. One retry, on the wire the caller originally asked for.
+ * param: req - the rewritten request, restored in place.
+ * param: tool - the tool that was replaced, from asSchemaRequest.
+ */
+func asToolRequestAgain(req *ChatRequest, tool *ToolDef) {
+	if req == nil || tool == nil {
+		return
+	}
+	req.ResponseFormat = nil
+	req.Tools = []ToolDef{*tool}
+	req.ToolChoice = ForceToolChoice(tool.Function.Name)
+}
+
+// rejectsSchemas reports whether an error is the provider saying this model has
+// no structured-output support — as opposed to a schema this model would accept
+// but the request got wrong, which a retry would not fix.
+func rejectsSchemas(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "400") {
+		return false
+	}
+	return strings.Contains(msg, "structured output") ||
+		strings.Contains(msg, "response_format") ||
+		strings.Contains(msg, "json_schema")
 }

@@ -760,6 +760,21 @@ var skipDirs = map[string]bool{
 	"dist": true, ".nuxt": true, ".services": true,
 }
 
+// skipAtRoot are directories skipped at the top of the workspace only.
+//
+// The agent keeps its own state beside the user's files, and a listing of the
+// workspace is meant to describe the second. sessions/ holds one directory per
+// conversation this deployment has ever had — measured at 283 on one install,
+// against a scan capped at 120 entries. Breadth-first, they were reached before
+// anything a person put there, so the planner's whole picture of the workspace
+// was a list of conversation ids and a note that more files existed.
+//
+// At the root only, because "sessions" is a name a real project may use for its
+// own directory, and skipDirs matches at every depth.
+var skipAtRoot = map[string]bool{
+	"sessions": true,
+}
+
 // dirEntry is a file or directory discovered during scanning.
 type dirEntry struct {
 	Rel   string // relative path from root
@@ -778,7 +793,7 @@ func scanDir(root, rel string) (dirs []dirEntry, files []dirEntry) {
 		name := e.Name()
 		childRel := filepath.Join(rel, name)
 		if e.IsDir() {
-			if strings.HasPrefix(name, ".") || skipDirs[name] {
+			if strings.HasPrefix(name, ".") || skipDirs[name] || (rel == "" && skipAtRoot[name]) {
 				continue
 			}
 			dirs = append(dirs, dirEntry{Rel: childRel, IsDir: true})
@@ -1634,7 +1649,16 @@ func fixComputeStepParams(raw string) string {
 		if toolName != "compute" {
 			continue
 		}
+		// params may be an object or a string holding one — see
+		// unwrapStringParams. Read as a string it would look absent, and the
+		// write-back below would then replace the planner's parameters with an
+		// empty object.
 		params, _ := step["params"].(map[string]any)
+		if params == nil {
+			if asString, isString := step["params"].(string); isString && strings.TrimSpace(asString) != "" {
+				_ = json.Unmarshal([]byte(asString), &params)
+			}
+		}
 		if params == nil {
 			params = make(map[string]any)
 		}

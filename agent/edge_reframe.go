@@ -233,12 +233,33 @@ func stepLabel(n *Node) string {
  * param: ctx - the run's context.
  * param: graph - the run so far.
  * param: request - what was asked, as the calling stage renders it.
- * param: reader - what the reading stage is about to do, as a verb phrase
- *        completing "a stage that is about to …".
+ * param: edge - which briefing this is: the section that writes it and the
+ *        name it is traced under. See ReframeEdge.
  * return: the block to prepend, or "" when nothing has run.
  */
-func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request, reader string) string {
-	material := a.reframeMaterial(ctx, graph, request)
+// ReframeEdge is one edge's briefing: the prompt that writes it, and the name
+// it is recorded under.
+//
+// One prompt per edge rather than one prompt with the reader's name substituted
+// into it. The three readers want different things of the same run — the
+// reflector a verdict it can act on, the planner what is missing and what would
+// obtain it, the writer what the evidence will not support — and a single
+// paragraph reworded three ways served the first of them and was carried by the
+// other two.
+type ReframeEdge struct {
+	Name   string // what this edge is called in the trace
+	Prompt string // the section that writes it
+}
+
+// The three edges. Each names the section in prompts.md that belongs to it.
+var (
+	ReframeToPlanner   = ReframeEdge{Name: "plan", Prompt: prompt.ReframePlan}
+	ReframeToReflector = ReframeEdge{Name: "reflect", Prompt: prompt.ReframeReflect}
+	ReframeToAnswer    = ReframeEdge{Name: "answer", Prompt: prompt.ReframeAnswer}
+)
+
+func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, edge ReframeEdge) string {
+	material := a.reframeMaterial(ctx, graph, request, edge)
 	if material == "" {
 		return "" // nothing has run; there is no situation to describe
 	}
@@ -254,8 +275,8 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request, reader s
 	// away a good paragraph and fall back to the bare material.
 	resp, err := a.ask(withTrace(ctx, TraceID{
 		NodeType: "reframe",
-		Tag:      "reframe",
-		Input:    map[string]string{"reader": reader},
+		Tag:      "reframe:" + edge.Name,
+		Input:    map[string]string{"edge": edge.Name},
 	}), Light, &llm.ChatRequest{
 		// The arcs, not only the prose about them. This stage carries: it takes
 		// what the nodes produced and forms it for the next one to read, and its
@@ -268,7 +289,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request, reader s
 		// The arcs are what let it check that summary against what actually came
 		// back.
 		Messages: BuildMessagesWithResults(
-			fmt.Sprintf(prompt.Reframe, reader), material, nil, graph.Arcs()),
+			edge.Prompt, material, nil, graph.Arcs()),
 		Temperature: 0.2,
 		MaxTokens:   a.replyBudget(replyEdgeBudget),
 	})
@@ -277,8 +298,8 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request, reader s
 	// through is exactly the case a reader of these records wants to see — see
 	// debugrecord.go.
 	rec := DebugRecord{
-		ID: "reframe:" + reader, Kind: "edge", Label: reader, Round: graph.Round(),
-		System: fmt.Sprintf(prompt.Reframe, reader), User: material,
+		ID: "reframe:" + edge.Name, Kind: "edge", Label: edge.Name, Round: graph.Round(),
+		System: edge.Prompt, User: material,
 	}
 	if err != nil || resp == nil || len(resp.Choices) == 0 ||
 		strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
@@ -306,10 +327,18 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request, reader s
  *
  *       A graph with no gate still yields the outcomes, read directly. That is
  *       the case a caller assembling a graph by hand is in.
- * param: ctx, graph, request - as EdgeReFrame.
+ *       The reflection is added for the answer edge alone, because that edge's
+ *       prompt says it is given one. A prompt naming an input the input does not
+ *       carry is the shape a model fills in for itself, and what it would be
+ *       inventing here is the run's own verdict.
+ *
+ *       Not on the other two. The reflector reading its own last decision is a
+ *       stage agreeing with itself, and the planner already has the reflector's
+ *       next move in the re-plan frame.
+ * param: ctx, graph, request, edge - as EdgeReFrame.
  * return: the material, empty when no step has ended.
  */
-func (a *Agent) reframeMaterial(ctx context.Context, graph *Graph, request string) string {
+func (a *Agent) reframeMaterial(ctx context.Context, graph *Graph, request string, edge ReframeEdge) string {
 	outcomes := ""
 	if graph != nil && graph.Context != nil {
 		resp, err := graph.Context.Get(ctx, ContextRequest{
@@ -349,7 +378,52 @@ func (a *Agent) reframeMaterial(ctx context.Context, graph *Graph, request strin
 	if strings.TrimSpace(outcomes) == "" {
 		return ""
 	}
+	if edge.Name == ReframeToAnswer.Name {
+		if r := latestReflection(graph); r != "" {
+			outcomes = strings.TrimSpace(outcomes) + "\n\nWHAT REFLECTION CONCLUDED:\n" + r
+		}
+	}
 	return "REQUEST:\n" + strings.TrimSpace(request) + "\n\n" + strings.TrimSpace(outcomes)
+}
+
+/*
+ * latestReflection renders the last reflection this run made.
+ * desc: The reflector's own account of where the run ended: what it decided,
+ *       why, and the outcome it wrote. It is the most authoritative statement
+ *       of what the run concluded — when the aggregator is skipped, the outcome
+ *       IS what the user reads — and the stage that writes the answer was not
+ *       being given it.
+ *
+ *       The last one, by creation order, because a run reflects once per round
+ *       and only the final decision ended it.
+ * param: graph - the run.
+ * return: the lines, empty when nothing reflected or the body carries nothing.
+ */
+func latestReflection(graph *Graph) string {
+	if graph == nil {
+		return ""
+	}
+	nodes := graph.ResolvedByType(NodeReflection)
+	for i := len(nodes) - 1; i >= 0; i-- {
+		body, ok := nodes[i].Body.(ReflectionBody)
+		if !ok {
+			continue
+		}
+		var sb strings.Builder
+		for _, line := range [][2]string{
+			{"decision", body.Out.Decision},
+			{"summary", body.Out.Summary},
+			{"outcome", body.Out.Outcome},
+		} {
+			if v := strings.TrimSpace(line[1]); v != "" {
+				sb.WriteString("- " + line[0] + ": " + v + "\n")
+			}
+		}
+		if sb.Len() > 0 {
+			return strings.TrimRight(sb.String(), "\n")
+		}
+	}
+	return ""
 }
 
 // reframeHeading opens the block. The reading stage's own prompt names it, so

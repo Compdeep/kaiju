@@ -62,8 +62,8 @@ func TestAToolThatFailsInItsEnvelopeIsStillRetried(t *testing.T) {
 			"command": "docker run --rm -it -v /:/host alpine cat /host/etc/shadow",
 		})),
 		// The fixer is called with no tools, so it answers as content.
-		"":                {Content: "docker run --rm -v /:/host alpine cat /host/etc/shadow"},
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"":                   {Content: "docker run --rm -v /:/host alpine cat /host/etc/shadow"},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentWithCompute(t, model, tool)
 
@@ -96,8 +96,8 @@ func TestTheFixerIsShownWhatTheStepActuallyReported(t *testing.T) {
 		"plan": plan(step("bash", "exploit_docker", map[string]any{
 			"command": "docker run --rm -it -v /:/host alpine cat /host/etc/shadow",
 		})),
-		"":                {Content: "docker run --rm -v /:/host alpine cat /host/etc/shadow"},
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"":                   {Content: "docker run --rm -v /:/host alpine cat /host/etc/shadow"},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentWithCompute(t, model, tool)
 

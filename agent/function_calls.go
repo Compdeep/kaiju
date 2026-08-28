@@ -64,11 +64,24 @@ func curatorToolDef() llm.ToolDef {
 	}
 }
 
+// reflectorToolDef is the reflection decision.
+//
+// progress carries "" as an enum member on purpose. The struct reads an absent
+// progress as "productive" (see ReflectionOutput) and the scheduler's streak
+// counter resets on anything that is not "diminishing" — both were written when
+// a field could simply be left out. Strict decoding closes the schema and marks
+// every property required, so nothing can be left out any more: without ""
+// present, a reflector with no view on the trend has to claim one, and the only
+// other thing it can claim is the value that ends a run after two of them.
+//
+// It is not offered in the prompt, which still asks for "productive" when
+// unsure. It is here so the schema permits what the Go on both sides already
+// handles.
 func reflectorToolDef() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
-			Name:        "submit_decision",
+			Name:        "reflector_decision",
 			Description: "Submit the reflection decision.",
 			Parameters: json.RawMessage(`{
 				"type": "object",
@@ -80,8 +93,8 @@ func reflectorToolDef() llm.ToolDef {
 					},
 					"progress": {
 						"type": "string",
-						"enum": ["productive", "diminishing"],
-						"description": "How the recent cycles are trending. Defaults to 'productive' if unsure. Two consecutive 'diminishing' batches downgrade replan→conclude; see prompt for rules."
+						"enum": ["", "productive", "diminishing"],
+						"description": "How the recent cycles are trending. Use 'productive' when unsure; '' is accepted and read the same way. Two consecutive 'diminishing' batches downgrade replan→conclude; see prompt for rules."
 					},
 					"summary": {
 						"type": "string",
@@ -127,7 +140,7 @@ func observerToolDef() llm.ToolDef {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string"},
-								"params": {"type": "object"},
+								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step: \"{\\\"url\\\": {\\\"step\\\": \\\"find_docs\\\", \\\"field\\\": \\\"results.0.url\\\"}}\"."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
 							}
@@ -173,7 +186,7 @@ func holmesToolDef() llm.ToolDef {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string", "description": "Tool name from the available tools list"},
-								"params": {"type": "object", "description": "Tool parameters wrapped as a key-value object. ALWAYS wrap inside params, never put fields at the action top level. Example for bash: {\"command\": \"cat .services/backend.err.log\"}. Example for service: {\"action\": \"logs\", \"name\": \"backend\", \"stream\": \"err\"}. Example for file_read: {\"path\": \"/path/to/file\"}. Example for process_list: {\"filter\": \"node\", \"limit\": 20}. Required params for the chosen tool MUST be present."}
+								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING. ALWAYS wrap them in params, never put fields at the action top level. Example for bash: \"{\\\"command\\\": \\\"cat .services/backend.err.log\\\"}\". Example for service: \"{\\\"action\\\": \\\"logs\\\", \\\"name\\\": \\\"backend\\\", \\\"stream\\\": \\\"err\\\"}\". Example for file_read: \"{\\\"path\\\": \\\"/path/to/file\\\"}\". Required params for the chosen tool MUST be present; write \"{}\" only for a tool that takes none."}
 							},
 							"required": ["tool", "params"]
 						}
@@ -233,7 +246,7 @@ func debuggerToolDef() llm.ToolDef {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string"},
-								"params": {"type": "object"},
+								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step: \"{\\\"url\\\": {\\\"step\\\": \\\"find_docs\\\", \\\"field\\\": \\\"results.0.url\\\"}}\"."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
 							}
@@ -337,12 +350,12 @@ func architectToolDef() llm.ToolDef {
 						"description": "Project root directory path, e.g. project/kaiju_webapp. All file paths, setup commands, service workdirs, and validators use this as their base."
 					},
 					"interfaces": {
-						"type": "object",
-						"description": "API contracts and types as a JSON object."
+						"type": "string",
+						"description": "API contracts and types, as a JSON object written INSIDE A STRING: \"{\\\"POST /api/todos\\\": {\\\"body\\\": {\\\"title\\\": \\\"string\\\"}}}\". Its keys are the endpoint and type names you are choosing, which is why it travels as a string. Write \"\" when the project defines none."
 					},
 					"schema": {
-						"type": "object",
-						"description": "Database schema as {type, tables}."
+						"type": "string",
+						"description": "Database schema as {type, tables}, as a JSON object written INSIDE A STRING: \"{\\\"type\\\": \\\"postgres\\\", \\\"tables\\\": {\\\"todos\\\": {\\\"id\\\": \\\"serial primary key\\\"}}}\". Write \"\" when the project has no database."
 					},
 					"setup": {
 						"type": "array",

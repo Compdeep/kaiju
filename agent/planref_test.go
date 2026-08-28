@@ -82,7 +82,7 @@ func TestResolveDeclaredRefs_DerivesTheDependency(t *testing.T) {
 	}
 	n := &Node{ID: "n2", Params: steps[1].Params}
 
-	deps := resolveDeclaredRefs(n, []string{"n1", "n2"}, steps)
+	deps := resolveDeclaredRefs(n, []string{"n1", "n2"}, steps, nil)
 
 	if len(deps) != 1 || deps[0] != "n1" {
 		t.Fatalf("dependency not derived from the reference: %v", deps)
@@ -103,7 +103,7 @@ func TestResolveDeclaredRefs_LeavesAnUnknownNameAlone(t *testing.T) {
 	}
 	n := &Node{ID: "n1", Params: steps[0].Params}
 
-	if deps := resolveDeclaredRefs(n, []string{"n1"}, steps); len(deps) != 0 {
+	if deps := resolveDeclaredRefs(n, []string{"n1"}, steps, nil); len(deps) != 0 {
 		t.Errorf("an unknown name produced a dependency: %v", deps)
 	}
 	if _, rewritten := n.Params["in"].(string); rewritten {

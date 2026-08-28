@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/Compdeep/kaiju/agent/prompt"
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
@@ -69,7 +71,7 @@ func TestARunPlansExecutesAndAnswers(t *testing.T) {
 			"mode": "agent", "intent": "observe", "skills": []string{},
 		}},
 		"plan": plan(step("process_list", "procs", nil)),
-		"submit_decision": {Args: map[string]any{
+		"reflector_decision": {Args: map[string]any{
 			"decision": "conclude", "summary": "two processes", "outcome": "two processes are running",
 		}},
 	})
@@ -101,8 +103,8 @@ func TestPreflightRunsAndItsIntentReachesTheRun(t *testing.T) {
 		"submit_preflight": {Args: map[string]any{
 			"mode": "agent", "intent": "observe", "skills": []string{},
 		}},
-		"plan":            plan(step("process_list", "procs", nil)),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"plan":               plan(step("process_list", "procs", nil)),
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, tool)
 
@@ -131,7 +133,7 @@ func TestOneStepReadsTheOutputOfTheStepBefore(t *testing.T) {
 			step("process_list", "procs", nil),
 			step("get_process", "detail", map[string]any{"count": "${step.0.count}"}),
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, first, second)
 
@@ -163,7 +165,7 @@ func TestAStepNamingAToolThatIsNotThereIsDropped(t *testing.T) {
 			step("process_list", "procs", nil),
 			step("no_such_tool", "invented", nil),
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, tool)
 
@@ -188,7 +190,7 @@ func TestAReflectionThatContinuesRunsAgain(t *testing.T) {
 		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
 		"plan":             plan(step("process_list", "procs", nil)),
 	})
-	model.answerNth("submit_decision",
+	model.answerNth("reflector_decision",
 		stubReply{Args: map[string]any{"decision": "continue", "summary": "keep going"}},
 		stubReply{Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	)
@@ -199,7 +201,7 @@ func TestAReflectionThatContinuesRunsAgain(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("the run failed: %v (stages: %v)", err, model.functionsCalled())
 	}
-	if n := model.callsTo("submit_decision"); n < 1 {
+	if n := model.callsTo("reflector_decision"); n < 1 {
 		t.Errorf("the reflector never ran; stages called: %v", model.functionsCalled())
 	}
 }
@@ -212,9 +214,9 @@ func TestAReflectionThatContinuesRunsAgain(t *testing.T) {
 func TestThePlannerIsToldWhatItHasAndWhatWasAsked(t *testing.T) {
 	tool := &countingTool{name: "process_list"}
 	model := newStubModel(t, map[string]stubReply{
-		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
-		"plan":             plan(step("process_list", "procs", nil)),
-		"submit_decision":  {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"submit_preflight":   {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+		"plan":               plan(step("process_list", "procs", nil)),
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, tool)
 
@@ -254,7 +256,7 @@ func TestAStepThatDependsOnSomethingItNeverReadsIsRejected(t *testing.T) {
 				"depends_on": []int{0},
 			},
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, first, second)
 
@@ -283,7 +285,7 @@ func TestATruncatedPlanIsAskedForAgainShorter(t *testing.T) {
 		"submit_preflight": {Args: map[string]any{
 			"mode": "agent", "intent": "observe", "skills": []string{},
 		}},
-		"submit_decision": {Args: map[string]any{
+		"reflector_decision": {Args: map[string]any{
 			"decision": "conclude", "summary": "two processes", "outcome": "two processes are running",
 		}},
 	})
@@ -364,7 +366,7 @@ func TestAReflectionThatReplansGrowsTheRun(t *testing.T) {
 		plan(step("process_list", "procs", nil)),
 		plan(step("net_info", "ports", nil)),
 	)
-	model.answerNth("submit_decision",
+	model.answerNth("reflector_decision",
 		stubReply{Args: map[string]any{"decision": "replan", "summary": "found the process, now the ports", "next": "look at the ports"}},
 		stubReply{Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	)
@@ -392,7 +394,7 @@ func TestReplanningStopsAtItsCap(t *testing.T) {
 		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
 		"plan":             plan(step("process_list", "procs", nil)),
 		// Always replan: without a cap this never ends.
-		"submit_decision": {Args: map[string]any{
+		"reflector_decision": {Args: map[string]any{
 			"decision": "replan", "summary": "again", "next": "and again", "outcome": "what I have",
 		}},
 	})
@@ -426,7 +428,7 @@ func TestARunThatSpendsItsAllowanceConcludesOnWhatItHas(t *testing.T) {
 	model := newStubModel(t, map[string]stubReply{
 		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
 		"plan":             plan(step("process_list", "procs", nil)),
-		"submit_decision": {Args: map[string]any{
+		"reflector_decision": {Args: map[string]any{
 			"decision": "replan", "summary": "more", "next": "more", "outcome": "what I have",
 		}},
 	})
@@ -461,9 +463,9 @@ func TestARunThatSpendsItsAllowanceConcludesOnWhatItHas(t *testing.T) {
 func TestAToolSeesTheRunItIsPartOf(t *testing.T) {
 	tool := &runAwareTool{}
 	model := newStubModel(t, map[string]stubReply{
-		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
-		"plan":             plan(step("process_list", "procs", nil)),
-		"submit_decision":  {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"submit_preflight":   {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+		"plan":               plan(step("process_list", "procs", nil)),
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, tool)
 
@@ -540,10 +542,10 @@ func TestAConcludeEndsTheRunEvenWithValuesNothingFollowed(t *testing.T) {
 	reader := &countingTool{name: "read_row"}
 
 	model := newStubModel(t, map[string]stubReply{
-		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
-		"plan":             plan(step("list_rows", "rows", nil)),
-		"submit_decision":  {Args: map[string]any{"decision": "conclude", "outcome": "two rows"}},
-		"submit_summary":   {Args: map[string]any{"summary": "there are two rows"}},
+		"submit_preflight":   {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+		"plan":               plan(step("list_rows", "rows", nil)),
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "two rows"}},
+		"submit_summary":     {Args: map[string]any{"summary": "there are two rows"}},
 	})
 	a := agentOnStub(t, model, lister, reader)
 
@@ -561,11 +563,191 @@ func TestAConcludeEndsTheRunEvenWithValuesNothingFollowed(t *testing.T) {
 		t.Errorf("read_row ran %d time(s). Nothing planned it, so something followed the "+
 			"ids on the run's behalf — which is what was removed", reader.calls)
 	}
-	if n := model.callsTo("submit_decision"); n != 1 {
+	if n := model.callsTo("reflector_decision"); n != 1 {
 		t.Errorf("the reflector was asked %d times, want once — a second ask means its "+
 			"first answer was discarded", n)
 	}
 	if res == nil || res.Outcome == "" {
 		t.Error("the run concluded and produced no answer")
+	}
+}
+
+// stepStringParams writes a step the way the schema now asks for it: params as
+// a string holding the JSON object, rather than the object itself.
+func stepStringParams(t *testing.T, tool, tag string, params map[string]any) map[string]any {
+	t.Helper()
+	if params == nil {
+		params = map[string]any{}
+	}
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("encode params: %v", err)
+	}
+	return map[string]any{"tool": tool, "tag": tag, "params": string(encoded), "depends_on": []int{}}
+}
+
+// A plan whose params are strings runs, and the tool receives the parameters
+// that were inside them.
+//
+// params is declared a string so the plan schema can be closed — a map with
+// undeclared keys is the one thing strict decoding cannot express. That is a
+// change to what the planner writes, and everything downstream reads params as
+// a map: the gate resolving impact from them, the reference rewrite, the
+// dispatcher's own validation. This is the whole chain on the new shape.
+func TestARunPlansWithStringParamsAndTheToolGetsThem(t *testing.T) {
+	tool := &countingTool{name: "process_list"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{
+			"mode": "agent", "intent": "observe", "skills": []string{},
+		}},
+		"plan": plan(stepStringParams(t, "process_list", "procs",
+			map[string]any{"filter": "node", "limit": 20})),
+		"reflector_decision": {Args: map[string]any{
+			"decision": "conclude", "outcome": "two processes are running",
+		}},
+	})
+	a := agentOnStub(t, model, tool)
+
+	if _, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"what is running?"}`),
+	}); err != nil {
+		t.Fatalf("the run failed: %v (stages called: %v)", err, model.functionsCalled())
+	}
+	if tool.calls != 1 {
+		t.Fatalf("the tool ran %d times, want once. Stages called: %v", tool.calls, model.functionsCalled())
+	}
+	if tool.got["filter"] != "node" {
+		t.Errorf("the parameters inside the string did not reach the tool: %#v", tool.got)
+	}
+}
+
+// A reference inside a params string still wires one step to the next.
+//
+// The reference is an object nested inside the string, so it survives two
+// decodes rather than one. Read as text instead it names no step, the
+// dependency is never derived, and both steps run at once against nothing.
+func TestAReferenceInsideAParamsStringStillWiresTheSteps(t *testing.T) {
+	first := &countingTool{name: "process_list"}
+	second := &countingTool{name: "file_read"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{
+			"mode": "agent", "intent": "observe", "skills": []string{},
+		}},
+		"plan": plan(
+			stepStringParams(t, "process_list", "procs", nil),
+			stepStringParams(t, "file_read", "read_it", map[string]any{
+				"path": map[string]any{"step": "procs", "field": "count"},
+			}),
+		),
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+	})
+	a := agentOnStub(t, model, first, second)
+
+	if _, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"read it"}`),
+	}); err != nil {
+		t.Fatalf("the run failed: %v (stages called: %v)", err, model.functionsCalled())
+	}
+	if second.calls != 1 {
+		t.Fatalf("the second step ran %d times, want once — the reference did not wire it. Stages: %v",
+			second.calls, model.functionsCalled())
+	}
+	// count is 2 in countingTool's envelope. Arriving as anything else means the
+	// reference was not resolved from the first step's output.
+	if got := fmt.Sprint(second.got["path"]); got != "2" {
+		t.Errorf("the reference resolved to %q, want the first step's count", got)
+	}
+}
+
+// The re-planner is told where the run stands before it plans the next steps.
+//
+// It already receives the values — the arcs travel as tool results — and it
+// still returned an empty plan on a run whose reflector had named the next move
+// exactly. What it was not given is the reading of those values: which part of
+// the request they settle, and what they leave open.
+//
+// The first plan is not reframed. Nothing has run, so there is no situation to
+// describe, and a briefing about an empty run is words in front of the request.
+func TestTheRePlannerIsShownWhereTheRunStands(t *testing.T) {
+	tool := &countingTool{name: "process_list"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe", "skills": []string{}}},
+		"plan":             plan(step("process_list", "procs", nil)),
+		"":                 {Content: "WHERE WE ARE: a listing is in hand and nothing has read it.\n\nSTILL OPEN:\n- Does the listing name the process the request asks about?"},
+	})
+	model.answerNth("reflector_decision",
+		stubReply{Args: map[string]any{"decision": "replan", "summary": "more needed", "next": "read it"}},
+		stubReply{Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+	)
+	a := agentOnStub(t, model, tool)
+
+	if _, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"what is running?"}`),
+	}); err != nil {
+		t.Fatalf("the run failed: %v (stages: %v)", err, model.functionsCalled())
+	}
+
+	if plans := model.requestsTo("plan"); len(plans) != 2 {
+		t.Fatalf("the planner ran %d times, want twice. Stages: %v", len(plans), model.functionsCalled())
+	}
+	if !model.wasShown("plan", 1, "STILL OPEN") {
+		t.Errorf("the re-plan was not given the reframe, so it plans from values with no reading of them:\n%s",
+			model.shownTo("plan", 1))
+	}
+	if !model.wasShown("plan", 1, prompt.ReframeHook) {
+		t.Error("the re-plan got the block without the instruction saying what it is — a stage " +
+			"that cannot tell a briefing from its input credits neither")
+	}
+	if model.wasShown("plan", 0, "STILL OPEN") {
+		t.Error("the FIRST plan was reframed; there is no run yet to describe")
+	}
+}
+
+// The re-plan frame carries failure guidance only when something failed.
+//
+// It used to carry it always: a run that had simply not finished gathering was
+// told how to write a `debug` step, with exact error text and module names, for
+// a failure that had not happened. Every line of a frame that describes a
+// situation the planner is not in makes the rest read less like it is about
+// this run.
+func TestTheReplanFrameMentionsDebuggingOnlyAfterAFailure(t *testing.T) {
+	frameFor := func(t *testing.T, tool toolapi.Tool) string {
+		t.Helper()
+		model := newStubModel(t, map[string]stubReply{
+			"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+			"plan":             plan(step(tool.Name(), "one", nil)),
+		})
+		model.answerNth("reflector_decision",
+			stubReply{Args: map[string]any{"decision": "replan", "next": "keep going"}},
+			stubReply{Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		)
+		a := agentOnStub(t, model, tool)
+		if _, err := a.RunDAGSync(context.Background(), Trigger{
+			Type: "chat_query", Data: json.RawMessage(`{"query":"go"}`),
+		}); err != nil {
+			t.Fatalf("the run failed: %v (stages: %v)", err, model.functionsCalled())
+		}
+		reqs := model.requestsTo("plan")
+		if len(reqs) != 2 {
+			t.Fatalf("the planner ran %d times, want twice. Stages: %v", len(reqs), model.functionsCalled())
+		}
+		var whole strings.Builder
+		for _, m := range reqs[1].Messages {
+			whole.WriteString(m.Content)
+		}
+		return whole.String()
+	}
+
+	clean := frameFor(t, &countingTool{name: "process_list"})
+	if strings.Contains(clean, "`debug` step") {
+		t.Error("a run with no failures was told how to plan a debug step")
+	}
+	if !strings.Contains(clean, "## Re-plan") {
+		t.Error("the re-plan frame did not reach the planner at all")
+	}
+
+	broken := frameFor(t, &failingTool{name: "process_list"})
+	if !strings.Contains(broken, "`debug` step") {
+		t.Error("a run with a failed step was not told how to plan a debug step")
 	}
 }

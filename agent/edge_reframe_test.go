@@ -100,7 +100,7 @@ func TestReframe_ACleanRunIsStillDescribed(t *testing.T) {
 	g := NewGraph()
 	withStep(g, "read", "file_read", toolapi.ToolOK("text", "listen = 8080", nil))
 
-	block := a.EdgeReFrame(context.Background(), g, "what is the port?", "answer")
+	block := a.EdgeReFrame(context.Background(), g, "what is the port?", ReframeToAnswer)
 	if block == "" {
 		t.Fatal("a run where every step succeeded got no account of itself")
 	}
@@ -113,7 +113,7 @@ func TestReframe_ACleanRunIsStillDescribed(t *testing.T) {
 // would be noise in every stage's prompt.
 func TestReframe_NothingRunYetIsNoBlock(t *testing.T) {
 	a := reframeAgent(t)
-	if block := a.EdgeReFrame(context.Background(), NewGraph(), "q", "answer"); block != "" {
+	if block := a.EdgeReFrame(context.Background(), NewGraph(), "q", ReframeToAnswer); block != "" {
 		t.Errorf("an empty run produced a block:\n%s", block)
 	}
 }
@@ -125,7 +125,7 @@ func TestReframe_NoModelStillGivesTheFacts(t *testing.T) {
 	g := NewGraph()
 	withStep(g, "look", "web_search", toolapi.ToolEmpty("search", "no results"))
 
-	block := a.EdgeReFrame(context.Background(), g, "find the advisory", "answer")
+	block := a.EdgeReFrame(context.Background(), g, "find the advisory", ReframeToAnswer)
 	if !strings.Contains(block, "## What happened so far") {
 		t.Errorf("block has no heading:\n%s", block)
 	}
@@ -162,7 +162,7 @@ func TestReframe_TheFactsNameNoKindOfValue(t *testing.T) {
 	producedNode(g, "lister", payloadWith("4021"))
 	withStep(g, "look", "search_records", toolapi.ToolEmpty("search", "nothing matched"))
 
-	block := a.EdgeReFrame(context.Background(), g, "which process is this?", "answer")
+	block := a.EdgeReFrame(context.Background(), g, "which process is this?", ReframeToAnswer)
 	for _, forbidden := range []string{"URL", "url", "web", "page", "fetch"} {
 		if strings.Contains(block, forbidden) {
 			t.Errorf("the facts name %q, which is one application's kind of value:\n%s", forbidden, block)
@@ -219,5 +219,62 @@ func TestEveryStageThatActsOnARunIsToldWhatItDid(t *testing.T) {
 		if !regexp.MustCompile(`WithReframe\(`).Match(src) {
 			t.Errorf("%s builds the block and does not apply it, so nothing tells it how to read one", c.stage)
 		}
+	}
+}
+
+// The answer edge is given the reflection its prompt says it has.
+//
+// REFRAME_ANSWER opens by listing four inputs, one of them "the reflection on
+// the completed run". Naming an input the material does not carry is the shape
+// a model fills in for itself, and what it would invent here is the run's own
+// verdict — the sentence a person reads when the aggregator is skipped.
+//
+// The other two edges do not get it. A reflector shown its own last decision is
+// a stage agreeing with itself, and the planner already has the reflector's
+// next move in the re-plan frame.
+func TestOnlyTheAnswerEdgeIsGivenTheReflection(t *testing.T) {
+	g := NewGraph()
+	tool := &Node{Type: NodeTool, ToolName: "web_search", Tag: "find"}
+	id := g.AddNode(tool)
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolOK("search", "two results", map[string]any{"count": 2})})
+
+	r := &Node{Type: NodeReflection, Tag: "reflect"}
+	rid := g.AddNode(r)
+	g.SetBody(rid, newReflectionBody(reflectionOutput{
+		Decision: "conclude",
+		Summary:  "the search returned pages and none was read",
+		Outcome:  "no transaction was retrieved",
+	}, `{"decision":"conclude"}`))
+
+	a := &Agent{}
+	answer := a.reframeMaterial(context.Background(), g, "find the latest transaction", ReframeToAnswer)
+	if !strings.Contains(answer, "WHAT REFLECTION CONCLUDED") {
+		t.Errorf("the answer edge was not given the reflection its prompt claims:\n%s", answer)
+	}
+	for _, want := range []string{"conclude", "no transaction was retrieved"} {
+		if !strings.Contains(answer, want) {
+			t.Errorf("the reflection reached it without %q:\n%s", want, answer)
+		}
+	}
+
+	for _, edge := range []ReframeEdge{ReframeToPlanner, ReframeToReflector} {
+		if m := a.reframeMaterial(context.Background(), g, "find it", edge); strings.Contains(m, "WHAT REFLECTION CONCLUDED") {
+			t.Errorf("the %s edge was given the reflection, which is not in its prompt", edge.Name)
+		}
+	}
+}
+
+// A run that never reflected produces no block rather than an empty heading.
+func TestTheReflectionBlockIsAbsentWhenNothingReflected(t *testing.T) {
+	g := NewGraph()
+	id := g.AddNode(&Node{Type: NodeTool, ToolName: "web_search", Tag: "find"})
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolOK("search", "two results", nil)})
+
+	m := (&Agent{}).reframeMaterial(context.Background(), g, "find it", ReframeToAnswer)
+	if strings.Contains(m, "WHAT REFLECTION CONCLUDED") {
+		t.Errorf("a heading with nothing under it:\n%s", m)
+	}
+	if m == "" {
+		t.Error("the material went empty; the steps still describe a run")
 	}
 }

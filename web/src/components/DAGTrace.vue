@@ -249,6 +249,7 @@ const activity = computed(() => {
   if (!live.length) return 'working'
   if (live.length > 1) return `${live.length} steps running`
   const n = live[0]
+  if (n.type === 'preflight') return 'reading the request'
   if (n.type === 'chat') return 'answering'
   if (n.type === 'executive') return n.tag === 'replan' ? 're-planning' : 'planning'
   if (n.type === 'tool') {
@@ -375,7 +376,7 @@ const layout = computed(() => {
 
   // Bookends sit outside the plan, at the root.
   nodes.forEach(n => {
-    if (n.type === 'executive' || n.type === 'aggregator') depthOf.set(n.id, 0)
+    if (n.type === 'executive' || n.type === 'aggregator' || n.type === 'preflight') depthOf.set(n.id, 0)
   })
 
   const items = []
@@ -540,6 +541,7 @@ const TY_LABEL = {
   executive: 'EXE', aggregator: 'AGG', tool: 'TOOL', compute: 'CMP',
   reflection: 'RFL', observer: 'OBS', micro_planner: 'MPL',
   interjection: 'INJ', actuator: 'ACT', holmes: '🕵️', chat: 'CHAT',
+  preflight: 'PRE',
 }
 function tyLabel (t) { return TY_LABEL[t] || (t ? t.slice(0, 4).toUpperCase() : '???') }
 
@@ -594,6 +596,7 @@ function parseRCA(result) {
   --card-top:    rgba(255, 255, 255, 0.55);
   --card-shadow: 0 1px 1px rgba(15, 23, 42, 0.05), 0 10px 24px -16px rgba(15, 23, 42, 0.35);
   --card-sweep:  rgba(8, 145, 178, 0.10);
+  --card-orbit:  #0891b2;
 
   /* The chip marking the tool the planner led with. The sage green below is
      what dark uses, and on near-black under cyan text it glows. On white under
@@ -629,6 +632,7 @@ function parseRCA(result) {
   --card-top:    rgba(255, 255, 255, 0.10);
   --card-shadow: 0 1px 1px rgba(0, 0, 0, 0.30), 0 12px 28px -18px rgba(0, 0, 0, 0.8);
   --card-sweep:  rgba(34, 211, 238, 0.13);
+  --card-orbit:  #22d3ee;
 
   /* Unchanged: this green is what dark looked like, and it works there. */
   --chip-lead-bg:   rgba(127, 156, 151, 0.12);
@@ -661,12 +665,52 @@ function parseRCA(result) {
   background-size: 100% 100%;
   background-repeat: no-repeat;
 }
-/* While the run is live a soft band travels across the wash — the signal the
-   separate scan line used to carry, moved onto the thing it was describing.
-   Low contrast on purpose: it passes UNDER eleven rows of text that have to stay
-   readable while it moves, so it is a lightening rather than a highlight.
-   Settled, the trace keeps only the static wash. */
-.trace.live {
+/* A run in flight, said at the edge rather than across the middle.
+   ─────────────────────────────────────────────────────────────────────────
+   A lit arc travels the perimeter. It is the signal the separate scan line
+   used to carry, moved onto the thing it describes — and it sits on the
+   border, where it can be bright without competing with eleven rows of text.
+   That matters most on white, where anything crossing the middle either
+   greys the text or is too faint to see at all.
+
+   The ring is a conic gradient masked to a 1px band: the mask paints the whole
+   box and the content box, then excludes one from the other, leaving only the
+   edge. --trace-angle is a registered property so the angle interpolates;
+   without @property a conic gradient can only jump. A browser that does not
+   register it leaves the arc parked, which is a static lit edge rather than
+   nothing. */
+@property --trace-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.trace.live::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 11px;
+  padding: 1px;
+  background: conic-gradient(from var(--trace-angle),
+    transparent 0turn,
+    var(--card-orbit) 0.10turn,
+    transparent 0.26turn,
+    transparent 1turn);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: trace-orbit 2.6s linear infinite;
+}
+@keyframes trace-orbit {
+  to { --trace-angle: 360deg; }
+}
+
+/* Dark keeps the band across the wash as well. On near-black it reads as depth
+   behind the rows rather than as something over them, which is why it works
+   there and not on white. */
+[data-theme="dark"] .trace.live {
   background-image:
     linear-gradient(100deg, transparent 0%, var(--card-sweep) 50%, transparent 100%),
     linear-gradient(105deg, var(--card-bg) 0%, var(--card-tint) 26%, transparent 68%);
@@ -679,7 +723,7 @@ function parseRCA(result) {
   100% { background-position: 170% 0, 0 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .trace.live { animation: none; }
+  .trace.live, .trace.live::before { animation: none; }
 }
 
 .trace-header {
@@ -728,7 +772,7 @@ function parseRCA(result) {
   flex-shrink: 0; width: 2px; align-self: stretch; min-height: 12px;
   border-radius: 1px; background: var(--border); margin-right: 3px;
 }
-.t-rail.executive, .t-rail.aggregator, .t-rail.chat { background: var(--n-plan); }
+.t-rail.executive, .t-rail.aggregator, .t-rail.chat, .t-rail.preflight { background: var(--n-plan); }
 .t-rail.reflection, .t-rail.observer, .t-rail.micro_planner { background: var(--n-think); }
 .t-rail.tool { background: var(--n-tool); }
 .t-rail.compute { background: var(--n-compute); }
@@ -746,7 +790,7 @@ function parseRCA(result) {
 
 /* Type — now before name */
 .t-ty { width: 34px; flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-.t-ty.executive, .t-ty.aggregator, .t-ty.chat { color: var(--n-plan); }
+.t-ty.executive, .t-ty.aggregator, .t-ty.chat, .t-ty.preflight { color: var(--n-plan); }
 .t-ty.reflection, .t-ty.observer, .t-ty.micro_planner { color: var(--n-think); }
 .t-ty.tool { color: var(--n-tool); }
 .t-ty.compute { color: var(--n-compute); }

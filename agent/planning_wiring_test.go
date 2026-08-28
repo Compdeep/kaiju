@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/Compdeep/kaiju/agent/gates"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,5 +145,75 @@ func TestBundledSkills_WriteNoResolvablePlaceholder(t *testing.T) {
 	if found == 0 {
 		t.Error("no placeholder-shaped text found in any card, so either skill_creator " +
 			"stopped stating the rule or templatePattern no longer matches it")
+	}
+}
+
+// The frame permits the literal it asks for.
+//
+// It tells the planner to take a finished step's value out of the tool result
+// above and write it into the param. The next sentence used to say "Never paste
+// a URL you don't actually have in front of you: a URL to fetch comes from a
+// search step, not memory" — which reads as a ban on writing any URL, and the
+// planner cannot tell whether a URL sitting in a tool result counts as being in
+// front of it.
+//
+// With that, and with a finished step being unaddressable, and with completed
+// steps not to be repeated, a re-plan asked to fetch a URL from an earlier
+// search has no move it is allowed to make. Observed: the reflector named the
+// exact URL to fetch, and the planner returned no steps and prose telling the
+// user to open the site themselves.
+func TestReplanFrame_PermitsTheLiteralItAsksFor(t *testing.T) {
+	f := replanFrameTemplate
+
+	if strings.Contains(f, "Never paste a URL") {
+		t.Error("the blanket ban is back; it forbids the copy the sentence before it instructs")
+	}
+	if !strings.Contains(f, "take the value out of that and write the value itself into the param") {
+		t.Fatal("the frame no longer tells the planner to copy a finished step's value")
+	}
+	// What replaced it has to keep both halves: copying from the material is
+	// allowed, inventing is not. Either alone is a rule that produced a bug.
+	for _, want := range []string{
+		"you can point to in the material above",
+		"a value you recall or assume",
+	} {
+		if !strings.Contains(f, want) {
+			t.Errorf("the rule no longer says %q, so it bans either too much or too little", want)
+		}
+	}
+	// And it must say what to do instead, or a planner that cannot find the
+	// value is left with nothing it may do.
+	if !strings.Contains(f, "the step that produces it is what to plan instead") {
+		t.Error("the rule refuses a value without naming the move that gets one")
+	}
+}
+
+// The prompt names the intent the way the schema asks for it.
+//
+// gates.Intent renders as "rank(100)" — it holds a number and says outright
+// that naming belongs to the registry. The prompt carried that string while
+// the plan schema's intent enum holds the registry's words, so the planner was
+// shown a rank and asked for a name with nothing joining the two. Observed: an
+// operate-level request came back declaring "observe", and preflight's floor is
+// the only reason its tools were not refused.
+func TestPlannerIsToldTheIntentByName(t *testing.T) {
+	reg := NewIntentRegistry()
+	if err := reg.Load(staticIntents{}); err != nil {
+		t.Fatal(err)
+	}
+	for rank, want := range map[int]string{0: "observe", 100: "operate", 200: "override"} {
+		if got := intentName(reg, gates.Intent(rank)); got != want {
+			t.Errorf("rank %d rendered %q, want %q — the schema's enum holds names", rank, got, want)
+		}
+	}
+	if got := intentName(reg, gates.IntentAuto); got != "auto" {
+		t.Errorf("auto rendered %q", got)
+	}
+	// A rank the registry does not carry falls back rather than inventing a word.
+	if got := intentName(reg, gates.Intent(77)); got != "rank(77)" {
+		t.Errorf("an unregistered rank rendered %q, want the rank itself", got)
+	}
+	if got := intentName(nil, gates.Intent(100)); got != "rank(100)" {
+		t.Errorf("no registry rendered %q, want the rank itself", got)
 	}
 }

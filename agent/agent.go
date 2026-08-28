@@ -160,15 +160,27 @@ func BuildMessagesWithResults(system, userQuery string, history []llm.Message, a
 // messages are built the same way twice.
 func stepCallID(nodeID string) string { return "call_" + nodeID }
 
-// stepResultContent is what one tool message carries: the step's fields when it
-// declared any, its text when it did not, and why it failed when it did.
+// stepResultContent is what one tool message carries: which step this was, the
+// step's fields when it declared any, its text when it did not, and why it
+// failed when it did.
 //
 // A failure is a result. A stage deciding what to do next needs the error more
 // than it needs the successes, and a step that failed still says what it was
 // called with — which is in the assistant turn above it.
+//
+// The step's NAME travels in the content because the two protocol fields that
+// could have carried it are spoken for: a tool message's name must be the tool
+// that ran, and the call id pairs it with the assistant turn above. Without it a
+// run that fetched twice presented two web_fetch results and nothing saying
+// which was which — the names were in the worklog, several thousand characters
+// away and truncated, and a planner asked to use a finished step's value had to
+// match them up by their parameters.
 func stepResultContent(r StepResult) string {
 	if r.Err != "" {
 		out := map[string]any{"error": r.Err}
+		if r.Name != "" {
+			out["step"] = r.Name
+		}
 		if len(r.Payload) > 0 {
 			out["data"] = json.RawMessage(r.Payload)
 		}
@@ -179,9 +191,50 @@ func stepResultContent(r StepResult) string {
 		return string(b)
 	}
 	if len(r.Payload) > 0 {
-		return string(r.Payload)
+		return withStepName(r.Payload, r.Name)
+	}
+	if r.Name != "" && r.Content != "" {
+		if b, err := json.Marshal(map[string]any{"step": r.Name, "content": r.Content}); err == nil {
+			return string(b)
+		}
 	}
 	return r.Content
+}
+
+/*
+ * withStepName puts the step's name beside the fields it returned.
+ * desc: Added to the payload object rather than wrapped around it, so a stage
+ *       reading a field reads it at the same path it always did — a wrapper
+ *       would move every field one level down and break every reader at once.
+ *
+ *       A payload that is not an object (an array, a bare value) is returned
+ *       untouched: there is nowhere to put the name that would not change the
+ *       shape the reader expects.
+ * param: payload - the step's fields, as returned.
+ * param: name - the step's name, empty when it has none.
+ * return: the payload, with "step" added when it could be.
+ */
+func withStepName(payload json.RawMessage, name string) string {
+	if name == "" {
+		return string(payload)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return string(payload) // not an object — leave the shape alone
+	}
+	if _, taken := obj["step"]; taken {
+		return string(payload) // the tool declared its own "step"; do not shadow it
+	}
+	named, err := json.Marshal(name)
+	if err != nil {
+		return string(payload)
+	}
+	obj["step"] = named
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return string(payload)
+	}
+	return string(out)
 }
 
 /*
@@ -509,6 +562,11 @@ func (a *Agent) LoadIntentRegistry(src IntentSource) error {
 	if !a.clearanceExplicit {
 		a.clearance.Set(a.intentRegistry.DefaultRank())
 	}
+	// The plan schema's intent enum is built from the registry that just
+	// loaded, so this is the first moment every stage's schema is the one a
+	// request would carry. See schema_check.go for what it reads and why the
+	// answer cannot be had from a reply.
+	a.LogStageSchemas()
 	return nil
 }
 

@@ -117,3 +117,41 @@ func TestASecondRotationWaitsForTheFirst(t *testing.T) {
 		t.Errorf("it waited and then did not rotate: %v", err)
 	}
 }
+
+// The agent's own session state is not part of the workspace it describes.
+//
+// sessions/ holds one directory per conversation the deployment has had — 283
+// on the install this was found on — and the scan stops at 120 entries. Reached
+// breadth-first they arrived before anything a person had put there, so a
+// planner's entire view of the workspace was a list of conversation ids.
+//
+// Skipped at the root only: "sessions" is a name a project may use for its own
+// directory, and skipDirs matches at every depth.
+func TestWorkspaceTreeLeavesOutTheAgentsOwnSessions(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{
+		"sessions/aaaa-1111/ctx", "sessions/bbbb-2222/ctx", "sessions/cccc-3333/ctx",
+		"project/myapp/src", "project/myapp/sessions", "media",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "project/myapp/src/main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tree := scanWorkspaceTree(root, 5)
+
+	if strings.Contains(tree, "sessions/aaaa-1111") {
+		t.Errorf("the agent's session state is in the workspace listing:\n%s", tree)
+	}
+	if !strings.Contains(tree, "project/myapp/sessions") {
+		t.Errorf("a project's OWN sessions directory was skipped too — the rule reached past the root:\n%s", tree)
+	}
+	for _, want := range []string{"project/myapp/src", "media"} {
+		if !strings.Contains(tree, want) {
+			t.Errorf("%q is missing from the listing:\n%s", want, tree)
+		}
+	}
+}

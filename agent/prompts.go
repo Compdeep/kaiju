@@ -262,13 +262,17 @@ Return JSON:
 {
   "blueprint": "<FULL BLUEPRINT MARKDOWN — see format below>",
   "project_root": "project/<name>",
-  "interfaces": { ... },
-  "schema": { ... },
+  "interfaces": "{ ... }",
+  "schema": "{ ... }",
   "setup": [ ... ],
   "tasks": [ ... ],
   "services": [ ... ],
   "validation": [ ... ]
 }
+
+"interfaces" and "schema" are JSON objects written INSIDE A STRING, with the quotes
+escaped. Their keys are names you are choosing — endpoint names, type names, table
+names — so they travel as text. Write "" for either one when the project has none.
 
 ### Blueprint format (the "blueprint" field)
 The blueprint is a complete markdown document. It must contain ALL of the following sections:

@@ -28,7 +28,7 @@ func TestAnEmptyRePlanIsRefused(t *testing.T) {
 
 	// The reflector asks for more work; the planner then offers an answer and no
 	// steps, which is the case under test.
-	model.answerNth("submit_decision", stubReply{Args: map[string]any{
+	model.answerNth("reflector_decision", stubReply{Args: map[string]any{
 		"decision": "replan",
 		"summary":  "nothing has actually been retrieved yet",
 		"next":     "fetch the source and read it",
@@ -62,9 +62,9 @@ func TestAnEmptyRePlanIsRefused(t *testing.T) {
 // the planner's" describes which component owns a decision rather than what
 // happened.
 func TestAnEmptyRePlanEndsTheRunWithoutFailingIt(t *testing.T) {
-	err := error(&ExecutiveNoMoveError{Answer: "recalled text"})
+	err := error(&ExecutiveNoMove{Answer: "recalled text"})
 
-	var noMove *ExecutiveNoMoveError
+	var noMove *ExecutiveNoMove
 	if !errors.As(err, &noMove) {
 		t.Fatal("the outcome is not distinguishable from an ordinary error, so the " +
 			"scheduler cannot tell a stop from a failure")
@@ -82,7 +82,7 @@ func TestAnEmptyRePlanEndsTheRunWithoutFailingIt(t *testing.T) {
 // planner's answer as the run's outcome.
 func TestTheSchedulerTreatsNoMoveAsAStop(t *testing.T) {
 	src := readSource(t, "scheduler.go")
-	i := strings.Index(src, "ExecutiveNoMoveError")
+	i := strings.Index(src, "ExecutiveNoMove")
 	if i < 0 {
 		t.Fatal("the scheduler does not recognise the outcome, so it falls through " +
 			"to the failure branch and shows a broken step")

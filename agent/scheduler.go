@@ -125,7 +125,22 @@ func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget
 // MUST NOT tell the planner to avoid `${step}`/`depends_on` for its new steps.
 // A prompt that bans wiring here is exactly what collapsed replans to flat plans
 // with literal URLs invented from memory (guarded by TestReplanFrame_TeachesWiring).
-const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n\nPlan the next steps needed to close this gap and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. step 0 `web_search`, step 1 `web_fetch` whose url param is `${step.0.results.0.url}` with `depends_on:[0]`. `${step.N}` addresses the NEW steps in THIS plan (0-indexed from your first new step). Only for a value from a PRIOR, already-finished step (shown above as DATA) do you paste it in literally with `depends_on:[]` — a prior-frame index can't reach it. Never paste a URL you don't actually have in front of you: a URL to fetch comes from a search step, not memory.\n\nIf the next move is to FIX a FAILURE, plan a single `debug` step (a leaf, no dependents) with the failure — exact error text, file paths, module names — in its `problem` param; the debugger diagnoses the root cause and applies the fix, and the following re-plan handles any follow-on work."
+//
+// What it carries is what is true of EVERY re-plan: the plan so far has run, and
+// this is how new steps are wired. Anything true only of some re-plans is added
+// at the call site — see replanDebugParagraph.
+const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n\nPlan the next steps needed to close this gap and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. step 0 `web_search`, step 1 `web_fetch` whose url param is `${step.0.results.0.url}` with `depends_on:[0]`. `${step.N}` addresses the NEW steps in THIS plan (0-indexed from your first new step). A step that already RAN is not addressable from here — neither its position nor its tag reaches back, because both name steps in THIS plan. What it returned is above, as a tool result: take the value out of that and write the value itself into the param, with `depends_on:[]`. A value you write literally must be one you can point to in the material above — a tool result, or the request itself. Copying it from there is what the sentence before this one asks for. What you may not write is a value you recall or assume: a URL, an id or a path you cannot find above does not exist, and the step that produces it is what to plan instead."
+
+// replanDebugParagraph is added to the frame only when something has actually
+// failed.
+//
+// It used to be part of the frame itself, so every re-plan was told how to
+// diagnose a failure whether or not one had happened. A run that had simply not
+// finished gathering was handed a paragraph about exact error text and module
+// names, which is advice for a situation it was not in — and the more of the
+// frame describes a situation the planner is not in, the less of it reads as
+// being about this run.
+const replanDebugParagraph = "\n\nIf the next move is to FIX a FAILURE, plan a single `debug` step (a leaf, no dependents) with the failure — exact error text, file paths, module names — in its `problem` param; the debugger diagnoses the root cause and applies the fix, and the following re-plan handles any follow-on work."
 
 // complexFanoutFloor is the number of resolved tool steps at or above which a run
 // counts as "complex" regardless of what preflight guessed — a structural backstop
@@ -209,6 +224,29 @@ func (a *Agent) aggregatorWillWriteTheAnswer(trigger Trigger, graph *Graph) bool
 		graph.HasNodeOfType(NodeCompute), complex, a.hasUsableEvidence(graph),
 		triggerIsAwaited(trigger), nil)
 	return mode > 0
+}
+
+/*
+ * preflightSummary is the one line the trace shows for what preflight decided.
+ * desc: What it settled, in the terms the rest of the run uses: which lane, what
+ *       the step is allowed to do, and which guidance was picked. Enough for a
+ *       reader to tell a chat turn from an agent one before any step has run.
+ * param: pf - the result. Nil gives an empty line rather than a panic.
+ * return: the line, or "".
+ */
+func preflightSummary(pf *PreflightResult) string {
+	if pf == nil {
+		return ""
+	}
+	out := pf.Mode
+	if out == "" {
+		out = "agent"
+	}
+	out += " · " + pf.Intent.String()
+	if len(pf.Skills) > 0 {
+		out += " · " + strings.Join(pf.Skills, ", ")
+	}
+	return out
 }
 
 // decideAutoAggMode picks the aggregator lane in auto mode (agg_mode -1): 0=skip
@@ -311,6 +349,18 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			execMode = trigger.ExecutionMode
 		}
 		query := a.formatTrigger(trigger)
+
+		// A row on screen before anything has run.
+		//
+		// Preflight is two model calls and takes several seconds, and both are
+		// pre-graph — no node, no event — so the trace element does not render
+		// at all until the first real node appears. From the user's side the
+		// interface simply sits there. This says what is happening while it is
+		// happening; the node is synthetic, like the executive's and the
+		// aggregator's.
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "preflight", Node: &NodeInfo{
+			ID: "preflight", Type: "preflight", State: "running", Tag: "reading the request"}})
+
 		var pf *PreflightResult
 		if execMode == "autonomous" {
 			// Pure agent: no routing (its result would only be discarded). Prepare
@@ -331,6 +381,10 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		// may adjust one of them depends on the run — so it happens here, where
 		// the trigger is, rather than inside the validation of the model's reply.
 		a.reconcileComputeIntent(trigger, pf)
+
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "preflight", Node: &NodeInfo{
+			ID: "preflight", Type: "preflight", State: "resolved", Tag: "reading the request",
+			Summary: preflightSummary(pf)}})
 
 		// Per-investigation preflight + card list live on the Graph, not the
 		// Agent, so concurrent investigations never clobber each other's state.
@@ -838,8 +892,26 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 		select {
 		case <-ctx.Done():
-			log.Printf("[dag] wall clock expired, aborting %d inflight nodes", inflight)
+			// Two different things arrive here and they are not the same event:
+			// the run ran out of its own time, or whoever asked for it hung up.
+			// Reporting both as the wall clock sent one investigation looking
+			// for a limit the engine was not applying, so they are named apart.
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				log.Printf("[dag] wall clock expired, aborting %d inflight nodes", inflight)
+			} else {
+				log.Printf("[dag] the caller went away, aborting %d inflight nodes", inflight)
+			}
+			// Leave the loop, the same way every other stopping condition does.
+			// Zeroing inflight alone was not enough: the loop condition is
+			// !reflectionConcluded, so the next turn saw nothing running and
+			// injected a reflection — a model call on the context that had just
+			// been cancelled, which fails, which leaves nothing running, which
+			// injects another. The run had no way out except the caller giving
+			// up on it.
+			reflectionConcluded = true
+			graph.SkipAllPending()
 			inflight = 0
+			continue
 
 		case comp := <-completionCh:
 			inflight--
@@ -1432,6 +1504,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// executive); hand it a generic frame: what's already done
 						// (worklog) + the reflector's `next`. The executive decides HOW.
 						frame := fmt.Sprintf(replanFrameTemplate, next)
+						// How to diagnose a failure, only where there is one.
+						// FailedNodes already excludes the ones a debug cycle
+						// has since addressed, so a run whose failures were
+						// fixed stops being told about them.
+						if len(graph.FailedNodes()) > 0 {
+							frame += replanDebugParagraph
+						}
 
 						// Its own id, not "executive".
 						//
@@ -1459,7 +1538,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							// which is an ending, not a failure. Shown as a failed
 							// step it read as a broken run to anyone looking at the
 							// trace, for something that simply stopped.
-							var noMove *ExecutiveNoMoveError
+							var noMove *ExecutiveNoMove
 							if errors.As(rerr, &noMove) {
 								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: planID, Node: &NodeInfo{
 									ID: planID, Type: "executive", State: "resolved", Tag: "no further steps",
@@ -2212,11 +2291,26 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	graph, budget, cleanup := a.setupDAGPipeline(trigger, runID)
 	defer cleanup()
 
-	// No hard wall clock — the kernel's heartbeat module manages soft timeouts.
-	dagCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	// Two contexts, because the time limit is on the WORK and never on the
+	// answer. execCtx carries the wall clock and bounds planning and node
+	// execution; answerCtx is the caller's own, so a run whose clock ran out
+	// still writes what it found instead of returning an error to somebody who
+	// asked a question. A caller that has gone away cancels both.
+	//
+	// WallClock was previously stored on the Budget and read by nobody, so the
+	// setting had no effect and the only thing that ever stopped a run was the
+	// caller hanging up. Zero still means no limit, which is what a host that
+	// leaves it unset gets.
+	answerCtx, cancelAnswer := context.WithCancel(ctx)
+	defer cancelAnswer()
+	execCtx := answerCtx
+	if budget.WallClock > 0 {
+		var cancelExec context.CancelFunc
+		execCtx, cancelExec = context.WithTimeout(answerCtx, budget.WallClock)
+		defer cancelExec()
+	}
 
-	pr, err := a.runPlanAndSchedule(dagCtx, trigger, graph, budget)
+	pr, err := a.runPlanAndSchedule(execCtx, trigger, graph, budget)
 	if err != nil {
 		// If planner returned conversational text, surface it as the outcome
 		// instead of failing the whole pipeline. This handles vague queries.
@@ -2241,7 +2335,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 			if query != "" {
 				chatPrompt := a.soulPrompt
 				if graph != nil && graph.Context != nil {
-					gateResp, gerr := graph.Context.Get(dagCtx, ContextRequest{
+					gateResp, gerr := graph.Context.Get(answerCtx, ContextRequest{
 						ReturnSources: Sources(SkillGuidance(nil)),
 						MaxBudget:     4000,
 					})
@@ -2259,7 +2353,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 				// The answer, as a node. Same call as before; it now has a place
 				// on the graph, which is what gives an interjection somewhere to
 				// land and a trace something to show.
-				answer, chatID, llmErr := a.runChatNode(dagCtx, trigger, graph, query, chatPrompt)
+				answer, chatID, llmErr := a.runChatNode(answerCtx, trigger, graph, query, chatPrompt)
 				if llmErr == nil {
 					// A steer typed while that answer was being written. Recorded
 					// beside the chat node and handed to the aggregator, which
@@ -2270,9 +2364,9 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 					//
 					// No interjection is the common case and costs nothing extra:
 					// the chat node's own answer is returned as it always was.
-					if msg, ok := pendingInterjection(dagCtx); ok {
+					if msg, ok := pendingInterjection(answerCtx); ok {
 						addInterjectionNode(graph, msg)
-						if coordinated, aggErr := a.coordinateChatAnswer(dagCtx, trigger, graph, resolvedChatIntent(trigger), query, answer, msg); aggErr == nil && coordinated != "" {
+						if coordinated, aggErr := a.coordinateChatAnswer(answerCtx, trigger, graph, resolvedChatIntent(trigger), query, answer, msg); aggErr == nil && coordinated != "" {
 							answer = coordinated
 						} else if aggErr != nil {
 							log.Printf("[dag] chat lane: coordinating the interjection failed, answering without it: %v", aggErr)
@@ -2326,9 +2420,18 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize (skipped)"}})
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "outcome", Text: outcome})
 	} else {
-		if dagCtx.Err() != nil {
-			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: "wall_clock_expired", Status: "timeout"})
-			return nil, fmt.Errorf("wall clock expired before aggregator")
+		// Only the caller going away stops the answer being written. An expired
+		// wall clock does not: it ended the gathering, and the evidence already
+		// on the graph is what the answer is made from. This used to test the
+		// execution context, so a run that ran out of time returned an error and
+		// the person waiting on it got nothing at all — the failure this split
+		// exists to prevent.
+		if answerCtx.Err() != nil {
+			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: "caller_gone", Status: "abandoned"})
+			return nil, fmt.Errorf("the caller went away before the answer was written: %w", answerCtx.Err())
+		}
+		if execCtx.Err() != nil {
+			log.Printf("[dag] wall clock expired after %s — answering from the evidence gathered so far", budget.WallClock)
 		}
 		// Aggregator is exempt from budget — it must always run to give the user a response
 		budget.TrySpawnNode("", true) // charge if possible, but don't block
@@ -2350,7 +2453,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "running", Tag: "synthesize"}})
 
 		var aggErr error
-		aggCtxResp2, actxErr2 := graph.Context.Get(dagCtx, ContextRequest{
+		aggCtxResp2, actxErr2 := graph.Context.Get(answerCtx, ContextRequest{
 			ReturnSources: Sources(
 				NodeReturns("all"),
 				Worklog(30, "all"),
@@ -2364,7 +2467,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		// The application's own answer, when it supplies one — see answer.go.
 		// The lane chosen above applies to the built-in aggregator; an
 		// application that writes its own answer chooses its own model.
-		answered, ok, ansErr := a.writeAnswer(dagCtx, AnswerRequest{
+		answered, ok, ansErr := a.writeAnswer(answerCtx, AnswerRequest{
 			Trigger: trigger, Graph: graph, Evidence: aggCtxResp2,
 			Intent: resolvedIntent, History: trigger.History,
 		})
@@ -2380,7 +2483,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 				recordLine = answered.Text
 			}
 		} else {
-			outcome, actions, aggErr = a.runAggregator(dagCtx, trigger, graph, resolvedIntent, trigger.History, aggLane, aggCtxResp2)
+			outcome, actions, aggErr = a.runAggregator(answerCtx, trigger, graph, resolvedIntent, trigger.History, aggLane, aggCtxResp2)
 			if aggErr != nil {
 				a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
 				a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: "aggregator_failed", Status: "failed"})

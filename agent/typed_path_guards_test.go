@@ -131,7 +131,7 @@ func TestGuard_EveryReferencePathResolvesAName(t *testing.T) {
 			Params: map[string]any{"in": map[string]any{"step": "read_second", "field": "content"}},
 		})
 		n := &Node{ID: "n3", Params: plan[2].Params}
-		deps := resolveDeclaredRefs(n, []string{"n1", "n2", "n3"}, plan)
+		deps := resolveDeclaredRefs(n, []string{"n1", "n2", "n3"}, plan, nil)
 		if len(deps) != 1 || deps[0] != "n2" {
 			t.Errorf("a declared reference by name wired %v, want [n2]", deps)
 		}

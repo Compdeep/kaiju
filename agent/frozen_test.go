@@ -53,29 +53,31 @@ type frozenPrompt struct {
 // and logging walk, and a section added in the middle is a different file from
 // one added at the end.
 var frozenPromptOrder = []string{
-	"SOUL", "ROUTE", "PREFLIGHT", "EXECUTIVE", "AGGREGATOR", "REFRAME",
-	"REFRAME_HOOK", "HOLMES", "MICROPLANNER", "OBSERVER", "REFLECTOR",
+	"SOUL", "ROUTE", "PREFLIGHT", "EXECUTIVE", "AGGREGATOR",
+	"REFRAME_PLAN", "REFRAME_REFLECT", "REFRAME_ANSWER", "REFRAME_HOOK", "HOLMES", "MICROPLANNER", "OBSERVER", "REFLECTOR",
 	"INTERJECTION", "CLASSIFIER", "CURATOR", "CHAT", "VISION", "REACT",
 }
 
 var frozenPrompts = map[string]frozenPrompt{
-	"SOUL":         {"03802a1782d4ffb3", 6524},
-	"ROUTE":        {"4e8fabcf0237bdb3", 2280},
-	"PREFLIGHT":    {"a1fc1618bf8b74d9", 9935},
-	"EXECUTIVE":    {"510518ad94eff79a", 6217},
-	"AGGREGATOR":   {"a782c5558ef001d0", 3631},
-	"REFRAME":      {"bbcd502243bc157f", 3819},
-	"REFRAME_HOOK": {"2066afe67efca674", 329},
-	"HOLMES":       {"beb3647df8d28a23", 6996},
-	"MICROPLANNER": {"dc48772ada445d93", 4598},
-	"OBSERVER":     {"2ab11100a1203b92", 1040},
-	"REFLECTOR":    {"0a5f87c27060d5b0", 6024},
-	"INTERJECTION": {"417d206c70b452b2", 788},
-	"CLASSIFIER":   {"1f813616ac1a9d88", 270},
-	"CURATOR":      {"7345d945b7f1b76f", 3199},
-	"CHAT":         {"6b5c0b585bffb6bb", 405},
-	"VISION":       {"a34b6cb0dc575294", 218},
-	"REACT":        {"8ac5f1aca3a544d3", 1669},
+	"SOUL":            {"03802a1782d4ffb3", 6524},
+	"ROUTE":           {"4e8fabcf0237bdb3", 2280},
+	"PREFLIGHT":       {"1a5c3fdb0d13414b", 6072},
+	"EXECUTIVE":       {"f865c729d1925ed2", 6622},
+	"AGGREGATOR":      {"a782c5558ef001d0", 3631},
+	"REFRAME_PLAN":    {"99ef89fec31ed3aa", 3450},
+	"REFRAME_REFLECT": {"9135887028deee2a", 3434},
+	"REFRAME_ANSWER":  {"6fa65607e7574724", 2074},
+	"REFRAME_HOOK":    {"fb587325040e5c47", 585},
+	"HOLMES":          {"bc48616b0088ce6f", 7131},
+	"MICROPLANNER":    {"7a0609fea913f741", 4635},
+	"OBSERVER":        {"9bc2b317bda1a499", 1042},
+	"REFLECTOR":       {"0a5f87c27060d5b0", 6024},
+	"INTERJECTION":    {"417d206c70b452b2", 788},
+	"CLASSIFIER":      {"1f813616ac1a9d88", 270},
+	"CURATOR":         {"7345d945b7f1b76f", 3199},
+	"CHAT":            {"6b5c0b585bffb6bb", 405},
+	"VISION":          {"a34b6cb0dc575294", 218},
+	"REACT":           {"8ac5f1aca3a544d3", 1669},
 }
 
 // liveSections reads the sections as the binary actually holds them, which is
@@ -84,7 +86,8 @@ func liveSections() map[string]string {
 	return map[string]string{
 		"SOUL": prompt.Soul, "ROUTE": prompt.Route, "PREFLIGHT": prompt.Preflight,
 		"EXECUTIVE": prompt.Executive, "AGGREGATOR": prompt.Aggregator,
-		"REFRAME": prompt.Reframe, "REFRAME_HOOK": prompt.ReframeHook,
+		"REFRAME_PLAN": prompt.ReframePlan, "REFRAME_REFLECT": prompt.ReframeReflect,
+		"REFRAME_ANSWER": prompt.ReframeAnswer, "REFRAME_HOOK": prompt.ReframeHook,
 		"HOLMES": prompt.Holmes, "MICROPLANNER": prompt.Microplanner,
 		"OBSERVER": prompt.Observer, "REFLECTOR": prompt.Reflector,
 		"INTERJECTION": prompt.Interjection, "CLASSIFIER": prompt.Classifier,
@@ -287,27 +290,32 @@ func TestFrozen_TheHandlersAnApplicationSupplies(t *testing.T) {
 
 // A run with one tool step that the reflector concludes on.
 var frozenStagesOfAStraightRun = []string{
-	"route",            // is this a conversation or work
-	"submit_preflight", // what kind of work, which skills, what intent
-	"plan",             // the executive writes the graph
-	"",                 // the re-frame: what has happened, in words
-	"submit_decision",  // the reflector: continue, replan or conclude
+	"route",              // is this a conversation or work
+	"submit_preflight",   // what kind of work, which skills, what intent
+	"plan",               // the executive writes the graph
+	"",                   // the re-frame: what has happened, in words
+	"reflector_decision", // the reflector: continue, replan or conclude
 }
 
 // The same run when the reflector asks for more work: the executive is
 // re-entered, and the whole read-and-decide cycle happens again.
 var frozenStagesOfARunThatReplans = []string{
 	"route", "submit_preflight",
-	"plan", "", "submit_decision", // first round, reflector says replan
-	"plan", "", "submit_decision", // second round, reflector concludes
+	"plan", "", "reflector_decision", // first round: plan, reframe, reflector says replan
+	"", "plan", "", "reflector_decision", // second round: reframe, re-plan, reframe, conclude
 }
+
+// The empty names are the reframe, which offers the model no tool and so has no
+// function to be called by. Two per round after the first: one for the planner
+// deciding what runs next, one for the reflector deciding whether anything
+// should. They read the same run and are asked different questions of it.
 
 func TestFrozen_TheStagesOfAStraightRun(t *testing.T) {
 	tool := &countingTool{name: "process_list"}
 	model := newStubModel(t, map[string]stubReply{
-		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe", "skills": []string{}}},
-		"plan":             plan(step("process_list", "procs", nil)),
-		"submit_decision":  {Args: map[string]any{"decision": "conclude", "summary": "done", "outcome": "it is done"}},
+		"submit_preflight":   {Args: map[string]any{"mode": "agent", "intent": "observe", "skills": []string{}}},
+		"plan":               plan(step("process_list", "procs", nil)),
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "summary": "done", "outcome": "it is done"}},
 	})
 	a := agentOnStub(t, model, tool)
 
@@ -328,7 +336,7 @@ func TestFrozen_TheStagesOfARunThatReplans(t *testing.T) {
 		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe", "skills": []string{}}},
 		"plan":             plan(step("process_list", "procs", nil)),
 	})
-	model.answerNth("submit_decision",
+	model.answerNth("reflector_decision",
 		stubReply{Args: map[string]any{"decision": "replan", "summary": "more needed", "next": "run it again"}},
 		stubReply{Args: map[string]any{"decision": "conclude", "summary": "done", "outcome": "it is done"}},
 	)

@@ -76,6 +76,38 @@ type holmesAction struct {
 }
 
 /*
+ * UnmarshalJSON decodes one action, whose params may be an object or a string
+ * holding one.
+ * desc: The schema declares a string, because an action's params is a map whose
+ *       keys are whatever the named tool takes and a strict decoder cannot
+ *       express a map with undeclared keys. The object form is still accepted:
+ *       it is what a tool call carries, what Anthropic sends, and what every
+ *       Holmes state already written to disk holds.
+ *
+ *       The same unwrapping the plan uses — see unwrapStringParams — so the two
+ *       stages cannot drift on what they accept.
+ * param: data - the action as the model wrote it.
+ * return: an error only when params was a string holding no readable object.
+ */
+func (h *holmesAction) UnmarshalJSON(data []byte) error {
+	rest, fromString, err := unwrapStringParams(data)
+	if err != nil {
+		return err
+	}
+	// Same fields, no methods, so json does not re-enter this one.
+	type action holmesAction
+	var decoded action
+	if err := json.Unmarshal(rest, &decoded); err != nil {
+		return err
+	}
+	*h = holmesAction(decoded)
+	if fromString != nil {
+		h.Params = fromString
+	}
+	return nil
+}
+
+/*
  * HolmesState is the per-investigation accumulator. It lives in the params
  * of each Holmes node so the next iteration can pick up where the last left
  * off. Each iteration appends a HolmesTurn to History; the LLM sees the

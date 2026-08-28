@@ -45,7 +45,7 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 	// asked for and does not.
 	rolePrompt, userPrompt = WithReframe(rolePrompt, userPrompt,
 		a.EdgeReFrame(ctx, graph, userPrompt,
-			"write the final answer a person will read"))
+			ReframeToAnswer))
 
 	// The arcs, alongside the prose. This stage writes the answer a person
 	// reads, and it wrote it from a rendering OF the evidence rather than from

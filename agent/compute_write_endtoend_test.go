@@ -157,7 +157,7 @@ func TestComputeWritesAFileNothingCanRun(t *testing.T) {
 			"filename": "privesc_checklist.json",
 			"code":     `{"checks":["suid","sudo -l"]}`,
 		}},
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "written"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "written"}},
 	})
 	a := agentWithCompute(t, model)
 
@@ -205,7 +205,7 @@ func TestAStepAskingForOutputThatWasNeverProducedIsToldSo(t *testing.T) {
 			"filename": "privesc_checklist.json",
 			"code":     `{"checks":["suid"]}`,
 		}},
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentWithCompute(t, model, reader)
 
@@ -248,7 +248,7 @@ func TestAScriptStillRunsAndItsOutputReachesTheNextStep(t *testing.T) {
 			"filename": "compute.sh",
 			"code":     "echo seventeen-checks",
 		}},
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentWithCompute(t, model, reader)
 	// Registered after the agent exists, because it needs the workspace path.
@@ -284,7 +284,7 @@ func TestEditModeStillReplacesTextInAnExistingFile(t *testing.T) {
 				{"old_content": "one check", "new_content": "seventeen checks"},
 			},
 		}},
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "amended"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "amended"}},
 	})
 	a := agentWithCompute(t, model)
 

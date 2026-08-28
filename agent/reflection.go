@@ -127,7 +127,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// unused — see edge_reframe.go.
 	sysPrompt, userPrompt = WithReframe(sysPrompt, userPrompt,
 		a.EdgeReFrame(ctx, graph, a.formatTrigger(trigger),
-			"decide whether this run should do more work or stop and answer"))
+			ReframeToReflector))
 	// What each arc produced, as the calls that produced it, alongside the
 	// prose. The two are disjoint by construction: a payload carries a tool's
 	// declared fields and never its content, and ## Node Results carries the

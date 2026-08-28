@@ -16,7 +16,7 @@ import (
 // A model that answers from a script, so a whole run can be driven in a test.
 //
 // The engine's stages are the only things that call a model, and each names its
-// own function when it asks — route, submit_preflight, plan, submit_decision,
+// own function when it asks — route, submit_preflight, plan, reflector_decision,
 // submit_summary. That name is the whole dispatch: a stage asking for a plan is
 // a request whose tools carry submit_plan, and nothing else in a run looks like
 // that.
@@ -129,10 +129,15 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(body, &req)
 
 	fn := ""
+	// schema is true when the request went out as a response_format rather than
+	// as a tool — see llm/structured.go. It changes what a real provider sends
+	// BACK, so it has to change what this one sends back, or the stub answers a
+	// wire nobody is on.
+	schema := false
 	if len(req.Tools) > 0 {
 		fn = req.Tools[0].Function.Name
 	} else if n := req.ResponseFormat.JSONSchema.Name; n != "" {
-		fn = n
+		fn, schema = n, true
 	}
 	call := stubCall{Function: fn}
 	for _, m := range req.Messages {
@@ -204,6 +209,21 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 	if reply.Args != nil {
 		b, _ := json.Marshal(reply.Args)
 		args = string(b)
+	}
+	// A schema request is answered the way a provider answers one: the object as
+	// message content, and finish_reason "stop", because no tool was offered so
+	// no tool was called. llm.asToolReply is what turns that back into the shape
+	// the stage reads.
+	//
+	// This used to reply with a tool call whatever was asked, which is why the
+	// suite stayed green through a live break: the executive gates on
+	// finish_reason == "tool_calls", the real provider said "stop", and every
+	// test here said "tool_calls". A stub that answers a wire nobody is on
+	// tests nothing.
+	if schema {
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":%s},"finish_reason":%s}]}`,
+			mustJSON(args), mustJSON(finishReason(reply, "stop")))
+		return
 	}
 	fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"c1","type":"function","function":{"name":%s,"arguments":%s}}]},"finish_reason":%s}]}`,
 		mustJSON(fn), mustJSON(args), mustJSON(finishReason(reply, "tool_calls")))

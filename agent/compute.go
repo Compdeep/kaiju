@@ -424,12 +424,22 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 	// Merge the architect's interfaces and schema into the session's
 	// shared interfaces file. Persists across turns.
 	if sessionID != "" {
+		// Read rather than assumed, and the failure said out loud. Both fields
+		// travel as a string holding the object — see objectFromRaw — and if
+		// one does not parse, this session's contracts are empty and every
+		// coder after it is shown nothing. That used to happen with the error
+		// discarded, so the only symptom was coders disagreeing about a shape
+		// nobody could see they had never been given.
 		var newIfaces, newSchema map[string]any
-		if len(planOutput.Interfaces) > 0 {
-			_ = json.Unmarshal(planOutput.Interfaces, &newIfaces)
+		if v, err := objectFromRaw(planOutput.Interfaces); err != nil {
+			log.Printf("[dag] architect interfaces not stored: %v", err)
+		} else {
+			newIfaces = v
 		}
-		if len(planOutput.Schema) > 0 {
-			_ = json.Unmarshal(planOutput.Schema, &newSchema)
+		if v, err := objectFromRaw(planOutput.Schema); err != nil {
+			log.Printf("[dag] architect schema not stored: %v", err)
+		} else {
+			newSchema = v
 		}
 		merged := &sessionInterfaces{Interfaces: newIfaces, Schema: newSchema}
 		if err := saveInterfaces(a.cfg.MetadataDir, sessionID, merged); err != nil {
@@ -481,9 +491,9 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 			if projectStructure != "" {
 				params["structure"] = projectStructure
 			}
-			if len(planOutput.Interfaces) > 0 {
-				var ifaces any
-				json.Unmarshal(planOutput.Interfaces, &ifaces)
+			if ifaces, err := objectFromRaw(planOutput.Interfaces); err != nil {
+				log.Printf("[dag] coder %s gets no interfaces: %v", item.Goal, err)
+			} else if len(ifaces) > 0 {
 				params["interfaces"] = ifaces
 			}
 			if item.Execute != "" {

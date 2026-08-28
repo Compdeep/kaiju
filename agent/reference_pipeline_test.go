@@ -41,7 +41,7 @@ func TestReferencePipeline_TagResolvesAndNothingUnresolvedTravels(t *testing.T) 
 		"in_prose":    "the file is at ${step.fetch_page.kept_at} — read it",
 		"shell":       "echo ${HOME}",
 	}
-	rewriteStepTemplates(params, nodeIDs, "n2", steps, nil)
+	rewriteStepTemplates(params, nodeIDs, "n2", steps, nil, nil)
 
 	if got := params["by_tag"].(string); !strings.HasPrefix(got, "${node."+producerID) {
 		t.Fatalf("a tag must resolve to the node it names, got %q", got)
@@ -76,7 +76,7 @@ func TestReferencePipeline_AnUnresolvedReferenceStopsTheStep(t *testing.T) {
 	steps := []PlanStep{{Tool: "compute", Tag: "work"}}
 
 	params := map[string]any{"goal": "read ${step.never_ran.kept_at} and count"}
-	rewriteStepTemplates(params, []string{"n1"}, "n1", steps, nil)
+	rewriteStepTemplates(params, []string{"n1"}, "n1", steps, nil, nil)
 
 	n := &Node{ID: "n1", Type: NodeCompute, Params: params}
 	err := substituteTemplates(n, g, nil)

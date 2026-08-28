@@ -68,7 +68,7 @@ func TestRun_APlanWiringEnvelopeContentIsNotRejected(t *testing.T) {
 			step("file_read", "read_csv", map[string]any{"path": "ttm.csv"}),
 			stepDep("compute_over", "rank", map[string]any{"goal": "${step.0.content}"}, 0),
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, reader, consumer)
 
@@ -107,7 +107,7 @@ func TestRun_AReferenceByTagResolvesToThatStep(t *testing.T) {
 			stepDep("compute_over", "use_second",
 				map[string]any{"goal": "${step.read_second.content}"}, 1),
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, first, second, consumer)
 
@@ -144,7 +144,7 @@ func TestRun_ThePlannerIsGivenWhatTheStepsProduced(t *testing.T) {
 	})
 	// Arc one runs, then the reflector asks for another. Arc two is where the
 	// planner needs what arc one produced.
-	model.answerNth("submit_decision",
+	model.answerNth("reflector_decision",
 		stubReply{Args: map[string]any{
 			"decision": "replan", "summary": "the file was read",
 			"next": "work over the file that was read",
@@ -178,7 +178,7 @@ func TestRun_ResultsArriveAsToolMessages(t *testing.T) {
 		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
 		"plan":             plan(step("file_read", "read_csv", map[string]any{"path": "ttm.csv"})),
 	})
-	model.answerNth("submit_decision",
+	model.answerNth("reflector_decision",
 		stubReply{Args: map[string]any{"decision": "replan", "next": "keep going"}},
 		stubReply{Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	)
@@ -308,9 +308,9 @@ func stepDep(tool, tag string, params map[string]any, deps ...int) map[string]an
 func TestRun_TheReflectorIsGivenTheArcs(t *testing.T) {
 	reader := &fileTool{name: "file_read", path: "workspace/report_9f3a.csv", text: "a,b,c"}
 	model := newStubModel(t, map[string]stubReply{
-		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
-		"plan":             plan(step("file_read", "read_csv", map[string]any{"path": "ttm.csv"})),
-		"submit_decision":  {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"submit_preflight":   {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+		"plan":               plan(step("file_read", "read_csv", map[string]any{"path": "ttm.csv"})),
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, reader)
 
@@ -319,7 +319,7 @@ func TestRun_TheReflectorIsGivenTheArcs(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("the run failed: %v", err)
 	}
-	reqs := model.requestsTo("submit_decision")
+	reqs := model.requestsTo("reflector_decision")
 	if len(reqs) == 0 {
 		t.Fatal("the reflector never ran")
 	}
@@ -334,7 +334,7 @@ func TestRun_TheReflectorIsGivenTheArcs(t *testing.T) {
 	}
 	if !sawCall || !sawResult {
 		t.Errorf("the reflector was not given the arc (call=%v result=%v):\n%s",
-			sawCall, sawResult, model.shownTo("submit_decision", 0))
+			sawCall, sawResult, model.shownTo("reflector_decision", 0))
 	}
 }
 
@@ -353,7 +353,7 @@ func TestRun_ADeclaredReferenceCarriesTheValue(t *testing.T) {
 				"goal": map[string]any{"step": "read_csv", "field": "content"},
 			}),
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, reader, consumer)
 
@@ -384,7 +384,7 @@ func TestRun_TheStringFormStillWorks(t *testing.T) {
 			step("file_read", "read_csv", map[string]any{"path": "ttm.csv"}),
 			stepDep("compute_over", "rank", map[string]any{"goal": "${step.read_csv.content}"}, 0),
 		),
-		"submit_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
 	a := agentOnStub(t, model, reader, consumer)
 

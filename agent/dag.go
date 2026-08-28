@@ -1351,6 +1351,58 @@ type StepResult struct {
  * param: round - the arc to return. Negative returns every arc.
  * return: the steps, in creation order.
  */
+/*
+ * FinishedStep finds a step this run has already run, by the name a plan gave
+ * it.
+ * desc: Positions restart with every plan, so a reference can only address
+ *       steps in the plan being written. A name does not restart — the run
+ *       keeps every node it ever made — so a name is the one handle that still
+ *       reaches a finished step, and this is what turns it back into a node.
+ *
+ *       The newest wins. A name used twice means the same work was planned
+ *       again, and a reference written after both was written by a planner
+ *       reading the later one's result. A node that RESOLVED wins over a newer
+ *       one that did not, because a failed step has no value to read and
+ *       reaching further back for one is better than resolving to nothing.
+ *
+ *       Only steps a plan can name: the run also grafts nodes of its own —
+ *       "reflect", "operator", "debug_1" — and those are not the planner's
+ *       vocabulary.
+ * param: name - the tag a plan gave the step.
+ * return: the node's id and its round, and whether one was found.
+ */
+func (g *Graph) FinishedStep(name string) (id string, round int, found bool) {
+	if g == nil || name == "" {
+		return "", 0, false
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	bestResolved, bestAny := -1, -1
+	var idResolved, idAny string
+	for _, nid := range g.order {
+		n, ok := g.nodes[nid]
+		if !ok || n.Tag != name {
+			continue
+		}
+		if n.Type != NodeTool && n.Type != NodeCompute {
+			continue
+		}
+		if n.Round >= bestAny {
+			bestAny, idAny = n.Round, nid
+		}
+		if n.State == StateResolved && n.Round >= bestResolved {
+			bestResolved, idResolved = n.Round, nid
+		}
+	}
+	if idResolved != "" {
+		return idResolved, bestResolved, true
+	}
+	if idAny != "" {
+		return idAny, bestAny, true
+	}
+	return "", 0, false
+}
+
 func (g *Graph) StepResults(round int) []StepResult {
 	g.mu.RLock()
 	defer g.mu.RUnlock()

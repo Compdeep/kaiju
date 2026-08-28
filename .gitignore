@@ -53,3 +53,35 @@ poster_prompt.txt
 subculture_selection.txt
 business_plan.md
 report.json
+
+# Service state — the registry the service tool writes (names, absolute paths,
+# pids, ports, crash status) and the stdout/stderr
+# logs it rotates. Machine-local, and the logs carry absolute paths and ports
+# from whatever ran here. Eight .log.prev files reached the repo before this.
+.services/
+.services.json
+
+# Logs, wherever they land.
+*.log
+*.log.prev
+
+# Eval binaries built at the repo root. /kaiju was anchored-ignored and these
+# three were not, so 21MB of build output was committed.
+/editor_eval
+/holmes_eval
+/pipeline_eval
+
+# Workspace zones. A run whose workspace is the repo root writes into these —
+# fetched pages, command output, uploads, per-session state, generated media.
+# None of it is source. See internal/workspace.AllowedZones for the five a plan
+# may write to; the rest are written by tools.
+/media/
+/canvas/
+/blueprints/
+/uploads/
+/sessions/
+/fetched/
+/output/
+
+# Data files dropped in for a run. ttm.csv was a company expense ledger.
+/*.csv

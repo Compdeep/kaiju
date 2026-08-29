@@ -77,7 +77,9 @@ type PreflightContext struct {
 }
 
 // PreflightContextSchema is the shape preflight returns for context, derived
-// from the struct rather than written beside it — see RefSchema for why.
+// from the struct rather than written beside it. A shape stated twice is a
+// shape that drifts: the model is told to produce one thing, Go looks for
+// another, and the field is not lost loudly — it is simply not recognised.
 func PreflightContextSchema() string { return toolapi.PayloadSchemaOf(PreflightContext{}) }
 
 // Text renders the context for a prompt: the framing, then each identifier on

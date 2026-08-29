@@ -31,8 +31,8 @@ For multiple videos in parallel:
 
 If yt-dlp is not installed, install it first:
 
-1. `bash` — `pip install yt-dlp`
-2. `bash` — download command (depends on step 0)
+1. `bash` — `pip install yt-dlp`, tag `install`
+2. `bash` — the download command. It passes no data from `install`, it only has to run after it, so this is the one case for `depends_on`.
 
 **Never download full playlists unless the user explicitly asks for a playlist.** If a search returns a playlist URL, either extract individual video URLs from it or use `--no-playlist --max-downloads 1` to get a single video. Playlists can contain hundreds of videos and will time out.
 
@@ -70,14 +70,14 @@ For a specific branch:
 
 ### Bulk download (many files from a list)
 
-1. `file_read` — read the file containing URLs
-2. `bash` — `xargs -n 1 -P 4 curl -L -O < urls.txt` (depends on step 0)
+1. `file_read` — read the file containing URLs, tag `read_list`
+2. `bash` — `xargs -n 1 -P 4 curl -L -O < urls.txt`. This reads the file from disk itself, so it needs `depends_on` for ordering rather than a reference.
 
 Or if URLs come from a search:
 
-1. `web_search` — find the download page
-2. `web_fetch` — extract download URLs from the page (depends on step 0)
-3. `bash` — download each URL found in step 1 with curl (depends on step 1)
+1. `web_search` — find the download page, tag `find_page`
+2. `web_fetch` — read the page, wiring in the first result URL that `find_page` returned, tag `read_page`
+3. `bash` — curl the download URLs, referencing `read_page`'s `content`. The references are the wiring; do not add `depends_on`.
 
 ### Check if tools are installed
 

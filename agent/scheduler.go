@@ -129,7 +129,7 @@ func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget
 // What it carries is what is true of EVERY re-plan: the plan so far has run, and
 // this is how new steps are wired. Anything true only of some re-plans is added
 // at the call site — see replanDebugParagraph.
-const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n\nPlan the next steps needed to close this gap and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. step 0 `web_search`, step 1 `web_fetch` whose url param is `${step.0.results.0.url}` with `depends_on:[0]`. `${step.N}` addresses the NEW steps in THIS plan (0-indexed from your first new step). A step that already RAN is not addressable from here — neither its position nor its tag reaches back, because both name steps in THIS plan. What it returned is above, as a tool result: take the value out of that and write the value itself into the param, with `depends_on:[]`. A value you write literally must be one you can point to in the material above — a tool result, or the request itself. Copying it from there is what the sentence before this one asks for. What you may not write is a value you recall or assume: a URL, an id or a path you cannot find above does not exist, and the step that produces it is what to plan instead."
+const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n\nPlan the next steps needed to close what remains and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. a `web_search` tagged `find_docs`, then a `web_fetch` whose url param is `${step.find_docs.results.0.url}`. The reference IS the wiring; do not also write `depends_on`. A reference addresses the NEW steps in THIS plan, by their tags. A step that already RAN is not addressable from here — neither its position nor its tag reaches back, because both name steps in THIS plan. What it returned is above, as a tool result: take the value out of that and write the value itself into the param, with `depends_on:[]`. A value you write literally must be one you can point to in the material above — a tool result, or the request itself. Copying it from there is what the sentence before this one asks for. What you may not write is a value you recall or assume: a URL, an id or a path you cannot find above does not exist, and the step that produces it is what to plan instead."
 
 // replanDebugParagraph is added to the frame only when something has actually
 // failed.
@@ -476,12 +476,6 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{
 			ID: "executive", Type: "executive", State: "failed", Tag: "plan", Error: gap.Error()}})
 		return nil, gap
-	}
-
-	// Store capability gaps on the graph for reflection/aggregator context
-	if len(planResult.Gaps) > 0 {
-		graph.Gaps = planResult.Gaps
-		log.Printf("[dag] capability gaps: %v", planResult.Gaps)
 	}
 
 	log.Printf("[dag] plan: %d nodes created", len(initialNodes))
@@ -2207,9 +2201,8 @@ type SyncResult struct {
 	// back to its own type.
 	Data any
 
-	Gaps     []string // capability gaps declared by the planner
-	Nodes    int      // total DAG nodes executed
-	LLMCalls int      // total LLM round-trips
+	Nodes    int // total DAG nodes executed
+	LLMCalls int // total LLM round-trips
 
 	// RunID is this run, not the caller's reference: one reference can produce
 	// several runs. Here because a caller that records something after a run —
@@ -2517,7 +2510,6 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		Outcome:  outcome,
 		Actions:  actions,
 		Data:     data,
-		Gaps:     graph.Gaps,
 		Nodes:    graph.NodeCount(),
 		LLMCalls: int(budget.LLMCount()),
 		Trace:    traceJSON,

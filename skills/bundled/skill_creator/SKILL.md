@@ -15,8 +15,8 @@ Use when the user asks to:
 
 ### Create a new skill
 
-1. `file_list` — check if the skill directory already exists
-2. `file_write` — write the SKILL.md file (depends on step 0)
+1. `file_list` — check whether the skill directory already exists, tag `check_dir`
+2. `file_write` — write the SKILL.md file, referencing `check_dir` so it runs after the check
 
 The SKILL.md must follow this structure:
 
@@ -31,39 +31,44 @@ metadata:
 ---
 ```
 
-Required sections in the body:
+Only these six headings are ever extracted from a card, each by the stage named beside it. Everything else in the body is read by people and never reaches a model.
 
-- `## When to Use` — when the planner should activate this skill
-- `## Planning Guidance` — how to decompose tasks into parallel/sequential steps
+- `## Planning Guidance` — goes to the planner. How to break this kind of task into steps.
+- `## RULES` — also goes to the planner, alongside Planning Guidance. Use it for the constraints that must hold, not for method.
+- `## Architect Guidance` — goes to the architect inside a `compute` node, which lays out a multi-file build.
+- `## Coder Guidance` — goes to the coder inside a `compute` node, which writes each file.
+- `## Debug Guidance` — goes to the stage that diagnoses a failure at runtime.
+- `## Aggregator Guidance` — goes to the stage that writes the final answer. Use it to say what shape the answer should take.
 
-Optional sections:
+A card needs `## Planning Guidance` or `## RULES`. With neither, the whole body is dropped and the card reaches the planner as its name and description alone. Kaiju logs a warning at startup when it loads such a card.
 
-- `## Approach Selection` — decision matrix for choosing between approaches
-- `## What NOT to do` — anti-patterns and guardrails
+Sections like `## When to Use` and `## What NOT to do` are conventional and useful to a reader, but no stage extracts them. Anything the planner must act on belongs under `## Planning Guidance` or `## RULES`.
 
 ### Planning Guidance format
 
-Planning Guidance teaches the DAG planner how to structure tool calls. Each pattern should:
+Planning Guidance teaches the planner how to structure tool calls. Each pattern should:
 
-1. Name the tools to use (`bash`, `file_read`, `file_write`, `web_search`, etc.)
-2. Show which steps run in parallel vs sequential
-3. Say in plain language when a step needs an earlier step's output
+1. Name the tools to use (`bash`, `file_read`, `file_write`, `web_search`, and so on). Use names that are in the registry; a card naming a tool that does not exist sends the planner after nothing.
+2. Show which steps can run at the same time and which must wait.
+3. Say in plain language what an earlier step gives a later one.
 
-Describe data flow in plain language ("using the URL from the search", "the file named in the error"). Do NOT write `${step.N.field}` placeholders or `param_refs` in a skill — the planner injects one step's output into another itself. A skill says WHAT each step needs; the planner decides HOW to wire it.
+Every step carries a `tag`, which is its name in the plan. A later step reads an earlier one by referencing that tag, and the reference is what makes it wait — no separate dependency is declared. `depends_on` exists for the one case where two steps pass no data and still need an order, such as an install before the command that uses it.
+
+Describe the data flow in plain language: "the URL from the search", "the file the error names". A card may name a tag and a field so the planner has something concrete to wire, but it must not write a reference that would resolve. `${step.N.field}` names a particular step, and a card cannot know which steps a plan will contain — the planner decides that and does the wiring. Naming the shape, as this paragraph does, is fine; writing a live one is a guess that breaks the moment a plan is ordered differently.
 
 Example pattern:
 ```
 ### Do something
 
-1. `tool_a` — description of what it does
-2. `tool_b` — uses tool_a's output (depends on step 0)
-3. `tool_c` — parallel with step 1
+1. `tool_a` — what it does, tag `first`
+2. `tool_b` — reads `first`'s output field, so it runs after it
+3. `tool_c` — needs nothing from either, so it runs at the same time as `tool_b`
 ```
 
 ### Improve an existing skill
 
-1. `file_read` — read the current SKILL.md
-2. `file_write` — write the improved version (depends on step 0)
+1. `file_read` — read the current SKILL.md, tag `read_card`
+2. `file_write` — write the improved version, referencing `read_card`'s content
 
 ### Validate a skill
 
@@ -86,3 +91,4 @@ Workspace skills override installed and bundled skills with the same name.
 - Don't write overly broad descriptions — the planner uses the description to decide when to activate the skill
 - Don't skip the Planning Guidance section — without it, the planner won't know how to decompose tasks for this skill
 - Don't reference tools that don't exist in the registry
+- Don't put guidance the planner needs under a heading no stage extracts — see the six above

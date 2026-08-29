@@ -125,15 +125,15 @@ func TestGuard_EveryReferencePathResolvesAName(t *testing.T) {
 		}
 	})
 
-	t.Run("a declared reference", func(t *testing.T) {
+	t.Run("wiring", func(t *testing.T) {
 		plan := append(append([]PlanStep{}, steps...), PlanStep{
 			Tool: "compute", Tag: "use_it",
-			Params: map[string]any{"in": map[string]any{"step": "read_second", "field": "content"}},
+			Params: map[string]any{"in": "${step.read_second.content}"},
 		})
 		n := &Node{ID: "n3", Params: plan[2].Params}
-		deps := resolveDeclaredRefs(n, []string{"n1", "n2", "n3"}, plan, nil)
+		deps := rewriteStepTemplates(n.Params, []string{"n1", "n2", "n3"}, n.ID, plan, nil, nil)
 		if len(deps) != 1 || deps[0] != "n2" {
-			t.Errorf("a declared reference by name wired %v, want [n2]", deps)
+			t.Errorf("a reference by name wired %v, want [n2]", deps)
 		}
 	})
 
@@ -142,8 +142,14 @@ func TestGuard_EveryReferencePathResolvesAName(t *testing.T) {
 			Tool: "compute", Tag: "use_it",
 			Params: map[string]any{"in": "${step.no_such_step.content}"},
 		})
-		if errs := validatePlanReferences(plan, nil); len(errs) == 0 {
-			t.Error("a name matching nothing was accepted — it silently became step 0")
+		errs := validatePlanReferences(plan, nil)
+		if len(errs) == 0 {
+			t.Fatal("a name matching nothing was accepted — it silently became step 0")
+		}
+		// A fault that says only what is wrong leaves the next attempt guessing,
+		// so it has to name what the plan DOES have.
+		if !strings.Contains(errs[0], "read_second") {
+			t.Errorf("the fault does not say what the plan does have: %q", errs[0])
 		}
 	})
 }

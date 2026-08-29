@@ -20,7 +20,10 @@ import (
 // "Do NOT use ${step}" ban that collapsed replans to flat plans (commit 2fcce6d).
 func TestReplanFrame_TeachesWiring(t *testing.T) {
 	f := replanFrameTemplate
-	for _, want := range []string{"${step.0.results.0.url}", "depends_on:[0]", "web_search", "web_fetch", "WIRE your new steps"} {
+	// By TAG, not by position. A position is counted from the first step of the
+	// plan it is in, so a re-plan renumbers every reference it inherits — which
+	// is the one thing a frame written for a re-plan must not teach.
+	for _, want := range []string{"${step.find_docs.results.0.url}", "web_search", "web_fetch", "WIRE your new steps"} {
 		if !strings.Contains(f, want) {
 			t.Errorf("replan frame no longer teaches wiring — missing %q", want)
 		}
@@ -39,13 +42,11 @@ func TestExecutivePrompt_TeachesStepWiring(t *testing.T) {
 	p := prompt.Executive
 	for _, want := range []string{
 		"## Wiring data between steps",
-		// The reference shape, and the search → fetch example that uses it.
-		// It was `${step.0.results.0.url}` — a string, and a POSITION. A
-		// position is counted from the first step of the plan it is in, so a
-		// plan that drops a step renumbers every reference after it.
-		`{"step"`,
-		`"field"`,
-		`"results.0.url"`,
+		// The reference, and the search → fetch example that uses it. By TAG:
+		// it was `${step.0.results.0.url}`, a POSITION, and a position is
+		// counted from the first step of the plan it is in, so a plan that
+		// drops a step renumbers every reference after it.
+		"${step.find_docs.results.0.url}",
 		"web_fetch",
 		// Still named, because a reference is now the dependency and the
 		// prompt has to say when depends_on is still yours to write.

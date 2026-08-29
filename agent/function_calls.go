@@ -140,7 +140,7 @@ func observerToolDef() llm.ToolDef {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string"},
-								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step: \"{\\\"url\\\": {\\\"step\\\": \\\"find_docs\\\", \\\"field\\\": \\\"results.0.url\\\"}}\"."},
+								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: \"{\\\"url\\\": \\\"${step.find_docs.results.0.url}\\\"}\"."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
 							}
@@ -246,7 +246,7 @@ func debuggerToolDef() llm.ToolDef {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string"},
-								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step: \"{\\\"url\\\": {\\\"step\\\": \\\"find_docs\\\", \\\"field\\\": \\\"results.0.url\\\"}}\"."},
+								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: \"{\\\"url\\\": \\\"${step.find_docs.results.0.url}\\\"}\"."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
 							}

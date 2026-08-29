@@ -61,10 +61,12 @@ Questions requiring math (distance, time, percentage, volume).
 
 Questions that chain facts: "the person who did X also did Y, what is Z?"
 
-1. `web_search` — find X (step 0)
-2. `web_fetch` — extract the person/item from X (depends on step 0)
-3. `web_search` — search for Y using the value extracted in step 1 (depends on step 1)
-4. `web_fetch` — extract Z (depends on step 2)
+1. `web_search` — find X, tag `find_x`
+2. `web_fetch` — read the page, wiring in the first result URL that `find_x` returned, tag `read_x`
+3. `web_search` — search for Y, building the query from what `read_x` returned, tag `find_y`
+4. `web_fetch` — read that page and extract Z, wiring the URL from `find_y`
+
+Each reference is the dependency. Do not add `depends_on` to a chain like this.
 
 ### ArXiv and academic papers
 

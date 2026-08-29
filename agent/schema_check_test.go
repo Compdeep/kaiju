@@ -144,20 +144,22 @@ func TestAPlanStepTakesParamsEitherWay(t *testing.T) {
 	}
 }
 
-// A reference is an object inside the string, and it has to arrive as one —
-// read as text it names no step and the wiring is lost.
+// A reference has to survive the params string character for character. One
+// escape lost on the way through and it names no step, so the wiring is lost.
 func TestAReferenceSurvivesTheParamsString(t *testing.T) {
 	var step PlanStep
 	if err := json.Unmarshal([]byte(`{"tool":"web_fetch","tag":"read",
-		"params":"{\"url\":{\"step\":\"find_news\",\"field\":\"results.0.url\"}}"}`), &step); err != nil {
+		"params":"{\"url\":\"${step.find_news.results.0.url}\"}"}`), &step); err != nil {
 		t.Fatalf("did not decode: %v", err)
 	}
-	ref, ok := refFrom(step.Params["url"])
-	if !ok {
-		t.Fatalf("the reference did not survive as one: %#v", step.Params["url"])
+	got, _ := step.Params["url"].(string)
+	if got != "${step.find_news.results.0.url}" {
+		t.Fatalf("the reference changed on the way through: %#v", step.Params["url"])
 	}
-	if ref.Step != "find_news" || ref.Field != "results.0.url" {
-		t.Errorf("the reference changed on the way through: %+v", ref)
+	refs := FindRefs(step.Params)
+	if len(refs) != 1 || refs[0].Tag != "find_news" ||
+		strings.Join(refs[0].Path, ".") != "results.0.url" {
+		t.Errorf("the reference did not survive as one: %+v", refs)
 	}
 }
 

@@ -20,7 +20,7 @@ import (
 type observerOutput struct {
 	Action string     `json:"action"` // "continue", "inject", "cancel", "reflect"
 	Reason string     `json:"reason"`
-	Steps  []PlanStep `json:"steps"` // set when action == "inject"; they become nodes when grafted
+	Steps  []PlanStep `json:"steps"`  // set when action == "inject"; they become nodes when grafted
 	Cancel []string   `json:"cancel"` // tags/IDs to cancel when action == "cancel"
 }
 

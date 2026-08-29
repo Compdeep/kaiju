@@ -659,7 +659,13 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 
 		}
 
-		sb.WriteString(fmt.Sprintf("\nBudget: max %d steps, %d LLM calls.\n", a.cfg.MaxNodes, a.cfg.MaxLLMCalls))
+		// A ceiling stated on its own reads as an allowance to spend: every
+		// recorded plan on a 30-step ceiling came back with 30 or 31 steps, and
+		// the surplus steps were filled with whatever the context happened to
+		// mention rather than with the objective, which is what the answer was
+		// then written from. The limits still hold; the wording asks for a plan
+		// sized to the work.
+		sb.WriteString(budgetLine(a.cfg.MaxNodes, a.cfg.MaxLLMCalls))
 	}
 
 	rolePrompt := sb.String() + a.environmentSection()
@@ -1105,6 +1111,54 @@ func (a *Agent) objective(trigger Trigger, graph *Graph, replanFrame ...string) 
  * param: trigger - the investigation trigger.
  * return: PlanResult pointer with steps and intent, or error.
  */
+/*
+ * planRetryAdvice tells the planner what it got wrong, in the terms of the
+ * mistake it actually made.
+ * desc: The retry always sent one fixed sentence — "goal, mode, query go INSIDE
+ *       params" — whatever had broken. A plan that put a ${step.N.field}
+ *       reference where the params STRING belongs was answered with advice
+ *       about a different error, and failed the same way twice: two model
+ *       calls, several minutes, and a run that ended with nothing investigated.
+ *
+ *       A second attempt is only worth making if it is told something the first
+ *       did not know. Each branch shows the shape that would have parsed,
+ *       because a corrected example is what the model can copy; the error alone
+ *       says only that it is wrong.
+ * param: err - what the parse rejected.
+ * param: raw - the arguments as they arrived, to tell the mistakes apart.
+ * return: the tool reply the retry is given.
+ */
+func planRetryAdvice(err error, raw string) string {
+	const opening = "Error: %v.\n\n%s\n\nFix that and call plan() again."
+
+	text := err.Error()
+	switch {
+	// params did not parse, and a reference is why. The reference syntax and
+	// the params-as-a-string rule meet here: the reference belongs INSIDE the
+	// string, and this put it where the string should be.
+	case strings.Contains(text, "params must be a JSON object") && strings.Contains(raw, "${"):
+		return fmt.Sprintf(opening, err,
+			"params is a STRING containing a JSON object, and a ${step.N.field} reference goes INSIDE "+
+				"that string as a value — it never replaces the object itself.\n"+
+				"  wrong:   \"params\": ${step.2.pid}\n"+
+				"  wrong:   \"params\": {\"pid\": ${step.2.pid}}\n"+
+				"  correct: \"params\": \"{\\\"pid\\\": \\\"${step.2.pid}\\\"}\"")
+
+	// params did not parse for some other reason.
+	case strings.Contains(text, "params must be a JSON object"):
+		return fmt.Sprintf(opening, err,
+			"params is a STRING whose contents are a JSON object, not an object and not bare text.\n"+
+				"  correct: \"params\": \"{\\\"path\\\": \\\"/tmp/x\\\"}\"")
+
+	// A field a step does not have, which is the shape the original advice was
+	// written for. Kept, because that failure is real and still happens.
+	case strings.Contains(text, "unknown field") || strings.Contains(text, "cannot unmarshal"):
+		return fmt.Sprintf(opening, err,
+			"goal, mode and query belong INSIDE params, not beside tool and tag at the step level.")
+	}
+	return fmt.Sprintf(opening, err, "Return the same plan with the JSON corrected.")
+}
+
 func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *Graph, replanFrame ...string) (planOut *PlanResult, errOut error) {
 	// The objective is built before the tools are chosen, and it is the same
 	// text the planner is about to read. That order is the point.
@@ -1356,7 +1410,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			log.Printf("[dag] executive (native) plan() parse failed, retrying: %v", err)
 			retryMessages := append(messages,
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
-				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: fmt.Sprintf("Error: %v. Fix the JSON and call plan() again. Remember: goal, mode, query go INSIDE params, not at the step level.", err)},
+				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: planRetryAdvice(err, fixedRaw)},
 			)
 			retryResp, retryErr := a.completeHeavyChecked(retracing(ctx, "plan_reparse"), &llm.ChatRequest{
 				Messages:    retryMessages,
@@ -2729,4 +2783,13 @@ func applyRunTarget(steps []PlanStep, target string, registry *toolapi.Registry)
 			steps[i].Target = ""
 		}
 	}
+}
+
+/*
+ * budgetLine states the plan's limits to the planner.
+ * desc: Named separately so the wording can be asserted; a bare "max N steps"
+ *       was read as an amount to spend rather than a limit to stay under.
+ */
+func budgetLine(maxNodes, maxLLMCalls int) string {
+	return fmt.Sprintf("\nBudget: at most %d steps and %d LLM calls. This is a ceiling, not a target — plan only the steps the objective needs, and stop there. Do not add steps that examine something the objective did not name.\n", maxNodes, maxLLMCalls)
 }

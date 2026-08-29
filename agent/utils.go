@@ -705,20 +705,71 @@ func loadLatestBlueprint(workspace, sessionID string) string {
 	return string(data)
 }
 
-func buildComputeUserPrompt(goal, query string, ctxData any, hints []any, plan, blueprintMode, fieldMeanings string) string {
+// computePrompt is everything a compute stage tells its model about the work.
+//
+// A struct rather than eight positional parameters, four of which are strings
+// that read the same at a call site. Both modes fill the same one — see
+// buildComputeUserPrompt, which is the single place either of them says what the
+// work is.
+type computePrompt struct {
+	Goal  string
+	Query string
+
+	// Context is the data the script will work from.
+	Context any
+	// Wired says whether any of it came from a step that ran. False means the
+	// plan typed it in, and a compute whose data is typed in has none.
+	Wired bool
+
+	Hints         []any
+	Blueprint     string
+	BlueprintMode string
+	FieldMeanings string
+}
+
+/*
+ * buildComputeUserPrompt writes the user message both compute modes send.
+ * desc: One builder for deep and shallow, so neither can be told something the
+ *       other is not.
+ * param: p - the work, its data, and where the data came from.
+ * return: the message.
+ */
+func buildComputeUserPrompt(p computePrompt) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("## Goal\n%s\n", goal))
+	sb.WriteString(fmt.Sprintf("## Goal\n%s\n", p.Goal))
 
-	if query != "" {
-		sb.WriteString(fmt.Sprintf("\n## Original User Request\n%s\n", query))
+	if p.Query != "" {
+		sb.WriteString(fmt.Sprintf("\n## Original User Request\n%s\n", p.Query))
 	}
 
-	if ctxData != nil {
-		contextJSON, err := json.MarshalIndent(ctxData, "", "  ")
-		if err == nil && string(contextJSON) != "null" {
-			sb.WriteString(fmt.Sprintf("\n## Available Data (from upstream steps)\n```json\n%s\n```\n", string(contextJSON)))
+	// What the data is, and where it came from, said separately.
+	//
+	// This heading read "Available Data (from upstream steps)" whatever was
+	// under it. A plan that wired nothing and typed one sentence into the
+	// context slot produced that heading over that sentence, and a model told
+	// its upstream data is one sentence about the date has been told it has
+	// what it needs. Asked for a calculation, the one observed reply was to
+	// write the missing figures as constants and label them with the source
+	// they should have come from.
+	//
+	// Nothing here judges whether the data is enough for the goal. It says only
+	// what is true and is known: whether any step fed this node.
+	var rendered string
+	if p.Context != nil {
+		if contextJSON, err := json.MarshalIndent(p.Context, "", "  "); err == nil && string(contextJSON) != "null" {
+			rendered = string(contextJSON)
 		}
+	}
+	switch {
+	case rendered != "" && p.Wired:
+		sb.WriteString(fmt.Sprintf("\n## Available Data (wired from earlier steps)\n```json\n%s\n```\n", rendered))
+	case rendered != "":
+		sb.WriteString(fmt.Sprintf("\n## Values written into the plan\n```json\n%s\n```\n", rendered))
+		sb.WriteString(noUpstreamData)
+	default:
+		sb.WriteString("\n## Available Data\nNone.\n")
+		sb.WriteString(noUpstreamData)
 	}
 
 	// What those values are, in the words of the tools that produced them. The
@@ -726,29 +777,42 @@ func buildComputeUserPrompt(goal, query string, ctxData any, hints []any, plan, 
 	// fields is the whole of something and which is a part, what a path leads
 	// to, what a number counts. Without it a script is written against guesses
 	// about the shape in front of it.
-	if strings.TrimSpace(fieldMeanings) != "" {
+	if strings.TrimSpace(p.FieldMeanings) != "" {
 		sb.WriteString("\n## What those fields are (declared by the tools that produced them)\n")
-		sb.WriteString(fieldMeanings)
+		sb.WriteString(p.FieldMeanings)
 	}
 
-	if len(hints) > 0 {
+	if len(p.Hints) > 0 {
 		sb.WriteString("\n## Previous Attempts (FAILED — learn from these)\n")
-		for i, h := range hints {
+		for i, h := range p.Hints {
 			sb.WriteString(fmt.Sprintf("%d. %v\n", i+1, h))
 		}
 		sb.WriteString("\nTry a DIFFERENT approach if the same method keeps failing.\n")
 	}
 
-	if plan != "" {
-		if blueprintMode == "reference" {
-			sb.WriteString(fmt.Sprintf("\n## Blueprint (REFERENCE — use for context and conventions, but you are building something new)\n%s\n", plan))
+	if p.Blueprint != "" {
+		if p.BlueprintMode == "reference" {
+			sb.WriteString(fmt.Sprintf("\n## Blueprint (REFERENCE — use for context and conventions, but you are building something new)\n%s\n", p.Blueprint))
 		} else {
-			sb.WriteString(fmt.Sprintf("\n## Blueprint (FOLLOW — use exact paths, conventions, and structure defined here)\n%s\n", plan))
+			sb.WriteString(fmt.Sprintf("\n## Blueprint (FOLLOW — use exact paths, conventions, and structure defined here)\n%s\n", p.Blueprint))
 		}
 	}
 
 	return sb.String()
 }
+
+// noUpstreamData is what a compute is told when no step fed it.
+//
+// It says the fact and what to do about it, because the fact alone was not
+// enough: a model that needs figures and has none will write figures. The last
+// sentence is the one that matters — an answer that names what is missing is
+// worth more than a plausible one built on values nobody measured.
+const noUpstreamData = "\nNo earlier step's output was wired into this compute, so this is everything " +
+	"you have. Whatever the goal needs beyond it, you do not have and cannot obtain: " +
+	"you are writing a script, not gathering. Values you supply yourself are not " +
+	"measurements, and presenting them as though a source produced them is the one " +
+	"outcome worse than not answering. If the goal cannot be met with what is above, " +
+	"say so in the output and name what is missing.\n"
 
 var tagSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 

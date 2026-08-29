@@ -327,7 +327,7 @@ var scenarios = []scenario{
 		name:          "compute_fanout",
 		fixtureSubdir: "compute_fanout",
 		query:         `For Mercury, Venus, Earth, Mars, and Jupiter, fetch their average distance from the Sun (km) and surface gravity (m/s²). Compute how many minutes light from the Sun takes to reach each planet (distance_km / 299792 / 60) and what a 75 kg human would weigh on each planet (75 × gravity / 9.81). Rank the planets by gravity, lowest first. Present the results as a table with columns: Planet, Distance (km), Gravity (m/s²), Light travel (min), Weight of 75 kg human (kg), Gravity rank.`,
-		purpose:       `End-to-end value-computation pipeline — 5 parallel fetches → compute(shallow) with 5 ${step.N.content} placeholders → ranked table. Exercises validateDataFlow (compute+depends_on must wire data via templates), template substitution (dep.Result field must exist or be graceful-degrade), and truncateToolResult (JSON envelopes stay valid when web_fetch content is large). A pass requires the final output to contain real numbers; a fail means either the validator chain broke or the pipeline couldn't recover.`,
+		purpose:       `End-to-end value-computation pipeline — 5 parallel fetches → compute(shallow) with 5 ${step.N.content} placeholders → ranked table. Exercises validatePlanWiring (compute+depends_on must wire data via templates), template substitution (dep.Result field must exist or be graceful-degrade), and truncateToolResult (JSON envelopes stay valid when web_fetch content is large). A pass requires the final output to contain real numbers; a fail means either the validator chain broke or the pipeline couldn't recover.`,
 		verify: func(workDir, kaijuOut string) error {
 			// Two acceptable outcomes — either one is a pass:
 			//
@@ -338,7 +338,7 @@ var scenarios = []scenario{
 			//
 			//   (B) validator caught a bad plan — the Executive emitted
 			//       compute with depends_on but no template placeholders
-			//       (or wrong wiring), validateDataFlow fired with a
+			//       (or wrong wiring), validatePlanWiring fired with a
 			//       descriptive error, and kaiju surfaced that error to
 			//       the user rather than silently corrupting.
 			//

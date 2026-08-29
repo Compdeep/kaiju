@@ -810,7 +810,7 @@ type executiveCallPayload struct {
  * linkDependsOnTags resolves depends_on entries that name a step's tag.
  * desc: FlexInts.UnmarshalJSON can only hold positions, so a name is dropped as
  *       it decodes and the step silently loses a dependency — the scheduler then has
- *       nothing to make it wait, and validateDataFlow, whose whole check is
+ *       nothing to make it wait, and validatePlanWiring, whose whole check is
  *       "declared a dependency but wired no value", returns early because the
  *       declaration is the thing that went missing. A re-plan is where this
  *       bites: positions restart with each plan and tags do not, so a reflector
@@ -902,6 +902,101 @@ func validatePlanNames(steps []PlanStep) []string {
 		seen[name] = i
 	}
 	return errs
+}
+
+/*
+ * validatePlanComputeInputs reports a compute that reads nothing while the plan
+ * gathers something.
+ * desc: A compute receives what is wired into it and nothing else. It cannot
+ *       reach the graph, cannot see the step beside it, and does not run again
+ *       when one finishes: its data is fixed at the moment it starts. So a
+ *       compute with no reference has no data for the whole of its life, and a
+ *       stage asked for a calculation it has no figures for will supply the
+ *       figures.
+ *
+ *       Observed: a plan searched, fetched, and ran a compute that referenced
+ *       neither. All three started in the same second; the compute then ran for
+ *       eighty seconds while both results sat in the graph where it could not
+ *       reach them, and wrote the numbers it needed as constants under a comment
+ *       naming the source they should have come from. Every check the engine
+ *       runs passed, because the compute schema requires a goal and a mode and
+ *       a reference is optional.
+ *
+ *       Only reported when the plan HAS something to wire. A calculation that
+ *       genuinely needs nothing — the thousandth prime, a conversion — is a
+ *       plan with no other step to read from, and is left alone. A step that
+ *       reads THIS compute is downstream and does not count: it is the output,
+ *       not an input.
+ *
+ *       It reaches the planner as a correction rather than dropping the step,
+ *       which is what validatePlanWiring does and why it could not be used here.
+ *       A run whose compute is deleted has no calculation at all; a run whose
+ *       planner is told to wire it has one that works.
+ * param: steps - the plan
+ * return: one message per compute that ignores what the plan gathered
+ */
+func validatePlanComputeInputs(steps []PlanStep) []string {
+	var errs []string
+	for i, s := range steps {
+		if s.Type != "compute" && s.Tool != "compute" {
+			continue
+		}
+		// A step that declares a dependency and wires nothing is the same fault
+		// wearing a different shape, and validatePlanWiring already owns it — it
+		// drops the step further down. Reporting it here as well would put two
+		// remedies on one fault: this one fails the run after three corrections,
+		// that one lets the run continue without the step. The split is by
+		// declaration, so each fault has exactly one owner.
+		if len(s.DependsOn) > 0 {
+			continue
+		}
+		// task_files is the other way data reaches a compute: it reads them off
+		// disk itself rather than being handed their content.
+		if hasNonEmptyTaskFiles(s.Params) {
+			continue
+		}
+		if len(stepRefsIn(s.Params, steps)) > 0 {
+			continue
+		}
+		var available []string
+		for j, other := range steps {
+			if j == i || readsStep(other, i, steps) {
+				continue
+			}
+			available = append(available, stepLabelFor(other, j))
+		}
+		if len(available) == 0 {
+			continue // nothing in this plan could have fed it
+		}
+		errs = append(errs, fmt.Sprintf(
+			"step %d (compute, tag %q): reads nothing from any step, while this plan runs %s. "+
+				"A compute is given only what its params reference — it cannot reach the graph, and its "+
+				"data is fixed when it starts, so a step finishing later does not reach it. Wire what it "+
+				"needs with ${step.<tag>.<field>}, or, if the calculation genuinely needs nothing this "+
+				"plan gathers, drop the steps that gather it",
+			i, s.Tag, strings.Join(available, ", ")))
+	}
+	return errs
+}
+
+// readsStep reports whether a step references the step at position idx, which
+// makes it downstream of it — its output, not a possible input.
+func readsStep(s PlanStep, idx int, steps []PlanStep) bool {
+	for _, r := range stepRefsIn(s.Params, steps) {
+		if r.idx == idx {
+			return true
+		}
+	}
+	return false
+}
+
+// stepLabelFor names a step the way the planner wrote it, for a message it has
+// to act on.
+func stepLabelFor(s PlanStep, i int) string {
+	if s.Tag != "" {
+		return fmt.Sprintf("%s (%s)", s.Tag, s.Tool)
+	}
+	return fmt.Sprintf("step %d (%s)", i, s.Tool)
 }
 
 /*
@@ -1386,13 +1481,38 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			refErrs := validatePlanReferencesIn(steps, a.registry, graph)
 			paramErrs := validatePlanParams(steps, a.registry)
 			depErrs := validatePlanDeps(steps)
-			allErrs := append(append(append(append([]string{}, nameErrs...), refErrs...), paramErrs...), depErrs...)
+			inputErrs := validatePlanComputeInputs(steps)
+
+			// Two kinds of fault, and only one of them can be certain.
+			//
+			// A name that matches nothing, a parameter a tool does not take, a
+			// reference to a step that is not there: each is wrong however the
+			// run turns out, so a plan carrying one is not dispatched.
+			//
+			// A compute that reads nothing is a plan that will probably invent
+			// its data — not a plan that cannot run. Judging it needs to know
+			// whether the goal requires what the plan gathered, and nothing here
+			// knows that. So the planner is told, up to the same three times, and
+			// if it still says no the plan runs as written: refusing would end
+			// runs over a suspicion, and each correction is a call to the heavy
+			// model with the whole plan prompt behind it.
+			//
+			// What survives is not unguarded. A compute with nothing wired is
+			// told so in its own prompt — see buildComputeUserPrompt — which is
+			// the layer that knows what it actually received.
+			fatal := append(append(append(append([]string{}, nameErrs...), refErrs...), paramErrs...), depErrs...)
+			allErrs := append(append([]string{}, fatal...), inputErrs...)
 			if len(allErrs) == 0 {
 				break // plan is clean — proceed
 			}
 			if corrections >= maxPlanCorrections {
-				return nil, fmt.Errorf("executive: plan still invalid after %d corrections: %s",
-					maxPlanCorrections, strings.Join(allErrs, "; "))
+				if len(fatal) > 0 {
+					return nil, fmt.Errorf("executive: plan still invalid after %d corrections: %s",
+						maxPlanCorrections, strings.Join(fatal, "; "))
+				}
+				log.Printf("[dag] executive kept a plan whose compute reads nothing after %d corrections: %s",
+					maxPlanCorrections, strings.Join(inputErrs, "; "))
+				break
 			}
 			log.Printf("[dag] executive plan has %d problem(s) [%d reference, %d param], correction %d/%d: %v",
 				len(allErrs), len(refErrs), len(paramErrs), corrections+1, maxPlanCorrections, allErrs)
@@ -1620,7 +1740,7 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 			for i, d := range s.DependsOn {
 				depStrs[i] = fmt.Sprintf("%d", d)
 			}
-			if err := validateDataFlow(s.Tool, depStrs, s.Params); err != nil {
+			if err := validatePlanWiring(s.Tool, depStrs, s.Params); err != nil {
 				log.Printf("[dag] executive plan validation: dropping step %q (%s): %v", s.Tag, s.Tool, err)
 				continue
 			}

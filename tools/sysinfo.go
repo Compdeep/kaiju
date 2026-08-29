@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
@@ -168,11 +167,6 @@ func (s *Sysinfo) ExecuteTyped(ctx context.Context, _ map[string]any) (toolapi.T
 var _ toolapi.Tool = (*Sysinfo)(nil)
 var _ toolapi.Outputter = (*Sysinfo)(nil)
 var _ toolapi.TypedExecutor = (*Sysinfo)(nil)
-
-func init() {
-	// Ensure sysinfo is always available as a reference tool.
-	_ = fmt.Sprintf
-}
 
 // platformSnapshot asks the host what it is doing right now — uptime, memory,
 // load — in whatever form that platform reports it.

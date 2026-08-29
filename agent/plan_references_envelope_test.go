@@ -45,7 +45,7 @@ func envRegistry(t *testing.T) *toolapi.Registry {
 // its text. `content` is the envelope's, not the payload's, and the validator
 // used to reject it — so a correct plan was thrown out, and the planner spent
 // its three corrections being told to fix something that was right.
-func TestValidatePlanEdges_AcceptsEnvelopeContent(t *testing.T) {
+func TestValidatePlanReferences_AcceptsEnvelopeContent(t *testing.T) {
 	steps := []PlanStep{
 		{Tool: "file_read", Params: map[string]any{"path": "ttm.csv"}},
 		{Tool: "compute", Params: map[string]any{"goal": "rank rows", "context.csv": "${step.0.content}"}, DependsOn: []int{0}},
@@ -56,7 +56,7 @@ func TestValidatePlanEdges_AcceptsEnvelopeContent(t *testing.T) {
 }
 
 // Every field the envelope declares, not just content.
-func TestValidatePlanEdges_AcceptsEveryEnvelopeField(t *testing.T) {
+func TestValidatePlanReferences_AcceptsEveryEnvelopeField(t *testing.T) {
 	reg := envRegistry(t)
 	for _, field := range []string{"content", "status", "type", "detail"} {
 		steps := []PlanStep{
@@ -71,7 +71,7 @@ func TestValidatePlanEdges_AcceptsEveryEnvelopeField(t *testing.T) {
 
 // The tool's own fields still validate, and a field no tool produces is still
 // caught — widening the check must not switch it off.
-func TestValidatePlanEdges_StillCatchesRealMistakes(t *testing.T) {
+func TestValidatePlanReferences_StillCatchesRealMistakes(t *testing.T) {
 	reg := envRegistry(t)
 
 	ok := []PlanStep{

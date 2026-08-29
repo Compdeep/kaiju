@@ -1,3 +1,13 @@
+// What a tool is, and the interfaces one may also implement.
+//
+// A tool is a capability the agent can call: bash, web_search, file_read. It is
+// registered, it is executed, and it is what a plan step names.
+//
+// This file was called skill.go, which is a different thing — a SKILL.md card
+// is guidance, and it reaches the registry only when it dispatches to a tool
+// (see skillmd.SkillMD). Reading the interface here under that name is where
+// the two senses blurred: variables holding a Tool were called skill in a dozen
+// places, and one word was doing two jobs.
 package toolapi
 
 import (
@@ -161,9 +171,50 @@ func GetOutputSchema(t Tool) json.RawMessage {
 }
 
 /*
+ * Addressed is an optional interface for a tool whose calls do not all go to
+ * the same place.
+ * desc: A throttle is enforced per destination rather than per tool, and a tool
+ *       that does not implement this has one destination — itself. Ten calls to
+ *       one service must be spaced; ten calls to ten services must not, and only
+ *       the tool can tell those apart, because only the tool knows what its own
+ *       parameters name.
+ *
+ *       The key is opaque and is only ever compared with another key from the
+ *       same tool. Nothing outside the tool parses it, so what goes in it is the
+ *       tool's business: a host, an account, a device, a database. Return "" when
+ *       the parameters do not say, and the call is treated as going wherever the
+ *       tool's unaddressed calls go.
+ */
+type Addressed interface {
+	/*
+	 * Destination names where this call will go.
+	 * param: params - the parameters the call will be made with
+	 * return: an opaque key, or "" when the parameters do not say
+	 */
+	Destination(params map[string]any) string
+}
+
+/*
+ * GetDestination returns the destination a call is addressed to, or "" for a
+ * tool that does not distinguish its calls.
+ * param: t - the tool to query
+ * param: params - the parameters the call will be made with
+ * return: the tool's key for this call, or ""
+ */
+func GetDestination(t Tool, params map[string]any) string {
+	if d, ok := t.(Addressed); ok {
+		return d.Destination(params)
+	}
+	return ""
+}
+
+/*
  * Throttled is an optional interface that tools can implement to declare
  * a minimum interval between consecutive invocations.
- * desc: Allows tools to rate-limit themselves; the DAG scheduler enforces the interval per-tool to avoid overwhelming external APIs
+ * desc: Allows tools to rate-limit themselves. The interval is enforced per
+ *       destination — see Addressed — so a tool whose calls reach different
+ *       services throttles each of them separately, and a tool with one
+ *       destination throttles as a whole.
  */
 type Throttled interface {
 	/*

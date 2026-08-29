@@ -623,8 +623,8 @@ func TestARunPlansWithStringParamsAndTheToolGetsThem(t *testing.T) {
 
 // A reference inside a params string still wires one step to the next.
 //
-// The reference is an object nested inside the string, so it survives two
-// decodes rather than one. Read as text instead it names no step, the
+// params arrives as a string holding JSON, so the reference is only a reference
+// after that second decode. Left as text the name resolves to nothing, the
 // dependency is never derived, and both steps run at once against nothing.
 func TestAReferenceInsideAParamsStringStillWiresTheSteps(t *testing.T) {
 	first := &countingTool{name: "process_list"}
@@ -636,7 +636,7 @@ func TestAReferenceInsideAParamsStringStillWiresTheSteps(t *testing.T) {
 		"plan": plan(
 			stepStringParams(t, "process_list", "procs", nil),
 			stepStringParams(t, "file_read", "read_it", map[string]any{
-				"path": map[string]any{"step": "procs", "field": "count"},
+				"path": "${step.procs.count}",
 			}),
 		),
 		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},

@@ -7,7 +7,7 @@
 //     tool call before it runs (e.g. bash({command, cwd}) — bash has
 //     no cwd). Called from fireNode just before executeToolNode.
 //
-//   validateDataFlow — catches the omission case: compute / edit_file
+//   validatePlanWiring — catches the omission case: compute / edit_file
 //     declares depends_on for upstream steps but wires NO ${node...}
 //     templates anywhere in params. Means the planner depended on a
 //     step's data and forgot to interpolate it.
@@ -324,7 +324,7 @@ func validateDirectParams(tool toolapi.Tool, params map[string]any) error {
 	return nil
 }
 
-// validateDataFlow rejects compute / edit_file nodes that declare
+// validatePlanWiring rejects compute / edit_file nodes that declare
 // depends_on but contain NO ${node...} templates anywhere in their
 // params. The planner almost never depends a compute on upstream steps
 // for pure sequencing — when it sets depends_on, it wants their data.
@@ -338,7 +338,7 @@ func validateDirectParams(tool toolapi.Tool, params map[string]any) error {
 // is also exempt — task_files IS the data source (the Coder reads each
 // listed file directly), so depends_on against an upstream file_read
 // is just harmless sequencing.
-func validateDataFlow(toolName string, dependsOn []string, params map[string]any) error {
+func validatePlanWiring(toolName string, dependsOn []string, params map[string]any) error {
 	if len(dependsOn) == 0 {
 		return nil
 	}
@@ -374,7 +374,7 @@ func paramsContainTemplate(v any) bool {
 
 // hasNonEmptyTaskFiles reports whether params["task_files"] is a non-empty
 // list. Accepts both []string (programmatic callers) and []any (JSON-decoded
-// LLM output). Used by validateDataFlow to exempt edit_file from the
+// LLM output). Used by validatePlanWiring to exempt edit_file from the
 // "depends_on requires templates" rule when task_files supplies the data.
 func hasNonEmptyTaskFiles(params map[string]any) bool {
 	tf, ok := params["task_files"]
@@ -548,11 +548,11 @@ func wholeBesideExcerpt(reg *toolapi.Registry, graph *Graph, depID, field string
 	if producer == nil || producer.Body == nil || producer.ToolName == "" {
 		return nil, false
 	}
-	skill, known := reg.Get(producer.ToolName)
+	tool, known := reg.Get(producer.ToolName)
 	if !known {
 		return nil, false
 	}
-	for _, declared := range toolapi.GetExcerpts(skill) {
+	for _, declared := range toolapi.GetExcerpts(tool) {
 		if declared.Field != field {
 			continue
 		}

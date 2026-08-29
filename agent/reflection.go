@@ -158,7 +158,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	}
 	resp, err := a.completeLightChecked(withTrace(ctx, reflectID), &llm.ChatRequest{
 		Messages:    messages,
-		Tools:       []llm.ToolDef{reflectorToolDef()},
+		Tools:       []llm.ToolDef{reflectorSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.replyBudget(replyDecisionBudget),
@@ -335,7 +335,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	}
 	resp, err := a.completeLightChecked(withTrace(ctx, interjectID), &llm.ChatRequest{
 		Messages:    messages,
-		Tools:       []llm.ToolDef{reflectorToolDef()},
+		Tools:       []llm.ToolDef{reflectorSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.replyBudget(replyDecisionBudget),

@@ -127,6 +127,13 @@ export function connect() {
               else ds.nodes.push(fn)
               if (fn.actions) handleActions(fn.actions)
             }
+            // The run is over, so nothing is still working. A stage that only
+            // ever exists as an event — the aggregator, the chat node — has no
+            // entry in the final snapshot to correct it, and its terminal event
+            // shares a 64-deep subscriber channel with the answer it streams
+            // just beforehand, so that event is the one dropped when the buffer
+            // is full. The trace then persists with `synthesize` spinning.
+            for (const n of ds.nodes) if (n.state === 'running') n.state = 'resolved'
             ds.running = false
             ds.interjectMode = false
           }

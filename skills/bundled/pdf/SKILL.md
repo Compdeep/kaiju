@@ -19,9 +19,10 @@ case needs a vision model instead — don't keep retrying it.
 - If the question is about a PDF and you have a file path for it, plan a
   `pdf_extract` step with `{"path": "<the .pdf path>"}` and answer from what it
   returns. Do NOT plan `file_read` on a `.pdf` — that returns binary garbage.
-- If the PDF lives at a URL, plan `web_fetch` first to download it to disk, then a
-  `pdf_extract` step on the downloaded file path. Reading follows fetching; they
-  are two steps, not one.
+- If the PDF lives at a URL, one `web_fetch` step is usually enough: it detects a
+  PDF and returns its text inline, and it writes the PDF itself to disk at
+  `full_content_path`. Add a `pdf_extract` step on that path only when the inline
+  text came back cut short and you need the rest.
 - For a large document, pass `max_chars` to cap how much text you pull back, then
   answer from the relevant portion rather than dumping the whole thing.
 - If `pdf_extract` reports no extractable text, tell the user the PDF looks

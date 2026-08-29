@@ -30,8 +30,8 @@ func (b MicroPlannerBody) Summary() string {
 	if b.Out.Summary != "" {
 		return "fix: " + Text.TruncateLog(b.Out.Summary, traceSummaryChars)
 	}
-	if len(b.Out.Nodes) > 0 {
-		return fmt.Sprintf("%d fix step(s)", len(b.Out.Nodes))
+	if len(b.Out.Steps) > 0 {
+		return fmt.Sprintf("%d fix step(s)", len(b.Out.Steps))
 	}
 	return RawText(b.Raw).Summary()
 }

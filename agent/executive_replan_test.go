@@ -24,7 +24,7 @@ func TestUnknownToolNames(t *testing.T) {
 		{"all real", []PlanStep{{Tool: "web_search"}, {Tool: "web_fetch"}}, nil},
 		{"one fake (skill-as-tool)", []PlanStep{{Tool: "web_research_guide"}, {Tool: "web_search"}}, []string{"web_research_guide"}},
 		{"distinct + ordered", []PlanStep{{Tool: "foo"}, {Tool: "web_search"}, {Tool: "bar"}, {Tool: "foo"}}, []string{"foo", "bar"}},
-		{"gap and blank ignored", []PlanStep{{Tool: "gap", Gap: "no tool"}, {Tool: ""}, {Tool: "web_fetch"}}, nil},
+		{"blank ignored", []PlanStep{{Tool: ""}, {Tool: "web_fetch"}}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

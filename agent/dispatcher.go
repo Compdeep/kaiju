@@ -28,8 +28,8 @@ type toolThrottle struct {
 }
 
 /*
- * throttleGate is a per-tool mutex and timestamp for throttle enforcement.
- * desc: Serializes calls to a single tool with a minimum time gap between calls.
+ * throttleGate is a mutex and timestamp for one throttle key.
+ * desc: Serializes the calls sharing that key, with a minimum gap between them.
  */
 type throttleGate struct {
 	mu       sync.Mutex
@@ -46,10 +46,12 @@ func newToolThrottle() *toolThrottle {
 }
 
 /*
- * gate returns the throttle gate for a tool, creating one if needed.
- * desc: Thread-safe lazy initialization of per-tool throttle gates.
- * param: name - the tool name.
- * return: pointer to the throttleGate for this tool.
+ * gate returns the throttle gate for a key, creating one if needed.
+ * desc: Thread-safe lazy initialization. The key is a tool and the destination
+ *       its call is addressed to, so two calls to one service wait for each
+ *       other and two calls to different services do not.
+ * param: name - the throttle key.
+ * return: pointer to the throttleGate for this key.
  */
 func (st *toolThrottle) gate(name string) *throttleGate {
 	st.mu.Lock()
@@ -63,17 +65,21 @@ func (st *toolThrottle) gate(name string) *throttleGate {
 }
 
 /*
- * waitThrottle blocks until the tool's cooldown period has elapsed.
- * desc: Acquires the per-tool mutex, checks elapsed time since last fire,
- *       sleeps for the remaining cooldown if needed, then records the new
- *       fire time. Returns early if context is cancelled.
+ * waitThrottle blocks until this key's cooldown has elapsed.
+ * desc: Acquires the key's mutex, checks elapsed time since the last fire,
+ *       sleeps for the remaining cooldown if needed, then records the new fire
+ *       time. Returns early if context is cancelled.
+ *
+ *       The wait is served in the calling node's own goroutine, so the steps
+ *       beside it keep running — a plan does not stop because one service is
+ *       being asked for too much.
  * param: ctx - context for cancellation.
- * param: toolName - the tool to throttle.
- * param: cooldown - minimum duration between calls.
+ * param: key - the tool and destination to throttle.
+ * param: cooldown - minimum duration between calls sharing the key.
  * return: duration since the last fire time after waiting.
  */
-func (st *toolThrottle) waitThrottle(ctx context.Context, toolName string, cooldown time.Duration) time.Duration {
-	g := st.gate(toolName)
+func (st *toolThrottle) waitThrottle(ctx context.Context, key string, cooldown time.Duration) time.Duration {
+	g := st.gate(key)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -144,8 +150,8 @@ func (a *Agent) finish(n *Node, result string, body NodeBody, err error) nodeCom
 	// This is the one thing the two paths do differently, and it is written
 	// here rather than by one of them quietly not doing it.
 	if err == nil {
-		if skill, ok := a.registry.Get(n.ToolName); ok {
-			hint := toolapi.GetDisplayHint(skill, n.Params, result)
+		if tool, ok := a.registry.Get(n.ToolName); ok {
+			hint := toolapi.GetDisplayHint(tool, n.Params, result)
 			if hint != nil && hint.Path != "" && a.remoteFor(n) {
 				log.Printf("[dag] node %s ran on %s; its panel names a path on that machine, so it is not shown here",
 					n.ID, Text.TruncateLog(n.Target, 12))
@@ -252,8 +258,8 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// Direct-param validation: reject keys the tool's schema doesn't
 	// declare (and whose schema forbids extras). Closes the silent-drop
 	// class where the planner invents params like bash(cwd: ...).
-	if skill, ok := a.registry.Get(n.ToolName); ok {
-		if err := validateDirectParams(skill, n.Params); err != nil {
+	if tool, ok := a.registry.Get(n.ToolName); ok {
+		if err := validateDirectParams(tool, n.Params); err != nil {
 			ch <- a.finish(n, "", nil, err)
 			return
 		}
@@ -384,11 +390,18 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		return
 	}
 
-	// Enforce per-tool cooldown before executing
-	if skill, ok := a.registry.Get(n.ToolName); ok {
-		cooldown := toolapi.GetThrottle(skill)
-		if cooldown > 0 {
-			throttle.waitThrottle(ctx, n.ToolName, cooldown)
+	// Enforce the cooldown before executing, per destination rather than per
+	// tool. The scheduler fires everything ready at once, so a plan with ten
+	// calls to one service sends ten at the same instant and the service
+	// answers some of them with a refusal — measured, on a run that lost three
+	// of nine that way. Ten calls to ten services have no such problem and must
+	// not be slowed down for one.
+	//
+	// A tool that does not say where a call goes keeps exactly its old
+	// behaviour: one destination, throttled as a whole.
+	if tool, ok := a.registry.Get(n.ToolName); ok {
+		if cooldown := toolapi.GetThrottle(tool); cooldown > 0 {
+			throttle.waitThrottle(ctx, n.ToolName+"\x00"+toolapi.GetDestination(tool, n.Params), cooldown)
 		}
 	}
 
@@ -501,7 +514,7 @@ var unresolvedReferenceRe = regexp.MustCompile(`\$\{(?:step|node)\.[^}]*\}`)
  *       to stay in the parameter as text, and text is handed to whatever runs
  *       next — so a model was shown a placeholder in prose, read it as a data
  *       path, and looked the value up under keys that do not exist. A reference
- *       nobody could resolve is a broken edge, and a broken edge should stop the
+ *       nobody could resolve is broken wiring, and broken wiring should stop the
  *       step rather than travel on as prose.
  * param: n - the node about to run
  * return: an error naming every reference left unresolved, or nil
@@ -750,14 +763,14 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		return "", nil, err
 	}
 
-	skill, ok := a.registry.Get(toolName)
+	tool, ok := a.registry.Get(toolName)
 	if !ok {
 		return "", nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
 
 	// Resolve the tool's effective impact via the intent registry (DB
 	// override wins, falls back to tool.Impact() default).
-	impact := a.intentRegistry.ResolveToolIntent(toolName, skill, params)
+	impact := a.intentRegistry.ResolveToolIntent(toolName, tool, params)
 	// Gate: rate limit (rank-0 tools exempt — reading local files should not be throttled)
 	if impact > 0 {
 		if err := a.gate.CheckRateLimit(); err != nil {
@@ -865,7 +878,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		ctx = WithExecContext(ctx, ec)
 	}
 
-	if tx, ok := skill.(toolapi.TypedExecutor); ok {
+	if tx, ok := tool.(toolapi.TypedExecutor); ok {
 		// Typed path: the tool returns a ToolMessage directly — no JSON round-trip.
 		// The node records which cards contributed guidance, so a trace shows
 		// what this run was coding against. Only the tools that consume the
@@ -883,7 +896,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			isContextual = true
 		}
 	} else {
-		result, err = skill.Execute(ctx, params)
+		result, err = tool.Execute(ctx, params)
 	}
 
 	// Audit

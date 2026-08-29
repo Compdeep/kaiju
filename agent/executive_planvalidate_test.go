@@ -47,13 +47,13 @@ func planValidateReg() *toolapi.Registry {
 	return reg
 }
 
-// TestValidatePlanEdges_SearchFetchEnvelope is the regression for the false
+// TestValidatePlanReferences_SearchFetchEnvelope is the regression for the false
 // positive: a valid search→fetch plan (web_fetch reads ${step.0.results.0.url}
 // from web_search) must be CLEAN. web_search's results[] lives under the
 // envelope's data, and the reference resolves against the unwrapped payload at
 // runtime — so the plan-time check must look inside data too, not only the top
 // level. It must still flag a genuinely wrong producer (results[] off web_fetch).
-func TestValidatePlanEdges_SearchFetchEnvelope(t *testing.T) {
+func TestValidatePlanReferences_SearchFetchEnvelope(t *testing.T) {
 	reg := planValidateReg()
 
 	valid := []PlanStep{

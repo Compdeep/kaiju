@@ -151,7 +151,7 @@ project/
     - **Task `brief` deps ↔ `setup` installs**: every library a task's brief implies (JWT → `jsonwebtoken`, Stripe → `stripe`, celebrate middleware → `celebrate`, bcrypt auth → `bcrypt`, …) appears in the setup's `npm install`. Don't imply a library in a brief that setup doesn't install — coders WILL import it, and it will fail.
     - **Env refs ↔ `.env` setup step**: every env var your stack reads (Stripe → `STRIPE_SECRET_KEY`, JWT signing → `JWT_SECRET`, SMTP → `SMTP_URL`, …) has a setup step writing a `.env.example` (or `.env`) with placeholder values. No env step means "undefined" at runtime on the first request.
 
-    A gap in any of the four = one Holmes investigation at runtime to diagnose and patch. Four gaps = four investigations. Catch it here instead.
+    Every one of these four you leave unchecked becomes a runtime failure that the debug stage then has to find and repair. Cross-checking them now costs one pass over what you have already written.
 
 13. **Stack coherence (greenfield scaffolds only).** When you're designing a NEW project (no existing source under `project/<name>/` that defines the stack), make ONE explicit choice on each of these axes and apply it to every task. Mixing paradigms in fresh code is the single biggest source of runtime errors that no fix resolves cleanly.
 
@@ -172,7 +172,7 @@ When diagnosing web app failures, follow this procedure — don't guess, read th
 **Service not responding (curl connection refused):**
 1. Read the service error log FIRST: use service(action="logs", name="<service>", lines=30)
 2. The log tells you WHY. Common causes:
-   - "Missing script: dev" → package.json has no dev script. Fix with file_write.
+   - "Missing script: dev" → package.json has no dev script. Add it with bash: `npm pkg set scripts.dev=vite --prefix project/frontend`. Never write package.json with file_write.
    - "MODULE_NOT_FOUND: <pkg>" → dependency not installed. Run npm install <pkg>.
    - "EADDRINUSE" → port already in use. Another process is on that port.
    - "Cannot find module './routes/auth'" → file path mismatch. Check the import vs actual file path.
@@ -191,8 +191,8 @@ When diagnosing web app failures, follow this procedure — don't guess, read th
 
 **package.json issues:**
 1. Must have "scripts": {"dev": "vite", "build": "vite build"} for Vue/Vite projects.
-2. Must list all dependencies the code imports.
-3. If missing scripts or deps, overwrite package.json with file_write — don't patch, rewrite the whole file.
+2. Must list every dependency the code imports.
+3. Fix it through npm in bash, never with file_write and never with a compute edit. Add a script with `npm pkg set scripts.dev=vite`, add a dependency with `npm install <name>`, pin one with `npm install <name>@<version>`, remove one with `npm uninstall <name>`. Hand-writing the JSON causes parse errors and skips npm's resolver.
 
 ## Coder Guidance
 
@@ -287,5 +287,15 @@ export default { plugins: { tailwindcss: {}, autoprefixer: {} } }
 - Hardcoded secrets, credentials, or API keys — use environment variables.
 - `console.log` debug output in production paths.
 - Unused imports or unused variables.
-- Default/placeholder UI text like "Lorem ipsum" — if the user didn't give you a name, make one up that fits the context.
-- A `package.json` file — setup owns it. If the task list includes package.json, emit a gap instead of writing; never guess versions in a dependency manifest.
+- Default/placeholder UI text like "Lorem ipsum" — if the user didn't give you a name, make one up that fits the context. Invented COPY is fine; invented FACTS are not. A product name, a tagline, a person in a testimonial mock-up: yours to write. A price, a reading, a total, a date, a figure the page states as true: only if you were given it. Where you have none, render the empty state you were told to handle — not a plausible number that a reader cannot tell from a measured one.
+- A `package.json` file — setup owns it. If a task names package.json, write nothing for that task and leave the file alone; a version guessed into a dependency manifest does not resolve.
+
+## Aggregator Guidance
+
+Separate what was written from what was verified. Files existing on disk is not an application that runs, and a service that started is not an application that answers. Report each from its own evidence: the coder tasks that completed, the setup and execute commands that exited zero, and the validation checks that passed.
+
+Where a validation check failed or never ran, say so plainly and name the endpoint or behaviour that is therefore unconfirmed. An answer that says the app is ready when the health check never returned is the failure this section exists to prevent.
+
+Tell the user how to run it: the commands that start the backend and the frontend, and the URL and port each listens on — taken from the services the run actually declared, not from what is usual.
+
+List what is genuinely incomplete: a route declared in the interfaces with no implementation, a dependency the setup did not install, an environment variable with no value. The user needs these named, not summarised as "some minor issues remain".

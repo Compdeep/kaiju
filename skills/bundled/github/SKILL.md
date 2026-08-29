@@ -29,17 +29,19 @@ Single step, no dependencies needed.
 Plan parallel calls when checking multiple repos or filtering by different criteria:
 
 1. `bash` — `gh issue list --label bug --state open`
-2. `bash` — `gh pr list --state open --json number,title,reviews` (parallel with step 0)
+2. `bash` — `gh pr list --state open --json number,title,reviews`
+
+Nothing links them, so they run at the same time.
 
 ### View CI run logs
 
-1. `bash` — `gh run list --limit 5` to find the run
-2. `bash` — `gh run view <id> --log-failed` using the run ID found in step 0 (depends on step 0)
+1. `bash` — `gh run list --limit 5` to find the run, tag `find_run`
+2. `bash` — `gh run view <id> --log-failed`, taking the run id from `find_run`'s `stdout`. That reference is the dependency.
 
 ### Code review workflow
 
-1. `bash` — `gh pr diff <number>` to get the diff
-2. `file_read` calls in parallel for changed files (depend on step 0)
+1. `bash` — `gh pr diff <number>` to get the diff, tag `get_diff`
+2. `file_read` for each changed file, referencing `get_diff`'s `stdout`. The reads run at the same time as each other.
 
 ### Create a PR
 
@@ -50,7 +52,9 @@ Plan parallel calls when checking multiple repos or filtering by different crite
 Plan parallel queries:
 
 1. `bash` — `gh repo view --json description,stargazerCount,forkCount`
-2. `bash` — `gh release list --limit 5` (parallel with step 0)
+2. `bash` — `gh release list --limit 5`
+
+Nothing links them, so they run at the same time.
 
 ### What NOT to do
 

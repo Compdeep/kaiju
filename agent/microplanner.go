@@ -21,7 +21,7 @@ import (
  */
 type microPlannerOutput struct {
 	Summary string     `json:"summary"` // diagnosis of root cause
-	Nodes   []PlanStep `json:"nodes"`   // fix plan steps
+	Steps   []PlanStep `json:"steps"`   // the steps that fix it
 }
 
 /*
@@ -94,7 +94,7 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 
 	resp, err := a.completeHeavyChecked(ctx, &llm.ChatRequest{
 		Messages:    messages,
-		Tools:       []llm.ToolDef{debuggerToolDef()},
+		Tools:       []llm.ToolDef{debuggerSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.replyBudget(replyAnalysisBudget),

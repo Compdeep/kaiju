@@ -26,8 +26,10 @@ Single step:
 Plan in parallel:
 
 1. `bash` — `curl -s "wttr.in/London?format=4"`
-2. `bash` — `curl -s "wttr.in/Tokyo?format=4"` (parallel with step 0)
-3. `bash` — `curl -s "wttr.in/NewYork?format=4"` (parallel with step 0)
+2. `bash` — `curl -s "wttr.in/Tokyo?format=4"`
+3. `bash` — `curl -s "wttr.in/NewYork?format=4"`
+
+Nothing links these three, so they run at the same time. Give each a tag and leave `depends_on` empty.
 
 ### Format options
 

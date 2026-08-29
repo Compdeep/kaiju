@@ -14,13 +14,13 @@ import (
 
 /*
  * observerOutput is the structured response from an observer call.
- * desc: Contains the observer's action decision, reason, optional new nodes
- *       to inject, and optional tags to cancel.
+ * desc: Contains the observer's action decision, reason, optional new plan
+ *       steps to inject, and optional tags to cancel.
  */
 type observerOutput struct {
 	Action string     `json:"action"` // "continue", "inject", "cancel", "reflect"
 	Reason string     `json:"reason"`
-	Nodes  []PlanStep `json:"nodes"`  // set when action == "inject"
+	Steps  []PlanStep `json:"steps"`  // set when action == "inject"; they become nodes when grafted
 	Cancel []string   `json:"cancel"` // tags/IDs to cancel when action == "cancel"
 }
 
@@ -138,7 +138,7 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 	})
 	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages:    messages,
-		Tools:       []llm.ToolDef{observerToolDef()},
+		Tools:       []llm.ToolDef{observerSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.replyBudget(replyBriefBudget),

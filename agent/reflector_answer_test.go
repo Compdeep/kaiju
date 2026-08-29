@@ -73,7 +73,7 @@ func TestTheReflectorIsToldInThePromptNotTheSchema(t *testing.T) {
 	if !strings.Contains(src, "Do not write the answer") {
 		t.Error("the reflector is not told, so it writes an answer that is discarded")
 	}
-	if strings.Contains(src, "reflectorToolDef(") && strings.Contains(src, "reflectorToolDef(true") {
+	if strings.Contains(src, "reflectorSchema(") && strings.Contains(src, "reflectorSchema(true") {
 		t.Error("the schema is being varied per call — one shape with one instruction " +
 			"beside it is what stops the prompt and the schema drifting apart")
 	}

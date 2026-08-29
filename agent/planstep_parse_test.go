@@ -28,7 +28,7 @@ func TestAPlanStepKeepsItsTarget(t *testing.T) {
 func TestAPlanStepKeepsEveryDeclaredField(t *testing.T) {
 	var s PlanStep
 	raw := `{"type":"tool","tool":"lookup_ip","params":{"ip":"8.8.8.8"},
-	         "depends_on":[0],"tag":"lookup","target":"self","gap":"none"}`
+	         "depends_on":[0],"tag":"lookup","target":"self"}`
 	if err := json.Unmarshal([]byte(raw), &s); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -41,8 +41,6 @@ func TestAPlanStepKeepsEveryDeclaredField(t *testing.T) {
 		t.Errorf("Tag = %q", s.Tag)
 	case s.Target != "self":
 		t.Errorf("Target = %q", s.Target)
-	case s.Gap != "none":
-		t.Errorf("Gap = %q", s.Gap)
 	case len(s.DependsOn) != 1 || s.DependsOn[0] != 0:
 		t.Errorf("DependsOn = %v", s.DependsOn)
 	case s.Params["ip"] != "8.8.8.8":
@@ -67,8 +65,7 @@ func TestEveryFieldOfAStepSurvivesDecoding(t *testing.T) {
 		"params": {"cmd": "ls"},
 		"depends_on": [2],
 		"tag": "list the directory",
-		"target": "machine-b",
-		"gap": "no shell on that host"
+		"target": "machine-b"
 	}`
 
 	var step PlanStep

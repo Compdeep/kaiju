@@ -117,6 +117,15 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 	// from whichever cards the classifier picked for this investigation.
 	// Every compute node (including parallel coder grafts) sees the same
 	// classifier-selected cards, so there's nothing to propagate through params.
+	// Whether any of that context came from a step, rather than from the plan
+	// typing it in. A node with no dependency read nothing: a reference IS the
+	// dependency in this engine, so a compute wired to an earlier step has one
+	// and a compute wired to nothing has none.
+	//
+	// It is not a judgement about whether the data is enough. It is the one fact
+	// the graph can state, and the prompt says only that.
+	wired := len(n.DependsOn) > 0
+
 	fieldMeanings := a.upstreamFieldMeanings(ec.Graph, n, ctxData)
 	var architectGuidance, coderGuidance string
 	if ec.SkillCards != nil {
@@ -136,9 +145,9 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 		if ec.Graph != nil {
 			sessionID = ec.Graph.SessionID
 		}
-		result, execErr = a.computePlan(ec.Ctx, ec.Graph, goal, query, ctxData, hints, blueprintRef, blueprintMode, tag, ts, architectGuidance, sessionID, fieldMeanings)
+		result, execErr = a.computePlan(ec.Ctx, ec.Graph, goal, query, ctxData, wired, hints, blueprintRef, blueprintMode, tag, ts, architectGuidance, sessionID, fieldMeanings)
 	default: // shallow
-		result, execErr = a.computeCode(ec.Ctx, ec.Graph, goal, query, ctxData, hints, blueprintRef, blueprintMode, tag, ts, lang, codeCtx, coderGuidance, fieldMeanings)
+		result, execErr = a.computeCode(ec.Ctx, ec.Graph, goal, query, ctxData, wired, hints, blueprintRef, blueprintMode, tag, ts, lang, codeCtx, coderGuidance, fieldMeanings)
 	}
 
 	n.EndedAt = time.Now()
@@ -297,7 +306,7 @@ func rootFromTaskFiles(taskFiles []string) string {
 	return candidate
 }
 
-func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query string, ctxData any,
+func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query string, ctxData any, wired bool,
 	hints []any, blueprintRef, blueprintMode, tag string, ts int64, architectGuidance, sessionID string, fieldMeanings string) (string, error) {
 
 	// Load session interfaces (API contracts + schema from prior turns).
@@ -322,7 +331,12 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 		}
 	}
 
-	userPrompt := buildComputeUserPrompt(goal, query, ctxData, hints, priorBlueprint, blueprintMode, fieldMeanings)
+	userPrompt := buildComputeUserPrompt(computePrompt{
+		Goal: goal, Query: query,
+		Context: ctxData, Wired: wired,
+		Hints: hints, Blueprint: priorBlueprint, BlueprintMode: blueprintMode,
+		FieldMeanings: fieldMeanings,
+	})
 	if block := formatInterfacesForPrompt(ifaces); block != "" {
 		userPrompt += "\n\n" + block
 	}
@@ -380,7 +394,7 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
-		Tools:       []llm.ToolDef{architectToolDef()},
+		Tools:       []llm.ToolDef{architectSchema()},
 		ToolChoice:  "required",
 		Temperature: 0.3,
 		MaxTokens:   a.replyBudget(replyAnalysisBudget),
@@ -561,7 +575,7 @@ type computeCodeContext struct {
 }
 
 // The two shapes the Coder may reply with, named so what the engine expects of
-// a reply and what coderToolDef offers can be checked against one another. They
+// a reply and what coderSchema offers can be checked against one another. They
 // were anonymous structs inside computeCode, where nothing outside that function
 // could see them and `execute` sat in both for months while no schema declared
 // it — the Coder was asked for a field it had no way to return.
@@ -586,7 +600,7 @@ type coderWriteReply struct {
  *       coding phase. Receives architect context (ownership, brief, structure)
  *       when spawned by a deep mode plan.
  */
-func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query string, ctxData any,
+func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query string, ctxData any, wired bool,
 	hints []any, blueprintRef, blueprintMode, tag string, ts int64, lang string,
 	codeCtx *computeCodeContext, coderGuidance, fieldMeanings string) (string, error) {
 
@@ -630,7 +644,12 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		}
 	}
 
-	userPrompt := buildComputeUserPrompt(goal, query, ctxData, hints, plan, blueprintMode, fieldMeanings)
+	userPrompt := buildComputeUserPrompt(computePrompt{
+		Goal: goal, Query: query,
+		Context: ctxData, Wired: wired,
+		Hints: hints, Blueprint: plan, BlueprintMode: blueprintMode,
+		FieldMeanings: fieldMeanings,
+	})
 	if lang != "" {
 		userPrompt += fmt.Sprintf("\n## Preferred Language\n%s\n", lang)
 	}
@@ -713,7 +732,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			{Role: "system", Content: coderSystem},
 			{Role: "user", Content: userPrompt},
 		},
-		Tools:       []llm.ToolDef{coderToolDef(editable)},
+		Tools:       []llm.ToolDef{coderSchema(editable)},
 		ToolChoice:  "required",
 		Temperature: 0.2,
 		MaxTokens:   a.replyBudget(replyCodeBudget),

@@ -55,6 +55,7 @@ const (
 	NodeInterjection                 // human-triggered reflection (operator message)
 	NodeHolmes                       // ReAct investigator iteration (root-cause analysis)
 	NodeChat                         // the chat lane's single answering call, as a node
+	NodeGroupReview                  // reads one tool's sibling calls together, once they are all in
 )
 
 /*
@@ -66,6 +67,8 @@ func (t NodeType) String() string {
 	switch t {
 	case NodeTool:
 		return "tool"
+	case NodeGroupReview:
+		return "group_review"
 	case NodeCompute:
 		return "compute"
 	case NodeExecutive:
@@ -331,8 +334,7 @@ type Graph struct {
 	counter   int
 	round     int // which planning round nodes added now belong to; see BeginRound
 	observer  chan<- DAGEvent
-	Gaps      []string // capability gaps declared by the executive (not mutex-protected — set once after planning)
-	SessionID string   // conversation session for per-session state (blueprints + interfaces.json)
+	SessionID string // conversation session for per-session state (blueprints + interfaces.json)
 
 	// RunID identifies this run, and only this run. Distinct from the trigger's
 	// correlation id, which identifies what CAUSED the run and is shared by
@@ -753,6 +755,30 @@ func (g *Graph) Get(id string) *Node {
  *       has reached a terminal state.
  * return: slice of Node pointers that are ready to fire.
  */
+/*
+ * SiblingCalls returns every call to one tool in one planning round.
+ * desc: The set a reply can be judged against. Bounded by the round because a
+ *       re-plan asks a different question — comparing this round's calls with
+ *       the last round's would compare answers to two questions.
+ * param: toolName - the tool they all ran.
+ * param: round - the planning round.
+ * return: the calls, in the order they were planned.
+ */
+func (g *Graph) SiblingCalls(toolName string, round int) []*Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	var out []*Node
+	for _, id := range g.order {
+		n, ok := g.nodes[id]
+		if !ok || n.Type != NodeTool || n.ToolName != toolName || n.Round != round {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
 func (g *Graph) ReadyNodes() []*Node {
 	g.mu.RLock()
 	defer g.mu.RUnlock()

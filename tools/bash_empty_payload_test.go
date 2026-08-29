@@ -40,7 +40,8 @@ func TestBashEmptyResult_KeepsTheCommandOutOfTheProse(t *testing.T) {
 		t.Errorf("Detail names the command rather than saying why nothing came back: %q", msg.Detail)
 	}
 
-	// And it is still recorded, where references and the frontend read it.
+	// And it is still recorded, where a ${step.N.command} reference and the
+	// frontend read it.
 	var data struct {
 		Command string `json:"command"`
 	}

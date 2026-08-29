@@ -22,7 +22,7 @@ Parallel writes are only safe when the files are independent. If files share typ
 
 ### Read before write
 
-Always plan `file_read` steps before any `file_write` steps for the same file. Never overwrite a file you haven't read. Link writes to their reads via `depends_on`.
+Always plan `file_read` steps before any `file_write` steps for the same file. Never overwrite a file you haven't read. Link a write to its read with a reference to the read step; that reference is the dependency.
 
 ### Single-file change
 
@@ -44,24 +44,24 @@ Maximize parallelism: files that don't depend on each other should be read and w
 
 ### Debugging a failing test or build
 
-1. `bash` — reproduce the failure (run the exact failing command)
-2. `file_read` — read the file(s) named in step 0's error output (depends on step 0)
-3. `file_write` — apply the fix (depends on the read)
-4. `bash` — re-run the original command to confirm (depends on the write)
+1. `bash` — reproduce the failure by running the exact failing command, tag `repro`
+2. `file_read` — read the files named in `repro`'s `stderr`, referencing it
+3. `file_write` — apply the fix, referencing what the read returned
+4. `bash` — re-run the original command to confirm, ordered after the write
 
 ### Adding unit tests
 
 1. `file_read` — read the source file being tested
-2. `file_read` — read existing test file if one exists (parallel with step 0)
-3. `file_write` — write or append test cases (depends on both reads)
-4. `bash` — run the new tests (depends on the write)
+2. `file_read` — read the existing test file if there is one. Nothing links it to the first read, so the two run at the same time.
+3. `file_write` — write or append the test cases, referencing both reads
+4. `bash` — run the new tests, ordered after the write
 
 ### Code review
 
 Read-only — no writes needed. Plan parallel reads then synthesize.
 
-1. `bash` — `git diff` or `git log` to identify changed files
-2. `file_read` calls in parallel for each file named in step 0's diff (depend on step 0)
+1. `bash` — `git diff` or `git log` to identify the changed files, tag `get_diff`
+2. `file_read` for each file `get_diff`'s `stdout` names. The reads run at the same time as each other.
 
 ### Project discovery
 
@@ -69,7 +69,7 @@ When the user references a project you haven't seen:
 
 1. `file_list` — list the project root
 2. `file_read` calls in parallel for key files: README, package.json / go.mod / Cargo.toml / pyproject.toml, and main entry point
-3. `bash` — `git log --oneline -10` for recent context (parallel with reads)
+3. `bash` — `git log --oneline -10` for recent context. It needs nothing from the reads, so it runs alongside them.
 
 ### What NOT to do
 

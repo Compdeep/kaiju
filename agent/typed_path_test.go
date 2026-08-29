@@ -338,20 +338,18 @@ func TestRun_TheReflectorIsGivenTheArcs(t *testing.T) {
 	}
 }
 
-// A plan wired with the declared shape runs, and the value arrives.
+// A reference by tag runs, and the value arrives.
 //
-// No ${step.N.content} anywhere: the reference is an object the provider can
-// validate, and the dependency is not stated — the reference IS the dependency.
-func TestRun_ADeclaredReferenceCarriesTheValue(t *testing.T) {
+// The dependency is not stated anywhere in the plan: a step referencing another
+// IS the dependency, and stating it twice is how the two came to disagree.
+func TestRun_AReferenceCarriesTheValue(t *testing.T) {
 	reader := &fileTool{name: "file_read", path: "ttm.csv", text: "a,b,c"}
 	consumer := &countingTool{name: "compute_over"}
 	model := newStubModel(t, map[string]stubReply{
 		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
 		"plan": plan(
 			step("file_read", "read_csv", map[string]any{"path": "ttm.csv"}),
-			step("compute_over", "rank", map[string]any{
-				"goal": map[string]any{"step": "read_csv", "field": "content"},
-			}),
+			step("compute_over", "rank", map[string]any{"goal": "${step.read_csv.content}"}),
 		),
 		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
 	})
@@ -360,7 +358,7 @@ func TestRun_ADeclaredReferenceCarriesTheValue(t *testing.T) {
 	if _, err := a.RunDAGSync(context.Background(), Trigger{
 		Type: "chat_query", Data: json.RawMessage(`{"query":"rank the rows in ttm.csv"}`),
 	}); err != nil {
-		t.Fatalf("a declared plan was rejected: %v", err)
+		t.Fatalf("the run failed: %v", err)
 	}
 	if consumer.calls != 1 {
 		t.Fatalf("the consuming step ran %d times, want once", consumer.calls)
@@ -370,30 +368,5 @@ func TestRun_ADeclaredReferenceCarriesTheValue(t *testing.T) {
 	}
 	if n := model.callsTo("plan"); n != 1 {
 		t.Errorf("the planner was corrected %d times for a correct plan", n-1)
-	}
-}
-
-// The string form still works while both are accepted, so a model that has not
-// moved is not a broken run.
-func TestRun_TheStringFormStillWorks(t *testing.T) {
-	reader := &fileTool{name: "file_read", path: "ttm.csv", text: "a,b,c"}
-	consumer := &countingTool{name: "compute_over"}
-	model := newStubModel(t, map[string]stubReply{
-		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
-		"plan": plan(
-			step("file_read", "read_csv", map[string]any{"path": "ttm.csv"}),
-			stepDep("compute_over", "rank", map[string]any{"goal": "${step.read_csv.content}"}, 0),
-		),
-		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
-	})
-	a := agentOnStub(t, model, reader, consumer)
-
-	if _, err := a.RunDAGSync(context.Background(), Trigger{
-		Type: "chat_query", Data: json.RawMessage(`{"query":"rank the rows"}`),
-	}); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
-	if got, _ := consumer.got["goal"].(string); got != "a,b,c" {
-		t.Errorf("the string form stopped working: %q", got)
 	}
 }

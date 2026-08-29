@@ -155,12 +155,12 @@ func (s *stepOutcomesSource) Load(g *Graph, _ *Trigger, a *Agent, _ map[string]a
 	}
 
 	if a != nil {
-		for _, r := range a.unresolvedReferences(g) {
-			from := r.Tag
+		for _, h := range a.unresolvedHandles(g) {
+			from := h.Tag
 			if from == "" {
 				from = "an earlier step"
 			}
-			unused = append(unused, fmt.Sprintf("- %s (from %s)", Text.TruncateLog(r.Value, 200), from))
+			unused = append(unused, fmt.Sprintf("- %s (from %s)", Text.TruncateLog(h.Value, 200), from))
 		}
 	}
 

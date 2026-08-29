@@ -22,6 +22,7 @@ func TestStageSchemasAreEnforceableOrKnownNotToBe(t *testing.T) {
 		"coder(edit)":  true,
 		"coder(write)": true,
 		"curator":      true,
+		"group_review": true,
 		"debugger":     true,
 		"holmes":       true,
 		"observer":     true,
@@ -108,7 +109,7 @@ func TestThePlanSchemaCarriesParamsAsAString(t *testing.T) {
 			} `json:"steps"`
 		} `json:"properties"`
 	}
-	raw := llm.SchemaAsSent(a.executiveToolDef())
+	raw := llm.SchemaAsSent(a.executivePlanSchema())
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		t.Fatalf("plan schema does not parse: %v", err)
 	}
@@ -144,20 +145,22 @@ func TestAPlanStepTakesParamsEitherWay(t *testing.T) {
 	}
 }
 
-// A reference is an object inside the string, and it has to arrive as one —
-// read as text it names no step and the wiring is lost.
+// A reference has to survive the params string character for character. One
+// escape lost on the way through and it names no step, so the wiring is lost.
 func TestAReferenceSurvivesTheParamsString(t *testing.T) {
 	var step PlanStep
 	if err := json.Unmarshal([]byte(`{"tool":"web_fetch","tag":"read",
-		"params":"{\"url\":{\"step\":\"find_news\",\"field\":\"results.0.url\"}}"}`), &step); err != nil {
+		"params":"{\"url\":\"${step.find_news.results.0.url}\"}"}`), &step); err != nil {
 		t.Fatalf("did not decode: %v", err)
 	}
-	ref, ok := refFrom(step.Params["url"])
-	if !ok {
-		t.Fatalf("the reference did not survive as one: %#v", step.Params["url"])
+	got, _ := step.Params["url"].(string)
+	if got != "${step.find_news.results.0.url}" {
+		t.Fatalf("the reference changed on the way through: %#v", step.Params["url"])
 	}
-	if ref.Step != "find_news" || ref.Field != "results.0.url" {
-		t.Errorf("the reference changed on the way through: %+v", ref)
+	refs := FindRefs(step.Params)
+	if len(refs) != 1 || refs[0].Tag != "find_news" ||
+		strings.Join(refs[0].Path, ".") != "results.0.url" {
+		t.Errorf("the reference did not survive as one: %+v", refs)
 	}
 }
 
@@ -293,21 +296,21 @@ func TestAHolmesActionTakesParamsEitherWay(t *testing.T) {
 // rather than carrying a second shape nobody updated.
 func TestGraftedStepsTakeParamsAsAString(t *testing.T) {
 	var obs observerOutput
-	if err := json.Unmarshal([]byte(`{"action":"inject","nodes":[
+	if err := json.Unmarshal([]byte(`{"action":"inject","steps":[
 		{"tool":"bash","tag":"look","params":"{\"command\":\"ls -la\"}","depends_on":[]}]}`), &obs); err != nil {
-		t.Fatalf("the observer's nodes did not decode: %v", err)
+		t.Fatalf("the observer's steps did not decode: %v", err)
 	}
-	if len(obs.Nodes) != 1 || obs.Nodes[0].Params["command"] != "ls -la" {
-		t.Errorf("the observer's params did not survive: %+v", obs.Nodes)
+	if len(obs.Steps) != 1 || obs.Steps[0].Params["command"] != "ls -la" {
+		t.Errorf("the observer's params did not survive: %+v", obs.Steps)
 	}
 
 	var dbg microPlannerOutput
-	if err := json.Unmarshal([]byte(`{"summary":"missing export","nodes":[
+	if err := json.Unmarshal([]byte(`{"summary":"missing export","steps":[
 		{"tool":"edit_file","tag":"fix","params":"{\"goal\":\"add the export\"}","depends_on":[]}]}`), &dbg); err != nil {
-		t.Fatalf("the debugger's nodes did not decode: %v", err)
+		t.Fatalf("the debugger's steps did not decode: %v", err)
 	}
-	if len(dbg.Nodes) != 1 || dbg.Nodes[0].Params["goal"] != "add the export" {
-		t.Errorf("the debugger's params did not survive: %+v", dbg.Nodes)
+	if len(dbg.Steps) != 1 || dbg.Steps[0].Params["goal"] != "add the export" {
+		t.Errorf("the debugger's params did not survive: %+v", dbg.Steps)
 	}
 }
 

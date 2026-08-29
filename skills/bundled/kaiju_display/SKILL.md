@@ -22,8 +22,8 @@ Do NOT use for implicit display — tools like `file_write` automatically push t
 
 If the user asks to see a file that already exists:
 
-1. `file_read` — read the file
-2. `panel_push` — push the file's content to the appropriate plugin (depends on the read)
+1. `file_read` — read the file, tag `read_file`
+2. `panel_push` — push `read_file`'s content to the plugin that suits the file type
 
 Choose the plugin based on file type:
 - `.html`, `.svg` → `preview`
@@ -51,8 +51,8 @@ Prefer mermaid for structured diagrams (flowcharts, sequence diagrams, ER diagra
 
 If the user asks to graph or chart data:
 
-1. `bash` or `file_read` — gather the data
-2. `panel_push` with plugin `graph` — push JSON data (depends on data gathering step)
+1. `bash` or `file_read` — gather the data, tag `get_data`
+2. `panel_push` with plugin `graph` — push the JSON that `get_data` returned
 
 ### What NOT to do
 

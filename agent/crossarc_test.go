@@ -45,22 +45,6 @@ func TestCrossArc_ANameReachesAStepThatAlreadyRan(t *testing.T) {
 	}
 }
 
-// The same, for a reference written as a value rather than inside a string.
-func TestCrossArc_ADeclaredReferenceReachesItToo(t *testing.T) {
-	g, prior := arcGraph(t)
-	n := &Node{ID: "n2", Type: NodeCompute, Tag: "calc", Params: map[string]any{
-		"tam": map[string]any{"step": "fetch_tam", "field": "value"},
-	}}
-	deps := resolveDeclaredRefs(n, []string{"n2"}, []PlanStep{{Tool: "compute", Tag: "calc"}}, g)
-
-	if got := n.Params["tam"]; got != "${node."+prior+".value}" {
-		t.Fatalf("the declared reference did not reach the finished step: %v", got)
-	}
-	if len(deps) != 1 || deps[0] != prior {
-		t.Errorf("deps = %v, want [%s]", deps, prior)
-	}
-}
-
 // The plan being written wins. A planner that names a step it just wrote means
 // that step — reaching back would hand it the older run's value instead, which
 // is a wrong answer rather than a failure.

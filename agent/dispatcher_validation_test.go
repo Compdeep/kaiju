@@ -146,17 +146,17 @@ func TestValidateDirectParams_RejectsMalformedSchema(t *testing.T) {
 	}
 }
 
-// ── validateDataFlow (template-aware) ───────────────────────────────────
+// ── validatePlanWiring (template-aware) ───────────────────────────────────
 
 func TestValidateDataFlow_AllowsEmptyDependsOn(t *testing.T) {
-	if err := validateDataFlow("compute", nil, nil); err != nil {
+	if err := validatePlanWiring("compute", nil, nil); err != nil {
 		t.Fatalf("no deps → should allow, got %v", err)
 	}
 }
 
 func TestValidateDataFlow_AllowsWhenTemplatePresent(t *testing.T) {
 	params := map[string]any{"context.x": "${node.n1.content}"}
-	if err := validateDataFlow("compute", []string{"n1"}, params); err != nil {
+	if err := validatePlanWiring("compute", []string{"n1"}, params); err != nil {
 		t.Fatalf("deps + template → should allow, got %v", err)
 	}
 }
@@ -166,27 +166,27 @@ func TestValidateDataFlow_AllowsStepFormTemplate(t *testing.T) {
 	// Validator should accept either form so the check survives both
 	// stages of the pipeline if it ever fires earlier than expected.
 	params := map[string]any{"context.x": "${step.0.content}"}
-	if err := validateDataFlow("compute", []string{"n1"}, params); err != nil {
+	if err := validatePlanWiring("compute", []string{"n1"}, params); err != nil {
 		t.Fatalf("step.N templates should also count as wired, got %v", err)
 	}
 }
 
 func TestValidateDataFlow_AllowsBashWithDepsNoTemplate(t *testing.T) {
 	// Pure sequencing without data flow is legitimate for bash/service.
-	if err := validateDataFlow("bash", []string{"n1"}, map[string]any{"command": "ls"}); err != nil {
+	if err := validatePlanWiring("bash", []string{"n1"}, map[string]any{"command": "ls"}); err != nil {
 		t.Fatalf("bash sequencing should not be rejected, got %v", err)
 	}
 }
 
 func TestValidateDataFlow_AllowsServiceWithDepsNoTemplate(t *testing.T) {
-	if err := validateDataFlow("service", []string{"n1", "n2"}, nil); err != nil {
+	if err := validatePlanWiring("service", []string{"n1", "n2"}, nil); err != nil {
 		t.Fatalf("service sequencing should not be rejected, got %v", err)
 	}
 }
 
 func TestValidateDataFlow_RejectsComputeWithDepsNoTemplate(t *testing.T) {
 	params := map[string]any{"goal": "rank stuff", "mode": "shallow"}
-	err := validateDataFlow("compute", []string{"n1", "n2", "n3"}, params)
+	err := validatePlanWiring("compute", []string{"n1", "n2", "n3"}, params)
 	if err == nil {
 		t.Fatalf("compute with deps but no template → should reject")
 	}
@@ -202,7 +202,7 @@ func TestValidateDataFlow_AllowsEditFileWithTaskFiles(t *testing.T) {
 	// edit_file reads its files via task_files — that IS the data source.
 	// depends_on against an upstream file_read is just sequencing, not a
 	// data-flow omission.
-	err := validateDataFlow("edit_file", []string{"n0"}, map[string]any{"goal": "fix it", "task_files": []string{"project/foo.py"}})
+	err := validatePlanWiring("edit_file", []string{"n0"}, map[string]any{"goal": "fix it", "task_files": []string{"project/foo.py"}})
 	if err != nil {
 		t.Fatalf("edit_file with task_files should be allowed regardless of templates, got %v", err)
 	}
@@ -211,7 +211,7 @@ func TestValidateDataFlow_AllowsEditFileWithTaskFiles(t *testing.T) {
 func TestValidateDataFlow_RejectsEditFileWithoutTaskFiles(t *testing.T) {
 	// Defensive: if somehow edit_file is called with deps but no task_files,
 	// the rule still fires (no data source declared, no template either).
-	err := validateDataFlow("edit_file", []string{"n0"}, map[string]any{"goal": "fix it"})
+	err := validatePlanWiring("edit_file", []string{"n0"}, map[string]any{"goal": "fix it"})
 	if err == nil {
 		t.Fatalf("edit_file with deps but no task_files and no template → should reject")
 	}
@@ -219,7 +219,7 @@ func TestValidateDataFlow_RejectsEditFileWithoutTaskFiles(t *testing.T) {
 
 func TestValidateDataFlow_AllowsEditFileWithTaskFilesAnyShape(t *testing.T) {
 	// JSON-decoded planner output uses []any, not []string. Both must work.
-	err := validateDataFlow("edit_file", []string{"n0"}, map[string]any{"goal": "fix it", "task_files": []any{"project/foo.py"}})
+	err := validatePlanWiring("edit_file", []string{"n0"}, map[string]any{"goal": "fix it", "task_files": []any{"project/foo.py"}})
 	if err != nil {
 		t.Fatalf("edit_file with []any task_files should be allowed, got %v", err)
 	}
@@ -227,7 +227,7 @@ func TestValidateDataFlow_AllowsEditFileWithTaskFilesAnyShape(t *testing.T) {
 
 func TestValidateDataFlow_RejectsEmptyParams(t *testing.T) {
 	// Explicitly-empty map is the same as nil — both mean "no wiring".
-	err := validateDataFlow("compute", []string{"n1"}, map[string]any{})
+	err := validatePlanWiring("compute", []string{"n1"}, map[string]any{})
 	if err == nil {
 		t.Fatalf("empty map should be treated the same as nil")
 	}
@@ -242,7 +242,7 @@ func TestValidateDataFlow_FindsTemplateInNestedValue(t *testing.T) {
 			map[string]any{"src": "${node.n1.content}"},
 		},
 	}
-	if err := validateDataFlow("compute", []string{"n1"}, params); err != nil {
+	if err := validatePlanWiring("compute", []string{"n1"}, params); err != nil {
 		t.Fatalf("nested template should count as wired, got %v", err)
 	}
 }

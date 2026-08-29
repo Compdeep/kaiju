@@ -54,7 +54,7 @@ type frozenPrompt struct {
 // one added at the end.
 var frozenPromptOrder = []string{
 	"SOUL", "ROUTE", "PREFLIGHT", "EXECUTIVE", "AGGREGATOR",
-	"REFRAME_PLAN", "REFRAME_REFLECT", "REFRAME_ANSWER", "REFRAME_HOOK", "HOLMES", "MICROPLANNER", "OBSERVER", "REFLECTOR",
+	"REFRAME_PLAN", "REFRAME_REFLECT", "REFRAME_ANSWER", "REFRAME_HOOK", "HOLMES", "MICROPLANNER", "OBSERVER", "GROUPREVIEW", "REFLECTOR",
 	"INTERJECTION", "CLASSIFIER", "CURATOR", "CHAT", "VISION", "REACT",
 }
 
@@ -62,15 +62,16 @@ var frozenPrompts = map[string]frozenPrompt{
 	"SOUL":            {"03802a1782d4ffb3", 6524},
 	"ROUTE":           {"4e8fabcf0237bdb3", 2280},
 	"PREFLIGHT":       {"1a5c3fdb0d13414b", 6072},
-	"EXECUTIVE":       {"f865c729d1925ed2", 6622},
+	"EXECUTIVE":       {"983137efaa6a9963", 8035},
 	"AGGREGATOR":      {"a782c5558ef001d0", 3631},
 	"REFRAME_PLAN":    {"99ef89fec31ed3aa", 3450},
 	"REFRAME_REFLECT": {"9135887028deee2a", 3434},
 	"REFRAME_ANSWER":  {"6fa65607e7574724", 2074},
 	"REFRAME_HOOK":    {"fb587325040e5c47", 585},
 	"HOLMES":          {"bc48616b0088ce6f", 7131},
-	"MICROPLANNER":    {"7a0609fea913f741", 4635},
+	"MICROPLANNER":    {"57b5192b628e285a", 4609},
 	"OBSERVER":        {"9bc2b317bda1a499", 1042},
+	"GROUPREVIEW":     {"1a80f0a1888030f0", 1956},
 	"REFLECTOR":       {"0a5f87c27060d5b0", 6024},
 	"INTERJECTION":    {"417d206c70b452b2", 788},
 	"CLASSIFIER":      {"1f813616ac1a9d88", 270},
@@ -89,7 +90,8 @@ func liveSections() map[string]string {
 		"REFRAME_PLAN": prompt.ReframePlan, "REFRAME_REFLECT": prompt.ReframeReflect,
 		"REFRAME_ANSWER": prompt.ReframeAnswer, "REFRAME_HOOK": prompt.ReframeHook,
 		"HOLMES": prompt.Holmes, "MICROPLANNER": prompt.Microplanner,
-		"OBSERVER": prompt.Observer, "REFLECTOR": prompt.Reflector,
+		"OBSERVER": prompt.Observer, "GROUPREVIEW": prompt.GroupReview,
+		"REFLECTOR":    prompt.Reflector,
 		"INTERJECTION": prompt.Interjection, "CLASSIFIER": prompt.Classifier,
 		"CURATOR": prompt.Curator, "CHAT": prompt.Chat, "VISION": prompt.Vision,
 		"REACT": prompt.React,
@@ -145,7 +147,7 @@ func TestFrozen_NoPromptIsEmpty(t *testing.T) {
 var frozenNodeTypes = map[int]string{
 	0: "tool", 1: "compute", 2: "executive", 3: "micro_planner", 4: "aggregator",
 	5: "actuator", 6: "reflection", 7: "observer", 8: "interjection", 9: "holmes",
-	10: "chat",
+	10: "chat", 11: "group_review",
 }
 
 // The numbers matter, not only the names: a NodeType is an iota and it is

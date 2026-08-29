@@ -548,7 +548,6 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 
 	resp := execResult(ctx, trigger.ID, outcome, result.Nodes, result.LLMCalls, tokens.RunTotal(ctx), elapsed)
 	resp.Actions = apiActions
-	resp.Gaps = result.Gaps
 	jsonResponse(w, resp, http.StatusOK)
 }
 

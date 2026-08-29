@@ -7,16 +7,23 @@ import (
 	"github.com/Compdeep/kaiju/agent/llm"
 )
 
-// ── Function-calling helpers ────────────────────────────────────────────────
+// ── Stage schemas ───────────────────────────────────────────────────────────
 //
-// Every LLM caller that needs structured JSON output uses function calling
-// instead of plain JSON parsing. The model is given a single tool with the
-// expected output schema and forced (ToolChoice="required") to call it. The
-// returned tool_calls[0].arguments is guaranteed to match the schema thanks
-// to grammar-constrained decoding on modern providers.
+// The shape each reasoning stage asks the model for. Not tools: nothing here is
+// registered, nothing here is executed, and the registry has never heard of any
+// of them. A tool is bash, web_search, file_read — a capability the agent can
+// call. These are declared in a tool's clothing because that is the shape the
+// provider takes a schema in.
 //
-// This eliminates the entire class of "model emitted free-form JSON that
-// doesn't match our struct" parser bugs.
+// Declaring one is what asks for the shape; it is not what enforces it. A
+// request carrying a single one of these, with the model pinned to it, is
+// rewritten at Client.Complete into a schema request the provider constrains as
+// the model writes — see llm/structured.go, which measured what the tool-calling
+// wire actually guarantees (0 of 3 replies valid) against what this buys
+// (3 of 3).
+//
+// A stage whose schema cannot be constrained is named at startup rather than
+// left to look like the ones that can — see schema_check.go.
 
 // extractToolArgs returns the arguments string from the first tool call in
 // the response, or falls back to the message content if the model didn't
@@ -38,13 +45,13 @@ func extractToolArgs(resp *llm.ChatResponse) (string, error) {
 	return "", fmt.Errorf("llm response: empty content and no tool calls")
 }
 
-// ── Tool definitions ────────────────────────────────────────────────────────
+// ── The schemas ─────────────────────────────────────────────────────────────
 //
-// Each parser has a corresponding ToolDef returning the JSON schema for its
-// output. The schemas mirror the Go structs in compute.go / reflection.go /
-// etc., but in JSON Schema form so the LLM provider can constrain decoding.
+// One per stage that parses what comes back. Each mirrors the Go struct that
+// reads it — in compute.go, reflection.go and the rest — written as JSON Schema
+// so the provider can constrain what the model writes.
 
-func curatorToolDef() llm.ToolDef {
+func curatorSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -64,7 +71,7 @@ func curatorToolDef() llm.ToolDef {
 	}
 }
 
-// reflectorToolDef is the reflection decision.
+// reflectorSchema is the reflection decision.
 //
 // progress carries "" as an enum member on purpose. The struct reads an absent
 // progress as "productive" (see ReflectionOutput) and the scheduler's streak
@@ -77,7 +84,7 @@ func curatorToolDef() llm.ToolDef {
 // It is not offered in the prompt, which still asks for "productive" when
 // unsure. It is here so the schema permits what the Go on both sides already
 // handles.
-func reflectorToolDef() llm.ToolDef {
+func reflectorSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -119,7 +126,53 @@ func reflectorToolDef() llm.ToolDef {
 	}
 }
 
-func observerToolDef() llm.ToolDef {
+// groupReviewSchema is the verdict on a set of sibling calls.
+//
+// One entry per step the reviewer judges unusable. A step it does not name is
+// usable and untouched, so the ordinary reply — everything worked — is an empty
+// list rather than a roll call.
+//
+// params carries the whole parameter object, not the changed keys. A patch
+// would have to say how it merges, and the two sides would eventually disagree
+// about a key that was dropped rather than left alone.
+func groupReviewSchema() llm.ToolDef {
+	return llm.ToolDef{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name:        "submit_group_review",
+			Description: "Say which of these sibling calls are unusable, and what to do about each.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"reason": {
+						"type": "string",
+						"description": "One sentence on what separates the usable replies from the rest. Write \"\" when every reply is usable."
+					},
+					"unusable": {
+						"type": "array",
+						"description": "One entry per step whose reply cannot be used. Empty when they are all fine. A step not named here is left alone.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"tag": {"type": "string", "description": "The tag of the step, exactly as given."},
+								"action": {
+									"type": "string",
+									"enum": ["retry", "correct", "give_up"],
+									"description": "retry: run it again unchanged. correct: run it again with the params below. give_up: no parameters will fix it."
+								},
+								"params": {"type": "string", "description": "Only when action is correct: the COMPLETE parameter object for the new call, as a JSON object written INSIDE A STRING, e.g. \"{\\\"first\\\": \\\"a\\\", \\\"second\\\": 2}\". Carry every parameter through, changing only what was wrong. Write \"\" for retry and give_up."},
+								"why": {"type": "string", "description": "What is wrong with this reply, in a few words."}
+							}
+						}
+					}
+				},
+				"required": ["reason", "unusable"]
+			}`),
+		},
+	}
+}
+
+func observerSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -133,14 +186,14 @@ func observerToolDef() llm.ToolDef {
 						"enum": ["continue", "inject", "cancel", "reflect"]
 					},
 					"reason": {"type": "string"},
-					"nodes": {
+					"steps": {
 						"type": "array",
 						"description": "When action=inject: new steps to add. Each is {tool, params, depends_on, tag}.",
 						"items": {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string"},
-								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step: \"{\\\"url\\\": {\\\"step\\\": \\\"find_docs\\\", \\\"field\\\": \\\"results.0.url\\\"}}\"."},
+								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: \"{\\\"url\\\": \\\"${step.find_docs.results.0.url}\\\"}\"."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
 							}
@@ -158,11 +211,11 @@ func observerToolDef() llm.ToolDef {
 	}
 }
 
-// holmesToolDef defines the function-calling schema for one iteration of the
+// holmesSchema defines the function-calling schema for one iteration of the
 // Holmes investigator. The model emits ONE thought + one or more actions OR a
 // final conclusion. Actions run in parallel; Holmes sees all results on the
 // next iteration.
-func holmesToolDef() llm.ToolDef {
+func holmesSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -226,7 +279,7 @@ func holmesToolDef() llm.ToolDef {
 	}
 }
 
-func debuggerToolDef() llm.ToolDef {
+func debuggerSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -239,27 +292,27 @@ func debuggerToolDef() llm.ToolDef {
 						"type": "string",
 						"description": "Diagnosis of the root cause."
 					},
-					"nodes": {
+					"steps": {
 						"type": "array",
 						"description": "Fix plan steps. Each is {tool, params, depends_on, tag}.",
 						"items": {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string"},
-								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step: \"{\\\"url\\\": {\\\"step\\\": \\\"find_docs\\\", \\\"field\\\": \\\"results.0.url\\\"}}\"."},
+								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: \"{\\\"url\\\": \\\"${step.find_docs.results.0.url}\\\"}\"."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
 							}
 						}
 					}
 				},
-				"required": ["summary", "nodes"]
+				"required": ["summary", "steps"]
 			}`),
 		},
 	}
 }
 
-func preflightToolDef() llm.ToolDef {
+func preflightSchema() llm.ToolDef {
 	// The context shape comes from PreflightContext, not from a copy written
 	// here — see PreflightContextSchema. It is the field that carries every URL,
 	// path and selector to a planner that cannot see the conversation, so a
@@ -308,9 +361,9 @@ func preflightToolDef() llm.ToolDef {
 	}
 }
 
-// routeToolDef is the minimal tool for the cheap first-pass router: mode only,
+// routeSchema is the minimal tool for the cheap first-pass router: mode only,
 // no skills/intent/categories — those are decided only on the agentic path.
-func routeToolDef() llm.ToolDef {
+func routeSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -332,7 +385,7 @@ func routeToolDef() llm.ToolDef {
 	}
 }
 
-func architectToolDef() llm.ToolDef {
+func architectSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -427,7 +480,7 @@ func architectToolDef() llm.ToolDef {
 	}
 }
 
-// coderToolDef builds the Coder's reply shape. editable says whether a file
+// coderSchema builds the Coder's reply shape. editable says whether a file
 // this call may edit already exists.
 //
 // When it does not, "edits" is left out. Both fields used to be offered on
@@ -439,7 +492,7 @@ func architectToolDef() llm.ToolDef {
 // one failing on it. An answer that cannot be carried out should not be on
 // offer, which settles it before the model is asked rather than after it
 // replies.
-func coderToolDef(editable bool) llm.ToolDef {
+func coderSchema(editable bool) llm.ToolDef {
 	editsField := ""
 	// Writing the file whole is the only shape on offer when nothing exists to
 	// edit, so the content field is demanded. A reply naming a file and a

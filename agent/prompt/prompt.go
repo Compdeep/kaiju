@@ -42,6 +42,7 @@ var (
 	Holmes         string
 	Microplanner   string
 	Observer       string
+	GroupReview    string
 	Reflector      string
 	Interjection   string
 	Classifier     string
@@ -66,6 +67,7 @@ var sectionOrder = []string{
 	"HOLMES",
 	"MICROPLANNER",
 	"OBSERVER",
+	"GROUPREVIEW",
 	"REFLECTOR",
 	"INTERJECTION",
 	"CLASSIFIER",
@@ -89,6 +91,7 @@ var targets = map[string]*string{
 	"HOLMES":          &Holmes,
 	"MICROPLANNER":    &Microplanner,
 	"OBSERVER":        &Observer,
+	"GROUPREVIEW":     &GroupReview,
 	"REFLECTOR":       &Reflector,
 	"INTERJECTION":    &Interjection,
 	"CLASSIFIER":      &Classifier,

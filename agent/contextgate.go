@@ -604,7 +604,7 @@ func (g *ContextGate) runCurator(ctx context.Context, query string, sources map[
 			{Role: "system", Content: prompt.Curator},
 			{Role: "user", Content: sb.String()},
 		},
-		Tools:       []llm.ToolDef{curatorToolDef()},
+		Tools:       []llm.ToolDef{curatorSchema()},
 		ToolChoice:  "required",
 		Temperature: 0.0,
 		MaxTokens:   g.agent.replyBudget(replyStructuredBudget),

@@ -189,7 +189,7 @@ func TestTheBuiltInCardsReachThePlanner(t *testing.T) {
 
 	prompt := a.executiveSystemPrompt(context.Background(), g, nil, "", "observe", "")
 
-	if !strings.Contains(prompt, "plan efficient queries") {
+	if !strings.Contains(prompt, "ask for what the question needs") {
 		t.Errorf("the data_retrieval card's planning guidance did not reach the planner:\n%s", prompt)
 	}
 	if !strings.Contains(prompt, "### data_retrieval") {

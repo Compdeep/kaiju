@@ -24,13 +24,15 @@ Single step. Use a broad focus to capture the key points in one fetch.
 Plan fetches in parallel:
 
 1. `web_fetch` — fetch URL 1 with `format=summary`
-2. `web_fetch` — fetch URL 2 with `format=summary` (parallel with step 0)
-3. `web_fetch` — fetch URL 3 with `format=summary` (parallel with step 0)
+2. `web_fetch` — fetch URL 2 with `format=summary`
+3. `web_fetch` — fetch URL 3 with `format=summary`
+
+Nothing links them, so they run at the same time.
 
 ### Summarize a YouTube video
 
-1. `bash` — `yt-dlp --write-auto-sub --skip-download --sub-lang en -o "/tmp/%(id)s" "URL"` to get transcript
-2. `file_read` — read the subtitle file (depends on step 0)
+1. `bash` — `yt-dlp --write-auto-sub --skip-download --sub-lang en -o "/tmp/%(id)s" "URL"` to get the transcript, tag `get_subs`
+2. `file_read` — read the subtitle file `get_subs` wrote. The path is fixed by the `-o` you passed, so write it out.
 
 If `yt-dlp` is not available, fall back to `web_fetch` on the YouTube page.
 
@@ -45,8 +47,10 @@ Single step. The aggregator synthesizes the summary from the content.
 Plan parallel reads:
 
 1. `file_read` — read file A
-2. `file_read` — read file B (parallel with step 0)
-3. `file_read` — read file C (parallel with step 0)
+2. `file_read` — read file B
+3. `file_read` — read file C
+
+Nothing links them, so they run at the same time.
 
 ### What NOT to do
 

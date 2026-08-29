@@ -421,7 +421,7 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 	}
 	resp, llmErr := a.completeHeavyChecked(withTrace(ctx, holmesID), &llm.ChatRequest{
 		Messages:    messages,
-		Tools:       []llm.ToolDef{holmesToolDef()},
+		Tools:       []llm.ToolDef{holmesSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.replyBudget(replyAnalysisBudget),

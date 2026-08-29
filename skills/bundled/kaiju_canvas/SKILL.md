@@ -23,10 +23,10 @@ Push mermaid syntax directly to the canvas panel:
 Example mermaid content:
 ```
 graph TD
-    A[User Request] --> B[Planner]
-    B --> C[DAG Scheduler]
-    C --> D[Tool Execution]
-    D --> E[Aggregator]
+    A[Customer] --> B[Order Service]
+    B --> C[Payment]
+    C --> D[Warehouse]
+    D --> E[Dispatch]
 ```
 
 ### SVG diagram
@@ -43,20 +43,20 @@ For interactive visualizations (charts, dashboards):
 
 ### Data chart from a file
 
-1. `file_read` — read the data source (CSV, JSON, etc.)
-2. `panel_push` — plugin `preview`, generate an HTML page with a chart library (Chart.js, D3 inline) that renders the data (depends on step 0)
+1. `file_read` — read the data source (CSV, JSON, and so on), tag `read_data`
+2. `panel_push` — plugin `preview`, an HTML page with an inline chart library (Chart.js, D3) rendering what `read_data` returned
 
 ### Architecture diagram from code
 
-1. `file_read` calls in parallel for the source files to analyze
-2. `panel_push` — plugin `canvas`, mime `text/x-mermaid`, generate a mermaid diagram from the code structure (depends on all reads)
+1. `file_read` for each source file to analyse. Nothing links them, so they run at the same time.
+2. `panel_push` — plugin `canvas`, mime `text/x-mermaid`, a mermaid diagram of the structure, referencing the reads
 
 ### Save to file
 
 If the user wants to keep the visualization:
 
 1. `panel_push` — display it in the panel
-2. `file_write` — write the same content to a file (parallel with step 0)
+2. `file_write` — write the same content to a file. Neither needs the other, so they run at the same time.
 
 ### Plugin choices
 

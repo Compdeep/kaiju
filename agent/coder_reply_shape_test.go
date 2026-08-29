@@ -14,13 +14,13 @@ import (
 // run failed on "no such file or directory". Two runs with identical inputs
 // went opposite ways — one wrote its file, one failed on it — so it came down
 // to which allowed answer the model happened to give.
-func TestCoderToolDef_OffersEditsOnlyWhenAFileExists(t *testing.T) {
+func TestCoderSchema_OffersEditsOnlyWhenAFileExists(t *testing.T) {
 	props := func(editable bool) map[string]json.RawMessage {
 		t.Helper()
 		var parsed struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 		}
-		raw := coderToolDef(editable).Function.Parameters
+		raw := coderSchema(editable).Function.Parameters
 		if err := json.Unmarshal(raw, &parsed); err != nil {
 			t.Fatalf("editable=%v: schema is not valid JSON: %v", editable, err)
 		}
@@ -69,13 +69,13 @@ func TestEditorEvalBundle_StillSeesBothShapes(t *testing.T) {
 // step then failed on a guard about a missing run command, which is a second
 // symptom of the same silence. When writing the file whole is the only shape on
 // offer, the content comes with it.
-func TestCoderToolDef_DemandsFileContentWhenThereIsNothingToEdit(t *testing.T) {
+func TestCoderSchema_DemandsFileContentWhenThereIsNothingToEdit(t *testing.T) {
 	required := func(editable bool) []string {
 		t.Helper()
 		var parsed struct {
 			Required []string `json:"required"`
 		}
-		if err := json.Unmarshal(coderToolDef(editable).Function.Parameters, &parsed); err != nil {
+		if err := json.Unmarshal(coderSchema(editable).Function.Parameters, &parsed); err != nil {
 			t.Fatalf("editable=%v: schema is not valid JSON: %v", editable, err)
 		}
 		return parsed.Required
@@ -110,12 +110,12 @@ func TestCoderToolDef_DemandsFileContentWhenThereIsNothingToEdit(t *testing.T) {
 //
 // Reading the structs by reflection rather than by a written list means a field
 // added to either one later is checked here without anyone remembering to.
-func TestCoderToolDef_DeclaresEveryFieldTheEngineReads(t *testing.T) {
+func TestCoderSchema_DeclaresEveryFieldTheEngineReads(t *testing.T) {
 	for _, editable := range []bool{false, true} {
 		var parsed struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 		}
-		if err := json.Unmarshal(coderToolDef(editable).Function.Parameters, &parsed); err != nil {
+		if err := json.Unmarshal(coderSchema(editable).Function.Parameters, &parsed); err != nil {
 			t.Fatalf("editable=%v: schema is not valid JSON: %v", editable, err)
 		}
 		for _, shape := range []any{coderEditReply{}, coderWriteReply{}} {
@@ -132,7 +132,7 @@ func TestCoderToolDef_DeclaresEveryFieldTheEngineReads(t *testing.T) {
 					continue
 				}
 				if _, declared := parsed.Properties[name]; !declared {
-					t.Errorf("editable=%v: %s reads %q, which coderToolDef does not declare — the Coder has no way to send it",
+					t.Errorf("editable=%v: %s reads %q, which coderSchema does not declare — the Coder has no way to send it",
 						editable, rt.Name(), name)
 				}
 			}

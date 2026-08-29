@@ -284,7 +284,7 @@ func TestABareReferenceToAnEnvelopeGivesThePayload(t *testing.T) {
 // question the check meant to ask.
 func TestAHalfWrittenPlaceholderDoesNotSatisfyTheDataFlowCheck(t *testing.T) {
 	params := map[string]any{"goal": "use ${node. and stop", "mode": "shallow"}
-	if err := validateDataFlow("compute", []string{"n1"}, params); err == nil {
+	if err := validatePlanWiring("compute", []string{"n1"}, params); err == nil {
 		t.Error("a step declaring a dependency was accepted on the strength of text " +
 			"that only looks like a reference, so nothing will inject anything and " +
 			"the tool receives the placeholder as prose")
@@ -295,7 +295,7 @@ func TestAHalfWrittenPlaceholderDoesNotSatisfyTheDataFlowCheck(t *testing.T) {
 // stricter than the thing it guards.
 func TestARealReferenceSatisfiesTheDataFlowCheck(t *testing.T) {
 	params := map[string]any{"goal": "read ${step.0.content}", "mode": "shallow"}
-	if err := validateDataFlow("compute", []string{"n1"}, params); err != nil {
+	if err := validatePlanWiring("compute", []string{"n1"}, params); err != nil {
 		t.Errorf("a step referencing its dependency was rejected: %v", err)
 	}
 }

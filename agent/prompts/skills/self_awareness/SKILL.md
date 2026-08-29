@@ -5,9 +5,11 @@ description: Questions about agent capabilities, available tools, system feature
 
 ## Planning Guidance
 
-When the user asks about what the agent can do, what tools are available, or how the system works, do not plan an investigation. Instead, plan minimal steps — at most get_context to establish identity. The answer comes from your knowledge of the tool list in the system prompt, not from telemetry data.
+When the user asks what this agent can do, which tools it has, or how it works, the tool list in this prompt is the answer. Plan nothing to look it up.
 
-If the user asks to demonstrate a capability, plan the demonstration directly.
+A question about this machine is a different question and does need steps: what it is, who it runs as, what is installed, what is listening, what is running. `sysinfo`, `env_list`, `net_info`, `process_list` and `bash` answer those, and the answer is whatever they return, not what is usual elsewhere.
+
+If the user asks for a demonstration of a capability, plan the demonstration rather than describing it.
 
 ## Aggregator Guidance
 

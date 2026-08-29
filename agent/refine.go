@@ -17,10 +17,8 @@ import (
 // It cannot use facts the application holds. "Restart the database on web-1"
 // needs to know that web-1 exists; only the application has that list.
 //
-// And it cannot ask. Today the only way to put a question to the user is for
-// the PLANNER to emit a gap, which happens after tools and skills are loaded
-// and only if the model chooses to ask rather than guess. Under a request
-// shaped like a task, models guess. Preflight is where an ambiguity is
+// And it cannot ask. The planner returns steps and nothing else, so there is no
+// way for it to put a question to the user. Preflight is where an ambiguity is
 // cheapest to notice and the question costs nothing extra, because the call has
 // already happened.
 //

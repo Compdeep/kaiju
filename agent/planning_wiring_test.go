@@ -2,6 +2,7 @@ package agent
 
 import (
 	"github.com/Compdeep/kaiju/agent/gates"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,38 +59,75 @@ func TestExecutivePrompt_TeachesStepWiring(t *testing.T) {
 	}
 }
 
-// No bundled skill may tell the planner NOT to wire steps. web_research_guide once
-// said "you never plan a separate web_search + web_fetch" / "for everything else use
-// web_research", which made every research plan flat. This scans every skill so the
-// ban can't creep back in through any of them.
-func TestBundledSkills_DoNotBanStepWiring(t *testing.T) {
+// everyShippedCard is every SKILL.md an installation can be given: the ones
+// loaded from disk, and the ones inside the binary.
+//
+// The two tests below scanned only the first set. The second — data_retrieval,
+// general_reasoning, self_awareness, system_operations — is compiled in by
+// //go:embed and is what an installation with no card directory runs on, so it
+// reaches more deployments than the bundled set does and was checked by nothing.
+//
+// The embedded half is read through the embed.FS rather than off disk, because
+// that is the copy that actually ships: a card added to the directory and not
+// picked up by the embed pattern is not in the binary, whatever the filesystem
+// says.
+func everyShippedCard(t *testing.T) map[string]string {
+	t.Helper()
+	cards := map[string]string{}
+
 	files, err := filepath.Glob("../skills/bundled/*/SKILL.md")
 	if err != nil {
-		t.Fatalf("glob skills: %v", err)
+		t.Fatalf("glob bundled skills: %v", err)
 	}
 	if len(files) == 0 {
 		t.Fatal("no bundled skills found at ../skills/bundled/*/SKILL.md — fix the test path")
-	}
-	banned := []string{
-		"never plan a separate web_search",
-		"for everything else, use web_research",
-		"never plan a separate `web_search`",
 	}
 	for _, path := range files {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		low := strings.ToLower(string(b))
+		cards["bundled/"+filepath.Base(filepath.Dir(path))] = string(b)
+	}
+
+	embedded, err := fs.Glob(builtinSkillsFS, "prompts/skills/*/SKILL.md")
+	if err != nil {
+		t.Fatalf("glob embedded skills: %v", err)
+	}
+	if len(embedded) == 0 {
+		t.Fatal("no embedded skills found in builtinSkillsFS — the go:embed pattern no longer reaches them")
+	}
+	for _, path := range embedded {
+		b, err := fs.ReadFile(builtinSkillsFS, path)
+		if err != nil {
+			t.Fatalf("read embedded %s: %v", path, err)
+		}
+		cards["embedded/"+filepath.Base(filepath.Dir(path))] = string(b)
+	}
+	return cards
+}
+
+// No shipped skill may tell the planner NOT to wire steps. web_research_guide once
+// said "you never plan a separate web_search + web_fetch" / "for everything else use
+// web_research", which made every research plan flat. This scans every skill so the
+// ban can't creep back in through any of them.
+func TestShippedSkills_DoNotBanStepWiring(t *testing.T) {
+	banned := []string{
+		"never plan a separate web_search",
+		"for everything else, use web_research",
+		"never plan a separate `web_search`",
+	}
+	for name, body := range everyShippedCard(t) {
+		low := strings.ToLower(body)
 		for _, phrase := range banned {
 			if strings.Contains(low, strings.ToLower(phrase)) {
-				t.Errorf("%s bans step wiring — contains %q", filepath.Base(filepath.Dir(path))+"/SKILL.md", phrase)
+				t.Errorf("%s bans step wiring — contains %q", name, phrase)
 			}
 		}
 	}
 }
 
-// No bundled skill writes a placeholder the planner would resolve.
+// No shipped skill writes a placeholder the planner would resolve.
 //
 // A card describes what each step needs; the planner decides how to wire it and
 // injects one step's output into another. A card that writes ${step.0.url}
@@ -104,15 +142,7 @@ func TestBundledSkills_DoNotBanStepWiring(t *testing.T) {
 // resolve: templates.go matches ${step.<anything>} and ${node.<anything>}, so
 // ${step.N.field} and ${node.<id>.field} — N and <id> being stand-ins, not
 // values — never resolve to anything, and a card may write those.
-func TestBundledSkills_WriteNoResolvablePlaceholder(t *testing.T) {
-	files, err := filepath.Glob("../skills/bundled/*/SKILL.md")
-	if err != nil {
-		t.Fatalf("glob skills: %v", err)
-	}
-	if len(files) == 0 {
-		t.Fatal("no bundled skills found at ../skills/bundled/*/SKILL.md — fix the test path")
-	}
-
+func TestShippedSkills_WriteNoResolvablePlaceholder(t *testing.T) {
 	// The spellings that name the shape without being one. Anything else the
 	// engine's own pattern matches is a reference that would resolve.
 	standIns := map[string]bool{
@@ -122,13 +152,8 @@ func TestBundledSkills_WriteNoResolvablePlaceholder(t *testing.T) {
 	}
 
 	found := 0
-	for _, path := range files {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		card := filepath.Base(filepath.Dir(path)) + "/SKILL.md"
-		for _, ref := range templatePattern.FindAllString(string(b), -1) {
+	for card, body := range everyShippedCard(t) {
+		for _, ref := range templatePattern.FindAllString(body, -1) {
 			found++
 			if standIns[ref] {
 				continue

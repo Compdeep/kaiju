@@ -42,15 +42,15 @@ Plan in parallel:
 
 ### Get video info first
 
-1. `bash` — `ffprobe -v quiet -print_format json -show_format -show_streams input.mp4`
-2. Based on duration/resolution, plan frame extraction (depends on step 0)
+1. `bash` — `ffprobe -v quiet -print_format json -show_format -show_streams input.mp4`, tag `probe`
+2. `bash` — extract frames, building the timestamps from the duration and resolution in `probe`'s `stdout`
 
 ### Display extracted frames
 
 After extraction, frames can be pushed to the composable panel:
 
-1. `bash` — extract frames (as above)
-2. `panel_push` — push the image or contact sheet to the preview panel (depends on step 0)
+1. `bash` — extract the frames as above, tag `extract`
+2. `panel_push` — push the image or contact sheet to the preview panel, using the path `extract` wrote to
 
 ### What NOT to do
 

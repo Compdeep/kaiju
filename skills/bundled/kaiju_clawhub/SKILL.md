@@ -42,8 +42,8 @@ Shows name, version, author, description, download count, and supported platform
 
 When the user wants to find and install a skill:
 
-1. `web_fetch` — fetch `https://clawhub.ai` with focus on skill listings (or use `web_search` for "clawhub <topic> skill")
-2. `bash` — `kaiju skill install <slug>` (depends on step 0, extract slug from results)
+1. `web_fetch` — fetch `https://clawhub.ai` with a focus on the skill listings, or `web_search` for "clawhub <topic> skill", tag `find_skill`
+2. `bash` — `kaiju skill install <slug>`, taking the slug from what `find_skill` returned
 
 ### Skill directories
 

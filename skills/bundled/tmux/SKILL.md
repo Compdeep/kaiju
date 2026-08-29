@@ -17,13 +17,15 @@ Do NOT use for simple non-interactive commands — use `bash` directly.
 ### Start a session and run a command
 
 1. `bash` — `tmux new-session -d -s work -x 200 -y 50`
-2. `bash` — `tmux send-keys -t work "npm run dev" Enter` (depends on step 0)
-3. `bash` — `sleep 3 && tmux capture-pane -t work -p` (depends on step 1)
+2. `bash` — `tmux send-keys -t work "npm run dev" Enter`
+3. `bash` — `sleep 3 && tmux capture-pane -t work -p`
+
+These steps pass no data to each other — the session name is the only thing they share, and you already know it. What they need is order, and that is what `depends_on` is for. Use it here.
 
 ### Send input to an interactive prompt
 
 1. `bash` — `tmux send-keys -t work "y" Enter`
-2. `bash` — `sleep 1 && tmux capture-pane -t work -p` (depends on step 0)
+2. `bash` — `sleep 1 && tmux capture-pane -t work -p`, ordered after it with `depends_on`
 
 ### Monitor a long-running process
 
@@ -34,8 +36,10 @@ No dependencies — can run standalone to check current state.
 ### Multiple panes in parallel
 
 1. `bash` — `tmux split-window -t work -h`
-2. `bash` — `tmux send-keys -t work.0 "make build" Enter` (depends on step 0)
-3. `bash` — `tmux send-keys -t work.1 "make test" Enter` (depends on step 0, parallel with step 1)
+2. `bash` — `tmux send-keys -t work.0 "make build" Enter`, ordered after the split
+3. `bash` — `tmux send-keys -t work.1 "make test" Enter`, ordered after the split
+
+Steps 2 and 3 both wait on the split and neither waits on the other, so they run at the same time in separate panes.
 
 ### Key patterns
 

@@ -18,7 +18,7 @@ import (
 // else.
 func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph, intent gates.Intent, history []llm.Message, l Lane, gateCtx *ContextResponse) (string, []ActuatorAction, error) {
 
-	// Assemble user prompt from gate context plus capability gaps from graph.
+	// Assemble user prompt from gate context and graph state.
 	userPrompt := a.assembleAggregatorPrompt(trigger, graph, gateCtx)
 
 	intentStr := intent.String()
@@ -119,8 +119,8 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 }
 
 // assembleAggregatorPrompt builds the aggregator's user message from a gate
-// response and graph state. Sections: Original Request, Capability Gaps,
-// Failed Steps, Skipped Steps, All Results, Worklog.
+// response and graph state. Sections: Original Request, Failed Steps,
+// Skipped Steps, All Results, Worklog.
 func (a *Agent) assembleAggregatorPrompt(trigger Trigger, graph *Graph, gateCtx *ContextResponse) string {
 	var sb strings.Builder
 
@@ -133,16 +133,6 @@ func (a *Agent) assembleAggregatorPrompt(trigger Trigger, graph *Graph, gateCtx 
 		sb.WriteString("## Original Request\n\n")
 		sb.WriteString(q)
 		sb.WriteString("\n\n")
-	}
-
-	// Capability gaps from the graph (set by the executive when no tool exists).
-	if graph != nil && len(graph.Gaps) > 0 {
-		sb.WriteString("## Capability Gaps\n\n")
-		sb.WriteString("The following capabilities were not available. Acknowledge these in your response.\n\n")
-		for _, gap := range graph.Gaps {
-			sb.WriteString(fmt.Sprintf("- %s\n", gap))
-		}
-		sb.WriteString("\n")
 	}
 
 	// Failed and skipped step warnings — must be prominent so the aggregator

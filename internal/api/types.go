@@ -58,7 +58,6 @@ type ActionInfo struct {
 type ExecuteResponse struct {
 	Outcome string       `json:"outcome"`
 	Actions []ActionInfo `json:"actions,omitempty"` // recommended follow-up actions (caller decides)
-	Gaps    []string     `json:"gaps,omitempty"`    // capability gaps (missing tools)
 	// IntentGap is set when the run was refused because the plan needs a rank
 	// the caller did not grant. Nothing ran. A client showing this can offer to
 	// run it again at the rank named, which is why the rank is here as a number

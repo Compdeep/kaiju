@@ -96,3 +96,73 @@ func TestTheSchedulerTreatsNoMoveAsAStop(t *testing.T) {
 			"see TestAnEmptyRePlanIsRefused")
 	}
 }
+
+// A re-plan made only of a gap is refused, like an empty one.
+//
+// A gap says no tool here can ever do this. That is true of a first plan or of
+// none — a capability the engine lacks was lacking a round ago, and a question
+// only the user can answer needed asking then. So a gap appearing for the first
+// time on a RE-plan is the planner declining work the reflector has ruled
+// remains.
+//
+// It used to slip through: counted as a step, it passed the empty-plan guard,
+// was stripped in validatePlanSteps, and left by the conversational exit —
+// ending the run with the planner's own text as the user's answer. Observed on
+// a run whose fetch was rate-limited while three other sources sat in hand.
+func TestAGapOnlyRePlanIsRefused(t *testing.T) {
+	tool := &countingTool{name: "web_search"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+	})
+	model.answerNth("plan",
+		plan(step("web_search", "look", nil)),
+		// the re-plan: one gap and nothing else
+		stubReply{Args: map[string]any{"answer": "cannot proceed", "steps": []map[string]any{
+			{"tool": "gap", "gap": "no tool here can reach that", "tag": "no_tool", "params": "{}"},
+		}}},
+	)
+	model.answerNth("reflector_decision",
+		stubReply{Args: map[string]any{"decision": "replan", "next": "try the other source"}},
+		stubReply{Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+	)
+	a := agentOnStub(t, model, tool)
+
+	res, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"find it"}`),
+	})
+	if err != nil {
+		t.Fatalf("the run failed: %v (stages: %v)", err, model.functionsCalled())
+	}
+	// The planner's own words must not become the answer — that is what the
+	// empty-re-plan guard refuses, and a gap reaches the same place.
+	if res != nil && strings.Contains(res.Outcome, "cannot proceed") {
+		t.Errorf("the planner's text became the user's answer:\n%s", res.Outcome)
+	}
+	if res != nil && strings.Contains(res.Outcome, "no tool here can reach that") {
+		t.Errorf("the gap became the user's answer:\n%s", res.Outcome)
+	}
+}
+
+// A gap beside real steps is still a note, not a stop. The plan runs and the
+// answer acknowledges what could not be covered.
+func TestAGapBesideRealStepsStillPlans(t *testing.T) {
+	tool := &countingTool{name: "web_search"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "observe"}},
+		"plan": stubReply{Args: map[string]any{"steps": []map[string]any{
+			{"tool": "web_search", "tag": "look", "params": "{}"},
+			{"tool": "gap", "gap": "there is no tool here that can send an SMS", "tag": "no_sms", "params": "{}"},
+		}}},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+	})
+	a := agentOnStub(t, model, tool)
+
+	if _, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"look it up and text me"}`),
+	}); err != nil {
+		t.Fatalf("a plan carrying a gap failed the run: %v", err)
+	}
+	if tool.calls != 1 {
+		t.Errorf("the real step ran %d times, want once — a gap beside it must not stop the plan", tool.calls)
+	}
+}

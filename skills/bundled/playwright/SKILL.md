@@ -1,193 +1,78 @@
 ---
-name: Playwright (Automation + MCP + Scraper)
+name: playwright
 slug: playwright
 version: 1.0.3
 homepage: https://clawic.com/skills/playwright
-description: "Browser automation via Playwright MCP. Navigate websites, click elements, fill forms, take screenshots, extract data, and debug real browser workflows. Use when (1) you need a real browser, not static fetch; (2) the task involves Playwright MCP, browser tools, Playwright tests, scripts, or JS-rendered pages; (3) the user wants navigation, forms, screenshots, PDFs, downloads, or browser-driven extraction turned into a reliable outcome."
-changelog: Clarified the MCP-first browser automation flow and improved quick-start guidance for forms, screenshots, and extraction.
+description: "Browser automation with Playwright. Drive a real browser to navigate sites, click elements, fill forms, take screenshots, extract data from JavaScript-rendered pages, and write or run end-to-end tests. Use when a static fetch is not enough because the page renders its content in the browser, or the task needs interaction, authentication, uploads, downloads, or the visible rendering of a page."
 metadata:
   requires:
-    bins: ["node", "npx", "playwright"]
+    bins: ["node", "npx"]
   os: ["linux", "darwin", "win32"]
-  clawdbot: {"emoji":"P","requires":{"bins":["node","npx"]},"os":["linux","darwin","win32"],"install":[{"id":"npm-playwright","kind":"npm","package":"playwright","bins":["playwright"],"label":"Install Playwright"},{"id":"npm-playwright-mcp","kind":"npm","package":"@playwright/mcp","bins":["playwright-mcp"],"label":"Install Playwright MCP (optional)"}]}
 ---
 
 ## When to Use
 
-Use this skill for real browser tasks: JS-rendered pages, multi-step forms, screenshots or PDFs, UI debugging, Playwright test authoring, MCP-driven browser control, and structured extraction from rendered pages.
+Use this skill when success depends on a real browser: pages that build their content with JavaScript, multi-step forms, logged-in views, uploads and downloads, screenshots and PDFs, and end-to-end tests of a running application.
 
-Prefer it when static fetch is insufficient or when the task depends on browser events, visible DOM state, authentication context, uploads or downloads, or user-facing rendering.
+Do not use it when a plain HTTP request would answer the question. `web_fetch` and `web_search` are faster, cheaper and steadier than a browser, and a page that serves its content in the initial HTML needs nothing more. Reach for a browser once you have evidence that the plain fetch came back without the content.
 
-If the user mainly wants the agent to drive a browser with simple actions like navigate, click, fill, screenshot, download, or extract, treat MCP as a first-class path.
+## Planning Guidance
 
-Use direct Playwright for scripts and tests. Use MCP when browser tools are already in the loop, the user explicitly wants MCP, or the fastest path is browser actions rather than writing new automation code.
+This system has no browser tool. Every browser action runs as Node code that drives Playwright, so a browser step is one of two shapes:
 
-Primary fit is repo-owned browser work: tests, debugging, repros, screenshots, and deterministic automation. Treat rendered-page extraction as a secondary use case, not the default identity.
+- `bash` running a script that already exists, or a one-line `node -e`, or an existing test suite (`npx playwright test`).
+- `compute` when the browser work needs a script that has not been written yet. Ask it for a complete script and a command that runs it.
 
-## Architecture
+Before the first browser step, establish that Playwright is there. `npx playwright --version` answers it, and `npx playwright install chromium` installs the browser binary, which is a separate download from the npm package and is the usual reason a first run fails. Both are `bash` steps, and both belong in the plan rather than inside the script.
 
-This skill is instruction-only. It does not create local memory, setup folders, or persistent profiles by default.
+Run headless. This machine ordinarily has no display, so a headed run and `npx playwright codegen` both fail with a missing-display error rather than showing anything. To learn a page's structure, have the script write the rendered HTML or an accessibility snapshot to a file, then read that file.
 
-Load only the smallest reference file needed for the task. Keep auth state temporary unless the repository already standardizes it and the user explicitly wants browser-session reuse.
+A browser step's real output is a file: a screenshot, a PDF, a download, a trace, or extracted data. Write it into the workspace under a name you choose, and have the next step read that path. For a screenshot, `image_read` is the step that looks at it; for extracted data, write JSON and read it with `file_read`.
 
-## Quick Start
+Serve the application before testing it. A suite pointed at a server nobody started fails on connection refused, and the fix is a `service` step for the server, not a retry of the test.
 
-### MCP browser path
-```bash
-npx @playwright/mcp --headless
-```
+There are reference files beside this card, in the `playwright` directory under the skills directory: `selectors.md`, `debugging.md`, `testing.md`, `ci-cd.md` and `scraping.md`. They hold the detail this card summarises. Locate the directory with `file_list` and read the one file the task needs, not all five.
 
-Use this path when the agent already has browser tools available or the user wants browser automation without writing new Playwright code.
+## RULES
 
-### Common MCP actions
+1. **Test what the user sees.** Use a browser when the outcome depends on rendered interface, actionability, authentication, uploads, downloads or navigation. Anything a unit test or a direct API call can check should be checked that way instead.
 
-Typical Playwright MCP tool actions include:
-- `browser_navigate` for opening a page
-- `browser_click` and `browser_press` for interaction
-- `browser_type` and `browser_select_option` for forms
-- `browser_snapshot` and `browser_evaluate` for inspection and extraction
-- `browser_choose_file` for uploads
-- screenshot, PDF, trace, and download capture through the active browser workflow
+2. **Isolate a run before making it clever.** Keep scripts and tests independent, so a retry or a parallel run inherits no state from the last one. Where a repository already has a Playwright configuration, fixtures and authentication setup, extend those rather than building a second arrangement alongside them.
 
-### Common browser outcomes
+3. **Look before you act.** Open the page and capture its rendered state before fixing on selectors or assertions. Guessing a selector from the page source is how automation works once and then stops working. When a failure only appears sometimes, capture a trace before rewriting anything.
 
-| Goal | Typical MCP-style action |
-|------|--------------------------|
-| Open and inspect a site | navigate, wait, inspect, screenshot |
-| Complete a form | navigate, click, fill, select, submit |
-| Capture evidence | screenshot, PDF, download, trace |
-| Pull structured page data | navigate, wait for rendered state, extract |
-| Reproduce a UI bug | headed run, trace, console or network inspection |
+4. **Prefer locators that survive a redesign.** Role, label, text, alt text, title and test id, ahead of CSS and XPath. Assert the visible outcome rather than that a click was issued. Where a locator matches several elements, narrow it; `first()`, `last()` and `nth()` silence the ambiguity without resolving it, and belong only where position is the thing under test.
 
-### Existing test suite
-```bash
-npx playwright test
-npx playwright test --headed
-npx playwright test --trace on
-```
+5. **Wait on the application, not on the clock.** Playwright's own actionability checks cover most waiting. Where they do not, wait on an expectation, a URL, a response or a signal the application gives when it is ready. A fixed sleep passes on a fast machine and fails on a slow one. `networkidle` never settles on a page that polls.
 
-### Bootstrap selectors and flows
-```bash
-npx playwright codegen https://example.com
-```
+6. **Control what you do not own.** Mock third-party services, upstream APIs and analytics when the point is to verify this application. For extracting data, check whether the site publishes an API or serves the content in plain HTML before driving a browser at it.
 
-### Direct script path
-```javascript
-const { chromium } = require('playwright');
-
-(async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  await page.goto('https://example.com');
-  await page.screenshot({ path: 'page.png', fullPage: true });
-  await browser.close();
-})();
-```
-
-## Quick Reference
-
-| Topic | File |
-|------|------|
-| Selector strategy and frame handling | `selectors.md` |
-| Failure analysis, traces, logs, and headed runs | `debugging.md` |
-| Test architecture, mocks, auth, and assertions | `testing.md` |
-| CI defaults, retries, workers, and failure artifacts | `ci-cd.md` |
-| Rendered-page extraction, pagination, and respectful throttling | `scraping.md` |
-
-## Approach Selection
-
-| Situation | Best path | Why |
-|----------|-----------|-----|
-| Static HTML or a simple HTTP response is enough | Use a cheaper fetch path first | Faster, cheaper, less brittle |
-| You need a reliable first draft of selectors or flows | Start with `codegen` or a headed exploratory run | Faster than guessing selectors from source or stale DOM |
-| Local app, staging app, or repo-owned E2E suite | Use `@playwright/test` | Best fit for repeatable tests and assertions |
-| One-off browser automation, screenshots, downloads, or rendered extraction | Use direct Playwright API | Simple, explicit, and easy to debug in code |
-| Agent/browser-tool workflow already depends on `browser_*` tools or the user wants no-code browser control | Use Playwright MCP | Fastest path for navigate-click-fill-screenshot workflows |
-| CI failures, flake, or environment drift | Start with `debugging.md` and `ci-cd.md` | Traces and artifacts matter more than new code |
-
-## Core Rules
-
-### 1. Test user-visible behavior and the real browser boundary
-- Do not spend Playwright on implementation details that unit or API tests can cover more cheaply.
-- Use Playwright when success depends on rendered UI, actionability, auth, uploads or downloads, navigation, or browser-only behavior.
-
-### 2. Make runs isolated before making them clever
-- Keep tests and scripts independent so retries, parallelism, and reruns do not inherit hidden state.
-- Extend the repository's existing Playwright harness, config, and fixtures before inventing a parallel testing shape from scratch.
-- Do not share mutable accounts, browser state, or server-side data across parallel runs unless the suite was explicitly designed for it.
-
-### 3. Reconnaissance before action
-- Open, wait, and inspect the rendered state before locking selectors or assertions.
-- Use `codegen`, headed mode, or traces to discover stable locators instead of guessing from source or stale DOM.
-- For flaky or CI-only failures, capture a trace before rewriting selectors or waits.
-
-### 4. Prefer resilient locators and web-first assertions
-- Use role, label, text, alt text, title, or test ID before CSS or XPath.
-- Assert the user-visible outcome with Playwright assertions instead of checking only that a click or fill command executed.
-- If a locator is ambiguous, disambiguate it. Do not silence strictness with `first()`, `last()`, or `nth()` unless position is the actual behavior under test.
-
-### 5. Wait on actionability and app state, not arbitrary time
-- Let Playwright's actionability checks work for you before reaching for sleeps or forced actions.
-- Prefer `expect`, URL waits, response waits, and explicit app-ready signals over generic timing guesses.
-
-### 6. Control what you do not own
-- Mock or isolate third-party services, flaky upstream APIs, analytics noise, and cross-origin dependencies whenever the goal is to verify your app.
-- For rendered extraction, prefer documented APIs or plain HTTP paths before driving a full browser.
-- Do not make live third-party widgets or upstream integrations the reason your suite flakes unless that exact integration is what the user asked to validate.
-
-### 7. Keep auth, production access, and persistence explicit
-- Do not persist saved browser state by default.
-- Reuse auth state only when the repository already standardizes it or the user explicitly asks for session reuse.
-- For destructive, financial, medical, production, or otherwise high-stakes flows, prefer staging or local environments and require explicit user confirmation before continuing.
+7. **Keep credentials and production access deliberate.** Do not persist browser state by default. Reuse a saved authentication state only where the repository already standardises it. For anything that spends money, changes production data, or cannot be undone, use a staging or local target.
 
 ## Playwright Traps
 
-- Guessing selectors from source or using `first()`, `last()`, or `nth()` to silence ambiguity -> the automation works once and then flakes.
-- Starting a new Playwright structure when the repo already has config, fixtures, auth setup, or conventions -> the new flow fights the existing harness and wastes time.
-- Testing internal implementation details instead of visible outcomes -> the suite passes while the user path is still broken.
-- Sharing one authenticated state across parallel tests that mutate server-side data -> failures become order-dependent and hard to trust.
-- Reaching for `force: true` before understanding overlays, disabled state, or actionability -> the test hides a real bug.
-- Waiting on `networkidle` for chatty SPAs -> analytics, polling, or sockets keep the page "busy" even when the UI is ready.
-- Driving a full browser when HTTP or an API would answer the question -> more cost, more flake, less signal.
-- Treating third-party widgets and live upstream services as if they were stable parts of your own product -> failures stop being actionable.
+- Guessing selectors from page source, or using `first()` to silence an ambiguous match — works once, then fails on the next deploy.
+- Building a new test structure next to the repository's existing configuration, fixtures and conventions — the two fight each other.
+- Asserting on internals rather than visible outcomes — the suite passes while the user's path is broken.
+- One authenticated session shared across parallel tests that write to the server — failures become order-dependent.
+- `force: true` before understanding the overlay or the disabled state that blocked the click — hides the bug the test was meant to catch.
+- Waiting for `networkidle` on a page with polling or a socket — the page is never idle.
+- Driving a browser where an HTTP request would do — slower, less reliable, and no more informative.
+- Running headed, or running `codegen`, on a machine with no display — fails before the browser opens.
 
-## External Endpoints
+## Debug Guidance
 
-| Endpoint | Data Sent | Purpose |
-|----------|-----------|---------|
-| User-requested web origins | Browser requests, form input, cookies, uploads, and page interactions required by the task | Automation, testing, screenshots, PDFs, and rendered extraction |
-| `https://registry.npmjs.org` | Package metadata and tarballs during optional installation | Install Playwright or Playwright MCP |
+When a browser step fails, read the error before changing the script.
 
-No other data is sent externally.
+- **`Executable doesn't exist` or a missing browser path** — the browser binary was never installed. Run `npx playwright install chromium`. Installing the npm package does not install the browser.
+- **`Missing X server or $DISPLAY`** — something asked for a headed browser. Set `headless: true`, or drop `--headed`.
+- **`connect ECONNREFUSED`** — nothing is serving the target. Start the application as a service and confirm it answers before running the test again.
+- **`Timeout ... waiting for locator`** — the element never reached the state the action needed. Screenshot the page at the moment of failure and look at it. The element may be absent, behind an overlay, inside an iframe, or still loading.
+- **`strict mode violation`** — the locator matched more than one element. Narrow it; do not add `first()`.
+- **A test that passes alone and fails alongside others** — shared state. Look at what the tests write, not at their timing.
 
-## Security & Privacy
+Capture a trace (`--trace on`) before rewriting a test that fails only sometimes. The trace shows what the page looked like at each step, which guessing does not.
 
-Data that leaves your machine:
-- Requests sent to the websites the user asked to automate.
-- Optional package-install traffic to npm when installing Playwright tooling.
+## Security and Privacy
 
-Data that stays local:
-- Source code, traces, screenshots, videos, PDFs, and temporary browser state kept in the workspace or system temp directory.
-
-This skill does NOT:
-- Create hidden memory files or local folder systems.
-- Recommend browser-fingerprint hacks, challenge-solving services, or rotating exits.
-- Persist sessions or credentials by default.
-- Make undeclared network requests beyond the target sites involved in the task and optional tool installation.
-- Treat high-stakes production flows as safe to automate without explicit user direction.
-
-## Trust
-
-By using this skill, browser requests go to the websites you automate and optional package downloads go through npm.
-Only install if you trust those services and the sites involved in your workflow.
-
-## Related Skills
-Install with `clawhub install <slug>` if user confirms:
-- `web` - HTTP-first investigation before escalating to a real browser.
-- `scrape` - Broader extraction workflows when browser automation is not the main challenge.
-- `screenshots` - Capture and polish visual artifacts after browser work.
-- `multi-engine-web-search` - Find and shortlist target pages before automating them.
-
-## Feedback
-- If useful: `clawhub star playwright`
-- Stay updated: `clawhub sync`
+Requests go to the sites the task names, carrying whatever the automation types into them, including any credentials it is given. Screenshots, traces, videos, PDFs and downloads stay in the workspace, and a screenshot of a logged-in page holds whatever was on screen. Installing Playwright fetches packages from the npm registry and browser binaries from Playwright's own download host.

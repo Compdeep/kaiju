@@ -2,9 +2,11 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +126,29 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 	}
 	defer fh.Close()
 
+	// A file a model cannot read is described, not read.
+	//
+	// The planner points this at whatever a step names, and a step that names a
+	// program gets one: /usr/bin/apt-get and /bin/sh were both read whole into a
+	// prompt on a live deployment, where 13.5% of every byte ever
+	// sent to a model was executable content. It cannot be reasoned about, it
+	// tokenises far worse than text, and it crowds out the evidence around it.
+	//
+	// Reported as OK rather than as a failure, because nothing went wrong: the
+	// step asked what is in this file and the answer is "a binary, of this type
+	// and this size". A failure would send the run looking for a fault, and the
+	// retry would read the same bytes again.
+	if kind, ok := binaryKind(fh); ok {
+		info, _ := fh.Stat()
+		size := int64(0)
+		if info != nil {
+			size = info.Size()
+		}
+		return toolapi.ToolOK("text",
+			fmt.Sprintf("%s is a %s binary, %d bytes. Its contents are not text and were not read.", path, kind, size),
+			fileReadData{Path: path, Binary: true, BinaryKind: kind, Bytes: size}), nil
+	}
+
 	maxLines := 500
 	if ml, ok := toolapi.ParamNum(params, "max_lines"); ok && ml > 0 {
 		maxLines = int(ml)
@@ -191,6 +216,56 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 	return toolapi.ToolOK("text", strings.Join(head, "\n"), fileReadData{
 		Path: path, LinesShown: shown, LinesTotal: total, Truncated: total > maxLines,
 	}), nil
+}
+
+/*
+ * binaryKind reports whether a file is one no model can read, and what it is.
+ * desc: Decided from the first bytes, then the file is rewound so an ordinary
+ *       read is unaffected. Signatures first, because they name the thing —
+ *       "ELF" is a better answer than "binary" — and a NUL byte as the fallback,
+ *       which is the oldest and most reliable text test there is: text files do
+ *       not contain NUL, and every executable, archive and image does.
+ *
+ *       Deliberately not a content-type sniff. UTF-16, which has NULs and is
+ *       text, is the known false positive; it is also not something an agent
+ *       inspecting a Unix host meets, and reporting its type rather than its
+ *       contents is a smaller loss than sending a megabyte of machine code.
+ * param: fh - an open file, positioned at the start.
+ * return: the kind, and whether it is binary at all.
+ */
+func binaryKind(fh *os.File) (string, bool) {
+	var buf [512]byte
+	n, _ := io.ReadFull(fh, buf[:])
+	defer fh.Seek(0, io.SeekStart)
+	head := buf[:n]
+	hasNUL := bytes.IndexByte(head, 0) >= 0
+	for _, sig := range []struct {
+		magic []byte
+		kind  string
+		// needsNUL marks a signature too weak to stand alone. "MZ" is two
+		// printable characters, so a sentence beginning "MZ is how a PE file
+		// starts" was refused as a program — caught by the test below, not in
+		// production. Every real PE carries a DOS stub full of NULs within the
+		// first 512 bytes, so requiring one keeps the specific name and costs
+		// nothing. The others begin with a byte no text file can start with.
+		needsNUL bool
+	}{
+		{magic: []byte("\x7fELF"), kind: "ELF"},
+		{magic: []byte("MZ"), kind: "PE/COFF", needsNUL: true},
+		{magic: []byte("\x1f\x8b"), kind: "gzip"},
+		{magic: []byte("PK\x03\x04"), kind: "zip"},
+		{magic: []byte("\x89PNG"), kind: "PNG"},
+		{magic: []byte("%PDF"), kind: "PDF"},
+		{magic: []byte("\xca\xfe\xba\xbe"), kind: "Mach-O"},
+	} {
+		if bytes.HasPrefix(head, sig.magic) && (!sig.needsNUL || hasNUL) {
+			return sig.kind, true
+		}
+	}
+	if hasNUL {
+		return "binary", true
+	}
+	return "", false
 }
 
 var _ toolapi.Tool = (*FileRead)(nil)

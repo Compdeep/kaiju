@@ -105,6 +105,23 @@ type ModelConfig struct {
 	// the application's catalog is safe rather than broken.
 	Limits ModelLimits
 
+	// PromptScale narrows every cap that carries content into a prompt, from 0
+	// to 1. Unset — or any value outside that range — means 1, which is the
+	// caps exactly as budgets.go states them, so a deployment that says nothing
+	// is unchanged.
+	//
+	// It exists because a cap resolves against the model's WINDOW, and a large
+	// window makes every cap pin to its ceiling at once: measured on a 262,144
+	// token deployment, one step could contribute 32,000 characters and one
+	// file read 16,000, each of them legal, three of them a prompt that timed
+	// out at the client's 180-second deadline.
+	//
+	// Not every cap moves with it, and not by the same amount — see Weight in
+	// budgets.go, where each says what it feels and why. A cap whose truncation
+	// removes a capability or breaks a syntax is exempt, so scaling this down
+	// makes prompts smaller and never makes a reply invalid.
+	PromptScale float64
+
 	// LLMTransport replaces how requests to the model reach it, for an
 	// application whose model is not at the other end of a socket. Nil is the
 	// ordinary case and leaves every client exactly as it was.

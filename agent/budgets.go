@@ -42,6 +42,49 @@ type budgetSpec struct {
 
 	// Bounds is what this cap cuts, in a line.
 	Bounds string
+
+	// Weight is how much of the deployment's prompt scale this cap feels, from
+	// 0 to 1. It exists because the caps are not alike: some bound bulk that a
+	// model reads and mostly ignores, and some bound the thing a stage came to
+	// say. Scaling those together would trade a prompt that is too big for a
+	// reply that is cut off.
+	//
+	//	1    bulk — evidence, a tool's result, a node's fields. Trimming these
+	//	     shortens what a stage reads and changes nothing it can do.
+	//	0    exempt — the tool index, a generated program, anything whose
+	//	     truncation removes a capability or breaks a syntax rather than
+	//	     making text shorter.
+	//
+	// Zero is the safe default: a spec that says nothing about weight does not
+	// move when a deployment scales, so adding one here is a deliberate act.
+	Weight float64
+}
+
+/*
+ * resolve applies a deployment's prompt scale to a resolved cap.
+ * desc: Base is a floor the scale may not breach — it is what a deployment with
+ *       no model catalog is given, so it is the size this engine is known to
+ *       work at, and no scaling argument is worth going below it.
+ *
+ *       A scale of 1 returns the cap unchanged whatever the weight, so a
+ *       deployment that sets nothing sees exactly the numbers it saw before
+ *       this field existed.
+ * param: got - the cap resolved against the window, before scaling.
+ * param: scale - the deployment's prompt scale, 0 < scale <= 1.
+ * return: the cap to use.
+ */
+func (s budgetSpec) resolve(got int, scale float64) int {
+	if got > s.Ceiling {
+		got = s.Ceiling
+	}
+	if scale > 0 && scale < 1 && s.Weight > 0 {
+		effect := 1 - s.Weight*(1-scale)
+		got = int(float64(got) * effect)
+	}
+	if got < s.Base {
+		got = s.Base
+	}
+	return got
 }
 
 // The table. Base values are what each was before this file existed, so a
@@ -53,6 +96,9 @@ var (
 	evidenceBudget = budgetSpec{
 		Base: toolapi.EvidenceBudget, Share: 16, Ceiling: 32000,
 		Bounds: "one step's result reaching a prompt",
+		// The largest single contributor measured: one OSINT lookup reached a
+		// prompt at 35,003 characters, sitting on this ceiling.
+		Weight: 1,
 	}
 
 	// toolResultBudget bounds one string tool's result as it finishes. A typed
@@ -61,6 +107,9 @@ var (
 	toolResultBudget = budgetSpec{
 		Base: 4096, Share: 32, Ceiling: 16000,
 		Bounds: "one string tool's result at dispatch",
+		// One file_read of a shell script arrived at 15,925 characters, which is
+		// this ceiling to within a rounding error.
+		Weight: 1,
 	}
 
 	// payloadBudget bounds a node's fields carried as data: the tool messages a
@@ -68,6 +117,10 @@ var (
 	payloadBudget = budgetSpec{
 		Base: 12000, Share: 12, Ceiling: 48000,
 		Bounds: "one node's fields, as data",
+		// Safe to scale hard: shortenPayloadValues cuts string VALUES and keeps
+		// every key, nesting level and list length, so a scaled payload is a
+		// smaller document rather than a broken one.
+		Weight: 1,
 	}
 
 	// toolIndexBudget bounds the planner's tool index — signatures and return
@@ -76,6 +129,12 @@ var (
 	toolIndexBudget = budgetSpec{
 		Base: 24000, Share: 8, Ceiling: 96000,
 		Bounds: "the tool index shown to the planner",
+		// Exempt, and the biggest thing in the prompt: measured at 28.6% of all
+		// section bytes, up to 39,459 characters on every planner call. Cutting
+		// it does not shorten text, it removes tools from the planner's view and
+		// breaks the calls it then writes. The way to make this smaller is fewer
+		// tools or terser signatures, not a percentage.
+		Weight: 0,
 	}
 )
 
@@ -98,6 +157,12 @@ var (
 //
 // Share is of the window in TOKENS here, not characters: what a model may write
 // and what it can read are both counted the same way on the wire.
+// Every cap below is exempt — Weight 0 — and that is a measurement, not
+// caution. The fault this scale exists to fix is REQUEST size: p90 202,593
+// bytes in, against replies whose p90 is a few hundred tokens out. Scaling the
+// return leg would buy almost nothing and cost the one thing a stage came to
+// say. The table above already records that more than one reflection in ten was
+// being cut off at its cap before it was raised; scaling would put it back.
 var (
 	// replyDecisionBudget bounds a stage that returns a decision and, on the
 	// paths where no aggregator follows, the answer with it. The largest of
@@ -105,6 +170,8 @@ var (
 	replyDecisionBudget = budgetSpec{
 		Base: 2048, Share: 64, Ceiling: 8192,
 		Bounds: "one reflection's decision, and its answer when nothing follows",
+		// It can be the whole reply to a user. Cutting it cuts the answer.
+		Weight: 0,
 	}
 
 	// replyBriefBudget bounds a stage that reports a judgement in a sentence or
@@ -113,6 +180,8 @@ var (
 	replyBriefBudget = budgetSpec{
 		Base: 1024, Share: 128, Ceiling: 4096,
 		Bounds: "one stage's judgement, in a sentence or two",
+		// Already a sentence or two. There is nothing here to reclaim.
+		Weight: 0,
 	}
 
 	// replyEdgeBudget bounds an edge. It carries; it does not add, so it should
@@ -121,6 +190,8 @@ var (
 	replyEdgeBudget = budgetSpec{
 		Base: 600, Share: 256, Ceiling: 2000,
 		Bounds: "one edge's framing paragraph",
+		// The smallest cap in the engine at 600 tokens. Not the problem.
+		Weight: 0,
 	}
 
 	// replyAnalysisBudget bounds a stage that reasons at length before deciding:
@@ -128,6 +199,8 @@ var (
 	replyAnalysisBudget = budgetSpec{
 		Base: 4096, Share: 32, Ceiling: 16384,
 		Bounds: "one investigation's reasoning and its conclusion",
+		// A conclusion cut short is a conclusion nobody can act on.
+		Weight: 0,
 	}
 
 	// replyCodeBudget bounds a stage that writes a program. The largest, because
@@ -138,6 +211,9 @@ var (
 	replyCodeBudget = budgetSpec{
 		Base: 16384, Share: 16, Ceiling: 65536,
 		Bounds: "one generated program",
+		// The comment above is the reason: a truncated program is broken, not
+		// shorter. This one must never scale.
+		Weight: 0,
 	}
 
 	// replyStructuredBudget bounds a stage filling a declared shape rather than
@@ -145,6 +221,8 @@ var (
 	replyStructuredBudget = budgetSpec{
 		Base: 2048, Share: 128, Ceiling: 8192,
 		Bounds: "one stage's reply into a declared schema",
+		// A declared shape half-filled does not parse. Never scale a schema.
+		Weight: 0,
 	}
 )
 
@@ -165,14 +243,26 @@ func (a *Agent) replyBudget(s budgetSpec) int {
 	if window <= 0 {
 		return s.Base
 	}
-	got := window / s.Share
-	if got < s.Base {
-		return s.Base
+	return s.resolve(window/s.Share, a.promptScale())
+}
+
+/*
+ * promptScale is how far this deployment narrows the caps that carry content.
+ * desc: 1 means the numbers in the table above, which is what every deployment
+ *       had before the setting existed — so an application that sets nothing is
+ *       unchanged. Anything outside (0,1] is treated as 1 rather than refused:
+ *       a mistyped setting should not make an engine send nothing.
+ * return: the scale, in (0,1].
+ */
+func (a *Agent) promptScale() float64 {
+	if a == nil {
+		return 1
 	}
-	if got > s.Ceiling {
-		return s.Ceiling
+	s := a.cfg.PromptScale
+	if s <= 0 || s > 1 {
+		return 1
 	}
-	return got
+	return s
 }
 
 /*
@@ -194,12 +284,5 @@ func (a *Agent) budget(s budgetSpec) int {
 	if window <= 0 {
 		return s.Base
 	}
-	got := window * charsPerToken / s.Share
-	if got < s.Base {
-		return s.Base
-	}
-	if got > s.Ceiling {
-		return s.Ceiling
-	}
-	return got
+	return s.resolve(window*charsPerToken/s.Share, a.promptScale())
 }

@@ -23,6 +23,9 @@ type fileReadData struct {
 	LinesTotal int    `json:"lines_total" desc:"lines in the file"`
 	Truncated  bool   `json:"truncated" desc:"true when the file has more lines than were shown"`
 	FromEnd    bool   `json:"from_end" desc:"true when the lines shown are the last of the file rather than the first"`
+	Binary     bool   `json:"binary,omitempty" desc:"true when the file is not text and was described rather than read"`
+	BinaryKind string `json:"binary_kind,omitempty" desc:"what kind of binary it is — ELF, PE/COFF, gzip, zip, PNG, PDF, Mach-O"`
+	Bytes      int64  `json:"bytes,omitempty" desc:"the file's size, reported when it was not read"`
 }
 
 // fileWriteData is what file_write returns.

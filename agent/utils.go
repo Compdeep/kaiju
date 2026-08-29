@@ -424,9 +424,18 @@ func rotateServiceLogs(workspace string) {
 }
 
 // llmTimeFormat is the timestamp format used everywhere LLMs see timestamps.
-// Compact, human-readable, includes date. Same format in worklog, gate context,
-// blueprints, and prompts.
-const llmTimeFormat = "Jan 02 15:04:05"
+// Same format in worklog, gate context, blueprints, and prompts.
+//
+// It was "Jan 02 15:04:05", and the comment above it said "includes date" —
+// which it did, apart from the year. A planner asked for the position of a body
+// "right now" was told "Aug 29 11:16:55", supplied the year itself, and wrote
+// START_TIME='2025-08-29' into nine API calls during a run that happened in
+// 2026. Six of them returned real data for the wrong year, and nothing in the
+// run could tell.
+//
+// Written the way a date is written INTO a parameter, so a stage that needs one
+// can copy it rather than compose it.
+const llmTimeFormat = "2006-01-02 15:04:05"
 
 // markRunStart appends a run separator to the worklog instead of truncating.
 // The reflector sees the marker and knows everything above it is from a prior run.

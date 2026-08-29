@@ -130,7 +130,7 @@ unrelated current query must not inherit the classification of prior work.
   "skills": ["skill_key", ...],
   "mode": "chat" | "agent",
   "intent": %s,
-  "required_categories": ["network", "filesystem", "compute", "process", "info"],
+  "required_categories": [one or more of "network", "filesystem", "compute", "process", "info"],
   "context": {
     "intent": "...",
     "urls": [...],
@@ -216,7 +216,12 @@ Choose one:
 
 ### required_categories
 
-Include only categories that the plan must use:
+Exactly these five words and nothing else. This is not the `skills` list and
+never contains a skill name — a value outside the five is dropped, so naming a
+skill here leaves the field empty and the planner is told nothing.
+
+Include only categories that the plan must use, and leave it empty when you
+cannot tell:
 
 - `"network"`: web search, web retrieval, or external APIs;
 - `"filesystem"`: reading, writing, or listing files;

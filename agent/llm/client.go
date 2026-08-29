@@ -266,6 +266,21 @@ func (c *Client) Transport(rt http.RoundTripper) *Client {
 	return c
 }
 
+// requestTimeout bounds one call end to end: connect, send, and read the whole
+// reply. The body is read in one piece rather than streamed, so nothing is
+// visible until the model finishes and a slow reply is indistinguishable from
+// no reply until this expires.
+//
+// It was 180s. A planner writing a long plan is the largest generation in a
+// run, and on a provider returning roughly a token a second that output alone
+// exceeded the limit — the request was accepted, headers came back, and the
+// deadline passed before the body did. The run was then discarded.
+//
+// 300s is chosen against the caller's own limit rather than the provider's
+// speed: a run's wall clock allows 600s, so two calls this slow still fit and
+// the deadline stays the shorter of the two.
+const requestTimeout = 300 * time.Second
+
 // NewClient creates a Client targeting an OpenAI-compatible endpoint.
 func NewClient(endpoint, apiKey, model string) *Client {
 	return NewClientWithProvider(ProviderOpenAI, endpoint, apiKey, model)
@@ -282,7 +297,7 @@ func NewClientWithProvider(provider, endpoint, apiKey, model string) *Client {
 		apiKey:   apiKey,
 		model:    model,
 		http: &http.Client{
-			Timeout: 180 * time.Second,
+			Timeout: requestTimeout,
 		},
 	}
 }

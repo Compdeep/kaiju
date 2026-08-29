@@ -209,6 +209,57 @@ func GetDestination(t Tool, params map[string]any) string {
 }
 
 /*
+ * Categorised is an optional interface a tool implements to say what KIND of
+ * work it does, from a closed vocabulary the engine owns.
+ * desc: One purpose only — narrowing what a planner is shown on a registry too
+ *       large to show whole. It is not authorisation, it is not routing, and
+ *       nothing dispatches on it.
+ *
+ *       The vocabulary is deliberately coarse and domain-neutral, because the
+ *       classifier that names these is a model reading a request in ordinary
+ *       words. Five buckets are hard to get wrong; a finer taxonomy would be
+ *       wrong more often, and a wrong bucket costs a tool its place.
+ *
+ *       A tool that implements nothing declares nothing, and a tool that
+ *       declares nothing is never excluded on this basis — see ToolCategories.
+ *       Silence must not remove a capability.
+ */
+type Categorised interface {
+	/*
+	 * Categories names the kinds of work this tool does.
+	 * return: zero or more of CategoryNetwork, CategoryFilesystem,
+	 *         CategoryCompute, CategoryProcess, CategoryInfo
+	 */
+	Categories() []string
+}
+
+// The vocabulary. A tool may name more than one; most name one.
+const (
+	CategoryNetwork    = "network"    // reaching anything off this machine
+	CategoryFilesystem = "filesystem" // reading, writing or listing files
+	CategoryCompute    = "compute"    // running code, or processing data
+	CategoryProcess    = "process"    // inspecting or controlling running programs
+	CategoryInfo       = "info"       // reading the state of this machine
+)
+
+/*
+ * ToolCategories returns what kinds of work a tool declares, or nothing.
+ * desc: Nothing is the answer for every tool that has not been told to say,
+ *       which is most of them and every tool an application wrote before this
+ *       existed. A caller narrowing by category must treat that as "cannot
+ *       say", never as "matches nothing" — the difference is a tool the
+ *       planner can still see against one it can never call.
+ * param: t - the tool to ask
+ * return: its categories, or nil
+ */
+func ToolCategories(t Tool) []string {
+	if c, ok := t.(Categorised); ok {
+		return c.Categories()
+	}
+	return nil
+}
+
+/*
  * Throttled is an optional interface that tools can implement to declare
  * a minimum interval between consecutive invocations.
  * desc: Allows tools to rate-limit themselves. The interval is enforced per

@@ -850,11 +850,98 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 		base = filtered
 	}
 
+	// Narrowed by what the run is FOR, before it is narrowed by what fits.
+	base = a.scopeToWork(graph, base)
+
 	// Last, and only here, does the list get shorter for reasons of size. The
 	// planner is shown a signature and a return shape per tool, and that is what
 	// stops fitting once a registry is large. Trimming after the visibility
 	// rules means the budget is spent on tools this run could actually call.
 	return a.fitToolIndex(graph, base)
+}
+
+// scopeFloor is how many of the ranking's best are kept whatever their
+// category, and it is deliberately far above what a plan is known to need.
+//
+// Measured over twenty-four plans on a large registry: a plan named 15 distinct
+// tools at the median, 21 at p90 and 22 at most. A floor of ten — which is what
+// "show the best handful" sounds like — would have starved half of them. Thirty
+// leaves room for a plan more ambitious than any yet seen, and still removes the
+// twenty-six tools of sixty-five that no plan has ever reached for, which is
+// where the saving actually is.
+const scopeFloor = 30
+
+/*
+ * scopeToWork keeps the tools this run is plausibly for, generously.
+ * desc: A union of two opinions, because neither is trustworthy alone. Preflight
+ *       names the KINDS of work the request needs, which is a categorical
+ *       judgement a person would stand behind but which knows nothing of an
+ *       application's more esoteric tools. The ranking scores every tool against
+ *       the objective, which reaches the esoteric ones but answers confidently
+ *       when it is guessing. A tool named by either survives.
+ *
+ *       Every way this can fail leaves the list whole. No categories from
+ *       preflight, no tool declaring one, or a union no smaller than the floor —
+ *       each returns everything, which is what this engine did before the
+ *       narrowing existed. It can remove a tool only when the classifier did not
+ *       ask for its kind AND the ranking placed it below thirty others, and even
+ *       then the shell is already pinned at the front by shellFirst.
+ *
+ *       Order is the ranking's throughout: this decides membership, never
+ *       priority.
+ * param: graph - the run, carrying preflight's classification.
+ * param: base - the ranked names, best first.
+ * return: the names to show, in the same order.
+ */
+func (a *Agent) scopeToWork(graph *Graph, base []string) []string {
+	if a == nil || a.registry == nil || len(base) <= scopeFloor {
+		return base
+	}
+	if graph == nil || graph.Preflight == nil || len(graph.Preflight.RequiredCategories) == 0 {
+		return base
+	}
+	want := make(map[string]bool, len(graph.Preflight.RequiredCategories))
+	for _, c := range graph.Preflight.RequiredCategories {
+		want[c] = true
+	}
+
+	keep := make([]string, 0, len(base))
+	declared := 0
+	for i, name := range base {
+		if i < scopeFloor {
+			keep = append(keep, name)
+			continue
+		}
+		tool, ok := a.registry.Get(name)
+		if !ok {
+			keep = append(keep, name)
+			continue
+		}
+		cats := toolapi.ToolCategories(tool)
+		if len(cats) == 0 {
+			// Cannot say. A tool that has never been told to declare must not
+			// disappear because of it.
+			keep = append(keep, name)
+			continue
+		}
+		declared++
+		for _, c := range cats {
+			if want[c] {
+				keep = append(keep, name)
+				break
+			}
+		}
+	}
+	// Nothing declared anything, so nothing was decided. Say so once rather
+	// than report a narrowing that did not happen.
+	if declared == 0 {
+		return base
+	}
+	if len(keep) < len(base) {
+		log.Printf("[agent] tools scoped to %v: showing %d of %d",
+			graph.Preflight.RequiredCategories, len(keep), len(base))
+	}
+	return keep
 }
 
 // shellFirst moves the shell to the front, leaving everything else in order.

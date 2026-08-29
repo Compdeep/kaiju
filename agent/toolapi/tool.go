@@ -1,3 +1,13 @@
+// What a tool is, and the interfaces one may also implement.
+//
+// A tool is a capability the agent can call: bash, web_search, file_read. It is
+// registered, it is executed, and it is what a plan step names.
+//
+// This file was called skill.go, which is a different thing — a SKILL.md card
+// is guidance, and it reaches the registry only when it dispatches to a tool
+// (see skillmd.SkillMD). Reading the interface here under that name is where
+// the two senses blurred: variables holding a Tool were called skill in a dozen
+// places, and one word was doing two jobs.
 package toolapi
 
 import (

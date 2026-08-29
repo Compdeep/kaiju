@@ -45,7 +45,7 @@ func TestDispatcherBuildsTheStateBeforeChoosingAPath(t *testing.T) {
 	src := readSource(t, "dispatcher.go")
 
 	build := indexOf(src, "ctx = WithExecContext(ctx, ec)")
-	fork := indexOf(src, "if tx, ok := skill.(toolapi.TypedExecutor); ok {")
+	fork := indexOf(src, "if tx, ok := tool.(toolapi.TypedExecutor); ok {")
 	if build < 0 || fork < 0 {
 		t.Fatal("the dispatcher no longer builds the state, or no longer forks on the typed interface")
 	}

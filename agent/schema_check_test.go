@@ -108,7 +108,7 @@ func TestThePlanSchemaCarriesParamsAsAString(t *testing.T) {
 			} `json:"steps"`
 		} `json:"properties"`
 	}
-	raw := llm.SchemaAsSent(a.executiveToolDef())
+	raw := llm.SchemaAsSent(a.executivePlanSchema())
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		t.Fatalf("plan schema does not parse: %v", err)
 	}
@@ -295,21 +295,21 @@ func TestAHolmesActionTakesParamsEitherWay(t *testing.T) {
 // rather than carrying a second shape nobody updated.
 func TestGraftedStepsTakeParamsAsAString(t *testing.T) {
 	var obs observerOutput
-	if err := json.Unmarshal([]byte(`{"action":"inject","nodes":[
+	if err := json.Unmarshal([]byte(`{"action":"inject","steps":[
 		{"tool":"bash","tag":"look","params":"{\"command\":\"ls -la\"}","depends_on":[]}]}`), &obs); err != nil {
-		t.Fatalf("the observer's nodes did not decode: %v", err)
+		t.Fatalf("the observer's steps did not decode: %v", err)
 	}
-	if len(obs.Nodes) != 1 || obs.Nodes[0].Params["command"] != "ls -la" {
-		t.Errorf("the observer's params did not survive: %+v", obs.Nodes)
+	if len(obs.Steps) != 1 || obs.Steps[0].Params["command"] != "ls -la" {
+		t.Errorf("the observer's params did not survive: %+v", obs.Steps)
 	}
 
 	var dbg microPlannerOutput
-	if err := json.Unmarshal([]byte(`{"summary":"missing export","nodes":[
+	if err := json.Unmarshal([]byte(`{"summary":"missing export","steps":[
 		{"tool":"edit_file","tag":"fix","params":"{\"goal\":\"add the export\"}","depends_on":[]}]}`), &dbg); err != nil {
-		t.Fatalf("the debugger's nodes did not decode: %v", err)
+		t.Fatalf("the debugger's steps did not decode: %v", err)
 	}
-	if len(dbg.Nodes) != 1 || dbg.Nodes[0].Params["goal"] != "add the export" {
-		t.Errorf("the debugger's params did not survive: %+v", dbg.Nodes)
+	if len(dbg.Steps) != 1 || dbg.Steps[0].Params["goal"] != "add the export" {
+		t.Errorf("the debugger's params did not survive: %+v", dbg.Steps)
 	}
 }
 

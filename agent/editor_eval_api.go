@@ -17,7 +17,7 @@ type EditorEvalResult struct {
 // duplicating prompts (which would silently drift from production).
 func EditorEvalBundle() (systemPrompt string, toolDef llm.ToolDef) {
 	// true so the harness sees both reply shapes, which is what it exercises.
-	return baseComputeCoderPrompt, coderToolDef(true)
+	return baseComputeCoderPrompt, coderSchema(true)
 }
 
 // EditorEvalExtractToolArgs unwraps the tool call arguments (or content

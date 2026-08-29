@@ -7,7 +7,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// Which values a run referenced and never resolved, without knowing the domain.
+// Which handles a run surfaced and never followed, without knowing the domain.
 //
 // Some tool output is a fact and some of it is a handle on something else: a
 // search result's URL, a record id, a machine name. A handle a run surfaced and never
@@ -33,12 +33,20 @@ import (
 // value that appears in a later node's parameters was acted on. That needs no
 // knowledge of which tool did it or what the value means.
 
-// referenceAnnotation marks a schema property as a handle on something the run
+// handleAnnotation marks a schema property as a handle on something the run
 // can retrieve, rather than a fact about what it already has.
-const referenceAnnotation = "x-reference"
+//
+// The Go name says handle and the annotation says reference, which is not an
+// oversight. Everything in this file used to be called a reference, and the
+// package already had one: the wiring a plan step writes to read an earlier
+// step's output. Two unrelated things under one word, four files apart. The Go
+// side is renamed; the annotation is a key inside a tool's published schema, and
+// a tool declaring the old spelling would not fail — it would simply stop being
+// noticed, which is the worst way for a rename to land.
+const handleAnnotation = "x-reference"
 
-// reference is one handle a tool surfaced.
-type reference struct {
+// handle is one value a tool surfaced that stands for something not yet read.
+type handle struct {
 	Value string // the handle itself, as it appeared in the payload
 	Tool  string // the tool the producer says follows it, empty when undeclared
 	Param string // the parameter the handle goes in, empty when undeclared
@@ -46,20 +54,20 @@ type reference struct {
 }
 
 /*
- * collectReferences gathers every handle the run surfaced, from any tool.
+ * collectHandles gathers every handle the run surfaced, from any tool.
  * desc: Walks each resolved tool node, reads its declared output schema, and
- *       pulls the values of properties marked with the reference annotation.
- *       A tool that declares no schema, or no reference fields, contributes
+ *       pulls the values of properties marked with the handle annotation.
+ *       A tool that declares no schema, or no marked fields, contributes
  *       nothing — so this is silent for every tool that has not opted in, and
  *       adding a tool needs no change here.
  * param: graph - the run so far.
  * return: the handles, in the order the steps ran, without duplicates.
  */
-func (a *Agent) collectReferences(graph *Graph) []reference {
+func (a *Agent) collectHandles(graph *Graph) []handle {
 	if graph == nil || a == nil || a.registry == nil {
 		return nil
 	}
-	var out []reference
+	var out []handle
 	seen := map[string]bool{}
 	for _, n := range graph.ResolvedByType(NodeTool) {
 		tb, ok := n.Body.(toolMessageBody)
@@ -70,22 +78,24 @@ func (a *Agent) collectReferences(graph *Graph) []reference {
 		if len(env.Data) == 0 {
 			continue
 		}
-		skill, ok := a.registry.Get(n.ToolName)
+		tool, ok := a.registry.Get(n.ToolName)
 		if !ok {
 			continue
 		}
-		schema := toolapi.GetOutputSchema(skill)
+		schema := toolapi.GetOutputSchema(tool)
 		if schema == nil {
 			continue
 		}
-		for _, path := range referencePaths(schema) {
-			tool, param := splitResolver(path.resolvedBy)
+		for _, path := range handlePaths(schema) {
+			// The tool that FOLLOWS the handle, which is not the tool above —
+			// that one produced it.
+			resolver, param := splitResolver(path.resolvedBy)
 			for _, v := range valuesAtPath(env.Data, path.path) {
 				if v == "" || seen[v] {
 					continue
 				}
 				seen[v] = true
-				out = append(out, reference{Value: v, Tool: tool, Param: param, Tag: n.Tag})
+				out = append(out, handle{Value: v, Tool: resolver, Param: param, Tag: n.Tag})
 			}
 		}
 	}
@@ -93,7 +103,7 @@ func (a *Agent) collectReferences(graph *Graph) []reference {
 }
 
 /*
- * unresolvedReferences returns the handles no later step acted on.
+ * unresolvedHandles returns the handles no later step acted on.
  * desc: A handle counts as followed when the tool its producer named was called
  *       with that value. Matching the tool matters: the first version matched
  *       the value against every parameter in the run, which is safe for a URL
@@ -108,13 +118,13 @@ func (a *Agent) collectReferences(graph *Graph) []reference {
  * param: graph - the run so far.
  * return: the unfollowed handles, in the order they were surfaced.
  */
-func (a *Agent) unresolvedReferences(graph *Graph) []reference {
-	refs := a.collectReferences(graph)
+func (a *Agent) unresolvedHandles(graph *Graph) []handle {
+	refs := a.collectHandles(graph)
 	if len(refs) == 0 {
 		return nil
 	}
 	byTool := valuesPassedToEachTool(graph)
-	var out []reference
+	var out []handle
 	for _, r := range refs {
 		if r.Tool == "" || !byTool[r.Tool][r.Value] {
 			out = append(out, r)
@@ -133,19 +143,19 @@ func splitResolver(v string) (tool, param string) {
 	return v, ""
 }
 
-// schemaRef is a reference-marked property: where to find it, and what the
-// producer says resolves it.
-type schemaRef struct {
+// schemaHandle is a marked property: where to find it, and what the producer
+// says resolves it.
+type schemaHandle struct {
 	path       []string // property names from the payload root, "" element = every array item
 	resolvedBy string
 }
 
-// referencePaths walks a tool's output schema and returns the paths of every
-// property carrying the reference annotation.
+// handlePaths walks a tool's output schema and returns the paths of every
+// property carrying the handle annotation.
 //
 // The schema describes the ENVELOPE, so the walk starts at its data property —
 // the payload is what a value is read from.
-func referencePaths(schema json.RawMessage) []schemaRef {
+func handlePaths(schema json.RawMessage) []schemaHandle {
 	payload := toolapi.PayloadSchema(schema)
 	if payload == nil {
 		return nil
@@ -154,19 +164,19 @@ func referencePaths(schema json.RawMessage) []schemaRef {
 	if json.Unmarshal(payload, &data) != nil {
 		return nil
 	}
-	var out []schemaRef
-	walkSchemaForReferences(data, nil, &out)
+	var out []schemaHandle
+	walkSchemaForHandles(data, nil, &out)
 	return out
 }
 
-func walkSchemaForReferences(node map[string]any, path []string, out *[]schemaRef) {
+func walkSchemaForHandles(node map[string]any, path []string, out *[]schemaHandle) {
 	if node == nil {
 		return
 	}
 	if items, ok := node["items"].(map[string]any); ok {
 		// An array: every element sits at the same path, marked by an empty
 		// element so valuesAtPath knows to fan out rather than index.
-		walkSchemaForReferences(items, append(append([]string{}, path...), ""), out)
+		walkSchemaForHandles(items, append(append([]string{}, path...), ""), out)
 	}
 	props, _ := node["properties"].(map[string]any)
 	for name, raw := range props {
@@ -175,12 +185,12 @@ func walkSchemaForReferences(node map[string]any, path []string, out *[]schemaRe
 			continue
 		}
 		here := append(append([]string{}, path...), name)
-		if v, marked := child[referenceAnnotation]; marked {
+		if v, marked := child[handleAnnotation]; marked {
 			resolver, _ := v.(string)
-			*out = append(*out, schemaRef{path: here, resolvedBy: resolver})
-			continue // a reference is a leaf; do not descend into it
+			*out = append(*out, schemaHandle{path: here, resolvedBy: resolver})
+			continue // a handle is a leaf; do not descend into it
 		}
-		walkSchemaForReferences(child, here, out)
+		walkSchemaForHandles(child, here, out)
 	}
 }
 
@@ -282,14 +292,14 @@ func collectParamStrings(v any, into map[string]bool) {
  */
 func chainHints(schema json.RawMessage) []string {
 	var out []string
-	for _, ref := range referencePaths(schema) {
+	for _, ref := range handlePaths(schema) {
 		if ref.resolvedBy == "" {
 			continue // marked as a handle, but nothing said what follows it
 		}
-		tool, param := splitResolver(ref.resolvedBy)
-		target := tool
+		resolver, param := splitResolver(ref.resolvedBy)
+		target := resolver
 		if param != "" {
-			target = tool + "(" + param + ")"
+			target = resolver + "(" + param + ")"
 		}
 		out = append(out, "${step.N."+renderPath(ref.path)+"} into "+target)
 	}

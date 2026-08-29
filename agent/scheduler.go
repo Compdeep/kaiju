@@ -941,8 +941,8 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					case "continue":
 						// no-op
 					case "inject":
-						if len(obs.Nodes) > 0 {
-							newNodes, graftErr := planStepsToNodes(obs.Nodes, graph, budget, a.registry, dagMode)
+						if len(obs.Steps) > 0 {
+							newNodes, graftErr := planStepsToNodes(obs.Steps, graph, budget, a.registry, dagMode)
 							if graftErr != nil {
 								log.Printf("[dag] observer inject failed: %v", graftErr)
 							} else {
@@ -1296,23 +1296,23 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				var mpOutput microPlannerOutput
 				if err := ParseLLMJSON(comp.Result, &mpOutput); err != nil {
 					log.Printf("[dag] debugger parse failed: %v", err)
-				} else if len(mpOutput.Nodes) > 0 {
+				} else if len(mpOutput.Steps) > 0 {
 					// Safety: a fix plan must never contain a `debug` step — that
 					// would recurse (debug → microplanner → debug). Drop any.
-					filtered := mpOutput.Nodes[:0]
-					for _, s := range mpOutput.Nodes {
+					filtered := mpOutput.Steps[:0]
+					for _, s := range mpOutput.Steps {
 						if s.Tool == debugToolName {
 							log.Printf("[dag] dropping `debug` step from debugger plan (no debug-in-debug)")
 							continue
 						}
 						filtered = append(filtered, s)
 					}
-					mpOutput.Nodes = filtered
+					mpOutput.Steps = filtered
 
-					log.Printf("[dag] debugger diagnosis: %s (%d steps)", Text.TruncateLog(mpOutput.Summary, 200), len(mpOutput.Nodes))
-					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "DEBUG_PLAN", fmt.Sprintf("%d steps: %s", len(mpOutput.Nodes), Text.TruncateLog(mpOutput.Summary, 150)))
+					log.Printf("[dag] debugger diagnosis: %s (%d steps)", Text.TruncateLog(mpOutput.Summary, 200), len(mpOutput.Steps))
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "DEBUG_PLAN", fmt.Sprintf("%d steps: %s", len(mpOutput.Steps), Text.TruncateLog(mpOutput.Summary, 150)))
 
-					newNodes, graftErr := planStepsToNodes(mpOutput.Nodes, graph, budget, a.registry, dagMode)
+					newNodes, graftErr := planStepsToNodes(mpOutput.Steps, graph, budget, a.registry, dagMode)
 					if graftErr != nil {
 						log.Printf("[dag] debugger graft failed: %v", graftErr)
 					} else {

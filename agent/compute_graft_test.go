@@ -197,7 +197,7 @@ func TestComputeReceivesTheRunStateFromTheContext(t *testing.T) {
 	}
 	text := string(src)
 	put := strings.Index(text, "ctx = WithExecContext(ctx, ec)")
-	branch := strings.Index(text, "if tx, ok := skill.(toolapi.TypedExecutor); ok {")
+	branch := strings.Index(text, "if tx, ok := tool.(toolapi.TypedExecutor); ok {")
 	if put < 0 || branch < 0 {
 		t.Fatal("the dispatcher no longer puts the run state on the ctx before choosing a path")
 	}

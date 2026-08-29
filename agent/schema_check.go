@@ -9,7 +9,7 @@ import (
 
 // Which stages the provider can actually be asked to enforce.
 //
-// Every reasoning stage declares one tool and pins the model to it, and the
+// Every reasoning stage declares one schema and pins the model to it, and the
 // client rewrites all of them into a schema request with strict set — see
 // llm/structured.go. Setting strict does not make a schema enforceable: a
 // provider that checks refuses a schema breaking its rules, and a provider that
@@ -42,20 +42,20 @@ type StageSchema struct {
  */
 func (a *Agent) StageSchemas() []StageSchema {
 	defs := map[string]llm.ToolDef{
-		"plan":      a.executiveToolDef(),
-		"route":     routeToolDef(),
-		"preflight": preflightToolDef(),
-		"reflector": reflectorToolDef(),
-		"observer":  observerToolDef(),
-		"holmes":    holmesToolDef(),
-		"debugger":  debuggerToolDef(),
-		"curator":   curatorToolDef(),
-		"architect": architectToolDef(),
+		"plan":      a.executivePlanSchema(),
+		"route":     routeSchema(),
+		"preflight": preflightSchema(),
+		"reflector": reflectorSchema(),
+		"observer":  observerSchema(),
+		"holmes":    holmesSchema(),
+		"debugger":  debuggerSchema(),
+		"curator":   curatorSchema(),
+		"architect": architectSchema(),
 		// The coder's shape depends on whether the node may edit an existing
 		// file. Both are checked: a schema that is only wrong in one of them is
 		// wrong on the runs that take that branch.
-		"coder(write)": coderToolDef(false),
-		"coder(edit)":  coderToolDef(true),
+		"coder(write)": coderSchema(false),
+		"coder(edit)":  coderSchema(true),
 	}
 
 	names := make([]string, 0, len(defs))

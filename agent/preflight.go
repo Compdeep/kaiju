@@ -262,7 +262,7 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	ctx = withTrace(ctx, TraceID{NodeType: "preflight", Tag: "route"})
 	resp, err := a.completeRoute(ctx, &llm.ChatRequest{
 		Messages:    msgs,
-		Tools:       []llm.ToolDef{routeToolDef()},
+		Tools:       []llm.ToolDef{routeSchema()},
 		ToolChoice:  "required",
 		Temperature: 0.0,
 		// Room for the mode and a handful of words to look up. It was 16, which
@@ -274,7 +274,7 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	// unparseable output — fall back to "chat", which the ROUTE prompt itself calls
 	// the default and common case. Escalating to the agent should be a POSITIVE
 	// decision, not what happens when the router trips. An aligned route model often
-	// balks at classifying edge content (e.g. adult roleplay), and defaulting that
+	// balks at classifying borderline content (e.g. adult roleplay), and defaulting that
 	// balk to "investigate" wrongly forced those turns onto the agent path — where
 	// the (also aligned) planner then refused. Failing toward the cheap, safe
 	// conversational lane keeps the user's selected chat model in play.
@@ -451,7 +451,7 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 	ctx = withTrace(ctx, TraceID{NodeType: "preflight", Tag: "classify"})
 	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages:    msgs,
-		Tools:       []llm.ToolDef{preflightToolDef()},
+		Tools:       []llm.ToolDef{preflightSchema()},
 		ToolChoice:  "required",
 		Temperature: 0.0,
 		// Eight fields share this, and two of them are open-ended: context is

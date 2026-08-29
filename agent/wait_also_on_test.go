@@ -36,7 +36,7 @@ func TestWaitAlsoOn_OrdersOnlyTheNodesThatReadTheField(t *testing.T) {
 	if !slices.Contains(g.Get(reader).DependsOn, child) {
 		t.Fatalf("the reader must now wait for the child, deps are %v", g.Get(reader).DependsOn)
 	}
-	// A node reading a field the compute already carries must keep its own edges,
+	// A node reading a field the compute already carries must keep its own dependencies,
 	// or every dependent of every compute would be serialised behind its script.
 	if slices.Contains(g.Get(other).DependsOn, child) {
 		t.Fatal("a node reading a field that is already present must not be delayed")
@@ -64,7 +64,7 @@ func TestWaitAlsoOn_LeavesNodesThatAlreadyStarted(t *testing.T) {
 	}
 }
 
-// Called twice — a second graft, or a retry — must not stack duplicate edges.
+// Called twice — a second graft, or a retry — must not stack duplicate dependencies.
 func TestWaitAlsoOn_DoesNotRepeatItself(t *testing.T) {
 	g := NewGraph()
 	compute := g.AddNode(&Node{Type: NodeCompute, Tag: "make_script"})
@@ -74,7 +74,7 @@ func TestWaitAlsoOn_DoesNotRepeatItself(t *testing.T) {
 
 	g.WaitAlsoOn(compute, child, "output")
 	if second := g.WaitAlsoOn(compute, child, "output"); len(second) != 0 {
-		t.Fatalf("the edge already exists, so nothing should be added again: %v", second)
+		t.Fatalf("the dependency already exists, so nothing should be added again: %v", second)
 	}
 	deps := g.Get(reader).DependsOn
 	if strings.Count(strings.Join(deps, " "), child) != 1 {

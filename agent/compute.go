@@ -380,7 +380,7 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
-		Tools:       []llm.ToolDef{architectToolDef()},
+		Tools:       []llm.ToolDef{architectSchema()},
 		ToolChoice:  "required",
 		Temperature: 0.3,
 		MaxTokens:   a.replyBudget(replyAnalysisBudget),
@@ -561,7 +561,7 @@ type computeCodeContext struct {
 }
 
 // The two shapes the Coder may reply with, named so what the engine expects of
-// a reply and what coderToolDef offers can be checked against one another. They
+// a reply and what coderSchema offers can be checked against one another. They
 // were anonymous structs inside computeCode, where nothing outside that function
 // could see them and `execute` sat in both for months while no schema declared
 // it — the Coder was asked for a field it had no way to return.
@@ -713,7 +713,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			{Role: "system", Content: coderSystem},
 			{Role: "user", Content: userPrompt},
 		},
-		Tools:       []llm.ToolDef{coderToolDef(editable)},
+		Tools:       []llm.ToolDef{coderSchema(editable)},
 		ToolChoice:  "required",
 		Temperature: 0.2,
 		MaxTokens:   a.replyBudget(replyCodeBudget),

@@ -57,11 +57,11 @@ func (a *Agent) upstreamFieldMeanings(graph *Graph, n *Node, ctxData any) string
 		if dep == nil || dep.ToolName == "" || described[dep.ToolName] {
 			continue
 		}
-		skill, known := a.registry.Get(dep.ToolName)
+		tool, known := a.registry.Get(dep.ToolName)
 		if !known {
 			continue
 		}
-		outSchema := toolapi.GetOutputSchema(skill)
+		outSchema := toolapi.GetOutputSchema(tool)
 		if outSchema == nil {
 			continue
 		}

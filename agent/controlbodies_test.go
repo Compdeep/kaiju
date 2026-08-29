@@ -55,10 +55,10 @@ func TestHolmesBodySummaryPrefersTheRootCause(t *testing.T) {
 }
 
 func TestMicroPlannerBodySummary(t *testing.T) {
-	if got := parseMicroPlannerBody(`{"summary":"restart the collector","nodes":[{"tool":"x"}]}`).Summary(); got != "fix: restart the collector" {
+	if got := parseMicroPlannerBody(`{"summary":"restart the collector","steps":[{"tool":"x"}]}`).Summary(); got != "fix: restart the collector" {
 		t.Errorf("Summary() = %q, want the diagnosis", got)
 	}
-	if got := parseMicroPlannerBody(`{"nodes":[{"tool":"x"},{"tool":"y"}]}`).Summary(); got != "2 fix step(s)" {
+	if got := parseMicroPlannerBody(`{"steps":[{"tool":"x"},{"tool":"y"}]}`).Summary(); got != "2 fix step(s)" {
 		t.Errorf("Summary() = %q, want the step count when there is no diagnosis", got)
 	}
 	if got := parseMicroPlannerBody("garbage").Summary(); got != "garbage" {
@@ -118,8 +118,8 @@ func TestControlBodiesExposeTheParsedOutput(t *testing.T) {
 	if got := parseHolmesBody(`{"conclude":true}`).Out.Conclude; !got {
 		t.Error("HolmesBody.Out.Conclude did not survive the parse")
 	}
-	if got := parseMicroPlannerBody(`{"nodes":[{"tool":"x"}]}`).Out.Nodes; len(got) != 1 {
-		t.Errorf("MicroPlannerBody.Out.Nodes = %d steps, want 1", len(got))
+	if got := parseMicroPlannerBody(`{"steps":[{"tool":"x"}]}`).Out.Steps; len(got) != 1 {
+		t.Errorf("MicroPlannerBody.Out.Steps = %d steps, want 1", len(got))
 	}
 	if got := parseObserverBody(`{"cancel":["tag-a"]}`).Out.Cancel; len(got) != 1 {
 		t.Errorf("ObserverBody.Out.Cancel = %v, want one tag", got)

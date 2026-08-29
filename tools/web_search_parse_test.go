@@ -101,7 +101,7 @@ func TestWebSearchOutputSchemaDescribesAResult(t *testing.T) {
 	}
 	url, _ := itemProps["url"].(map[string]any)
 	if _, marked := url["x-reference"]; !marked {
-		t.Error("the url is not marked as a reference, so a url this tool " +
+		t.Error("the url is not marked as a handle, so a url this tool " +
 			"surfaced and nothing read is not reported to the answering stage")
 	}
 }

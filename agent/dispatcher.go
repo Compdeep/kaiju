@@ -144,8 +144,8 @@ func (a *Agent) finish(n *Node, result string, body NodeBody, err error) nodeCom
 	// This is the one thing the two paths do differently, and it is written
 	// here rather than by one of them quietly not doing it.
 	if err == nil {
-		if skill, ok := a.registry.Get(n.ToolName); ok {
-			hint := toolapi.GetDisplayHint(skill, n.Params, result)
+		if tool, ok := a.registry.Get(n.ToolName); ok {
+			hint := toolapi.GetDisplayHint(tool, n.Params, result)
 			if hint != nil && hint.Path != "" && a.remoteFor(n) {
 				log.Printf("[dag] node %s ran on %s; its panel names a path on that machine, so it is not shown here",
 					n.ID, Text.TruncateLog(n.Target, 12))
@@ -252,8 +252,8 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// Direct-param validation: reject keys the tool's schema doesn't
 	// declare (and whose schema forbids extras). Closes the silent-drop
 	// class where the planner invents params like bash(cwd: ...).
-	if skill, ok := a.registry.Get(n.ToolName); ok {
-		if err := validateDirectParams(skill, n.Params); err != nil {
+	if tool, ok := a.registry.Get(n.ToolName); ok {
+		if err := validateDirectParams(tool, n.Params); err != nil {
 			ch <- a.finish(n, "", nil, err)
 			return
 		}
@@ -385,8 +385,8 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	}
 
 	// Enforce per-tool cooldown before executing
-	if skill, ok := a.registry.Get(n.ToolName); ok {
-		cooldown := toolapi.GetThrottle(skill)
+	if tool, ok := a.registry.Get(n.ToolName); ok {
+		cooldown := toolapi.GetThrottle(tool)
 		if cooldown > 0 {
 			throttle.waitThrottle(ctx, n.ToolName, cooldown)
 		}
@@ -501,7 +501,7 @@ var unresolvedReferenceRe = regexp.MustCompile(`\$\{(?:step|node)\.[^}]*\}`)
  *       to stay in the parameter as text, and text is handed to whatever runs
  *       next — so a model was shown a placeholder in prose, read it as a data
  *       path, and looked the value up under keys that do not exist. A reference
- *       nobody could resolve is a broken edge, and a broken edge should stop the
+ *       nobody could resolve is broken wiring, and broken wiring should stop the
  *       step rather than travel on as prose.
  * param: n - the node about to run
  * return: an error naming every reference left unresolved, or nil
@@ -750,14 +750,14 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		return "", nil, err
 	}
 
-	skill, ok := a.registry.Get(toolName)
+	tool, ok := a.registry.Get(toolName)
 	if !ok {
 		return "", nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
 
 	// Resolve the tool's effective impact via the intent registry (DB
 	// override wins, falls back to tool.Impact() default).
-	impact := a.intentRegistry.ResolveToolIntent(toolName, skill, params)
+	impact := a.intentRegistry.ResolveToolIntent(toolName, tool, params)
 	// Gate: rate limit (rank-0 tools exempt — reading local files should not be throttled)
 	if impact > 0 {
 		if err := a.gate.CheckRateLimit(); err != nil {
@@ -865,7 +865,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		ctx = WithExecContext(ctx, ec)
 	}
 
-	if tx, ok := skill.(toolapi.TypedExecutor); ok {
+	if tx, ok := tool.(toolapi.TypedExecutor); ok {
 		// Typed path: the tool returns a ToolMessage directly — no JSON round-trip.
 		// The node records which cards contributed guidance, so a trace shows
 		// what this run was coding against. Only the tools that consume the
@@ -883,7 +883,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			isContextual = true
 		}
 	} else {
-		result, err = skill.Execute(ctx, params)
+		result, err = tool.Execute(ctx, params)
 	}
 
 	// Audit

@@ -68,14 +68,14 @@ func compileToolIndex(registry *toolapi.Registry, names []string) string {
 // costs before it decides to show it. Returns "" for a name the registry does
 // not hold, so an entry always costs what it is worth.
 func toolIndexEntry(registry *toolapi.Registry, name string) string {
-	skill, ok := registry.Get(name)
+	tool, ok := registry.Get(name)
 	if !ok {
 		return ""
 	}
 	var sb strings.Builder
-	sig := compactParamSignature(skill.Parameters())
-	sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, skill.Description()))
-	if outSchema := toolapi.GetOutputSchema(skill); outSchema != nil {
+	sig := compactParamSignature(tool.Parameters())
+	sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, tool.Description()))
+	if outSchema := toolapi.GetOutputSchema(tool); outSchema != nil {
 		if shape := compactOutputShape(outSchema); shape != "" {
 			sb.WriteString("  → returns: " + shape + "\n")
 		}
@@ -729,13 +729,13 @@ func (a *Agent) runExecutive(ctx context.Context, trigger Trigger, graph *Graph,
 	return a.runExecutiveNative(ctx, trigger, graph, replanFrame...)
 }
 
-// ── Plan tool schema for native function calling mode ──────────────────────
+// ── The plan schema ────────────────────────────────────────────────────────
 
-// executiveToolSchemaTemplate is the plan meta-tool schema with a %s placeholder
+// executivePlanSchemaTemplate is the plan schema with a %s placeholder
 // where the intent enum goes. The enum is built at call time from the
 // registry so custom intent names (admin-created via the UI) show up as
 // valid values to the model.
-var executiveToolSchemaTemplate = `{
+var executivePlanSchemaTemplate = `{
 	"type": "object",
 	"properties": {
 		"answer": {
@@ -766,14 +766,17 @@ var executiveToolSchemaTemplate = `{
 }`
 
 /*
- * executiveToolDef returns the meta-tool definition for native function calling mode.
- * desc: Defines a single "plan" tool whose input schema matches the PlanStep array format.
- *       The model "calls" this tool with the entire DAG as its argument. The intent
- *       enum is built at call time from the registry so admin-created custom intents
- *       are presented as valid values to the model.
- * return: llm.ToolDef for the plan meta-tool.
+ * executivePlanSchema returns the shape a plan takes.
+ * desc: One schema, named "plan", matching the PlanStep array. The model is
+ *       pinned to it and answers with the whole plan as its argument. It is not
+ *       a tool — nothing registers it and nothing executes it; llm.ToolDef is
+ *       simply the shape a provider takes a schema in.
+ *
+ *       The intent enum is built at call time from the registry, so an intent
+ *       an operator added is a value the model may return.
+ * return: the schema, in the shape the provider takes.
  */
-func (a *Agent) executiveToolDef() llm.ToolDef {
+func (a *Agent) executivePlanSchema() llm.ToolDef {
 	// Build the intent enum dynamically from the registry. If the registry
 	// hasn't been loaded the enum is omitted entirely — Go has no knowledge
 	// of specific intent names to fall back on.
@@ -782,7 +785,7 @@ func (a *Agent) executiveToolDef() llm.ToolDef {
 		names = a.intentRegistry.AllowedNames(-1)
 	}
 	enumJSON, _ := json.Marshal(names)
-	schema := json.RawMessage(fmt.Sprintf(executiveToolSchemaTemplate, string(enumJSON)))
+	schema := json.RawMessage(fmt.Sprintf(executivePlanSchemaTemplate, string(enumJSON)))
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -806,7 +809,7 @@ type executiveCallPayload struct {
 /*
  * linkDependsOnTags resolves depends_on entries that name a step's tag.
  * desc: FlexInts.UnmarshalJSON can only hold positions, so a name is dropped as
- *       it decodes and the step silently loses an edge — the scheduler then has
+ *       it decodes and the step silently loses a dependency — the scheduler then has
  *       nothing to make it wait, and validateDataFlow, whose whole check is
  *       "declared a dependency but wired no value", returns early because the
  *       declaration is the thing that went missing. A re-plan is where this
@@ -999,10 +1002,10 @@ func (a *Agent) objective(trigger Trigger, graph *Graph, replanFrame ...string) 
 }
 
 /*
- * runExecutiveNative makes a single LLM call using native function calling.
- * desc: Sends the plan meta-tool to the LLM. The model calls plan() with the
- *       entire DAG as the argument. No text parsing, no markdown fences.
- *       Falls back to text parsing if the model responds with text instead of a tool call.
+ * runExecutiveNative makes a single LLM call for the plan.
+ * desc: Sends the plan schema and pins the model to it, so the whole plan comes
+ *       back as one argument. No text parsing, no markdown fences. Falls back to
+ *       text parsing if the model answers with prose instead.
  * param: ctx - context for the LLM call.
  * param: trigger - the investigation trigger.
  * return: PlanResult pointer with steps and intent, or error.
@@ -1124,7 +1127,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	})
 	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
 		Messages: messages,
-		Tools:    []llm.ToolDef{a.executiveToolDef()},
+		Tools:    []llm.ToolDef{a.executivePlanSchema()},
 		// PIN the model to `plan` — not just "call some tool". A weak reasoning
 		// model, seeing web_search/web_fetch named all over the guidance, otherwise
 		// emits a direct tool call instead of wrapping it in a plan; that hard-fails
@@ -1196,7 +1199,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		})
 		retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_shorter"), &llm.ChatRequest{
 			Messages:    shorter,
-			Tools:       []llm.ToolDef{a.executiveToolDef()},
+			Tools:       []llm.ToolDef{a.executivePlanSchema()},
 			ToolChoice:  llm.ForceToolChoice("plan"),
 			Temperature: a.cfg.Temperature,
 			MaxTokens:   a.planMaxTokens(ctx),
@@ -1206,7 +1209,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		}
 	}
 
-	// Check if the model called the plan tool
+	// Did the plan come back in the shape it was asked for
 	if choice.FinishReason == "tool_calls" && len(choice.Message.ToolCalls) > 0 {
 		tc := choice.Message.ToolCalls[0]
 
@@ -1232,7 +1235,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			})
 			retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_wrap"), &llm.ChatRequest{
 				Messages:    again,
-				Tools:       []llm.ToolDef{a.executiveToolDef()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: a.cfg.Temperature,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -1262,7 +1265,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			)
 			retryResp, retryErr := a.completeHeavyChecked(retracing(ctx, "plan_reparse"), &llm.ChatRequest{
 				Messages:    retryMessages,
-				Tools:       []llm.ToolDef{a.executiveToolDef()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -1335,7 +1338,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			)
 			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
 				Messages:    replanMessages,
-				Tools:       []llm.ToolDef{a.executiveToolDef()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -1433,7 +1436,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			)
 			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
 				Messages:    replanMessages,
-				Tools:       []llm.ToolDef{a.executiveToolDef()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema()},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -1648,11 +1651,11 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 			// intent that covers the heaviest tool.
 			maxRank := 0
 			for _, s := range valid {
-				skill, ok := a.registry.Get(s.Tool)
+				tool, ok := a.registry.Get(s.Tool)
 				if !ok {
 					continue
 				}
-				rank := a.intentRegistry.ResolveToolIntent(s.Tool, skill, s.Params)
+				rank := a.intentRegistry.ResolveToolIntent(s.Tool, tool, s.Params)
 				if rank > maxRank {
 					maxRank = rank
 				}
@@ -1660,7 +1663,7 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 			inferredIntent = gates.Intent(a.intentRegistry.SnapUp(maxRank))
 		}
 		result.InferredIntent = inferredIntent
-		log.Printf("[dag] inferred intent: %s (from plan tool impacts)", inferredIntent)
+		log.Printf("[dag] inferred intent: %s (from the impacts of the planned steps)", inferredIntent)
 	}
 
 	return result, nil
@@ -1783,7 +1786,7 @@ func (a *Agent) parseExecutiveOutput(raw string, isAuto bool) ([]PlanStep, gates
 /*
  * breakCycles checks for cycles in the step dependency graph.
  * desc: Uses DFS with visit states (unvisited/visiting/visited). If a back
- *       edge is found, the offending dependency is removed to break the cycle.
+ *       one is found, the offending dependency is removed to break the cycle.
  * param: steps - the plan steps to check.
  * return: true if any cycles were found, and the fixed steps.
  */
@@ -1802,7 +1805,8 @@ func breakCycles(steps []PlanStep) (bool, []PlanStep) {
 				continue
 			}
 			if state[dep] == 1 {
-				// Back edge — this is a cycle. Drop this dependency.
+				// A dependency pointing back at a step still being walked is a cycle.
+				// Drop it.
 				log.Printf("[dag] breaking cycle: step %d → step %d", i, dep)
 				hasCycle = true
 				continue
@@ -2021,7 +2025,7 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 		for _, depIdx := range s.DependsOn {
 			// Never wire a node to itself. A replan frequently emits a stale
 			// depends_on:[0] on its own FIRST step — a reference to a prior-frame
-			// search that this plan-local index can't reach. A self-edge makes the
+			// search that this plan-local index can't reach. Depending on itself makes the
 			// node wait on itself, so it's cascaded to StateSkipped and the reflector
 			// re-plans the same fetch forever (the observed web_fetch loop).
 			if depIdx < len(nodeIDs) && nodeIDs[depIdx] != "" && nodeIDs[depIdx] != nodeIDs[i] {
@@ -2138,23 +2142,23 @@ func availableStepNames(steps []PlanStep, except int) string {
 // does. Only a tool that DECLARES an output schema is checked, and only the
 // first segment of the path — an incomplete deep schema must not reject a
 // reference that would have worked.
-func fieldNotProduced(tool, field string, registry *toolapi.Registry) string {
+func fieldNotProduced(toolName, field string, registry *toolapi.Registry) string {
 	top := strings.SplitN(field, ".", 2)[0]
 	if isNumericPathSegment(top) {
 		return ""
 	}
-	skill, ok := registry.Get(tool)
+	tool, ok := registry.Get(toolName)
 	if !ok {
 		return ""
 	}
-	outSchema := toolapi.GetOutputSchema(skill)
+	outSchema := toolapi.GetOutputSchema(tool)
 	if outSchema == nil {
 		return ""
 	}
 	if envelopeFieldExists(outSchema, top) || fieldExistsInSchema(outSchema, top) {
 		return ""
 	}
-	return fmt.Sprintf("reads field %q, which %s does not return", top, tool)
+	return fmt.Sprintf("reads field %q, which %s does not return", top, toolName)
 }
 
 // stepIndexFor resolves the first segment of a step reference to a position.
@@ -2212,7 +2216,7 @@ func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string,
 				// output, and a replan often points ${step.0…} at what is really a
 				// prior-frame (concluded) node this plan-local index can't reach.
 				// Leave the placeholder unresolved rather than wiring a dead/self
-				// edge — otherwise the node waits on itself, is skipped, and the
+				// dependency — otherwise the node waits on itself, is skipped, and the
 				// reflector re-plans the same fetch forever.
 				log.Printf("[dag] template %s on %s references invalid/self step %d, leaving placeholder unresolved", match, owner, idx)
 				return match
@@ -2228,8 +2232,8 @@ func rewriteStepTemplates(params map[string]any, nodeIDs []string, owner string,
 			// best-effort warning only, mirrors the legacy behaviour.
 			if registry != nil && field != "" {
 				upstreamTool := steps[idx].Tool
-				if skill, ok := registry.Get(upstreamTool); ok {
-					outSchema := toolapi.GetOutputSchema(skill)
+				if tool, ok := registry.Get(upstreamTool); ok {
+					outSchema := toolapi.GetOutputSchema(tool)
 					if outSchema == nil {
 						log.Printf("[dag] warning: template on %s references %s which has no output schema", owner, upstreamTool)
 					} else if !envelopeFieldExists(outSchema, strings.SplitN(field, ".", 2)[0]) &&
@@ -2343,11 +2347,11 @@ func validatePlanReferencesIn(steps []PlanStep, registry *toolapi.Registry, grap
 					continue
 				}
 				producer := steps[r.idx].Tool
-				skill, ok := registry.Get(producer)
+				tool, ok := registry.Get(producer)
 				if !ok {
 					continue
 				}
-				outSchema := toolapi.GetOutputSchema(skill)
+				outSchema := toolapi.GetOutputSchema(tool)
 				if outSchema == nil {
 					continue
 				}
@@ -2405,11 +2409,11 @@ func validatePlanParams(steps []PlanStep, registry *toolapi.Registry) []string {
 	}
 	var errs []string
 	for i, s := range steps {
-		skill, ok := registry.Get(s.Tool)
+		tool, ok := registry.Get(s.Tool)
 		if !ok {
 			continue // unknown tool name — not this check's job
 		}
-		schema, err := parseToolSchema(skill.Parameters())
+		schema, err := parseToolSchema(tool.Parameters())
 		if err != nil {
 			continue // unreadable schema → nothing to check against
 		}

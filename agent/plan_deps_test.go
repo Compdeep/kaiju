@@ -7,7 +7,7 @@ import (
 
 // A re-plan names an earlier step by its tag, because positions restart with a
 // new plan and tags do not. FlexInts can only hold positions, so a name was
-// dropped as it decoded and the step lost the edge without anyone being told.
+// dropped as it decoded and the step lost the dependency without anyone being told.
 func TestPlanDependsOn_ResolvesTagsAndReportsTheRest(t *testing.T) {
 	raw := `{"steps":[
 		{"tool":"reader","tag":"fetch_page","depends_on":[]},
@@ -41,15 +41,15 @@ func TestPlanDependsOn_ResolvesTagsAndReportsTheRest(t *testing.T) {
 	if got := steps[3].UnresolvedDeps; len(got) != 1 || got[0] != "never_planned" {
 		t.Fatalf("an unknown name must be kept for reporting, got %v", got)
 	}
-	// A step naming its own tag would be an edge to itself, which never resolves.
+	// A step naming its own tag would depend on itself, which never resolves.
 	if got := steps[4].UnresolvedDeps; len(got) != 1 || got[0] != "itself" {
 		t.Fatalf("a self-reference must be reported rather than wired, got %v", got)
 	}
 	if len(steps[4].DependsOn) != 0 {
-		t.Fatalf("a self-edge must never be created, got %v", steps[4].DependsOn)
+		t.Fatalf("a step must never depend on itself, got %v", steps[4].DependsOn)
 	}
 
-	// And the plan comes back for correction rather than running short an edge.
+	// And the plan comes back for correction rather than running short a dependency.
 	errs := validatePlanDeps(steps)
 	if len(errs) != 2 {
 		t.Fatalf("both unresolved dependencies must be reported, got %v", errs)

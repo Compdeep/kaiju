@@ -548,11 +548,11 @@ func wholeBesideExcerpt(reg *toolapi.Registry, graph *Graph, depID, field string
 	if producer == nil || producer.Body == nil || producer.ToolName == "" {
 		return nil, false
 	}
-	skill, known := reg.Get(producer.ToolName)
+	tool, known := reg.Get(producer.ToolName)
 	if !known {
 		return nil, false
 	}
-	for _, declared := range toolapi.GetExcerpts(skill) {
+	for _, declared := range toolapi.GetExcerpts(tool) {
 		if declared.Field != field {
 			continue
 		}

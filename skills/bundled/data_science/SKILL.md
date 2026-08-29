@@ -112,7 +112,15 @@ Four tasks.
 
 Write Python that a data scientist reviewing your code would respect. Not jupyter-notebook-pasted-into-a-file quality — real scripts.
 
+**Where a value came from:**
+- Values you were given, you may use. Values you were not given, you do not have. There is no third case, and a script cannot go and get one — it computes, it does not gather.
+- A number you were not handed is not a constant. A constant is a fact of the problem — a conversion factor, a threshold the request stated, a physical value that does not change. A measurement is what the answer is about, and writing one from memory produces an answer about numbers nobody measured.
+- Never write a comment attributing a value to a source you did not read. `# From <source>` above a figure you supplied yourself is the most damaging line in the file: it survives review, it reads as provenance, and it makes an invented number look checked.
+- When the goal needs data you were not given, say so. Print what is missing and exit non-zero, or return a result whose fields name the gap. A script that reports what it lacks is worth more than one that fills the gap and reports a number.
+- Recognising the case: you were asked to calculate something about the real world, and nothing in your input holds the measurements. That is the case. It is not solved by knowing the values — it is solved by saying you were not given them.
+
 **Every script is self-contained and runnable:**
+- Self-contained means it needs no setup beyond its inputs. It does NOT mean it carries its own data: a script that embeds the measurements it was supposed to be given is not self-contained, it is unsourced.
 - Has a clear entry point, either `if __name__ == "__main__":` or a `main()` function.
 - Uses argparse or hardcoded paths clearly at the top — no magic strings buried in the middle.
 - Prints progress to stderr or stdout so the user knows what's happening (`print(f"Loaded {len(df)} rows", file=sys.stderr)`).
@@ -171,6 +179,16 @@ Write Python that a data scientist reviewing your code would respect. Not jupyte
 - `import *`.
 - `print(df)` left behind as debugging.
 - Raw `except:` without an exception type.
-- Untyped magic numbers (put them in a constant at the top with a comment).
+- Untyped magic numbers (put them in a constant at the top with a comment). This is how to write a value you HAVE; it is not permission to supply one you do not — see **Where a value came from**.
 - A dataframe that never gets saved anywhere — if you computed it, write it to disk or print a meaningful summary.
 - Plots that are saved but never labeled or titled.
+
+## Aggregator Guidance
+
+Lead with the numbers the question asked for, stated exactly as computed, with their units. A question about a trend is answered by the figures for that trend, not by a description of the pipeline that produced them.
+
+Say where the outputs are. Name the files the run wrote — the cleaned data, the figures, the metrics, the report — by their paths, so the user can open them.
+
+Carry the caveats the analysis itself established: how many rows were dropped in cleaning and why, the size of the sample, the assumptions a test rests on, the effect size beside the p-value. A result that is significant and tiny should be reported as both.
+
+Where a script failed or a stage never ran, say which numbers are therefore missing. Do not present output from an earlier stage as though it answered the question the later stage was meant to answer, and do not describe a model's performance from the code that would have measured it rather than from the measurement.

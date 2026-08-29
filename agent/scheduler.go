@@ -2169,6 +2169,20 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				}
 			}
 
+			// A tool's calls are read together once they have all landed, and
+			// only when one of them failed. This is the one moment the set can
+			// be compared — after the last sibling and before launchReady lets
+			// anything downstream read them — and it is why the check sits
+			// here rather than in the tool, which sees one reply at a time and
+			// cannot tell a refusal from an answer without knowing the service.
+			//
+			// Cheap by construction: one call for the whole group, never one
+			// per reply, and none at all for a group where everything worked.
+			if group, ready := completedGroup(graph, node); ready && budget.TryObserverCall() {
+				inflight++
+				go a.fireGroupReview(ctx, group, graph, budget, completionCh, trigger)
+			}
+
 			// Check for human interjection before launching new nodes.
 			// If injected, pending nodes are gated — they'll launch after
 			// the interjection reflection completes.

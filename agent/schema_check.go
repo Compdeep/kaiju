@@ -42,15 +42,16 @@ type StageSchema struct {
  */
 func (a *Agent) StageSchemas() []StageSchema {
 	defs := map[string]llm.ToolDef{
-		"plan":      a.executivePlanSchema(),
-		"route":     routeSchema(),
-		"preflight": preflightSchema(),
-		"reflector": reflectorSchema(),
-		"observer":  observerSchema(),
-		"holmes":    holmesSchema(),
-		"debugger":  debuggerSchema(),
-		"curator":   curatorSchema(),
-		"architect": architectSchema(),
+		"plan":         a.executivePlanSchema(),
+		"route":        routeSchema(),
+		"preflight":    preflightSchema(),
+		"reflector":    reflectorSchema(),
+		"observer":     observerSchema(),
+		"group_review": groupReviewSchema(),
+		"holmes":       holmesSchema(),
+		"debugger":     debuggerSchema(),
+		"curator":      curatorSchema(),
+		"architect":    architectSchema(),
 		// The coder's shape depends on whether the node may edit an existing
 		// file. Both are checked: a schema that is only wrong in one of them is
 		// wrong on the runs that take that branch.

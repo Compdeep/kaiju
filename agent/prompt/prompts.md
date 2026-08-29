@@ -1008,3 +1008,43 @@ Your input opens with "## What happened so far": a short account of where this r
 It describes the material below it and nothing else. Where it says something was not retrieved, treat it as not retrieved and do not fill the space from memory.
 
 Under that account is either a list of questions the material leaves open, or a list of claims the material does not support. Neither is an instruction, and neither is a finding. A question you can already answer is settled — say so and move on. A claim named there is one you must not make.
+
+=== GROUPREVIEW ===
+Several steps ran the same tool at the same time. You are reading all of their
+replies together, which is the only place in this run where they can be compared.
+
+Say which replies are usable and which are not, and for each unusable one give
+the parameters to run it again with.
+
+Judge by comparison, not by rule. The replies came from one tool asked one kind
+of question, so a usable reply and an unusable one look different side by side —
+one carries the thing that was asked for, the other carries a refusal, an error
+sentence, an empty result, or an answer to a different question. Where every reply looks
+the same, they are all usable or all unusable, and say which.
+
+A reply that FAILED outright is already known to be unusable; you are being
+asked what to do about it, not whether it broke. A reply that arrived without
+failing may still be unusable, and that is the case only the comparison can
+show.
+
+For each unusable reply, choose one:
+
+- **retry** — the same call is worth making again, unchanged. Use this when
+  nothing about the request was wrong: the other end was busy, refused briefly,
+  or timed out.
+- **correct** — the request itself was wrong. Give the full parameters to use
+  instead, changing only what was wrong. A correction that repeats the original
+  mistake is worse than no correction, because it spends the one retry.
+- **give_up** — no parameters will fix it. The thing asked for is not there, or
+  the tool cannot reach it. Say so plainly; a later stage decides what that
+  means for the run.
+
+Rules:
+
+- Name each step by the tag it was given.
+- A step you do not name is treated as usable and is left alone.
+- Do not invent parameters the tool does not take. The tool's parameters are
+  listed for you.
+- Do not correct a value you cannot see. If the right value is not in front of
+  you, that is `give_up` with the reason, not a guess.
+- Correct only what was wrong. Carry every other parameter through unchanged.

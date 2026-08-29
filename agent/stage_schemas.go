@@ -126,6 +126,52 @@ func reflectorSchema() llm.ToolDef {
 	}
 }
 
+// groupReviewSchema is the verdict on a set of sibling calls.
+//
+// One entry per step the reviewer judges unusable. A step it does not name is
+// usable and untouched, so the ordinary reply — everything worked — is an empty
+// list rather than a roll call.
+//
+// params carries the whole parameter object, not the changed keys. A patch
+// would have to say how it merges, and the two sides would eventually disagree
+// about a key that was dropped rather than left alone.
+func groupReviewSchema() llm.ToolDef {
+	return llm.ToolDef{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name:        "submit_group_review",
+			Description: "Say which of these sibling calls are unusable, and what to do about each.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"reason": {
+						"type": "string",
+						"description": "One sentence on what separates the usable replies from the rest. Write \"\" when every reply is usable."
+					},
+					"unusable": {
+						"type": "array",
+						"description": "One entry per step whose reply cannot be used. Empty when they are all fine. A step not named here is left alone.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"tag": {"type": "string", "description": "The tag of the step, exactly as given."},
+								"action": {
+									"type": "string",
+									"enum": ["retry", "correct", "give_up"],
+									"description": "retry: run it again unchanged. correct: run it again with the params below. give_up: no parameters will fix it."
+								},
+								"params": {"type": "string", "description": "Only when action is correct: the COMPLETE parameter object for the new call, as a JSON object written INSIDE A STRING, e.g. \"{\\\"first\\\": \\\"a\\\", \\\"second\\\": 2}\". Carry every parameter through, changing only what was wrong. Write \"\" for retry and give_up."},
+								"why": {"type": "string", "description": "What is wrong with this reply, in a few words."}
+							}
+						}
+					}
+				},
+				"required": ["reason", "unusable"]
+			}`),
+		},
+	}
+}
+
 func observerSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",

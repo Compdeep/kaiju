@@ -22,6 +22,7 @@ func TestStageSchemasAreEnforceableOrKnownNotToBe(t *testing.T) {
 		"coder(edit)":  true,
 		"coder(write)": true,
 		"curator":      true,
+		"group_review": true,
 		"debugger":     true,
 		"holmes":       true,
 		"observer":     true,

@@ -28,8 +28,8 @@ type toolThrottle struct {
 }
 
 /*
- * throttleGate is a per-tool mutex and timestamp for throttle enforcement.
- * desc: Serializes calls to a single tool with a minimum time gap between calls.
+ * throttleGate is a mutex and timestamp for one throttle key.
+ * desc: Serializes the calls sharing that key, with a minimum gap between them.
  */
 type throttleGate struct {
 	mu       sync.Mutex
@@ -46,10 +46,12 @@ func newToolThrottle() *toolThrottle {
 }
 
 /*
- * gate returns the throttle gate for a tool, creating one if needed.
- * desc: Thread-safe lazy initialization of per-tool throttle gates.
- * param: name - the tool name.
- * return: pointer to the throttleGate for this tool.
+ * gate returns the throttle gate for a key, creating one if needed.
+ * desc: Thread-safe lazy initialization. The key is a tool and the destination
+ *       its call is addressed to, so two calls to one service wait for each
+ *       other and two calls to different services do not.
+ * param: name - the throttle key.
+ * return: pointer to the throttleGate for this key.
  */
 func (st *toolThrottle) gate(name string) *throttleGate {
 	st.mu.Lock()
@@ -63,17 +65,21 @@ func (st *toolThrottle) gate(name string) *throttleGate {
 }
 
 /*
- * waitThrottle blocks until the tool's cooldown period has elapsed.
- * desc: Acquires the per-tool mutex, checks elapsed time since last fire,
- *       sleeps for the remaining cooldown if needed, then records the new
- *       fire time. Returns early if context is cancelled.
+ * waitThrottle blocks until this key's cooldown has elapsed.
+ * desc: Acquires the key's mutex, checks elapsed time since the last fire,
+ *       sleeps for the remaining cooldown if needed, then records the new fire
+ *       time. Returns early if context is cancelled.
+ *
+ *       The wait is served in the calling node's own goroutine, so the steps
+ *       beside it keep running — a plan does not stop because one service is
+ *       being asked for too much.
  * param: ctx - context for cancellation.
- * param: toolName - the tool to throttle.
- * param: cooldown - minimum duration between calls.
+ * param: key - the tool and destination to throttle.
+ * param: cooldown - minimum duration between calls sharing the key.
  * return: duration since the last fire time after waiting.
  */
-func (st *toolThrottle) waitThrottle(ctx context.Context, toolName string, cooldown time.Duration) time.Duration {
-	g := st.gate(toolName)
+func (st *toolThrottle) waitThrottle(ctx context.Context, key string, cooldown time.Duration) time.Duration {
+	g := st.gate(key)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -384,11 +390,18 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		return
 	}
 
-	// Enforce per-tool cooldown before executing
+	// Enforce the cooldown before executing, per destination rather than per
+	// tool. The scheduler fires everything ready at once, so a plan with ten
+	// calls to one service sends ten at the same instant and the service
+	// answers some of them with a refusal — measured, on a run that lost three
+	// of nine that way. Ten calls to ten services have no such problem and must
+	// not be slowed down for one.
+	//
+	// A tool that does not say where a call goes keeps exactly its old
+	// behaviour: one destination, throttled as a whole.
 	if tool, ok := a.registry.Get(n.ToolName); ok {
-		cooldown := toolapi.GetThrottle(tool)
-		if cooldown > 0 {
-			throttle.waitThrottle(ctx, n.ToolName, cooldown)
+		if cooldown := toolapi.GetThrottle(tool); cooldown > 0 {
+			throttle.waitThrottle(ctx, n.ToolName+"\x00"+toolapi.GetDestination(tool, n.Params), cooldown)
 		}
 	}
 

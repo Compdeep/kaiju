@@ -106,6 +106,41 @@ func (w *WebFetch) Description() string {
  */
 func (w *WebFetch) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
+// Destination is the host this call will reach, so the throttle below applies to
+// one site at a time rather than to fetching as a whole.
+//
+// A plan that reads ten pages of one site sends ten requests at the same instant,
+// because the scheduler fires everything ready at once — and a site answers some
+// of them with a refusal. A plan that reads ten different sites has no such
+// problem, and slowing it down for one it does not have would cost every research
+// run its parallelism.
+//
+// The host and nothing else. Not the path, or two pages of one site would count
+// as two sites; not the scheme or the port, since a site is no less itself on
+// another one. A parameter that is not a URL yields "", which throttles with
+// every other unaddressed fetch — the behaviour this tool had before it said
+// where its calls go.
+func (w *WebFetch) Destination(params map[string]any) string {
+	raw, _ := params["url"].(string)
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// Throttle is the gap between two requests to ONE host — see Destination, which
+// is what makes that "one host" rather than "any fetch".
+//
+// Measured on the run this was written for: nine requests to a single service
+// left in the same second and three came back refused for being too many. The
+// same nine spaced by this much would have arrived over ten seconds, which that
+// service serves without complaint.
+//
+// It is a cost, and it is the smaller one. It buys back a refusal, the review
+// call that reads the refusals, and the spaced retry that follows them.
+func (w *WebFetch) Throttle() time.Duration { return 1200 * time.Millisecond }
+
 /*
  * OutputSchema returns the JSON schema for the tool's output.
  * desc: Defines the output structure with status, title, and extracted content fields.

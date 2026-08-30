@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/prompt"
+	"github.com/Compdeep/kaiju/agent/skillmd"
 )
 
 // These guard the regression where the planner stopped emitting wired multi-step
@@ -241,5 +242,33 @@ func TestPlannerIsToldTheIntentByName(t *testing.T) {
 	}
 	if got := intentName(nil, gates.Intent(100)); got != "rank(100)" {
 		t.Errorf("no registry rendered %q, want the rank itself", got)
+	}
+}
+
+// Every shipped card contributes guidance the planner will actually read.
+//
+// The executive builds its Skill Guidance block by extracting the headings in
+// skillmd.PlannerHeadings and nothing else. A card whose body uses none of them
+// still reaches the planner — it is selected, and its name and description are
+// shown — so the run looks correct from outside while the entire body is
+// dropped. Observed: a card naming the exact endpoints a run needed was
+// selected for that run, contributed nothing, and the planner spent three
+// re-plans guessing URLs that returned 404.
+//
+// LoadDir warns about this at boot, which is no use when the log goes somewhere
+// nobody reads. This fails the build instead.
+func TestShippedSkills_ContributeGuidanceThePlannerReads(t *testing.T) {
+	for name, body := range everyShippedCard(t) {
+		found := false
+		for _, heading := range skillmd.PlannerHeadings {
+			if Text.ExtractSection(body, heading) != "" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s has none of %v, so the planner is shown its name and nothing else",
+				name, skillmd.PlannerHeadings)
+		}
 	}
 }

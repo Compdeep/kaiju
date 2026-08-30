@@ -12,20 +12,22 @@ address balance.
 Do NOT use for prices, market capitalisation or trading volume. Those are market
 data, not chain data, and none of the endpoints below carry them.
 
-## The one rule
+## Planning Guidance
 
-Call the chain. Never read a block explorer's web page.
+### Call the chain, never the explorer
 
 etherscan.io, explorer.solana.com and their equivalents are applications for people.
 They sit behind bot detection that answers an automated fetch with a challenge page —
 `HTTP 403` and "Just a moment...", or `HTTP 429` and "Vercel Security Checkpoint" —
-and no wait, header or retry gets past it, because it is not a rate limit. Two runs
-have been lost to this.
+and no wait, header or retry gets past it, because it is not a rate limit. Three runs
+have now been lost to this.
 
 Every one of those sites is a view onto a node that answers JSON over HTTP with no
-key at all. Ask the node.
+key at all. Ask the node. The endpoints below are the whole answer to "how do I get
+chain data" — do not search for others, and do not guess a path on a host you have
+not read a response from.
 
-## Ethereum
+### Ethereum
 
 One `web_fetch` step. Endpoint `https://ethereum-rpc.publicnode.com`
 (`https://eth.drpc.org` and `https://1rpc.io/eth` also answer; `cloudflare-eth.com`
@@ -45,7 +47,7 @@ last entry of the array.
 Other methods, same shape: `eth_blockNumber` (no params), `eth_getTransactionByHash`
 (`["0x…"]`), `eth_getBalance` (`["0x…","latest"]`).
 
-## Solana
+### Solana
 
 Two `web_fetch` steps, the second wired to the first. Endpoint
 `https://api.mainnet-beta.solana.com`.
@@ -53,16 +55,27 @@ Two `web_fetch` steps, the second wired to the first. Endpoint
 This endpoint returns `HTTP 415` and `Invalid content-type` unless the request says
 `Content-Type: application/json`. Set the header on every call.
 
-1. `body`: `{"jsonrpc":"2.0","id":1,"method":"getSlot","params":[{"commitment":"finalized"}]}`
-   Returns the slot number as `result`.
-2. `body`: `{"jsonrpc":"2.0","id":1,"method":"getBlock","params":[<slot>,{"encoding":"json","transactionDetails":"signatures","maxSupportedTransactionVersion":0,"rewards":false}]}`
-   Returns `blockTime` and a `signatures` array. The latest transaction is the last
-   signature.
+First step, to find the current slot:
 
-Ask for `"transactionDetails":"signatures"` unless the question needs more. The full
-form returns several megabytes for one block.
+- `url`: `https://api.mainnet-beta.solana.com`
+- `method`: `POST`
+- `headers`: `{"Content-Type": "application/json"}`
+- `body`: `{"jsonrpc":"2.0","id":1,"method":"getSlot","params":[{"commitment":"finalized"}]}`
 
-## Bitcoin
+It returns the slot number as `result`. Second step, same url, method and headers,
+with that number written into the body:
+
+- `body`: `{"jsonrpc":"2.0","id":1,"method":"getBlock","params":[SLOT,{"encoding":"json","transactionDetails":"signatures","maxSupportedTransactionVersion":0,"rewards":false}]}`
+
+It returns `blockTime` and a `signatures` array. The latest transaction is the last
+signature. Ask for `"transactionDetails":"signatures"` unless the question needs
+more — the full form returns several megabytes for one block.
+
+There is no public Solscan endpoint for this. `public-api.solscan.io` is gone and
+`pro-api.solscan.io` needs a paid token; both have cost runs their remaining
+re-plans. Blockchair has no Solana API. Use the RPC above.
+
+### Bitcoin
 
 Plain GET, no body, no headers.
 
@@ -70,7 +83,7 @@ Plain GET, no body, no headers.
 - `https://mempool.space/api/block/<hash>/txids` — every transaction id in a block.
 - `https://blockchain.info/latestblock` — height, hash and time in one call.
 
-## Values are in the chain's smallest unit
+### Values are in the chain's smallest unit
 
 This is where a plan goes wrong quietly, because the wrong answer looks reasonable.
 
@@ -86,18 +99,18 @@ When a response carries both a native amount and a fiat one, divide, then confir
 two agree before answering. If they disagree by a factor of a thousand, the
 conversion is wrong, not the source.
 
-## What NOT to do
+### What NOT to do
 
-- Do not `web_search` for "latest ethereum transaction". The search returns price and
-  news pages. The endpoint is above; go straight to it.
-- Do not fetch an explorer page as a fallback when an API fails. It will fail too, and
-  differently enough to look worth another attempt.
+- Do not `web_search` first. The search returns price and news pages for every
+  phrasing of this question. The endpoint is above; the first step of the plan is
+  the fetch.
+- Do not fetch an explorer page as a fallback when an API fails. It will fail too,
+  and differently enough to look worth another attempt.
 - Do not use `api.etherscan.io` V1. It is deprecated and answers with a notice saying
   so. V2 needs a key.
 - Do not plan a `compute` step to parse these responses unless the question needs
   arithmetic across many of them. A later step reads one field of an earlier
   response by referencing it; a whole program to pick a value out of JSON is a
   step that does nothing.
-- Do not treat a Solana `synthetic_coinbase` entry, or any row with a null hash, as
-  "the latest transaction". It is a reward record. Take the newest row that has a
-  hash.
+- Do not treat a `synthetic_coinbase` entry, or any row with a null hash, as "the
+  latest transaction". It is a reward record. Take the newest row that has a hash.

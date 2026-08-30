@@ -544,6 +544,25 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	// names the flag to drop.
 	retryOnce := func(node *Node, comp nodeCompletion, detail string) bool {
 		tier := classifyRetryTier(detail)
+		wait := retryBackoff(detail)
+		// The tool is asked before the text is read.
+		//
+		// classifyRetryTier works on the sentence a failure left behind, and for
+		// a whole class of tool that sentence is a status line with the reason
+		// missing from it. The tool held the response. Where it says something,
+		// it knows something this cannot, and it decides; where it says nothing
+		// — which is every tool that declares no opinion — the patterns below
+		// run exactly as they did.
+		if advice := a.toolRetryAdvice(node, comp); advice.Verdict != toolapi.RetryUnknown {
+			switch advice.Verdict {
+			case toolapi.RetryNever:
+				tier = "skip"
+			case toolapi.RetryAfter:
+				tier, wait = "blind", advice.Wait
+			}
+			log.Printf("[dag] %s (%s) judged its own failure: %s — %s",
+				comp.NodeID, node.ToolName, retryVerdictName(advice.Verdict), advice.Why)
+		}
 		// Once per node. The tier that already ran is on the node, not spelled
 		// into its name — see Node.Retry.
 		if tier == "skip" || node.Retry != "" {
@@ -561,7 +580,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			// A host that said "too many requests" is not rerun on the spot.
 			// The wait is served in the node's own goroutine, so the rest of the
 			// plan carries on meanwhile — see fireNode.
-			graph.HoldUntil(comp.NodeID, retryBackoff(detail))
+			graph.HoldUntil(comp.NodeID, wait)
 			graph.SetState(comp.NodeID, StatePending)
 			log.Printf("[dag] blind retry for %s: %s", comp.NodeID, Text.TruncateLog(detail, 200))
 			appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BLIND_RETRY", detail)
@@ -2129,10 +2148,16 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					// is written and never run, and the reflector sees only
 					// metadata and concludes "done" on an empty answer.
 					//
-					// Guarded by SpawnedBy == "" so we only graft for planner-
-					// spawned top-level compute — architect children still route
-					// through Phase 3 above.
-					if node.SpawnedBy == "" {
+					// Guarded on WHICH parent, not on having one. Only an
+					// architect's coder children route through Phase 3, and their
+					// parent is the architect compute node. A compute node grafted
+					// by a replan carries the reflection that ordered it as its
+					// parent, and is otherwise the same top-level compute the
+					// planner writes on a first plan — so it needs this graft just
+					// as much. Testing SpawnedBy == "" put every replan-spawned
+					// compute on the architect's side of the line and left its code
+					// written and never run.
+					if !architectChild(graph, node) {
 						var res struct {
 							Execute string `json:"execute,omitempty"`
 							Type    string `json:"type,omitempty"`
@@ -2728,6 +2753,44 @@ func retryDetail(n *Node, fallback string) string {
 }
 
 // classifyRetryTier determines what kind of retry (if any) is appropriate.
+/*
+ * toolRetryAdvice asks the tool that failed what it makes of its own failure.
+ * desc: Only a tool node has a tool to ask, and only a typed result carries the
+ *       envelope to ask about. Everything else answers RetryUnknown, which is
+ *       the answer that changes nothing.
+ * param: node - the node that failed.
+ * param: comp - its completion, whose Body carries the tool's envelope.
+ * return: the tool's advice, or RetryUnknown.
+ */
+func (a *Agent) toolRetryAdvice(node *Node, comp nodeCompletion) toolapi.RetryAdvice {
+	none := toolapi.RetryAdvice{Verdict: toolapi.RetryUnknown}
+	if node.Type != NodeTool || comp.Body == nil || a.registry == nil {
+		return none
+	}
+	enveloped, ok := comp.Body.(interface {
+		Envelope() toolapi.ToolMessage
+	})
+	if !ok {
+		return none
+	}
+	tool, ok := a.registry.Get(node.ToolName)
+	if !ok {
+		return none
+	}
+	return toolapi.ToolRetryAdvice(tool, enveloped.Envelope())
+}
+
+// retryVerdictName names a verdict for the log line that reports it.
+func retryVerdictName(v toolapi.RetryVerdict) string {
+	switch v {
+	case toolapi.RetryNever:
+		return "not worth retrying"
+	case toolapi.RetryAfter:
+		return "worth one more attempt"
+	}
+	return "no opinion"
+}
+
 // Returns "skip" (no retry), "blind" (rerun same command), or "twotime" (LLM fix,
 // up to two attempts — the second informed by how the first one failed).
 func classifyRetryTier(errMsg string) string {
@@ -2976,6 +3039,19 @@ func (a *Agent) runBashParams(ctx context.Context, node *Node) (string, error) {
 	return sk.(interface {
 		Execute(context.Context, map[string]any) (string, error)
 	}).Execute(ctx, node.Params)
+}
+
+// architectChild reports whether a compute node is a coder child grafted from
+// an architect's blueprint. Phase 3 of the blueprint graft gives those their run
+// command, so the shallow exec graft must leave them alone. Any other parent —
+// the reflection that ordered a replan, most often — means top-level compute
+// that nothing else will run.
+func architectChild(graph *Graph, n *Node) bool {
+	if n == nil || n.SpawnedBy == "" {
+		return false
+	}
+	parent := graph.Get(n.SpawnedBy)
+	return parent != nil && parent.Type == NodeCompute
 }
 
 // graftComputeExecution wires an execute bash node — the one that runs the

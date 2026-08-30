@@ -75,6 +75,16 @@ func toolIndexEntry(registry *toolapi.Registry, name string) string {
 	var sb strings.Builder
 	sig := compactParamSignature(tool.Parameters())
 	sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, tool.Description()))
+	// A parameter required only in some modes is marked required by neither the
+	// signature nor the schema's flat "required" list, because it is not
+	// required in every mode. The dispatcher enforces those rules anyway, from
+	// the same schema, so a planner shown only the flat list writes exactly what
+	// it was told is valid and is rejected for it — and re-planning against the
+	// same signature reproduces the same step. Measured: a plan rejected three
+	// times for one missing parameter, then the run abandoned.
+	for _, line := range conditionalRequirementLines(tool.Parameters()) {
+		sb.WriteString("  " + line + "\n")
+	}
 	if outSchema := toolapi.GetOutputSchema(tool); outSchema != nil {
 		if shape := compactOutputShape(outSchema); shape != "" {
 			sb.WriteString("  → returns: " + shape + "\n")
@@ -97,6 +107,13 @@ func toolIndexEntrySize(registry *toolapi.Registry, name string) int {
 
 /*
  * compactParamSignature extracts param names from a JSON schema into a function signature.
+ *
+ * Reads the schema's flat "required" list only. A parameter required in some of
+ * a tool's modes and not others cannot appear in that list — it is not required
+ * in every mode — so it renders here as optional, which for that mode it is not.
+ * conditionalRequirementLines states those rules alongside the signature; the
+ * two are written together and must stay together, because the dispatcher
+ * enforces both.
  * desc: Parses the tool's parameter JSON schema and produces "query*, max_results"
  *       where * marks required params.
  * param: schema - raw JSON parameter schema
@@ -127,6 +144,33 @@ func compactParamSignature(schema json.RawMessage) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// conditionalRequirementLines states the rules a signature cannot carry, in the
+// words the dispatcher uses to reject a step that breaks one.
+//
+// Read from the tool's own schema through parseToolSchema — the same parser
+// validatePlanParams uses — so the two cannot drift. A rule the dispatcher
+// enforces is a rule the planner was shown, and it is shown in the same words,
+// so a planner reading one and being rejected by the other can connect them.
+//
+// Returns nothing for a schema with no such rules, an unreadable one, or a rule
+// requiring nothing. The tool index is the largest section of the planner's
+// prompt, and a tool with no conditions must not pay a line for that.
+func conditionalRequirementLines(raw json.RawMessage) []string {
+	schema, err := parseToolSchema(raw)
+	if err != nil || len(schema.Conditional) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(schema.Conditional))
+	for _, c := range schema.Conditional {
+		if len(c.Require) == 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s required when %s",
+			strings.Join(c.Require, ", "), c.describe()))
+	}
+	return lines
 }
 
 /*

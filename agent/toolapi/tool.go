@@ -463,3 +463,67 @@ func RequiresTarget(t Tool) bool {
 	}
 	return true
 }
+
+/*
+ * RetryVerdict is what a tool says about a failure it just returned.
+ * desc: Three answers, not two. A tool that has no opinion says so — Unknown —
+ *       and the engine falls back to reading the error text, which is what it
+ *       did before any tool answered at all.
+ */
+type RetryVerdict int
+
+const (
+	RetryUnknown RetryVerdict = iota // no opinion; the engine decides
+	RetryNever                       // trying again cannot work
+	RetryAfter                       // worth another attempt, after Wait
+)
+
+/*
+ * RetryAdvice is a tool's judgement on its own failure.
+ * desc: Why is prose for the log and the worklog. It matters more than the
+ *       verdict: the reflector plans its next move from the text, and "rate
+ *       limited" and "the host served a bot challenge" lead to different plans.
+ */
+type RetryAdvice struct {
+	Verdict RetryVerdict
+	Wait    time.Duration // honoured on RetryAfter, ignored otherwise
+	Why     string
+}
+
+/*
+ * Retryable is an optional interface a tool implements to judge its OWN
+ * failures.
+ * desc: The engine reads an error string and guesses from patterns in it. That
+ *       guess is only as good as what survives into the string, and for a fetch
+ *       almost nothing does: an HTTP 429 that means "you have asked too often"
+ *       and an HTTP 429 that means "prove you are a browser" arrive as the same
+ *       nine characters. The body tells them apart and the tool is the only
+ *       thing holding it.
+ *
+ *       So the judgement is made where the evidence is, and the engine asks
+ *       instead of guessing. A tool that implements nothing keeps the guess —
+ *       see ToolRetryAdvice.
+ */
+type Retryable interface {
+	/*
+	 * RetryAdvice judges a failing result this tool produced.
+	 * param: m - the envelope the tool returned, error status and all.
+	 * return: the verdict, RetryUnknown when the tool cannot tell.
+	 */
+	RetryAdvice(m ToolMessage) RetryAdvice
+}
+
+/*
+ * ToolRetryAdvice asks a tool what it makes of its own failure.
+ * desc: Unknown for every tool that does not implement Retryable, which is the
+ *       answer that leaves the engine's own classification in charge.
+ * param: t - the tool that failed.
+ * param: m - the envelope it returned.
+ * return: the tool's advice, or RetryUnknown.
+ */
+func ToolRetryAdvice(t Tool, m ToolMessage) RetryAdvice {
+	if r, ok := t.(Retryable); ok {
+		return r.RetryAdvice(m)
+	}
+	return RetryAdvice{Verdict: RetryUnknown}
+}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,6 +141,125 @@ func (w *WebFetch) Destination(params map[string]any) string {
 // It is a cost, and it is the smaller one. It buys back a refusal, the review
 // call that reads the refusals, and the spaced retry that follows them.
 func (w *WebFetch) Throttle() time.Duration { return 1200 * time.Millisecond }
+
+// A wall is not a queue.
+//
+// Two of these have now cost a run its answer. explorer.solana.com answered the
+// FIRST request of a run with HTTP 429 and a page titled "Vercel Security
+// Checkpoint"; etherscan.io answered with HTTP 403 and a page titled "Just a
+// moment...". Neither is a count that drains. Both are a detector asking for
+// JavaScript this tool does not run, and both return the identical page to the
+// second request, the tenth and the one an hour later.
+//
+// The status code cannot tell them from the real thing — a genuine rate limit
+// is a 429 too — but the body says which it is in its first few hundred bytes,
+// and this is the only place that body exists.
+//
+// Read ONLY on a response that already failed. That gate is what keeps the
+// markers from matching prose: a page discussing Cloudflare challenges is a
+// 200 and is never offered here.
+var challengeMarkers = []struct {
+	needle string
+	who    string
+}{
+	{"vercel security checkpoint", "Vercel"},
+	{"just a moment...", "Cloudflare"},
+	{"cf-browser-verification", "Cloudflare"},
+	{"__cf_chl", "Cloudflare"},
+	{"cf_chl_opt", "Cloudflare"},
+	{"checking your browser before accessing", "Cloudflare"},
+	{"attention required! | cloudflare", "Cloudflare"},
+	{"_incapsula_resource", "Imperva"},
+	{"datadome", "DataDome"},
+	{"px-captcha", "PerimeterX"},
+}
+
+/*
+ * challengeReason names the bot wall a failed response came from.
+ * desc: Only the head of the body is read. A challenge page announces itself in
+ *       its title and its inline script; a marker appearing three screens down
+ *       is likelier to be a site talking about one.
+ * param: body - the response body of a request that returned 4xx or 5xx.
+ * return: a sentence naming what happened, or "" when it was an ordinary error.
+ */
+func challengeReason(body string) string {
+	head := body
+	if len(head) > 8192 {
+		head = head[:8192]
+	}
+	head = strings.ToLower(head)
+	for _, m := range challengeMarkers {
+		if strings.Contains(head, m.needle) {
+			return "bot challenge from " + m.who + " — this host will not answer a plain fetch, whatever the wait"
+		}
+	}
+	return ""
+}
+
+/*
+ * RetryAdvice judges a fetch that failed — see toolapi.Retryable.
+ * desc: The engine classifies a failure by reading its error text, and for a
+ *       fetch that text is the status line and nothing else. This says what the
+ *       status line cannot.
+ *
+ *       Three answers. A bot challenge is never worth another attempt. An
+ *       answer about who you are — unauthorized, forbidden, gone, not there —
+ *       is settled, and the identical request cannot unsettle it; that is what
+ *       spent a run's one retry on a 401 from a documented paid endpoint. What
+ *       is left is the genuinely transient: too many requests, and a server
+ *       that fell over.
+ *
+ *       Anything else gets no opinion, and the engine decides as it did before.
+ * param: m - the envelope this tool returned.
+ * return: the verdict, RetryUnknown when the shape is not one of these.
+ */
+func (w *WebFetch) RetryAdvice(m toolapi.ToolMessage) toolapi.RetryAdvice {
+	if m.Status != toolapi.StatusError {
+		return toolapi.RetryAdvice{Verdict: toolapi.RetryUnknown}
+	}
+	var r fetchResult
+	if len(m.Data) > 0 {
+		_ = json.Unmarshal(m.Data, &r)
+	}
+	if why := challengeReason(r.Content); why != "" {
+		return toolapi.RetryAdvice{Verdict: toolapi.RetryNever, Why: why}
+	}
+	switch statusCode(r.Status) {
+	case 401, 402, 403, 404, 405, 410, 451:
+		return toolapi.RetryAdvice{
+			Verdict: toolapi.RetryNever,
+			Why:     "the host answered about access or existence, and the same request cannot get a different answer",
+		}
+	case 408, 425, 429, 500, 502, 503, 504:
+		// The same pause the engine uses, and for the same reason: long enough
+		// to outlast a per-second limit, short enough that a run waiting on it
+		// is still answering. There is one retry per node, so nothing grows.
+		return toolapi.RetryAdvice{
+			Verdict: toolapi.RetryAfter,
+			Wait:    5 * time.Second,
+			Why:     "the host was busy or briefly broken",
+		}
+	}
+	return toolapi.RetryAdvice{Verdict: toolapi.RetryUnknown}
+}
+
+/*
+ * statusCode reads the numeric code out of a status line this tool wrote.
+ * desc: The line is built here as "HTTP %d %s", so the code is the second field.
+ * param: status - the status line, or "" when there is none.
+ * return: the code, or 0 when the line does not carry one.
+ */
+func statusCode(status string) int {
+	fields := strings.Fields(status)
+	if len(fields) < 2 {
+		return 0
+	}
+	code, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0
+	}
+	return code
+}
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.
@@ -343,6 +463,16 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 			body = body[:2048] + "..."
 		}
 		out, err = marshalFetchResult(fetchResult{Status: status, Content: body, Format: format})
+		// The status names the code; this names what the code MEANT. They are
+		// not the same thing on a bot wall — a 429 there is a challenge, not a
+		// count — and the sentence is what the reflector plans its next move
+		// from. Told "rate limited" it waits and tries the same host again;
+		// told this, it goes somewhere else.
+		if err == nil {
+			if why := challengeReason(body); why != "" {
+				out.Detail = status + " (" + why + ")"
+			}
+		}
 
 	case decFound:
 		// A plugin decoded a binary body (e.g. a PDF a search turned up).

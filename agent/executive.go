@@ -2627,6 +2627,19 @@ func validatePlanParams(steps []PlanStep, registry *toolapi.Registry) []string {
 	}
 	var errs []string
 	for i, s := range steps {
+		// A step written inside a step is reported as itself, before the
+		// per-parameter faults it would otherwise arrive as. Those name the
+		// keys — tool, params, tag — and say each is not a parameter of the
+		// tool, which is true and leaves the planner to work out that it wrote
+		// at the wrong level from three symptoms. It is one mistake and it has
+		// a name, so the correction says the name and the rest is noise.
+		if nested := nestedStepKeys(s.Params); len(nested) > 0 {
+			errs = append(errs, fmt.Sprintf(
+				"step %d (%s): params holds a step, not %s's parameters — it contains %s. "+
+					"params carries only the names in %s's own signature",
+				i, s.Tool, s.Tool, strings.Join(nested, ", "), s.Tool))
+			continue
+		}
 		tool, ok := registry.Get(s.Tool)
 		if !ok {
 			continue // unknown tool name — not this check's job
@@ -2656,6 +2669,37 @@ func validatePlanParams(steps []PlanStep, registry *toolapi.Registry) []string {
 		}
 	}
 	return errs
+}
+
+/*
+ * nestedStepKeys reports the step's own key names found inside its params.
+ *
+ * A step is {tool, params, tag, depends_on} and params holds the tool's
+ * parameters. Writing a step there instead is one mistake, and it arrives at
+ * the check below as one fault per key — three lines saying tool, params and
+ * tag are not parameters of process_list, which is true and says nothing about
+ * what went wrong. A planner able to infer the structure from that recovers; a
+ * planner that cannot repeats the plan until the run is abandoned.
+ *
+ * Only the names that are a step's and never a tool's. params is the surest of
+ * them and tool nearly so; tag and depends_on are here because they arrive
+ * together with the other two, and requiring more than one match keeps a tool
+ * that genuinely takes a "tag" from being read as a nested step.
+ */
+func nestedStepKeys(params map[string]any) []string {
+	if len(params) == 0 {
+		return nil
+	}
+	var found []string
+	for _, k := range []string{"tool", "params", "tag", "depends_on"} {
+		if _, ok := params[k]; ok {
+			found = append(found, k)
+		}
+	}
+	if len(found) < 2 {
+		return nil
+	}
+	return found
 }
 
 // envelopeData extracts the "data" sub-schema from a tool's envelope output

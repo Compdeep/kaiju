@@ -299,14 +299,24 @@ Every input goes in `params`. Each value is one of:
 
 Reference a step by its **tag**, never by its position. Positions are counted from the first step of THIS plan, so they shift whenever a plan changes; a tag does not.
 
-**`params` is a STRING holding a JSON object**, not an object. Write the object and escape the quotes inside it. Write `"{}"` for a tool that takes no parameters — never an empty string, and never leave it out. Everything below describes what goes INSIDE that string.
+**A step has exactly four keys**, and `params` is one of them:
+
+```
+{"tool": "<tool name>", "params": "<JSON object as a string>", "tag": "<this step's name>", "depends_on": []}
+```
+
+`params` is a STRING holding the tool's own parameters as a JSON object — the parameter names in that tool's signature, and nothing else. Write the object and escape the quotes inside it. Write `"{}"` for a tool that takes none: never an empty string, never left out.
+
+`tool`, `tag` and `depends_on` belong to the step. They never appear inside `params`. A `params` string that contains them is a step written inside a step, and it is REJECTED.
+
+Two steps, the second reading the first's output:
 
 ```
 {"tool": "web_search", "params": "{\"query\": \"solana explorer\"}", "tag": "find_docs"}
 {"tool": "web_fetch",  "params": "{\"url\": \"${step.find_docs.results.0.url}\"}", "tag": "read_docs"}
+```
 
 No `depends_on` on either step. The reference is the wiring.
-```
 
 **You do not write `depends_on` for a reference.** A step that references another depends on it by saying so, and the wiring is done for you. `depends_on` is only for the rare case of ordering with no data passing between the steps.
 
@@ -326,19 +336,19 @@ No `depends_on` on either step. The reference is the wiring.
 Each example below is ONE pattern — read the bold label to see which kind of task it is for, then copy the shape that matches yours.
 
 **Read a source you found (the usual web-research chain).** A web_search tagged `find_docs`; a fetch that reads one of its result URLs →
-  `{"tool":"web_fetch","params":"{\\"url\\":\\"${step.find_docs.results.0.url}\\",\\"format\\":\\"extract\\",\\"focus\\":\\"the specific facts/figures you need\\"}","tag":"read_source"}`
+  `{"tool":"web_fetch","params":"{\"url\":\"${step.find_docs.results.0.url}\",\"format\":\"extract\",\"focus\":\"the specific facts/figures you need\"}","tag":"read_source"}`
   This is how research reads its sources — a news article, an analyst report, a paper. `extract` returns the matching text word for word, read across the whole page. For deep research, plan one fetch per top result (`results.0.url`, `results.1.url`, …): a URL you searched but never fetched is NOT a source you have read.
 
 **Read a source you are going to work from.** Documentation, a specification, a schema, a manual — anything whose exact wording you need because you are about to write something against it →
-  `{"tool":"web_fetch","params":"{\\"url\\":\\"${step.find_docs.results.0.url}\\",\\"format\\":\\"markdown\\"}","tag":"read_spec"}`
+  `{"tool":"web_fetch","params":"{\"url\":\"${step.find_docs.results.0.url}\",\"format\":\"markdown\"}","tag":"read_spec"}`
   `markdown` gives you the page as clean text. Use it when you do not yet know which part matters; use `extract` with a focus when you do. Do not reach for a format that keeps the page as it was sent — you get the top of the file, which is its markup and its navigation, not what it says.
   Every fetch also writes the whole page to disk and returns `full_content_path`. When what came back inline is not enough, do not fetch the page again — plan a step that reads or searches it: `${step.read_spec.full_content_path}`, which is the complete document.
 
 **Process a file with compute.** A file_read tagged `read_csv`; a compute that processes what it read →
-  `{"tool":"compute","params":"{\\"goal\\":\\"clean and rank rows\\",\\"mode\\":\\"shallow\\",\\"context.csv\\":\\"${step.read_csv.content}\\"}","tag":"rank_rows"}`
+  `{"tool":"compute","params":"{\"goal\":\"clean and rank rows\",\"mode\":\"shallow\",\"context.csv\":\"${step.read_csv.content}\"}","tag":"rank_rows"}`
 
 **Feed a URL into a shell command (niche — e.g. downloading a file).** A web_search tagged `find_media`; a bash step that needs the URL INSIDE a command →
-  `{"tool":"bash","params":"{\\"command\\":\\"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.find_media.results.0.url}'\\"}","tag":"download"}`
+  `{"tool":"bash","params":"{\"command\":\"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.find_media.results.0.url}'\"}","tag":"download"}`
 
 ## Where files go
 

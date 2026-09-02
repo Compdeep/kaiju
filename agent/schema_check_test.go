@@ -22,19 +22,28 @@ func TestStageSchemasAreEnforceableOrKnownNotToBe(t *testing.T) {
 		"coder(edit)":  true,
 		"coder(write)": true,
 		"curator":      true,
-		"group_review": true,
-		"debugger":     true,
-		"holmes":       true,
-		"observer":     true,
-		"plan":         true,
 		"preflight":    true,
 		"reflector":    true,
 		"route":        true,
 	}
-	// Nothing is open now. The map is kept rather than deleted: it is where a
-	// stage goes when its schema cannot be closed yet, and an empty one says
-	// there is no such stage rather than that nobody looked.
-	knownOpen := map[string]bool{}
+	// Every stage that carries a tool's params. They cannot be closed, because
+	// params is a map whose keys are whatever the named tool takes and strict
+	// requires every property declared.
+	//
+	// They were closed, by carrying params as a string. Measured on a live
+	// deployment before that was undone: params arrived as a string 1,680 times
+	// out of 1,680 — the type held perfectly — and 528 of those strings were
+	// wrong inside, where no schema reaches. The closure guaranteed the one
+	// thing that never failed, and cost the model four backslashes per
+	// backslash in any value carrying one, which is how a Windows path reached
+	// a tool broken.
+	knownOpen := map[string]bool{
+		"plan":         true,
+		"observer":     true,
+		"holmes":       true,
+		"debugger":     true,
+		"group_review": true,
+	}
 
 	a := newSchemaTestAgent(t)
 	seen := map[string]bool{}
@@ -65,57 +74,6 @@ func TestStageSchemasAreEnforceableOrKnownNotToBe(t *testing.T) {
 		if !seen[name] {
 			t.Errorf("%s is no longer a stage that asks for one shape — was it removed, or does it offer tools now?", name)
 		}
-	}
-}
-
-// The plan schema was the last one that could not be enforced, and the reason
-// is worth keeping: a step's params is a map whose keys are whatever the named
-// tool takes, and a strict decoder cannot express a map with undeclared keys.
-// Closing it would have forbidden the planner from passing any parameter.
-//
-// So params travels as a string holding the object. This test holds the shape
-// that made it closable, because the object form is the obvious thing for
-// someone to restore without knowing what it costs.
-func TestThePlanSchemaCarriesParamsAsAString(t *testing.T) {
-	a := newSchemaTestAgent(t)
-
-	var plan *StageSchema
-	for _, s := range a.StageSchemas() {
-		if s.Stage == "plan" {
-			cp := s
-			plan = &cp
-		}
-	}
-	if plan == nil {
-		t.Fatal("there is no plan stage")
-	}
-	if len(plan.Problems) > 0 {
-		t.Errorf("the plan schema stopped being enforceable:")
-		for _, p := range plan.Problems {
-			t.Errorf("    %s", p)
-		}
-	}
-
-	var schema struct {
-		Properties struct {
-			Steps struct {
-				Items struct {
-					Properties struct {
-						Params struct {
-							Type string `json:"type"`
-						} `json:"params"`
-					} `json:"properties"`
-				} `json:"items"`
-			} `json:"steps"`
-		} `json:"properties"`
-	}
-	raw := llm.SchemaAsSent(a.executivePlanSchema())
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		t.Fatalf("plan schema does not parse: %v", err)
-	}
-	if got := schema.Properties.Steps.Items.Properties.Params.Type; got != "string" {
-		t.Errorf("params is declared %q — as an object it is a map with undeclared keys, "+
-			"which reopens the schema and takes the enforcement with it", got)
 	}
 }
 

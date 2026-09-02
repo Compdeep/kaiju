@@ -160,7 +160,7 @@ func groupReviewSchema() llm.ToolDef {
 									"enum": ["retry", "correct", "give_up"],
 									"description": "retry: run it again unchanged. correct: run it again with the params below. give_up: no parameters will fix it."
 								},
-								"params": {"type": "string", "description": "Only when action is correct: the COMPLETE parameter object for the new call, as a JSON object written INSIDE A STRING, e.g. \"{\\\"first\\\": \\\"a\\\", \\\"second\\\": 2}\". Carry every parameter through, changing only what was wrong. Write \"\" for retry and give_up."},
+								"params": {"type": "object", "additionalProperties": true, "description": "Only when action is correct: the COMPLETE parameter object for the new call, e.g. {\"first\": \"a\", \"second\": 2}. Carry every parameter through, changing only what was wrong. Write {} for retry and give_up."},
 								"why": {"type": "string", "description": "What is wrong with this reply, in a few words."}
 							}
 						}
@@ -193,7 +193,7 @@ func observerSchema() llm.ToolDef {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string"},
-								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: \"{\\\"url\\\": \\\"${step.find_docs.results.0.url}\\\"}\"."},
+								"params": {"type": "object", "additionalProperties": true, "description": "The tool's parameters, as an object whose keys are the parameter names in that tool's signature, e.g. {\"path\": \"project/app/server.js\"}. Write {} for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: {\"url\": \"${step.find_docs.results.0.url}\"}."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
 							}
@@ -239,7 +239,7 @@ func holmesSchema() llm.ToolDef {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string", "description": "Tool name from the available tools list"},
-								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING. ALWAYS wrap them in params, never put fields at the action top level. Example for bash: \"{\\\"command\\\": \\\"cat .services/backend.err.log\\\"}\". Example for service: \"{\\\"action\\\": \\\"logs\\\", \\\"name\\\": \\\"backend\\\", \\\"stream\\\": \\\"err\\\"}\". Example for file_read: \"{\\\"path\\\": \\\"/path/to/file\\\"}\". Required params for the chosen tool MUST be present; write \"{}\" only for a tool that takes none."}
+								"params": {"type": "object", "additionalProperties": true, "description": "The tool's parameters, as an object whose keys are the parameter names in that tool's signature. ALWAYS wrap them in params, never put fields at the action top level. Example for bash: {\"command\": \"cat .services/backend.err.log\"}. Example for service: {\"action\": \"logs\", \"name\": \"backend\", \"stream\": \"err\"}. Example for file_read: {\"path\": \"/path/to/file\"}. Required params for the chosen tool MUST be present; write {} only for a tool that takes none."}
 							},
 							"required": ["tool", "params"]
 						}
@@ -299,7 +299,7 @@ func debuggerSchema() llm.ToolDef {
 							"type": "object",
 							"properties": {
 								"tool": {"type": "string"},
-								"params": {"type": "string", "description": "The tool's parameters as a JSON object written INSIDE A STRING, e.g. \"{\\\"path\\\": \\\"project/app/server.js\\\"}\". Write \"{}\" for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: \"{\\\"url\\\": \\\"${step.find_docs.results.0.url}\\\"}\"."},
+								"params": {"type": "object", "additionalProperties": true, "description": "The tool's parameters, as an object whose keys are the parameter names in that tool's signature, e.g. {\"path\": \"project/app/server.js\"}. Write {} for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: {\"url\": \"${step.find_docs.results.0.url}\"}."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
 							}

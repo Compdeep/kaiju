@@ -84,37 +84,6 @@ func TestOneStepShapedNameIsNotANestedStep(t *testing.T) {
 	}
 }
 
-/*
- * Every params example in the prompt has to parse as the JSON object it claims
- * to be.
- *
- * Four of the nine were double-escaped — `\\"` where `\"` was meant, the level
- * a Go source literal needs, reached the markdown unchanged — so the file
- * taught two escapings at once and the block labelled Examples was the wrong
- * one. Nothing fails when that happens: not a build, not a call, not a log.
- * Only a model reading it, and only the ones that cannot tell it is a mistake.
- */
-func TestEveryParamsExampleInThePromptParses(t *testing.T) {
-	src := promptsMarkdown(t)
-	re := regexp.MustCompile(`"params"\s*:\s*"((?:[^"\\]|\\.)*)"`)
-	found := 0
-	for _, m := range re.FindAllStringSubmatch(src, -1) {
-		raw := m[1]
-		if strings.HasPrefix(raw, "<") {
-			continue // a placeholder describing the shape, not an example of it
-		}
-		found++
-		unquoted := strings.ReplaceAll(raw, `\"`, `"`)
-		var obj map[string]any
-		if err := json.Unmarshal([]byte(unquoted), &obj); err != nil {
-			t.Errorf("params example does not parse: %s\n  %v", raw, err)
-		}
-	}
-	if found < 5 {
-		t.Fatalf("only %d params examples found; the pattern has drifted from the file", found)
-	}
-}
-
 // The prompt must not show a step inside params, which is what the planner was
 // doing and what one sentence of the prompt used to point at.
 func TestThePromptNeverShowsAStepInsideParams(t *testing.T) {

@@ -302,18 +302,18 @@ Reference a step by its **tag**, never by its position. Positions are counted fr
 **A step has exactly four keys**, and `params` is one of them:
 
 ```
-{"tool": "<tool name>", "params": "<JSON object as a string>", "tag": "<this step's name>", "depends_on": []}
+{"tool": "<tool name>", "params": {<the tool's parameters>}, "tag": "<this step's name>", "depends_on": []}
 ```
 
-`params` is a STRING holding the tool's own parameters as a JSON object — the parameter names in that tool's signature, and nothing else. Write the object and escape the quotes inside it. Write `"{}"` for a tool that takes none: never an empty string, never left out.
+`params` is an object holding the tool's own parameters — the parameter names in that tool's signature, and nothing else. Write `{}` for a tool that takes none: never left out.
 
 `tool`, `tag` and `depends_on` belong to the step. They never appear inside `params`. A `params` string that contains them is a step written inside a step, and it is REJECTED.
 
 Two steps, the second reading the first's output:
 
 ```
-{"tool": "web_search", "params": "{\"query\": \"solana explorer\"}", "tag": "find_docs"}
-{"tool": "web_fetch",  "params": "{\"url\": \"${step.find_docs.results.0.url}\"}", "tag": "read_docs"}
+{"tool": "web_search", "params": {"query": "solana explorer"}, "tag": "find_docs"}
+{"tool": "web_fetch",  "params": {"url": "${step.find_docs.results.0.url}"}, "tag": "read_docs"}
 ```
 
 No `depends_on` on either step. The reference is the wiring.
@@ -336,19 +336,19 @@ No `depends_on` on either step. The reference is the wiring.
 Each example below is ONE pattern — read the bold label to see which kind of task it is for, then copy the shape that matches yours.
 
 **Read a source you found (the usual web-research chain).** A web_search tagged `find_docs`; a fetch that reads one of its result URLs →
-  `{"tool":"web_fetch","params":"{\"url\":\"${step.find_docs.results.0.url}\",\"format\":\"extract\",\"focus\":\"the specific facts/figures you need\"}","tag":"read_source"}`
+  `{"tool":"web_fetch","params": {"url":"${step.find_docs.results.0.url}","format":"extract","focus":"the specific facts/figures you need"},"tag":"read_source"}`
   This is how research reads its sources — a news article, an analyst report, a paper. `extract` returns the matching text word for word, read across the whole page. For deep research, plan one fetch per top result (`results.0.url`, `results.1.url`, …): a URL you searched but never fetched is NOT a source you have read.
 
 **Read a source you are going to work from.** Documentation, a specification, a schema, a manual — anything whose exact wording you need because you are about to write something against it →
-  `{"tool":"web_fetch","params":"{\"url\":\"${step.find_docs.results.0.url}\",\"format\":\"markdown\"}","tag":"read_spec"}`
+  `{"tool":"web_fetch","params": {"url":"${step.find_docs.results.0.url}","format":"markdown"},"tag":"read_spec"}`
   `markdown` gives you the page as clean text. Use it when you do not yet know which part matters; use `extract` with a focus when you do. Do not reach for a format that keeps the page as it was sent — you get the top of the file, which is its markup and its navigation, not what it says.
   Every fetch also writes the whole page to disk and returns `full_content_path`. When what came back inline is not enough, do not fetch the page again — plan a step that reads or searches it: `${step.read_spec.full_content_path}`, which is the complete document.
 
 **Process a file with compute.** A file_read tagged `read_csv`; a compute that processes what it read →
-  `{"tool":"compute","params":"{\"goal\":\"clean and rank rows\",\"mode\":\"shallow\",\"context.csv\":\"${step.read_csv.content}\"}","tag":"rank_rows"}`
+  `{"tool":"compute","params": {"goal":"clean and rank rows","mode":"shallow","context.csv":"${step.read_csv.content}"},"tag":"rank_rows"}`
 
 **Feed a URL into a shell command (niche — e.g. downloading a file).** A web_search tagged `find_media`; a bash step that needs the URL INSIDE a command →
-  `{"tool":"bash","params":"{\"command\":\"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.find_media.results.0.url}'\"}","tag":"download"}`
+  `{"tool":"bash","params": {"command":"yt-dlp -o 'media/%(title)s.%(ext)s' '${step.find_media.results.0.url}'"},"tag":"download"}`
 
 ## Where files go
 
@@ -501,7 +501,7 @@ Call `submit_investigation`:
 {
   "reasoning": "<Holmes prose, ~200 words max>",
   "hypothesis": "<working theory, one line>",
-  "actions": [{"tool": "<name>", "params": "{\"key\": \"value\"}"}],
+  "actions": [{"tool": "<name>", "params": {"key": "value"}}],
   "conclude": false,
   "rca": null
 }
@@ -526,9 +526,9 @@ If the root cause is a PATTERN that likely repeats across sibling files (e.g. an
 
 ## Actions format
 
-Each action is `{"tool": "<name>", "params": "<the parameters as a JSON object, written INSIDE A STRING>"}`. Params MUST be inside `params` — top-level params are silently dropped, and `params` is a string, not an object. Example:
+Each action is `{"tool": "<name>", "params": {<the tool's parameters>}}`. Params MUST be inside `params` — top-level params are silently dropped. Example:
 
-{"actions": [{"tool": "file_read", "params": "{\"path\": \"project/myapp/package.json\"}"}, {"tool": "service", "params": "{\"action\": \"logs\", \"name\": \"frontend\", \"stream\": \"err\", \"lines\": 50}"}]}
+{"actions": [{"tool": "file_read", "params": {"path": "project/myapp/package.json"}}, {"tool": "service", "params": {"action": "logs", "name": "frontend", "stream": "err", "lines": 50}}]}
 
 === MICROPLANNER ===
 You are a debugging expert working in a clean room. A problem has been presented to you along with the project blueprint (intended structure) and workspace files (actual state).
@@ -550,7 +550,7 @@ Your job: turn a diagnosis into a complete, executable fix plan.
 - Plan ALL steps needed in one go: diagnostic reads, file fixes, service restarts, verification.
 - Chain steps with depends_on so they execute in order.
 - Use edit_file for code changes to a known file. task_files is REQUIRED and names the exact file(s) being edited — without it the step fails. edit_file handles both modifying existing files and creating new ones at a known path.
-  Example: {"tool":"edit_file","params":"{\"goal\":\"add CORS middleware to the express app\",\"task_files\":[\"project/myapp/backend/server.js\"]}"}
+  Example: {"tool":"edit_file","params": {"goal":"add CORS middleware to the express app","task_files":["project/myapp/backend/server.js"]}}
 - Use compute only for VALUE generation (not file edits) — analytics, calculations, derived data that downstream steps consume by referencing `${step.<this step's tag>.output}` inside the params string. Do NOT set blueprint_ref — it is managed automatically.
 - Use bash for shell commands that terminate (curl, mv, rm). Always prefix with "cd <project_dir> &&" — bare commands run in the workspace root, NOT the project directory. The actual project directory is in the Build System section of the Blueprint above — use it verbatim, do NOT invent directory names.
 - Use service for long-running processes (dev servers, daemons). The service tool requires an "action" field (one of: start, stop, restart, status, logs, list, remove). Required params for "start": name, command, workdir, port. Use whatever invocation form the project's domain skill specifies — domain skills are appended to this prompt and tell you the right command form for each ecosystem.
@@ -563,7 +563,7 @@ Your job: turn a diagnosis into a complete, executable fix plan.
 
 {
   "summary": "your diagnosis of the root cause",
-  "nodes": [{"tool":"...","params":"{}","depends_on":[],"tag":"..."}]
+  "nodes": [{"tool":"...","params": {},"depends_on":[],"tag":"..."}]
 }
 
 Output ONLY the JSON, no commentary.
@@ -576,7 +576,7 @@ Output JSON:
 {
   "action": "continue|inject|cancel|reflect",
   "reason": "brief explanation",
-  "nodes": [{"tool":"...","params":"{}","depends_on":[],"tag":"..."}],
+  "nodes": [{"tool":"...","params": {},"depends_on":[],"tag":"..."}],
   "cancel": ["tag1", "tag2"]
 }
 

@@ -42,8 +42,11 @@ type groupReview struct {
 type unusableReply struct {
 	Tag    string `json:"tag"`
 	Action string `json:"action"` // "retry", "correct", "give_up"
-	Params string `json:"params"` // a JSON object in a string, when Action is "correct"
-	Why    string `json:"why"`
+	// Params is the corrected call's parameters, when Action is "correct". An
+	// object, because the schema now declares one — the string form is still
+	// read, for a model that sends it anyway.
+	Params json.RawMessage `json:"params"`
+	Why    string          `json:"why"`
 }
 
 /*
@@ -209,8 +212,8 @@ func (a *Agent) applyGroupReview(graph *Graph, group []*Node, out groupReview) i
 			}
 			continue
 		case "correct":
-			params := map[string]any{}
-			if err := ParseLLMJSON(u.Params, &params); err != nil || len(params) == 0 {
+			params, err := objectFromRaw(u.Params)
+			if err != nil || len(params) == 0 {
 				log.Printf("[dag] group review's correction for %s does not parse, leaving it failed: %v", u.Tag, err)
 				continue
 			}

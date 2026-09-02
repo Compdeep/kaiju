@@ -277,16 +277,22 @@ var planStepFields = func() map[string]bool {
 func (s *PlanStep) UnmarshalJSON(data []byte) error {
 	// params arrives one of two ways and both are decoded here.
 	//
-	// As an object, which is what a tool call carries and what Anthropic still
-	// sends. And as a STRING holding that object, which is what the schema now
-	// declares — a step's params is a map whose keys are whatever the named
-	// tool takes, and a strict decoder cannot express a map with undeclared
-	// keys. Carrying it as a string is what closes the schema, at the cost of
-	// the model writing one level of escaping.
+	// As an object, which is what the schema declares and what a tool call
+	// carries. And as a STRING holding that object, which the schema used to
+	// declare: a step's params is a map whose keys are whatever the named tool
+	// takes, and a strict decoder cannot express a map with undeclared keys, so
+	// carrying it as a string was what closed the schema.
 	//
-	// The string is unwrapped before the fields decode rather than after,
-	// because the decode below would otherwise refuse it outright: a string
-	// where a map is expected is an error, not an empty map.
+	// It cost more than it closed. Measured on the model in use, asked for a
+	// string: six replies out of six held something that was not JSON at all —
+	// pid=12612 — while the same model asked for an object returned the object
+	// correctly six times out of six. The type was enforced and its contents
+	// never were, which is the half that carries the meaning.
+	//
+	// The string is still read, because a model sends what it sends and older
+	// ones were taught this. It is unwrapped before the fields decode rather
+	// than after, because the decode below would otherwise refuse it outright:
+	// a string where a map is expected is an error, not an empty map.
 	rest, fromString, err := unwrapStringParams(data)
 	if err != nil {
 		return err
@@ -805,7 +811,7 @@ var executivePlanSchemaTemplate = `{
 				"properties": {
 					"type":       {"type": "string", "enum": ["tool","compute"], "description": "Node type: tool (default) or compute (LLM code generation)"},
 					"tool":       {"type": "string", "description": "Tool name from the Tools list"},
-					"params":     {"type": "string", "description": "The tool's input parameters, as a JSON object written INSIDE A STRING. Example: \"{\\\"query\\\": \\\"search terms\\\"}\". ALWAYS populate for tools with required params marked *; write \"{}\" when the tool takes none, never an empty string. A value is either something you have — \"{\\\"command\\\": \\\"ls -la\\\"}\" — or a REFERENCE to an earlier step's output, written ${step.<that step's tag>.<dot-path into its output>}. Example: a fetch reading the first result of a search tagged find_docs is \"{\\\"url\\\": \\\"${step.find_docs.results.0.url}\\\"}\"."},
+					"params":     {"type": "object", "additionalProperties": true, "description": "The tool's input parameters, as an object whose keys are the parameter names in that tool's signature. ALWAYS populate for tools with required params marked *; write {} when the tool takes none. A value is either something you have — {\"command\": \"ls -la\"} — or a REFERENCE to an earlier step's output, written ${step.<that step's tag>.<dot-path into its output>}. Example: a fetch reading the first result of a search tagged find_docs is {\"url\": \"${step.find_docs.results.0.url}\"}."},
 					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Rarely needed. A step that references another already depends on it, and the wiring is done for you. Use this ONLY to order two steps that pass no data between them."},
 					"tag":        {"type": "string", "description": "This step's name, unique within the plan: letters, digits, _ or - with no spaces. Other steps reference this step by it."}
 				}
@@ -840,7 +846,7 @@ func (a *Agent) executivePlanSchema() llm.ToolDef {
 		Type: "function",
 		Function: llm.FunctionDef{
 			Name:        "plan",
-			Description: `Submit an execution plan. params is a STRING holding a JSON object. Example: {"steps":[{"tool":"web_search","params":"{\"query\":\"bitcoin price\"}","tag":"find_price"}]}. Chaining — the second step REFERENCES the first by its tag, and that is the whole wiring: {"steps":[{"tool":"web_search","params":"{\"query\":\"news\"}","tag":"find_news"},{"tool":"web_fetch","params":"{\"url\":\"${step.find_news.results.0.url}\"}","tag":"read_news"}]}. Trivial: {"steps":[],"answer":"Paris."}`,
+			Description: `Submit an execution plan. A step is {tool, params, tag, depends_on}, and params is an object holding that tool's own parameters. Example: {"steps":[{"tool":"web_search","params":{"query":"bitcoin price"},"tag":"find_price"}]}. Chaining — the second step REFERENCES the first by its tag, and that is the whole wiring: {"steps":[{"tool":"web_search","params":{"query":"news"},"tag":"find_news"},{"tool":"web_fetch","params":{"url":"${step.find_news.results.0.url}"},"tag":"read_news"}]}. Trivial: {"steps":[],"answer":"Paris."}`,
 			Parameters:  schema,
 		},
 	}

@@ -52,7 +52,7 @@ func prefixAssistantHistory(history []llm.Message) []llm.Message {
  */
 func compileToolIndex(registry *toolapi.Registry, names []string) string {
 	var sb strings.Builder
-	sb.WriteString("## Tools (* = required param)\n")
+	sb.WriteString("## Tools (* = required param, name: a|b|c = the only values that parameter takes)\n")
 	sb.WriteString("The parameters shown for each tool are the only ones available — use only the parameters listed.\n")
 	for _, name := range names {
 		sb.WriteString(toolIndexEntry(registry, name))
@@ -114,8 +114,9 @@ func toolIndexEntrySize(registry *toolapi.Registry, name string) int {
  * conditionalRequirementLines states those rules alongside the signature; the
  * two are written together and must stay together, because the dispatcher
  * enforces both.
- * desc: Parses the tool's parameter JSON schema and produces "query*, max_results"
- *       where * marks required params.
+ * desc: Parses the tool's parameter JSON schema and produces "max_results, query*"
+ *       where * marks required params, and "action*: ping|resolve" for a
+ *       parameter whose schema names the values it accepts.
  * param: schema - raw JSON parameter schema
  * return: comma-separated parameter signature string
  */
@@ -123,6 +124,7 @@ func compactParamSignature(schema json.RawMessage) string {
 	var s struct {
 		Properties map[string]struct {
 			Type string `json:"type"`
+			Enum []any  `json:"enum"`
 		} `json:"properties"`
 		Required []string `json:"required"`
 	}
@@ -135,15 +137,62 @@ func compactParamSignature(schema json.RawMessage) string {
 		reqSet[r] = true
 	}
 
-	var parts []string
+	names := make([]string, 0, len(s.Properties))
 	for name := range s.Properties {
+		names = append(names, name)
+	}
+	// Map order is not stable in Go, so the same tool rendered twice produced
+	// two different signatures and the prompt differed run to run.
+	slices.Sort(names)
+
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		part := name
 		if reqSet[name] {
-			parts = append(parts, name+"*")
-		} else {
-			parts = append(parts, name)
+			part += "*"
 		}
+		if vals := valueList(s.Properties[name].Enum); vals != "" {
+			part += ": " + vals
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, ", ")
+}
+
+/*
+ * valueList renders the values a parameter accepts, as ping|resolve|sockets.
+ *
+ * A parameter that takes one of a fixed set was shown as a bare name, so the
+ * planner had to invent the word: network_diag names four actions in its schema
+ * and the planner wrote "connectivity", three steps of one plan rejected at run
+ * time with nothing gathered. The values are in the schema and cost a few words
+ * to carry, so they are carried.
+ *
+ * Nothing is elided, however many there are. A value left out is a value the
+ * planner has to guess at, which is the condition this exists to end.
+ *
+ * param: enum - the schema's enum for one property, nil when it declares none
+ * return: the values joined by |, or "" when there are none
+ */
+func valueList(enum []any) string {
+	if len(enum) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(enum))
+	for _, v := range enum {
+		if str, ok := v.(string); ok {
+			out = append(out, str)
+			continue
+		}
+		// A number or a boolean, written the way the schema holds it so the
+		// planner copies it back in a form the dispatcher accepts.
+		b, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		out = append(out, string(b))
+	}
+	return strings.Join(out, "|")
 }
 
 // conditionalRequirementLines states the rules a signature cannot carry, in the

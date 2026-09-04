@@ -153,6 +153,37 @@ and preserved every identifier verbatim.
   thinking), gemma-3-12b (starves at 16 tokens), gemini-flash-lite & llama-3.1-8b
   (70%, over/under-escalate).
 
+## Phase C — PLANNER fit (2026-09-04)
+
+The router and the executor force a call inside 16 and 256 tokens, and this bench
+measured those. The planner is the third forced call and a different shape: one
+`plan()` call whose arguments are the whole plan, capped by `agent.maxTokens`.
+A model can pass Phase A and still be unable to finish a plan.
+
+Measured against a real failing run's planner prompt — 73,695 characters, the
+same strict `plan` schema the engine sends, `max_tokens` 4096, temperature 0.3,
+three samples each, replayed outside the product:
+
+| model | complete | finish | completion tokens | latency |
+|---|---|---|---|---|
+| `qwen/qwen3-32b` | 3/3 | `stop` | 1401, 3160, 1434 | 75s, 79s, 206s |
+| `qwen/qwen3-30b-a3b-instruct-2507` | 0/3 | `length` | 4096, 4096, 4096 | 54s, 62s, 54s |
+
+qwen3-32b is a thinking model and fails the 16-token ROUTE budget for the reason
+this whole document is about, but it writes a plan in a third of the budget and
+stops on its own. It carries `tool_call_ok: true` and `roles: ["answer","planner"]`
+on that measurement — not router, not executor, where nothing here tested it.
+
+qwen3-30b-a3b-instruct runs the cap out exactly, every time, and its JSON is cut
+mid-string. That is not a rate or a tail: on this prompt it is certain. The
+executive asks once for a shorter plan when it sees `finish_reason: "length"`;
+a second overrun has no branch, and the run ends with no plan at all.
+
+The cost of 32b is in the third column. 206 seconds against 54 is where a
+gateway's own timeout lands, and a deployment running it saw 36% of its calls
+come back as aborted 504s. Neither model is free: one overruns the cap, the
+other overruns the clock.
+
 ## Future option: a dedicated classifier (BERT)
 
 The ROUTE decision is a 3-way classification — architecturally a perfect fit for a

@@ -265,6 +265,30 @@ with **no forced tool calls**, so a reasoning/thinking model is a perfectly good
 (often better) choice here — unlike the planner, executor, and router lanes, which
 need reliable tool-callers. Empty ⇒ the reasoning lane writes the answer too.
 
+#### When a lane's model cannot drive it
+
+The catalog (`models/models.json`) records two things per model that decide
+this: `thinking`, and `tool_call_ok` — whether it reliably emits a SMALL forced
+tool call. `llm.model`, `executor.model` and `agent.route_model` all force one,
+so a model failing either flag returns empty or times out on those lanes.
+`agent.answer_model` is exempt, for the reason above.
+
+The model pickers filter on those flags, but a config file and a custom endpoint
+reach the lanes without passing a picker. So the check runs at load and names any
+lane whose model the catalog says cannot drive it:
+
+```
+[config] llm.model (the planner, Holmes and the ReAct loop) is set to
+qwen/qwen3-32b, which reasons before it answers. This lane forces a tool call
+inside a small reply budget, so the reasoning consumes the budget and the call
+returns empty or times out.
+```
+
+It warns and does not refuse. The catalog is curated rather than exhaustive, so
+an id it does not carry is the ordinary case for a self-hosted endpoint, and a
+daemon that will not start over a name it does not recognise is worse than one
+that says what it thinks.
+
 #### `agent.intents`
 
 Seeds the intent registry on **first run only**. Once the DB has any `intents`

@@ -139,6 +139,37 @@ Four rules, each with a reason:
   system message is a caller talking to the model directly, and this package
   does not edit that.
 
+## What the provider says went wrong
+
+Two failures used to arrive as silence, and silence is read by every caller as
+an answer it could not use.
+
+**A 200 that carries an error.** An OpenAI-compatible gateway answers an
+upstream failure, a rate limit or a filtered request with HTTP 200, an empty
+`choices` list, zero usage, and an `error` object as the only account of it.
+That object was not decoded, so a caller saw a reply with no choices and no
+reason, and the trace recorded an empty response with nothing against it —
+6.9% of one deployment's planning calls, each abandoning a run.
+`ChatResponse.Error` is decoded now and returned as the error it is, so the
+caller and the trace both say what the provider said. A 200 with no choices and
+no error object carries a bounded slice of the body instead, because the body is
+then the only evidence and it is unrecoverable after the fact.
+
+**A provider that has stopped answering.** Every one of those calls is billed
+for what the model generated before it was abandoned, returns nothing, and the
+caller's retry sends the same work again: 46 of 57 calls in three hours on one
+deployment, 1.15M tokens of which roughly 40% was paid for and thrown away. Ten
+consecutive upstream failures open a breaker (`agent/llm/breaker.go`), after
+which requests fail fast with `ErrProviderUnavailable` — which a caller can tell
+from a failure of its own, because nothing was sent, so nothing was billed and
+nothing about its prompt is implicated. Five minutes later exactly one request
+is allowed through and its outcome decides, so a provider still down costs one
+call per cooldown rather than one per caller.
+
+Only the provider's own failures count toward it. A truncated reply, an answer
+that will not parse, a model that ignored the schema — those are answers, and a
+run of bad ones must not stop every caller from asking.
+
 ## The trace
 
 The door writes one `LLMTrace` per send. It already holds seven of the fields —

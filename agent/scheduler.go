@@ -1041,12 +1041,33 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// their own turn, so the graph settles one node at a time
 				// without a prune, which the failure path below deliberately
 				// does not do either.
+				//
+				// A blocked node is NOT work. workSinceReflection is what the
+				// loop reads to decide whether anything new is worth reflecting
+				// on, and this node never ran — it produced no result, no error
+				// of its own, and nothing the reflector has not already seen in
+				// the failure that blocked it.
+				//
+				// Counting it here spent a reflection per blocked node. The
+				// comment above is the mechanism: dependents settle one at a
+				// time rather than in a prune, so each one drove inflight to
+				// zero on its own, passed the "work happened" guard on its own,
+				// and injected its own reflector — three in a row on a live run
+				// whose plan had four unreadable files, each an LLM call and a
+				// budget node re-reading evidence that had not changed.
+				//
+				// Not counting it does not lose the final reflection. The
+				// failure that caused the block counts (below), so the batch
+				// still reflects; and a block that settles alone after a
+				// reflection has, by construction, nothing new to report — the
+				// loop breaks and the aggregator writes the answer from the
+				// graph, which is where an empty ReflectionOutcome already
+				// leads.
 				var blocked *blockedByDep
 				if errors.As(comp.Err, &blocked) {
 					log.Printf("[dag] node %s (%s) never ran: %v", comp.NodeID, node.ToolName, comp.Err)
 					graph.SetBlocked(comp.NodeID, comp.Err)
 					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "BLOCKED", errMsg)
-					workSinceReflection++
 					a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: comp.NodeID, Node: graph.SnapshotNode(comp.NodeID)})
 					launchReady()
 					continue

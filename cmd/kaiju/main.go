@@ -230,6 +230,18 @@ func runConfigCmd() {
 }
 
 func loadConfig() *config.Config {
+	cfg := findConfig()
+	// Every lane's model is checked once, here, because a config file and a
+	// custom endpoint both reach the lanes without passing a model picker — and
+	// the pickers are the only other place these two catalog fields are read.
+	for _, w := range cfg.ModelLaneWarnings() {
+		log.Printf("[config] %s", w)
+	}
+	return cfg
+}
+
+// findConfig locates and loads the config, falling back to defaults + env vars.
+func findConfig() *config.Config {
 	// Check for --config flag
 	configPath := ""
 	for i, arg := range os.Args {

@@ -144,3 +144,22 @@ func Limits(id string) (contextTokens, maxOutputTokens int) {
 	}
 	return 0, 0
 }
+
+/*
+ * Find returns the catalog entry for a model id.
+ * desc: The catalog is curated rather than exhaustive, so false means the list
+ *       has never heard of the id — a self-hosted model, or one newer than the
+ *       list — and not that the id is wrong. A caller deciding whether to
+ *       complain has to tell those two apart, which is why this reports both
+ *       the entry and whether there was one.
+ * param: id - the model id as configured for a lane, e.g. "qwen/qwen3-32b".
+ * return: the entry and true, or the zero Info and false.
+ */
+func Find(id string) (Info, bool) {
+	for _, m := range all {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return Info{}, false
+}

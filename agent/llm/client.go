@@ -389,6 +389,13 @@ func (c *Client) setAuthHeaders(req *http.Request) {
 // Complete sends a chat completion request and returns the response.
 // Routes to the appropriate provider backend.
 func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
+	// Nothing is sent while the provider is failing every request. An upstream
+	// failure is billed for whatever the model generated before it was
+	// abandoned, and the caller's retry sends the same work again — see
+	// breaker.go for what that cost on one deployment.
+	if err := providerBreaker.allow(); err != nil {
+		return nil, err
+	}
 	c.capReply(req)
 
 	// A stage asking for one shape gets the wire that enforces it, and gets its
@@ -419,6 +426,13 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 	if err == nil && resp != nil {
 		asToolReply(resp, replaced)
 		tokens.AddSplit(ctx, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+	}
+	// A reply that arrived says the provider is answering, whatever the model
+	// put in it; only the provider's own failures count against it.
+	if upstream, reason := upstreamFailure(err); upstream {
+		providerBreaker.failed(reason)
+	} else if err == nil {
+		providerBreaker.succeeded()
 	}
 	// The same chokepoint, for observation rather than accounting. Fires on
 	// failure too, so an embedding application logging calls sees the ones

@@ -169,15 +169,27 @@ chat boundary (see `docs/memory.md`).
 | `file_write` | Byte-writer: write `content` to `path`. No LLM — use when the exact bytes are in hand. |
 | `compute` | Generate a VALUE via a runnable script (shallow) or scaffold a project (deep); shallow captures stdout on `.output`. *(config-gated: `tools.compute.enabled && !agent.disable_coding`.)* |
 | `edit_file` | Edit/create a known file via the Coder LLM; `task_files` required. *(same coding gate.)* |
-| `debug` | The REPAIR super-tool — grafts Holmes RCA → microplanner fix → validators. Write-capable, so gated like `compute`. *(same coding gate.)* See `docs/graph.md`. |
+| `debug` | The DIAGNOSIS door — grafts Holmes, which forms and tests a hypothesis and names a root cause. `Observe`, because Holmes only reads. The microplanner fix behind it is gated separately, at dispatch, against the rank `compute` needs — so a run below it gets the cause and no fix. *(same coding gate.)* See `docs/graph.md`. |
 | `archive` | Create / extract / list zip and tar.gz archives. |
 | `plugin_enable` | Switch on a built-in-but-off plugin, making its tools live immediately. *(config-gated: `allow_runtime_plugin_activation`.)* Audited. |
 | `plugin_option` | Set and persist a plugin config option (e.g. the remote plugin host URL). *(config-gated: `allow_runtime_plugin_activation`.)* |
 
 `compute`, `edit_file`, and `debug` are agent-bound — they drive LLM lanes, so
 they are constructed with the `*Agent` and dispatched via `ExecuteWithContext`
-rather than plain `Execute`. `debug`'s impact is `Affect` because its
-microplanner fix edits files.
+rather than plain `Execute`.
+
+`debug`'s impact is `Observe`, not `Affect`. What the tool itself does is read:
+Holmes gathers evidence and names a cause. The write is the microplanner behind
+it, and that is gated where it is dispatched — `dispatchMicroplannerWithRCA`
+resolves the rank `compute` needs and declines when the run is below it, leaving
+the root cause as the result.
+
+It was `Affect`, which priced the diagnosis at the cost of the repair. Two things
+followed. An investigation at observe rank could not plan a `debug` step at all,
+so the one stage that forms and tests a hypothesis was unreachable on exactly
+the runs that needed it. And the reflector — whose tool section IS rank-filtered,
+unlike the Executive's — could not see the tool it is meant to steer a re-plan
+towards.
 
 ### Control (`ImpactControl`)
 

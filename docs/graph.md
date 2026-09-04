@@ -48,17 +48,22 @@ Every kaiju investigation is a DAG. Components emit nodes, the scheduler fires t
                     ┌─────────────────────┴─────────────────────┐
                     │ a SUCCESS revealed the next move → new     │
                     │   steps                                    │
-                    │ a step FAILED → the Executive plans a      │
+                    │ a step FAILED, or an OBSERVATION is        │
+                    │   unexplained → the Executive plans a      │
                     │   `debug` step ↓                           │
                     └─────────────────────┬─────────────────────┘
                                           ▼
                                    ┌──────────────┐
-                                   │ debug (tool) │  scheduler grafts Holmes →
+                                   │ debug (tool) │  Observe — scheduler grafts Holmes →
                                    └──────┬───────┘
                                           ▼
                                    ┌──────────────┐
-                                   │   Holmes     │  read-only root-cause of the FAILED step
-                                   └──────┬───────┘
+                                   │   Holmes     │  read-only root cause: hypothesis,
+                                   └──────┬───────┘  test, revise, name the cause
+                                          │
+                        rank ≥ compute's? ─┤
+                              no ──────────┴─▶ the RCA is the result; the run concludes on it
+                              yes
                                           ▼
                                    ┌──────────────┐
                                    │ Microplanner │  RCA → fix steps (grafted onto Graph)
@@ -66,6 +71,12 @@ Every kaiju investigation is a DAG. Components emit nodes, the scheduler fires t
 ```
 
 Repair is not a separate lane. A failure flows through the *same* door as an expansion: the reflector returns `replan`, the Executive plans a `debug` super-tool step, and when that node resolves the scheduler grafts the first Holmes iteration onto it. There is no `investigate → Holmes → Debugger` shortcut anymore.
+
+**Diagnosis and repair are priced separately.** `debug` is `ImpactObserve`, because Holmes only reads. The repair is gated at dispatch instead: `dispatchMicroplannerWithRCA` resolves the rank `compute` needs through the intent registry — the same resolver the execution gate uses, so the two cannot drift — and declines below it, leaving the root cause as the run's result. That is the same shape as the guard beside it, which declines when `compute` is out of the caller's scope.
+
+The alternative, pricing the diagnosis at the cost of the repair, put Holmes out of reach of every observe-rank run and hid `debug` from the reflector, whose tool section is rank-filtered (`toolSectionLines`) where the Executive's deliberately is not.
+
+**A failed step is not the only thing worth diagnosing.** An observation the evidence does not account for — an actor touching a target it has no obvious reason to touch, matching neither a benign shape nor a malicious one — is the other. Reaching for more of the same evidence does not settle that; forming a hypothesis about the mechanism and testing it does, and the mechanism is usually mundane and local: a daemon's PAM stack, a package's post-install hook, a service's own maintenance timer. An absence of evidence is not this case — a step that failed for permissions, or a host that was unreachable, is a `conclude`.
 
 ## Graph data model
 
@@ -177,7 +188,7 @@ Reflection *timing* depends on the DAG mode (`dag.go`: `DAGModeReflect` / `DAGMo
 
 The Scheduler also owns:
 - **Budget** (`MaxNodes`, `MaxLLMCalls`, plus replan/debug round caps `maxReplans` / `maxInvestigations`). Each LLM-bearing node decrements. Exhaustion prunes downstream work.
-- **Graft hooks** — the architect's compute output spawns setup/coder/execute/service nodes as children; a service start spawns an auto-grafted health check; a resolved **`debug`** node grafts the first Holmes iteration (`spawnFirstHolmes`); a concluded Holmes grafts the **microplanner**, whose fix steps are grafted in turn (and validators are re-grafted after them).
+- **Graft hooks** — the architect's compute output spawns setup/coder/execute/service nodes as children; a service start spawns an auto-grafted health check; a resolved **`debug`** node grafts the first Holmes iteration (`spawnFirstHolmes`); a concluded Holmes grafts the **microplanner** *when the run's rank reaches what `compute` needs*, whose fix steps are grafted in turn (and validators are re-grafted after them) — below that rank the graft is declined and Holmes's RCA stands as the result.
 - **Cascade prune** — when a node fails and no debug cycle recovers it, its dependent subtree is marked `StateSkipped` so the reflector knows those results never exist.
 - **Diminishing-returns brake** — two consecutive reflector `diminishing` rounds downgrade a `replan` to `conclude`, so debug/expand batches stop being spawned when fixes aren't moving the answer forward.
 
@@ -222,7 +233,7 @@ Decisions steer the scheduler:
 - **continue** — work is still in flight; let the current plan finish.
 - **replan** — the graph needs to GROW and the goal isn't answered yet. Two shapes, same decision:
   - *a success revealed the next move* — e.g. searches returned URLs → "fetch the 3 URLs the searches surfaced".
-  - *a step FAILED and needs fixing* — describe the failure (exact error text, file paths, module names) in `next`. The Executive then plans a `debug` step; the reflector names the move, the Executive plans HOW.
+  - *a step FAILED and needs fixing, or an OBSERVATION is unexplained* — describe it in `next`: the exact error text, file paths and module names for a failure; the actor, target and what has already been ruled out for an observation the evidence does not account for. The Executive then plans a `debug` step; the reflector names the move, the Executive plans HOW.
 - **conclude** — the goal is met, OR the request is too vague/underspecified to act on (ask the user to clarify instead of guessing). If `aggregate=false` the reflector's `verdict` is the final answer verbatim; if `aggregate=true` the Aggregator runs. A `conclude` stands: nothing overrules it. What the reflector is holding and never followed is reported to it in the block the reframe prepends, and the decision is its own.
 
 The prompt leans hard on the anti-hallucination rule: conclude ONLY when the evidence *answers* the goal — an unfetched URL or an un-followed lead is `replan`, never a confident guess from memory. Transient tool output (empty fetch, HTTP 5xx, timeout, rate limit), out-of-scope failures, and truly-unfixable environment failures are `conclude`, not `replan` — they don't belong in the debugger.

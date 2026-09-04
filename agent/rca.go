@@ -262,6 +262,25 @@ func dispatchMicroplannerWithRCA(ctx context.Context, a *Agent, graph *Graph, bu
 		return "", nil
 	}
 
+	// The same question asked of the run's rank rather than its scope. A repair
+	// writes: the microplanner grafts compute steps and those steps edit files.
+	// A run below the rank compute needs is a run that asked to be told what is
+	// wrong, not to have it changed — and dispatching anyway spends a stage to
+	// arrive at a gate refusal, which reaches the reflector as a failed step
+	// rather than as an answer.
+	//
+	// Resolved through the intent registry rather than compared against a
+	// constant, so this and the execution gate cannot come to different
+	// conclusions about the same tool: an operator who pins compute to another
+	// rank moves both at once.
+	if computeTool, ok := a.registry.Get(computeToolName); ok {
+		if required := a.intentRegistry.ResolveToolIntent(computeToolName, computeTool, nil); required > int(intent) {
+			log.Printf("[dag] holmes concluded at %s; the repair needs rank(%d), so the root cause is the result",
+				intent, required)
+			return "", nil
+		}
+	}
+
 	if !budget.TrySpawnNode("", true) {
 		return "", fmt.Errorf("no budget for microplanner")
 	}

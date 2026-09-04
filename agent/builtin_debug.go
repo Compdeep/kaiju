@@ -47,22 +47,35 @@ func NewDebugTool(a *Agent) *DebugTool { return &DebugTool{agent: a} }
 func (d *DebugTool) Name() string { return debugToolName }
 
 func (d *DebugTool) Description() string {
-	return "Diagnose and FIX a failed step. Spawns Holmes (a read-only root-cause investigator), " +
-		"then a clean-room debugger plans and applies the fix, then validators confirm it. " +
-		"Use this ONLY when a prior step FAILED and the failure is inside the agent's control — " +
-		"pass the exact error text, file paths, and module names in `problem`. " +
+	return "Find the ROOT CAUSE of something this run cannot account for. Spawns Holmes, a " +
+		"read-only investigator that forms a hypothesis, tests it with its own tool calls, and " +
+		"revises it until the cause is established. Two things qualify: a step that FAILED, and " +
+		"an OBSERVATION the evidence does not explain — a process touching a file it has no " +
+		"obvious reason to touch, an actor that matches no benign shape and no malicious one " +
+		"either. Pass what you cannot explain in `problem`, with the exact error text, file " +
+		"paths, process names and pids you already have. " +
 		"Do NOT use it for transient errors (timeouts, HTTP 5xx, rate limits, empty results) — " +
-		"those are retried, not diagnosed — or when nothing actually failed. " +
+		"those are retried, not diagnosed — or when the evidence already answers the question. " +
 		"Where a fix would need privileges or would change the machine beyond this run, say so in " +
 		"`problem` and plan it anyway: the gate decides whether it may proceed, and knowing the cause " +
-		"is worth having either way. One debug step per failure — plan it as a " +
-		"leaf; the next re-plan handles follow-on work once the fix lands."
+		"is worth having either way. One debug step per question — plan it as a " +
+		"leaf; the next re-plan handles follow-on work once the cause is known."
 }
 
 func (d *DebugTool) Impact(params map[string]any) int {
-	// Write-capable: the microplanner fix edits files. IGX gates it like
-	// compute so lanes below the required clearance can't invoke it.
-	return toolapi.ImpactAffect
+	// What this tool itself does is read: Holmes gathers evidence and names a
+	// cause. The write is the microplanner behind it, and that is gated where it
+	// is dispatched (dispatchMicroplannerWithRCA) against the rank compute
+	// needs — so a run below that rank still gets the diagnosis and simply does
+	// not get the fix.
+	//
+	// It was Affect, which gated the diagnosis on the cost of the repair. Two
+	// things followed. An investigation at observe rank could not plan a debug
+	// step at all, so the one stage in the engine that forms and tests a
+	// hypothesis was unreachable on exactly the runs that needed it. And the
+	// reflector, whose tool section IS filtered by rank (toolSectionLines),
+	// could not see the tool it is supposed to steer a re-plan towards.
+	return toolapi.ImpactObserve
 }
 
 var debugParamSchema = json.RawMessage(`{

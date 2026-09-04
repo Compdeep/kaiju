@@ -17,8 +17,12 @@ func TestDebugTool_Envelope(t *testing.T) {
 	if d.Name() != debugToolName {
 		t.Fatalf("Name() = %q, want %q", d.Name(), debugToolName)
 	}
-	if d.Impact(nil) != toolapi.ImpactAffect {
-		t.Fatalf("Impact = %d, want ImpactAffect (%d) — debug fixes edit files", d.Impact(nil), toolapi.ImpactAffect)
+	// The tool itself reads: Holmes gathers and names a cause. The write is the
+	// microplanner behind it, gated where it is dispatched. Ranked at Affect,
+	// the diagnosis cost what the repair costs, and the reflector — whose tool
+	// section is rank-filtered — could not see the tool at observe rank.
+	if d.Impact(nil) != toolapi.ImpactObserve {
+		t.Fatalf("Impact = %d, want ImpactObserve (%d) — the fix is the microplanner's and is gated at dispatch", d.Impact(nil), toolapi.ImpactObserve)
 	}
 
 	msg, err := d.ExecuteTyped(context.Background(), map[string]any{"problem": "boom at x.go:3"})

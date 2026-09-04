@@ -811,10 +811,16 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	replanCount := 0
 	schedulerStart := time.Now()
 	// diminishingStreak tracks consecutive reflector passes that reported
-	// progress=diminishing. Two in a row downgrades the current decision
-	// from "replan" to "conclude" so we don't spawn fresh debug/expand batches
-	// when work isn't moving the needle.
+	// progress=diminishing OR progress=stuck. Two in a row downgrades the
+	// current decision from "replan" to "conclude" so we don't spawn fresh
+	// debug/expand batches when work isn't moving the needle.
 	diminishingStreak := 0
+	// stuckBiasApplied records that one replan has already been pointed at a
+	// diagnosis. Once per run: the point is to stop a stuck run reaching for
+	// more of the same evidence, and a run that has already been told once and
+	// is still stuck does not need telling again — Holmes firing on every
+	// stuck pass is its own kind of spinning.
+	stuckBiasApplied := false
 	// debuggerInflight is declared above (alongside other top-level state)
 	// so injectBatchReflection can close over it.
 
@@ -1433,17 +1439,36 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					log.Printf("[dag] reflection parse failed, continuing: %v", parseErr)
 					graph.SetResult(comp.NodeID, comp.Result)
 				} else {
-					// Progress classification brake — only "diminishing" has
-					// scheduler-visible effect. Two consecutive diminishing
-					// batches downgrade investigate/replan→conclude so Holmes
-					// cycles stop spawning and the graph stops expanding when
-					// work isn't moving the needle. Empty / unknown /
-					// "productive" resets the streak.
+					// Progress classification brake. Two consecutive batches
+					// reporting diminishing OR stuck downgrade replan→conclude,
+					// so debug/expand batches stop being spawned when work is
+					// not moving the needle. Empty / unknown / "productive"
+					// resets the streak.
+					//
+					// "stuck" used to be in neither case and fell to the
+					// default, which RESETS the streak — so a reflector
+					// reporting that it could not get further cleared the brake
+					// that would have stopped the run, and a stuck pass bought
+					// more expansion than a productive one.
+					//
+					// It also earns one nudge. A stuck run reaching for more of
+					// the same evidence is the shape that ends inconclusive; the
+					// move that changes the outcome is to name what cannot be
+					// explained and let Holmes form a hypothesis about it. That
+					// is a `debug` step, and only the executive can plan one, so
+					// the bias goes into the replan's `next` rather than
+					// replacing the decision — replan stays the door.
 					switch ref.Progress {
-					case "diminishing":
+					case "diminishing", "stuck":
 						diminishingStreak++
-						log.Printf("[reflector:diminishing] streak=%d (decision=%q): %s", diminishingStreak, ref.Decision, Text.TruncateLog(ref.Summary, 160))
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "DIMINISHING", fmt.Sprintf("streak=%d | %s", diminishingStreak, Text.TruncateLog(ref.Summary, 180)))
+						log.Printf("[reflector:%s] streak=%d (decision=%q): %s", ref.Progress, diminishingStreak, ref.Decision, Text.TruncateLog(ref.Summary, 160))
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", strings.ToUpper(ref.Progress), fmt.Sprintf("streak=%d | %s", diminishingStreak, Text.TruncateLog(ref.Summary, 180)))
+						if ref.Progress == "stuck" && ref.Decision == "replan" && !stuckBiasApplied && diminishingStreak < 2 {
+							stuckBiasApplied = true
+							ref.Next = biasNextToDiagnosis(ref.Next, ref.Summary)
+							log.Printf("[reflector:stuck] pointing this replan at a diagnosis rather than more evidence")
+							appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "STUCK_TO_DIAGNOSIS", Text.TruncateLog(ref.Next, 200))
+						}
 						if diminishingStreak >= 2 && ref.Decision == "replan" {
 							log.Printf("[reflector:diminishing] streak hit 2 — downgrading %s→conclude", ref.Decision)
 							ref.Decision = "conclude"

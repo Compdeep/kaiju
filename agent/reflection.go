@@ -425,3 +425,57 @@ func parseReflectionOutput(raw string) (*reflectionOutput, error) {
 
 	return &output, nil
 }
+
+// The move a stuck run has not tried.
+//
+// A reflector reporting "stuck" has said the evidence it can reach does not
+// settle the question. Left alone it replans for more of the same — another
+// file, another process listing — and a run that could not account for what it
+// saw with six reads does not account for it with nine. What changes the
+// outcome is naming the thing that cannot be explained and letting Holmes form
+// a hypothesis about the mechanism behind it.
+//
+// Only the executive can plan a `debug` step, so this goes into the replan's
+// `next` — the field the executive reads as "the concrete next step" — rather
+// than replacing the decision. Replan stays the door; this says what to walk
+// through it for.
+//
+// Appended, never substituted. The reflector's own `next` is what it concluded
+// from evidence this function cannot see, and a run whose remaining work is a
+// real fetch should still do it.
+
+// diagnosisBias is the sentence appended to a stuck replan. Written as one
+// sentence because it is read by a planner that is already holding a long
+// prompt, and as an instruction rather than a suggestion because a hint at that
+// position is reliably ignored.
+const diagnosisBias = "Then plan one `debug` step. Do not gather more of the same evidence — " +
+	"this run has already reported that it cannot get further with it. State in `problem` " +
+	"exactly what remains unexplained: the actor, the target, what has been ruled out, and " +
+	"why the evidence gathered does not account for it."
+
+/*
+ * biasNextToDiagnosis points a stuck replan at a diagnosis.
+ * desc: Returns the reflector's own next move with the diagnosis instruction
+ *       appended. An empty next falls back to the reflector's summary, because
+ *       the executive is given `next` as the whole move and an instruction with
+ *       no subject reads as a step about nothing.
+ *
+ *       Idempotent: an input already carrying the instruction is returned
+ *       unchanged, so a caller that applies it twice cannot stack it.
+ * param: next - the reflector's `next`, possibly empty.
+ * param: summary - the reflector's summary, used when next is empty.
+ * return: the next move to hand the executive.
+ */
+func biasNextToDiagnosis(next, summary string) string {
+	next = strings.TrimSpace(next)
+	if strings.Contains(next, diagnosisBias) {
+		return next
+	}
+	if next == "" {
+		next = strings.TrimSpace(summary)
+	}
+	if next == "" {
+		return diagnosisBias
+	}
+	return next + "\n\n" + diagnosisBias
+}

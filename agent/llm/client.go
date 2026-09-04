@@ -168,6 +168,45 @@ type ChatResponse struct {
 	ID      string   `json:"id"`
 	Choices []Choice `json:"choices"`
 	Usage   Usage    `json:"usage"`
+	// Error is what a provider says went wrong in a body it still returned 200
+	// with. OpenAI-compatible gateways do this for an upstream failure, a rate
+	// limit or a filtered request: the status is 200, choices is empty, usage is
+	// zero, and the only account of it is here.
+	//
+	// It was not decoded, so a caller saw a reply with no choices and no reason,
+	// and the trace recorded an empty response with no error against it. Measured at
+	// 6.9% of one deployment's planning calls, each one abandoning a run.
+	Error *ProviderError `json:"error,omitempty"`
+}
+
+// ProviderError is the error object an OpenAI-compatible provider returns.
+// Fields beyond the message vary by provider and are kept as they arrive.
+type ProviderError struct {
+	Message string `json:"message"`
+	Type    string `json:"type,omitempty"`
+	Code    any    `json:"code,omitempty"`
+}
+
+// String renders the error for a log line or a wrapped error, naming whichever
+// fields the provider filled in.
+func (e *ProviderError) String() string {
+	if e == nil {
+		return ""
+	}
+	out := e.Message
+	if out == "" {
+		out = "no message"
+	}
+	if e.Type != "" {
+		out += " (type " + e.Type
+		if e.Code != nil {
+			out += fmt.Sprintf(", code %v", e.Code)
+		}
+		out += ")"
+	} else if e.Code != nil {
+		out += fmt.Sprintf(" (code %v)", e.Code)
+	}
+	return out
 }
 
 // Choice is a single completion choice.
@@ -424,6 +463,19 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 	var chatResp ChatResponse
 	if err := json.Unmarshal(data, &chatResp); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	// A 200 that carries an error instead of a reply. Reported as the error it
+	// is, so the caller and the trace both say what the provider said, rather
+	// than a caller seeing an empty reply and inventing its own account of it.
+	if chatResp.Error != nil && len(chatResp.Choices) == 0 {
+		return &chatResp, fmt.Errorf("provider returned an error with HTTP 200: %s", chatResp.Error.String())
+	}
+	// No choices and nothing saying why. The body is the only evidence, so a
+	// bounded amount of it travels with the error — without it this arrives as
+	// "no choices" and the reason is unrecoverable after the fact.
+	if len(chatResp.Choices) == 0 {
+		return &chatResp, fmt.Errorf("provider returned no choices with HTTP 200: %s", truncate(string(data), 400))
 	}
 
 	return &chatResp, nil

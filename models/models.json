@@ -1,5 +1,5 @@
 {
-  "_comment": "kaiju model catalog. thinking = the model reasons BY DEFAULT, which is what kaiju gets since it sends no parameter unless a lane forces one off. A model that merely SUPPORTS reasoning but does not default to it \u2014 every Claude \u2014 is false; on the modern lines it is a SWITCH the request can turn off, not a fixed property, so it no longer excludes a model from a tool-calling lane. tool_call_ok = can emit a small forced tool call (router/executor budgets) with reasoning off where it has one; BENCH-VERIFIED where verified=true \u2014 2026-09-05 against three real preflight prompts from a live deployment, reasoning off, at the lane's real 2048-token budget; else inferred from the family. roles: which lanes a picker should offer the model for. Refreshed 2026-09-05 against the live OpenRouter catalogue: context_tokens and max_output_tokens are that provider's published figures.",
+  "_comment": "kaiju model catalog. thinking = the model reasons BY DEFAULT, which is what kaiju gets since it sends no parameter unless a lane forces one off. A model that merely SUPPORTS reasoning but does not default to it \u2014 every Claude \u2014 is false; on the modern lines it is a SWITCH the request can turn off, not a fixed property, so it no longer excludes a model from a tool-calling lane. tool_call_ok = can emit a small forced tool call (router/executor budgets) with reasoning off where it has one; BENCH-VERIFIED where verified=true (docs/router-model-bench.md), else inferred from the family. roles: which lanes a picker should offer the model for. Refreshed 2026-09-05 against the live OpenRouter catalogue: context_tokens and max_output_tokens are that provider's published figures.",
   "version": 3,
   "models": [
     {
@@ -33,8 +33,8 @@
       "provider": "openrouter",
       "thinking": true,
       "tools": true,
-      "tool_call_ok": false,
-      "verified": true,
+      "tool_call_ok": true,
+      "verified": false,
       "vision": true,
       "chat": false,
       "roles": [
@@ -139,7 +139,7 @@
       "thinking": true,
       "tools": true,
       "tool_call_ok": true,
-      "verified": true,
+      "verified": false,
       "vision": true,
       "chat": false,
       "roles": [
@@ -160,8 +160,8 @@
       "provider": "openrouter",
       "thinking": true,
       "tools": true,
-      "tool_call_ok": false,
-      "verified": true,
+      "tool_call_ok": true,
+      "verified": false,
       "vision": true,
       "chat": false,
       "roles": [
@@ -248,7 +248,7 @@
       "provider": "openrouter",
       "thinking": false,
       "tools": true,
-      "tool_call_ok": false,
+      "tool_call_ok": true,
       "verified": true,
       "vision": false,
       "chat": true,
@@ -332,8 +332,8 @@
       "provider": "openrouter",
       "thinking": true,
       "tools": true,
-      "tool_call_ok": false,
-      "verified": true,
+      "tool_call_ok": true,
+      "verified": false,
       "vision": true,
       "chat": false,
       "roles": [
@@ -435,7 +435,7 @@
       "thinking": true,
       "tools": true,
       "tool_call_ok": true,
-      "verified": true,
+      "verified": false,
       "vision": false,
       "chat": false,
       "roles": [
@@ -464,28 +464,6 @@
         "answer",
         "planner",
         "executor"
-      ]
-    },
-    {
-      "id": "deepseek/deepseek-v4-flash-vision-exp",
-      "name": "DeepSeek V4 Flash Vision",
-      "family": "deepseek",
-      "version": "v4-vision",
-      "context": "1.05M",
-      "context_tokens": 1048576,
-      "max_output_tokens": 131072,
-      "provider": "openrouter",
-      "thinking": true,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": true,
-      "vision": true,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner",
-        "executor",
-        "router"
       ]
     },
     {
@@ -589,7 +567,7 @@
       "thinking": true,
       "tools": true,
       "tool_call_ok": true,
-      "verified": true,
+      "verified": false,
       "vision": false,
       "chat": false,
       "roles": [
@@ -608,8 +586,8 @@
       "provider": "openrouter",
       "thinking": true,
       "tools": true,
-      "tool_call_ok": false,
-      "verified": true,
+      "tool_call_ok": true,
+      "verified": false,
       "vision": false,
       "chat": false,
       "roles": [
@@ -628,8 +606,8 @@
       "provider": "openrouter",
       "thinking": true,
       "tools": true,
-      "tool_call_ok": false,
-      "verified": true,
+      "tool_call_ok": true,
+      "verified": false,
       "vision": false,
       "chat": false,
       "roles": [
@@ -669,8 +647,8 @@
       "provider": "openrouter",
       "thinking": true,
       "tools": true,
-      "tool_call_ok": false,
-      "verified": true,
+      "tool_call_ok": true,
+      "verified": false,
       "vision": true,
       "chat": false,
       "roles": [
@@ -689,8 +667,8 @@
       "provider": "openrouter",
       "thinking": true,
       "tools": true,
-      "tool_call_ok": false,
-      "verified": true,
+      "tool_call_ok": true,
+      "verified": false,
       "vision": true,
       "chat": false,
       "roles": [

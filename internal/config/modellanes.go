@@ -31,11 +31,6 @@ import (
 type laneModel struct {
 	lane string
 	id   string
-	// small says this lane forces a SMALL call, which is what ToolCallOK
-	// measures. The planner forces one too, but its reply is a whole plan — a
-	// model that cannot fit a 96-token classification may still write a good
-	// one, so applying the small-call verdict there warns about the wrong thing.
-	small bool
 }
 
 /*
@@ -50,9 +45,9 @@ type laneModel struct {
  */
 func (c *Config) ModelLaneWarnings() []string {
 	lanes := []laneModel{
-		{"llm.model (the planner, Holmes and the ReAct loop)", c.LLM.Model, false},
-		{"executor.model (preflight, the reflector and the observer)", c.Executor.Model, true},
-		{"agent.route_model (the chat-or-investigate decision)", c.Agent.RouteModel, true},
+		{"llm.model (the planner, Holmes and the ReAct loop)", c.LLM.Model},
+		{"executor.model (preflight, the reflector and the observer)", c.Executor.Model},
+		{"agent.route_model (the chat-or-investigate decision)", c.Agent.RouteModel},
 	}
 	seen := map[string]bool{}
 	var out []string
@@ -83,7 +78,7 @@ func (c *Config) ModelLaneWarnings() []string {
 			out = append(out, fmt.Sprintf(
 				"%s is set to %s, which reasons before it answers. This lane forces a tool call inside a small reply budget, so the reasoning consumes the budget and the call returns empty or times out.",
 				l.lane, l.id))
-		case l.small && !info.ToolCallOK:
+		case !info.ToolCallOK:
 			seen[l.id] = true
 			out = append(out, fmt.Sprintf(
 				"%s is set to %s, which the catalog does not record as reliable at a small forced tool call. This lane makes one.",

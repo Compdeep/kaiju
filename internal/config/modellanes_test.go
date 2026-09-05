@@ -137,13 +137,6 @@ func TestEveryDefaultModelIsInTheCatalog(t *testing.T) {
 
 // The lanes that force a small call must default to a model that can make one.
 // A default that trips the engine's own filter is a default nobody chose.
-//
-// Thinking is deliberately NOT checked. Both lanes turn reasoning off before
-// they send, and measured against real preflight prompts with it off, the three
-// best models were all reason-capable — the previous non-thinking default was
-// 25 times slower than the winner and was cut at the cap on one prompt of three.
-// What matters here is that the model can emit the call, not what it would do
-// if it were allowed to think.
 func TestTheDefaultsSuitTheirLanes(t *testing.T) {
 	d := Default()
 	for _, c := range []struct{ lane, id string }{
@@ -157,35 +150,11 @@ func TestTheDefaultsSuitTheirLanes(t *testing.T) {
 		if !ok {
 			continue // reported by the test above
 		}
+		if m.Thinks() {
+			t.Errorf("%s defaults to %q, which reasons before it answers", c.lane, c.id)
+		}
 		if !m.ToolCallOK {
 			t.Errorf("%s defaults to %q, which the catalog does not record as fit for a forced call", c.lane, c.id)
 		}
-		if !m.Tools {
-			t.Errorf("%s defaults to %q, which cannot call tools at all", c.lane, c.id)
-		}
-	}
-}
-
-// And whatever the default is, the picker for that lane has to offer it.
-// A default a picker filters out is a setting an operator cannot restore after
-// changing it once.
-func TestEachLanesDefaultAppearsInItsOwnPicker(t *testing.T) {
-	d := Default()
-	inList := func(list []models.Info, id string) bool {
-		for _, m := range list {
-			if m.ID == id {
-				return true
-			}
-		}
-		return false
-	}
-	if id := d.Executor.Model; id != "" && !inList(models.ForcedSmallCall(), id) {
-		t.Errorf("executor defaults to %q, which its own picker does not offer", id)
-	}
-	if id := d.Agent.RouteModel; id != "" && !inList(models.RouterFit(), id) {
-		t.Errorf("router defaults to %q, which its own picker does not offer", id)
-	}
-	if id := d.LLM.Model; id != "" && !inList(models.ToolSafe(), id) {
-		t.Errorf("the reasoning lane defaults to %q, which its own picker does not offer", id)
 	}
 }

@@ -137,18 +137,29 @@ func All() []Info {
 
 /*
  * ToolSafe returns the models that can drive a lane which forces a tool call.
- * desc: The planner pins tool_choice to one named tool, and two kinds of model
- *       cannot honour that: one in thinking mode (providers reject an object
- *       tool_choice outright, or the model spends its budget reasoning and
- *       never calls), and one that simply does not emit small forced calls
- *       reliably. This is the filter a model picker wants — it is also what
- *       drops the roleplay tunes, which carry no tool support at all.
+ * desc: Two fields decide it: the model can call tools at all, and it emits a
+ *       SMALL forced call reliably. That is what the name claims and what the
+ *       fields measure.
+ *
+ *       Thinking used to be a third term, and it excluded every reasoning model
+ *       outright. Two things broke that. It was measured false in one direction
+ *       — qwen3-32b reasons AND returned a complete plan three times out of
+ *       three — and on every model line released since early 2026 reasoning is
+ *       a SWITCH the request turns off, not a property the model is stuck with.
+ *       Keeping the term hid most of the current catalogue from every picker,
+ *       including the model an installation was already configured to run,
+ *       which is how a settings page ends up showing an empty dropdown.
+ *
+ *       What a thinking model costs a lane is still real and still said: the
+ *       lane warnings name it at startup (internal/config), and a picker can
+ *       read Thinks() to mark it. This decides what is OFFERED; it does not
+ *       decide what is wise.
  * return: a fresh slice, in catalog order.
  */
 func ToolSafe() []Info {
 	out := make([]Info, 0, len(all))
 	for _, m := range all {
-		if !m.Thinks() && m.ToolCallOK {
+		if m.Tools && m.ToolCallOK {
 			out = append(out, m)
 		}
 	}

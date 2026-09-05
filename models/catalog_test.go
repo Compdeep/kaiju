@@ -85,19 +85,48 @@ func TestAnEntryWithoutThinkingIsDroppedRatherThanDefaulted(t *testing.T) {
 	}
 }
 
-// ToolSafe reads the flag through Thinks(), so a dropped entry cannot reach a
-// picker and a declared one is judged on what it declared.
-func TestToolSafeIsNonEmptyAndExcludesThinkers(t *testing.T) {
+// ToolSafe offers what can call tools, and a reasoning mode no longer excludes a
+// model from that.
+//
+// The third term used to be !Thinks(), and it hid most of the catalogue from
+// every picker — including, on one deployment, the model the config already
+// named, which is how a settings page shows an empty dropdown. It was also
+// measured false: qwen3-32b reasons and returned a complete plan three times of
+// three. On every line released since early 2026 reasoning is a switch a request
+// turns off rather than a property the model carries.
+func TestToolSafeOffersWhatCanCallTools(t *testing.T) {
 	safe := ToolSafe()
 	if len(safe) == 0 {
 		t.Fatal("ToolSafe is empty; every picker that filters through it shows nothing")
 	}
 	for _, m := range safe {
-		if m.Thinks() {
-			t.Errorf("%q thinks and is still offered as tool-safe", m.ID)
+		if !m.Tools {
+			t.Errorf("%q is offered as tool-safe without tool support", m.ID)
 		}
 		if !m.ToolCallOK {
 			t.Errorf("%q is offered as tool-safe without tool_call_ok", m.ID)
 		}
+	}
+	// A reasoning model has to be reachable, or the whole current catalogue is.
+	thinkers := 0
+	for _, m := range safe {
+		if m.Thinks() {
+			thinkers++
+		}
+	}
+	if thinkers == 0 {
+		t.Error("no reasoning model is offered; the filter is excluding on Thinking again")
+	}
+}
+
+// Whatever the picker offers, the lane warning still has to be able to say what a
+// reasoning model costs — offering is not the same as recommending.
+func TestAReasoningModelIsStillIdentifiable(t *testing.T) {
+	m, ok := Find("qwen/qwen3-32b")
+	if !ok {
+		t.Fatal("the catalog no longer carries qwen3-32b, which a live deployment runs")
+	}
+	if !m.Thinks() {
+		t.Error("qwen3-32b is not marked as reasoning, so nothing can warn about it")
 	}
 }

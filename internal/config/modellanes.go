@@ -57,10 +57,23 @@ func (c *Config) ModelLaneWarnings() []string {
 		}
 		info, known := models.Find(l.id)
 		if !known {
+			// Said, but not as a complaint. This is not a judgement about the
+			// model — it is the absence of one, and the common cause is
+			// ordinary: a self-hosted id, or a release newer than the catalog.
+			//
+			// Silence used to stand here, on the reasoning that an unknown id is
+			// the normal case for a self-hosted endpoint. That is true and it
+			// still reads as approval. Naming it as untested, and saying what
+			// failure would look like, is what an operator can act on: try it
+			// and watch, rather than change it.
+			seen[l.id] = true
+			out = append(out, fmt.Sprintf(
+				"%s is set to %s, which the model catalog does not carry. It may not work in this lane: the lane forces a tool call inside a small reply budget, and nothing here has measured whether this model can. Watch for empty replies.",
+				l.lane, l.id))
 			continue
 		}
 		switch {
-		case info.Thinking:
+		case info.Thinks():
 			seen[l.id] = true
 			out = append(out, fmt.Sprintf(
 				"%s is set to %s, which reasons before it answers. This lane forces a tool call inside a small reply budget, so the reasoning consumes the budget and the call returns empty or times out.",

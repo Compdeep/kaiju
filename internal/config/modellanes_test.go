@@ -47,16 +47,51 @@ func TestModelLaneWarnings_SameModelBothLanesWarnsOnce(t *testing.T) {
 	}
 }
 
-// The catalog is curated, not exhaustive. A self-hosted model it has never heard
-// of is the ordinary case, and warning about it would train an operator to
-// ignore the line that matters.
-func TestModelLaneWarnings_UnknownModelIsSilent(t *testing.T) {
+// The catalog is curated, not exhaustive, and an id it has never heard of is the
+// ordinary case for a self-hosted endpoint. This used to be silent for that
+// reason, and silence reads as approval. It says so now — as an absence of
+// information rather than a judgement, because the operator's move is to test
+// the model, not to change it.
+func TestModelLaneWarnings_UnknownModelSaysItIsUntested(t *testing.T) {
 	c := &Config{}
 	c.LLM.Model = "our-own-finetune-v3"
 	c.Executor.Model = ""
 
-	if warnings := c.ModelLaneWarnings(); len(warnings) != 0 {
-		t.Fatalf("an unknown model warned: %v", warnings)
+	warnings := c.ModelLaneWarnings()
+	if len(warnings) != 1 {
+		t.Fatalf("got %d lines, want 1: %v", len(warnings), warnings)
+	}
+	if !strings.Contains(warnings[0], "our-own-finetune-v3") {
+		t.Errorf("the line does not name the model: %q", warnings[0])
+	}
+	if !strings.Contains(warnings[0], "may not work") {
+		t.Errorf("the line does not say it may not work: %q", warnings[0])
+	}
+	// It must not read as a measured claim about the model. "reasons before it
+	// answers" is the wording reserved for one the catalog has actually tested.
+	if strings.Contains(warnings[0], "reasons before it answers") {
+		t.Errorf("an untested model is described as though it had been measured: %q", warnings[0])
+	}
+}
+
+// The two lines have to stay distinguishable. Something measured about a model
+// and an admission that nothing is known are different things, and if both read
+// the same an operator learns to skip both.
+func TestModelLaneWarnings_MeasuredAndUntestedReadDifferently(t *testing.T) {
+	measured := &Config{}
+	measured.LLM.Model = "qwen/qwen3-32b"
+	untested := &Config{}
+	untested.LLM.Model = "our-own-finetune-v3"
+
+	m, u := measured.ModelLaneWarnings(), untested.ModelLaneWarnings()
+	if len(m) != 1 || len(u) != 1 {
+		t.Fatalf("want one line each, got %d and %d", len(m), len(u))
+	}
+	if m[0] == u[0] {
+		t.Fatal("a measured model and an unknown one produce the same line")
+	}
+	if strings.Contains(m[0], "may not work") {
+		t.Errorf("a measured model is described as untested: %q", m[0])
 	}
 }
 

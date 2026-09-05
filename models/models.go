@@ -47,7 +47,19 @@ type Info struct {
 	// A model that thinks BY DEFAULT counts as one: kaiju never sends a thinking
 	// or reasoning parameter (see agent/llm/anthropic.go and client.go), so the
 	// provider's default is what we get.
-	Thinking bool `json:"thinking"`
+	//
+	// A pointer so that ABSENT is not the same as false, and it has to be a
+	// pointer because of which way false leans. Leave tool_call_ok out and the
+	// entry decodes as "cannot emit a small forced call", which excludes it from
+	// the lanes that make one: wrong, and safe, and noticed the first time
+	// somebody looks for it in a picker. Leave THIS out and the entry decodes as
+	// "does not reason before answering", which is the permissive answer — the
+	// model is offered for the router's 16-token forced call and fails there the
+	// way docs/router-model-bench.md describes, silently, as under-escalation.
+	//
+	// So the dangerous default is the one you get by typing nothing, and load()
+	// refuses an entry that does not say. Read it through Thinks().
+	Thinking *bool `json:"thinking"`
 	// Tools reports whether the model can call tools at all.
 	Tools bool `json:"tools"`
 	// ToolCallOK reports whether the model reliably emits a SMALL forced tool call
@@ -86,13 +98,29 @@ var all = load()
 
 // load parses the embedded catalog. On a malformed file it returns an empty
 // list — callers then serve nothing — rather than panicking at init.
+//
+// An entry that does not declare `thinking` is dropped and named. The catalog is
+// embedded, so this can only be reached by editing models.json and rebuilding:
+// the person who caused it is the person reading the log, and the fix is one
+// word. Dropping the entry rather than defaulting it is the point — a default
+// here is the silent-permissive case this field exists to prevent.
 func load() []Info {
 	var cat catalog
 	if err := json.Unmarshal(modelsJSON, &cat); err != nil {
 		log.Printf("[models] catalog: parse failed, catalog empty: %v", err)
 		return nil
 	}
-	return cat.Models
+	out := cat.Models[:0]
+	for _, m := range cat.Models {
+		if m.Thinking == nil {
+			log.Printf("[models] catalog: %q does not declare \"thinking\", so it is dropped — "+
+				"an entry that omits it would read as a model that does not reason before answering, "+
+				"which is the answer that gets it offered for a forced tool call", m.ID)
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 /*
@@ -120,12 +148,23 @@ func All() []Info {
 func ToolSafe() []Info {
 	out := make([]Info, 0, len(all))
 	for _, m := range all {
-		if !m.Thinking && m.ToolCallOK {
+		if !m.Thinks() && m.ToolCallOK {
 			out = append(out, m)
 		}
 	}
 	return out
 }
+
+/*
+ * Thinks reports whether this model reasons before it answers.
+ * desc: The field is a pointer so an entry that does not declare it can be told
+ *       from one that declares false — see Thinking. load() drops the undeclared
+ *       ones, so by the time a caller has an Info from this package the pointer
+ *       is set; this reads false for a zero Info built anywhere else rather than
+ *       dereferencing nil.
+ * return: true when the model emits hidden reasoning tokens.
+ */
+func (i Info) Thinks() bool { return i.Thinking != nil && *i.Thinking }
 
 /*
  * Limits reports what a model can take in and give back, in tokens.

@@ -287,12 +287,11 @@ func stateBudget(req *llm.ChatRequest, cap int) {
 		// verbose — one wrote 1,140 tokens for a job another did in 155. Half
 		// the cap is well above what a good reply has ever needed and still
 		// leaves the model room to be told it went long.
+		// Short, because it is read on every call and paid for every time. The
+		// two numbers are the point; the reason for them is one clause.
 		req.Messages[i].Content += fmt.Sprintf(
-			"\n\n%s about %d tokens, and aim for about %d. Generation stops at the "+
-				"limit, so a longer reply is cut off part-way and cannot be used — a "+
-				"reply cut in half is worth less than a shorter one that finishes. "+
-				"Plan the length before you start.",
-			budgetMarker, cap, cap/2)
+			"\n\n%s the max size is %d tokens, but you should aim for about half of that.",
+			budgetMarker, cap)
 		return
 	}
 }

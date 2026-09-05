@@ -1,5 +1,5 @@
 {
-  "_comment": "kaiju model catalog. thinking = the model has a reasoning mode; on the modern lines it is a SWITCH the request can turn off, not a fixed property, so it no longer excludes a model from a tool-calling lane. tool_call_ok = can emit a small forced tool call (router/executor budgets) with reasoning off where it has one; BENCH-VERIFIED where verified=true (docs/router-model-bench.md), else inferred from the family. roles: which lanes a picker should offer the model for. Refreshed 2026-09-05 against the live OpenRouter catalogue: context_tokens and max_output_tokens are that provider's published figures.",
+  "_comment": "kaiju model catalog. thinking = the model reasons BY DEFAULT, which is what kaiju gets since it sends no parameter unless a lane forces one off. A model that merely SUPPORTS reasoning but does not default to it \u2014 every Claude \u2014 is false; on the modern lines it is a SWITCH the request can turn off, not a fixed property, so it no longer excludes a model from a tool-calling lane. tool_call_ok = can emit a small forced tool call (router/executor budgets) with reasoning off where it has one; BENCH-VERIFIED where verified=true (docs/router-model-bench.md), else inferred from the family. roles: which lanes a picker should offer the model for. Refreshed 2026-09-05 against the live OpenRouter catalogue: context_tokens and max_output_tokens are that provider's published figures.",
   "version": 3,
   "models": [
     {
@@ -720,6 +720,109 @@
       ]
     },
     {
+      "id": "anthropic/claude-opus-5",
+      "name": "Claude Opus 5",
+      "family": "claude",
+      "version": "5",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "anthropic/claude-opus-4.8",
+      "name": "Claude Opus 4.8",
+      "family": "claude",
+      "version": "4.8",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "anthropic/claude-sonnet-5",
+      "name": "Claude Sonnet 5",
+      "family": "claude",
+      "version": "5",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "anthropic/claude-sonnet-4.6",
+      "name": "Claude Sonnet 4.6",
+      "family": "claude",
+      "version": "4.6",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "anthropic/claude-haiku-4.5",
+      "name": "Claude Haiku 4.5",
+      "family": "claude",
+      "version": "4.5",
+      "context": "200K",
+      "context_tokens": 200000,
+      "max_output_tokens": 64000,
+      "provider": "openrouter",
+      "thinking": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "executor",
+        "router",
+        "answer"
+      ]
+    },
+    {
       "id": "anthropic/claude-fable-5.1",
       "name": "Claude Fable 5.1",
       "family": "claude",
@@ -728,7 +831,7 @@
       "context_tokens": 1000000,
       "max_output_tokens": 128000,
       "provider": "openrouter",
-      "thinking": true,
+      "thinking": false,
       "tools": true,
       "tool_call_ok": true,
       "verified": false,

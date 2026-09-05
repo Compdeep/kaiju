@@ -20,7 +20,20 @@ type anthropicRequest struct {
 	Tools       []anthropicTool    `json:"tools,omitempty"`
 	ToolChoice  any                `json:"tool_choice,omitempty"`
 	Temperature float64            `json:"temperature"`
+	// Thinking is Anthropic's name for what everyone else calls reasoning, and
+	// the shape differs too: an object with a type rather than an enabled flag.
+	// Translated from ChatRequest.Reasoning in buildAnthropicRequest, so a
+	// caller sets one field and does not learn which wire carried it.
+	Thinking *anthropicThinking `json:"thinking,omitempty"`
 }
+
+// anthropicThinking is {"type":"disabled"}. Only the off value is modelled, for
+// the same reason ReasoningControl models only the off switch.
+type anthropicThinking struct {
+	Type string `json:"type"`
+}
+
+var anthropicThinkingOff = &anthropicThinking{Type: "disabled"}
 
 type anthropicMessage struct {
 	Role    string `json:"role"`
@@ -56,6 +69,10 @@ type anthropicResponse struct {
 // completeAnthropic converts OpenAI-format request to Anthropic Messages API,
 // sends the request, and converts the response back to OpenAI format.
 func (c *Client) completeAnthropic(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
+	// The same per-model deadline the OpenAI path applies — see timeoutFor.
+	ctx, cancel := context.WithTimeout(ctx, c.timeoutFor(req))
+	defer cancel()
+
 	aReq := buildAnthropicRequest(c.model, req)
 
 	body, err := json.Marshal(aReq)
@@ -107,6 +124,11 @@ func buildAnthropicRequest(model string, req *ChatRequest) *anthropicRequest {
 	}
 	if req.Model != "" {
 		aReq.Model = req.Model
+	}
+	// Same instruction, different spelling. A caller sets Reasoning and does not
+	// learn which provider it reached.
+	if req.Reasoning != nil && !req.Reasoning.Enabled {
+		aReq.Thinking = anthropicThinkingOff
 	}
 
 	// Extract system messages

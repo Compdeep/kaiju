@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 )
@@ -73,4 +74,43 @@ func resolvedModel(laneModel string, c *llm.Client) string {
 		return laneModel
 	}
 	return c.Model()
+}
+
+// How long a run may take, against the model that will do its thinking.
+//
+// The two clocks have to be set together. A single call is bounded by the
+// client's request deadline, and the whole run by the wall clock the scheduler
+// wraps every call in — so a call deadline the run cannot accommodate is not a
+// deadline at all: the run is cancelled by the shorter of the two and the error
+// says "context canceled" rather than naming the clock that actually ran out.
+//
+// A thinking model is given twice the request deadline (llm.thinkingRequestTimeout),
+// so the run is given twice the wall clock. Without it, raising one and not the
+// other moves the failure rather than removing it.
+
+/*
+ * wallClock reports how long this run may take.
+ * desc: The configured wall clock, doubled when the model on the reasoning lane
+ *       reasons before it answers. That lane's model is the one asked for the
+ *       plan, which is the longest single call a run makes; the other lanes
+ *       either force reasoning off or write short replies.
+ *
+ *       Doubling rather than adding, because the thinking is proportional to
+ *       the work rather than a fixed overhead: a bigger plan means more of it.
+ * return: the wall clock for this run, or zero when none is configured — which
+ *         means no wall clock at all, and doubling zero must stay zero.
+ */
+func (a *Agent) wallClock() time.Duration {
+	base := a.cfg.DAGWallClock
+	if base <= 0 || a.cfg.Thinks == nil {
+		return base
+	}
+	var model string
+	if a.llm != nil {
+		model = a.llm.Model()
+	}
+	if model != "" && a.cfg.Thinks(model) {
+		return base * 2
+	}
+	return base
 }

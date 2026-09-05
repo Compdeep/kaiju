@@ -157,6 +157,31 @@ legacy single-provider path) or drawn from the `providers` catalog by name.
 | `temperature` | `0.3` | Sampling temperature |
 | `max_tokens` | `4096` | Max output tokens per LLM call |
 
+### The six lanes, and their keys
+
+Every one of these is an LLM. The section named `llm` is not "the LLM section" —
+it is the **reasoning** lane, and it is called `llm` because it predates the
+others, when kaiju had one model and no lanes. The settings UI uses the lane
+names, not the key names, which is why the two do not match.
+
+- **reasoning** — `llm.*` — the executive, the aggregator, the classifier,
+  direct responses. Also the **fallback**: any lane below with an empty model
+  runs this one. That is why an unset `executor.model` silently ends up on
+  whatever the reasoning lane is, and why the startup lane check now says so.
+- **executor** — `executor.*` — reflection, the observer, the micro-planner,
+  the compactor.
+- **router** — `agent.route_model` — chat or agent, once per turn, in one
+  96-token forced call.
+- **answer** — `agent.answer_model` — the final answer. Open-ended prose, so a
+  reasoning model suits this lane and no other.
+- **chat** — `chat.*` — direct completion, no planner, no tools.
+- **vision** — `vision.*` — calls carrying images.
+
+In Go the same six are `agent.Lane`: Heavy, Light, Route, Answer. Heavy is
+reasoning and Light is executor. Three vocabularies for one idea is a wart, not
+a distinction; the config keys are the ones on disk and the lane names are the
+ones a person reads.
+
 ### `executor`
 
 Optional secondary model for the cheaper background roles (reflection, observer,

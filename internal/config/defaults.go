@@ -15,20 +15,39 @@ func Default() *Config {
 		// — see the ui package — because the question there is what happens when
 		// somebody forgets. Here nobody can: this line is the answer.
 		UI: ui.Config{Sections: ui.AllSections()},
+		// Open-weight by default, on every lane that has a sensible open choice.
+		// A deployment that cannot send its data to a vendor should not have to
+		// change anything to be safe, and one that wants a closed model is
+		// making a deliberate choice rather than accepting a default.
+		//
+		// The reasoning lane: qwen3-235b-a22b-2507, a 235B mixture-of-experts
+		// with 22B active, so it is large without being slow, and it has no
+		// reasoning phase to pay for. Open weights, ten providers on OpenRouter
+		// and downloadable, so the same default works on-premise.
 		LLM: LLMConfig{
-			Provider:    "openai",
-			Endpoint:    "https://api.openai.com/v1",
-			Model:       "gpt-4o",
+			Provider:    "openrouter",
+			Endpoint:    "https://openrouter.ai/api/v1",
+			Model:       "qwen/qwen3-235b-a22b-2507",
 			Temperature: 0.3,
 			MaxTokens:   4096,
 		},
+		// The executor: qwen3-30b-a3b-instruct-2507, 3B active per token and the
+		// cheapest thing measured that answers a forced call — 283 to 413 tokens
+		// on the real preflight schema. This lane runs a dozen times per
+		// investigation where the reasoning lane runs once, so its cost and
+		// latency are what a run is actually made of.
+		Executor: ExecutorConfig{
+			Provider: "openrouter",
+			Model:    "qwen/qwen3-30b-a3b-instruct-2507",
+		},
 		Chat: ChatConfig{
-			// Tools below is the palette an escalated agent may use; a tool-capable
-			// model is preferred. gpt-4o-mini is tool-capable and cheap; a deployment
-			// that prefers another model (e.g. a cost-effective Qwen) overrides this.
-			// Leaving it empty falls back to the reasoning model.
-			Provider: "openai",
-			Model:    "gpt-4o-mini",
+			// Tools below is the palette an escalated agent may use, so a
+			// tool-capable model is preferred. The same open-weight instruct
+			// model the executor uses: cheap, tool-capable, and one model fewer
+			// for a deployment to obtain. Leaving it empty falls back to the
+			// reasoning lane.
+			Provider: "openrouter",
+			Model:    "qwen/qwen3-30b-a3b-instruct-2507",
 			// web_fetch by default: the palette available to an escalated agent. A
 			// request that sends its own chat_tools overrides this.
 			Tools: []string{"web_fetch"},

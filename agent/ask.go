@@ -198,6 +198,30 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 		req.Model = model
 	}
 
+	// The two lanes that force a SMALL call get the model's thinking turned off,
+	// whatever model that is.
+	//
+	// Not a default and not a setting: there is no deployment in which hidden
+	// reasoning helps a 96-token routing decision or a preflight classification,
+	// so there is nothing for an operator to decide. Measured on the real
+	// preflight schema — with thinking on, three current models ran to the cap
+	// and returned unparseable JSON; with it off, all three answered in 157 to
+	// 292 tokens.
+	//
+	// Heavy and Answer are deliberately absent. Heavy forces a call too, but it
+	// has the budget for the thinking and the thinking earns it: on one planner
+	// prompt a thinking model returned complete plans three times of three where
+	// a non-thinking one ran the cap out three times of three. What that costs is
+	// time, and the clocks are widened for it rather than the thinking removed.
+	// Answer writes prose, where thinking is simply better.
+	//
+	// The picker also stops offering thinking models for these lanes. Two doors,
+	// because a config file reaches a lane without passing a picker — which is
+	// how a thinking model drove one deployment's executor for seven days.
+	if l == Light || l == Route {
+		llm.WithoutReasoning(req)
+	}
+
 	// Fix the cap here rather than leaving it to the send, so the number stated
 	// below is the number the provider stops at. capReply then finds nothing
 	// left to lower.

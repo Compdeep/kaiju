@@ -178,6 +178,32 @@ func ToolSafe() []Info {
 func (i Info) Thinks() bool { return i.Thinking != nil && *i.Thinking }
 
 /*
+ * ForcedSmallCall returns the models fit for a lane that forces a SMALL tool
+ * call — the router at 96 tokens, the executor's classifiers.
+ * desc: ToolSafe minus the ones that reason before answering. Those are excluded
+ *       here and nowhere else: on the reasoning lane thinking earns its cost, and
+ *       on answer and chat it is simply better. It is only in a small forced call
+ *       that it has no upside — the reasoning consumes the budget the call was to
+ *       fill, and the reply arrives empty or unparseable.
+ *
+ *       The engine turns thinking off on those lanes anyway (see agent/ask.go),
+ *       so this is the second of two doors rather than the only one. A picker
+ *       that offered a thinking model here would be offering a choice the engine
+ *       then overrides, which is worse than not offering it: the operator would
+ *       have picked a model for a property it is not allowed to use.
+ * return: a fresh slice, in catalog order.
+ */
+func ForcedSmallCall() []Info {
+	out := make([]Info, 0, len(all))
+	for _, m := range all {
+		if m.Tools && m.ToolCallOK && !m.Thinks() {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+/*
  * Limits reports what a model can take in and give back, in tokens.
  * desc: Reads the two numeric fields of the catalog entry. Both are zero when
  *       the id is not in the catalog, or when the catalog carries no numbers

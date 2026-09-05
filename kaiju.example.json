@@ -1,4 +1,6 @@
 {
+  "_lanes": "Six lanes, all of them LLMs. reasoning = llm.* (the executive, aggregator and classifier — and the FALLBACK every empty lane below inherits). executor = executor.* (reflection, observer, micro-planner, compactor). router = agent.route_model (chat-or-agent, one 96-token forced call). answer = agent.answer_model (the final answer; a reasoning model suits this lane and no other). chat = chat.*. vision = vision.*. The key `llm` is named for a time when there was one model and no lanes; the settings UI calls that lane `reasoning`.",
+
   "llm": {
     "provider": "openai",
     "endpoint": "https://api.openai.com/v1",

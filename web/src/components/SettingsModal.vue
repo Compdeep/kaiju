@@ -36,6 +36,17 @@
                 reasoning
               </div>
               <div class="model-desc">executive, aggregator, classifier, direct responses</div>
+              <!-- Said where the choice is made. A thinking model is a good
+                   choice for this lane — it plans well — and it is also the
+                   slowest thing a run does, so the tradeoff belongs next to the
+                   selector rather than in a log nobody reads until afterwards.
+                   The two clocks are raised for it automatically; what the
+                   reader still has to know is that the run takes longer. -->
+              <div v-if="reasoningModelThinks" class="model-warn">
+                This model reasons before it answers. It plans well and it is
+                <b>significantly slower</b> — up to twice as long per run.
+                The call and run deadlines are doubled to allow for it.
+              </div>
               <div class="form-row">
                 <div class="form-group">
                   <label>provider</label>
@@ -320,13 +331,27 @@ const reasoningModels = computed(() => {
  * desc: Filter the full model list to only those matching the executor provider (or reasoning provider as fallback)
  * @returns {Array<Object>} Models available for the selected executor provider
  */
-const executorModels = computed(() => {
-  const p = execProvider.value || cfg.value.llm.provider
-  // Executor lane runs the small forced tool-call classifiers (preflight/reflect/
-  // observer). Only tool_call_ok models survive the tight budget — a thinking model
-  // here starves and returns nothing (the flat-DAG bug). See router-model-bench.
-  return allModels.value.filter(m => m.provider === p && m.tool_call_ok)
+// Whether the model chosen for the reasoning lane reasons before it answers.
+// Read from the catalog the picker is already filled from, so it cannot drift
+// from what the engine decides.
+const reasoningModelThinks = computed(() => {
+  const m = allModels.value.find(x => x.id === cfg.value.llm.model)
+  return !!(m && m.thinking)
 })
+
+// The executor and the router both force a SMALL call, so both are filtered the
+// same way: tool_call_ok AND not a thinking model. The engine turns thinking off
+// on these two lanes regardless (agent/ask.go), so offering one here would offer
+// a choice the engine overrides — the operator would have picked a model for a
+// property it is not allowed to use.
+//
+// This is the only place a reasoning mode excludes a model. On the reasoning lane
+// it earns its cost, and on answer and chat it is better.
+function forcedSmallCall (provider) {
+  return allModels.value.filter(m => m.provider === provider && m.tool_call_ok && !m.thinking)
+}
+
+const executorModels = computed(() => forcedSmallCall(execProvider.value || cfg.value.llm.provider))
 
 /**
  * desc: Handle reasoning provider change by updating the endpoint and selecting the first available model
@@ -424,12 +449,12 @@ function onChatModelChange() {
  *   Empty provider ⇒ falls back to the executor lane.
  * @returns {Array<Object>}
  */
-const routeModels = computed(() => {
-  const p = routeProvider.value || execProvider.value || cfg.value.llm.provider
-  // Router = a 16-token forced tool call → only tool_call_ok models. A thinking
-  // model here emits no tool call and silently falls back to "chat".
-  return allModels.value.filter(m => m.provider === p && m.tool_call_ok)
-})
+const routeModels = computed(() =>
+  // The router is a 96-token forced call, so the same filter as the executor —
+  // see forcedSmallCall. A thinking model here emits no call at all and the
+  // decision silently falls back to "chat", which is what
+  // docs/router-model-bench.md was written about.
+  forcedSmallCall(routeProvider.value || execProvider.value || cfg.value.llm.provider))
 
 /**
  * desc: Legible dropdown label — name plus params / thinking / tool-call badges so
@@ -545,6 +570,15 @@ onMounted(async () => {
   color: var(--text); margin-bottom: 2px;
 }
 .model-desc { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; }
+/* The tradeoff, next to the selector that makes it. A thinking model suits this
+   lane and costs time; the engine doubles both clocks for it, and this is what
+   the reader still has to be told. */
+.model-warn {
+  font-size: 11px; line-height: 1.45; margin: -4px 0 10px;
+  padding: 6px 9px; border-left: 2px solid #c08a3e; border-radius: 2px;
+  background: rgba(192, 138, 62, 0.1); color: var(--text);
+}
+.model-warn b { font-weight: 600; }
 .tool-picker { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .tool-chk { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; user-select: none; }
 .tool-chk input { cursor: pointer; }

@@ -63,7 +63,7 @@ func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget
 		a.cfg.MaxPerSkill,
 		a.cfg.MaxLLMCalls,
 		a.cfg.MaxObserverCalls,
-		a.cfg.DAGWallClock,
+		a.wallClock(),
 	)
 
 	// Construct the per-investigation ContextGate. This is the single API

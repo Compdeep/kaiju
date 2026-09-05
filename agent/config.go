@@ -105,6 +105,18 @@ type ModelConfig struct {
 	// the application's catalog is safe rather than broken.
 	Limits ModelLimits
 
+	// Thinks reports whether a model reasons before it answers. Two clocks read
+	// it, and they have to move together: a call by such a model is given twice
+	// the request deadline (see llm.thinkingRequestTimeout) and a run whose
+	// reasoning lane uses one is given twice the wall clock, because a call
+	// deadline the run cannot accommodate is not a deadline — the run is
+	// cancelled by the shorter clock and the error names neither.
+	//
+	// Nil, or a model the application's catalog does not carry, means the
+	// ordinary deadlines. An unknown model waits the same as one that does not
+	// think, which is the safe answer rather than the generous one.
+	Thinks ModelThinks
+
 	// PromptScale narrows every cap that carries content into a prompt, from 0
 	// to 1. Unset — or any value outside that range — means 1, which is the
 	// caps exactly as budgets.go states them, so a deployment that says nothing
@@ -141,6 +153,9 @@ type ModelConfig struct {
 // their replies with it, and a distinct type would need an adapter at every
 // construction for no gain.
 type ModelLimits = llm.ModelLimits
+
+// ModelThinks reports whether a model reasons before it answers.
+type ModelThinks = llm.ModelThinks
 
 // PathConfig is where the agent reads and writes.
 type PathConfig struct {

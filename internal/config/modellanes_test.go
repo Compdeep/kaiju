@@ -1,8 +1,11 @@
 package config
 
-import "strings"
+import (
+	"strings"
+	"testing"
 
-import "testing"
+	"github.com/Compdeep/kaiju/models"
+)
 
 // A thinking model on a lane that forces a tool call is the case this exists
 // for: qwen3-32b drove both lanes of a live install for four hours and 36% of
@@ -103,5 +106,55 @@ func TestModelLaneWarnings_ToolSafeModelIsSilent(t *testing.T) {
 
 	if warnings := c.ModelLaneWarnings(); len(warnings) != 0 {
 		t.Fatalf("a tool-safe pair warned: %v", warnings)
+	}
+}
+
+// Every model this binary defaults to has to be one the catalog carries.
+//
+// The defaults and the catalog are edited in different files by different
+// changes, and nothing connected them: a refresh that dropped gpt-4o left the
+// compiled default naming a model the catalog had never heard of, so a fresh
+// install printed "may not work — the catalog does not carry it" about its own
+// choice. That is the shape of failure this catches.
+func TestEveryDefaultModelIsInTheCatalog(t *testing.T) {
+	d := Default()
+	for _, c := range []struct{ lane, id string }{
+		{"llm.model", d.LLM.Model},
+		{"executor.model", d.Executor.Model},
+		{"chat.model", d.Chat.Model},
+		{"agent.route_model", d.Agent.RouteModel},
+		{"agent.answer_model", d.Agent.AnswerModel},
+		{"vision.model", d.Vision.Model},
+	} {
+		if c.id == "" {
+			continue // an empty lane inherits, which is a choice and not an id
+		}
+		if _, ok := models.Find(c.id); !ok {
+			t.Errorf("the default for %s is %q, which the catalog does not carry", c.lane, c.id)
+		}
+	}
+}
+
+// The lanes that force a small call must default to a model that can make one.
+// A default that trips the engine's own filter is a default nobody chose.
+func TestTheDefaultsSuitTheirLanes(t *testing.T) {
+	d := Default()
+	for _, c := range []struct{ lane, id string }{
+		{"executor.model", d.Executor.Model},
+		{"agent.route_model", d.Agent.RouteModel},
+	} {
+		if c.id == "" {
+			continue
+		}
+		m, ok := models.Find(c.id)
+		if !ok {
+			continue // reported by the test above
+		}
+		if m.Thinks() {
+			t.Errorf("%s defaults to %q, which reasons before it answers", c.lane, c.id)
+		}
+		if !m.ToolCallOK {
+			t.Errorf("%s defaults to %q, which the catalog does not record as fit for a forced call", c.lane, c.id)
+		}
 	}
 }

@@ -334,6 +334,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 			// The model catalog is the application's, so the engine asks for the
 			// limits rather than carrying a copy of them.
 			Limits: configapi.ModelLimits,
+			Thinks: configapi.ModelThinks,
 		},
 		PathConfig: agent.PathConfig{
 			DataDir:     cfg.Agent.DataDir,

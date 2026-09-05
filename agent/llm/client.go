@@ -131,6 +131,50 @@ type ChatRequest struct {
 	// Complete when a caller declared one forced tool — see structured.go. A
 	// caller may also set it directly.
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+
+	// Reasoning turns the model's own thinking off for this call. Nil leaves it
+	// alone, which is the provider's default and, on every model line released
+	// since early 2026, means thinking is ON.
+	//
+	// This exists because reasoning stopped being a property and became a
+	// switch. Alibaba published its last separate -instruct variant with Qwen3;
+	// everything from 3.5 on is one hybrid model, and the same is true across
+	// GLM, DeepSeek, Kimi and Gemini. A lane that forces a small tool call
+	// cannot use any of them with thinking on — measured on the real preflight
+	// schema, qwen3.7-flash, qwen3.8-flash and qwen3.6-35b-a3b all ran to the
+	// cap and returned unparseable JSON; with it off, all three returned a valid
+	// call in 157 to 292 tokens and under four seconds.
+	//
+	// Set by ask() for the lanes that force one, never by a caller and never
+	// from configuration: there is no deployment in which thinking helps a
+	// 96-token routing decision, so there is nothing to configure.
+	Reasoning *ReasoningControl `json:"reasoning,omitempty"`
+}
+
+// ReasoningControl is the OpenAI-compatible reasoning parameter. Only the off
+// switch is modelled: the lanes that set it want thinking gone, and the lanes
+// that want it leave the field nil and take the provider's default.
+type ReasoningControl struct {
+	Enabled bool `json:"enabled"`
+}
+
+// reasoningOff is the value every caller uses. A single shared pointer because
+// nothing mutates it and a fresh allocation per request says otherwise.
+var reasoningOff = &ReasoningControl{Enabled: false}
+
+/*
+ * WithoutReasoning turns the model's thinking off for this request.
+ * desc: For a lane that forces a small tool call, where hidden reasoning
+ *       consumes the budget the call was supposed to fill. Idempotent, and a
+ *       no-op on a nil request.
+ * param: req - the request, modified in place.
+ * return: the request, so this reads as part of building one.
+ */
+func WithoutReasoning(req *ChatRequest) *ChatRequest {
+	if req != nil {
+		req.Reasoning = reasoningOff
+	}
+	return req
 }
 
 // ForceToolChoice returns a tool_choice value that REQUIRES the model to call
@@ -238,11 +282,57 @@ type Client struct {
 	model    string
 	http     *http.Client
 	limits   ModelLimits
+	thinks   ModelThinks
 }
 
 // ModelLimits reports what a model can take in and give back, in tokens. Zero
 // for either means the caller does not know, not that the limit is zero.
 type ModelLimits func(model string) (contextTokens, maxOutputTokens int)
+
+// ModelThinks reports whether a model reasons before it answers. False for a
+// model the caller knows nothing about, which is the same answer as "does not
+// think" and deliberately so: an unknown model gets the ordinary timeout rather
+// than the long one.
+type ModelThinks func(model string) bool
+
+/*
+ * Thinks tells a client which of its models reason before answering.
+ * desc: Only the request deadline reads it. A thinking model is given
+ *       thinkingRequestTimeout instead of requestTimeout, because the hidden
+ *       tokens are real generation the caller waits through.
+ *
+ *       Set on the client beside Limits and for the same reason: a per-call
+ *       decision is a decision somebody forgets to make.
+ * param: fn - the lookup, or nil to give every call the ordinary deadline.
+ * return: the client, so this reads as part of construction.
+ */
+func (c *Client) Thinks(fn ModelThinks) *Client {
+	c.thinks = fn
+	return c
+}
+
+/*
+ * timeoutFor reports how long this request may take.
+ * desc: The ordinary deadline, or the longer one when the model that will
+ *       answer reasons first. Reads req.Model where the caller stamped one and
+ *       the client's own model otherwise, which is the same order Complete
+ *       resolves them in.
+ * param: req - the request as it will be sent.
+ * return: the deadline for this one call.
+ */
+func (c *Client) timeoutFor(req *ChatRequest) time.Duration {
+	if c == nil || c.thinks == nil || req == nil {
+		return requestTimeout
+	}
+	model := req.Model
+	if model == "" {
+		model = c.model
+	}
+	if model != "" && c.thinks(model) {
+		return thinkingRequestTimeout
+	}
+	return requestTimeout
+}
 
 /*
  * Limits tells a client what its models can do.
@@ -320,6 +410,23 @@ func (c *Client) Transport(rt http.RoundTripper) *Client {
 // the deadline stays the shorter of the two.
 const requestTimeout = 300 * time.Second
 
+// thinkingRequestTimeout is what a model that reasons before it answers is
+// given instead.
+//
+// The hidden tokens are generated at the same rate as the visible ones and the
+// caller waits for every one of them, so the same reply takes longer by however
+// much the model thought. Measured on one planner prompt: a thinking model took
+// 75s, 79s and 206s where a non-thinking one took 54s to 62s — and 206s against
+// a 300s ceiling is close enough that a larger prompt goes over it. On the
+// deployment this was measured on, 44% of planner calls returned nothing but a
+// deadline.
+//
+// Double, because the cost is the thinking and roughly two thirds of what that
+// model generated was thinking. It applies per model rather than per lane: a
+// lane running a model that does not think gains nothing from a longer wait,
+// and a stuck provider should be abandoned at 300s as before.
+const thinkingRequestTimeout = 600 * time.Second
+
 // NewClient creates a Client targeting an OpenAI-compatible endpoint.
 func NewClient(endpoint, apiKey, model string) *Client {
 	return NewClientWithProvider(ProviderOpenAI, endpoint, apiKey, model)
@@ -335,8 +442,11 @@ func NewClientWithProvider(provider, endpoint, apiKey, model string) *Client {
 		endpoint: endpoint,
 		apiKey:   apiKey,
 		model:    model,
+		// The ceiling, not the deadline. Each request sets its own with a
+		// context — see timeoutFor — and this stops a connection outliving the
+		// longest of them if that context is ever missing.
 		http: &http.Client{
-			Timeout: requestTimeout,
+			Timeout: thinkingRequestTimeout,
 		},
 	}
 }
@@ -446,6 +556,12 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 	if req.Model == "" {
 		req.Model = c.model
 	}
+
+	// The deadline for THIS call, which depends on whether the model that will
+	// answer reasons first. Derived from the caller's context, so a run whose
+	// own clock is shorter still wins.
+	ctx, cancel := context.WithTimeout(ctx, c.timeoutFor(req))
+	defer cancel()
 
 	body, err := json.Marshal(req)
 	if err != nil {

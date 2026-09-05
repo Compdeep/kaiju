@@ -63,3 +63,27 @@ investigates. It has a body, a payload, timings and a place in the trace.
 **Edge** — a stage that carries. It performs no action: it takes what the
 previous node produced and forms it for the next one to read. `EdgeReFrame`
 is one. An edge has no result of its own, only a message it shaped.
+
+**Lane** — which model answers a call, and it is the vocabulary the settings UI
+uses. There are six, and every one of them is an LLM: naming one of them "the
+LLM" is what makes this confusing.
+
+- **reasoning** — the executive, the aggregator, the classifier, direct
+  responses. Config key `llm.*`, which is the odd one out: it predates the
+  others, when there was one model and no lanes. It is also the FALLBACK — any
+  lane below with an empty model runs this one, silently, which is why an unset
+  executor ends up on whatever the reasoning lane is.
+- **executor** — reflection, the observer, the micro-planner, the compactor.
+  Config `executor.*`.
+- **router** — decides chat or agent, once per turn, in one 96-token forced
+  call. Config `agent.route_model`.
+- **answer** — writes the final answer, the aggregator. Open-ended prose, so a
+  reasoning model is a good choice here and a poor one everywhere else. Config
+  `agent.answer_model`.
+- **chat** — the direct-completion lane, no planner and no tools. Config
+  `chat.*`.
+- **vision** — calls carrying images. Config `vision.*`.
+
+In Go these are `agent.Lane`: Heavy, Light, Route, Answer. Heavy is reasoning
+and Light is executor; the names differ from the config and from the UI, which
+is a wart, not a distinction.

@@ -327,6 +327,19 @@ func ModelLimits(id string) (contextTokens, maxOutputTokens int) {
 }
 
 /*
+ * ModelThinks reports whether a model reasons before it answers.
+ * desc: The catalog's own answer, as agent.Config.Thinks. False for an id the
+ *       catalog does not carry — an unknown model gets the ordinary deadlines
+ *       rather than the generous ones, which is the safe direction.
+ * param: id - the model id as configured for a lane.
+ * return: true when the model emits hidden reasoning tokens.
+ */
+func ModelThinks(id string) bool {
+	m, ok := models.Find(id)
+	return ok && m.Thinks()
+}
+
+/*
  * jsonResponse writes a value as JSON with the given status.
  * desc: A copy of the helper this file used while it lived in package api.
  *       Copying six lines is cheaper than exporting a helper from one package

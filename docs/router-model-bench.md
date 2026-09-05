@@ -1,7 +1,21 @@
 # Router / Preflight model quality bench
 
-_Recorded 2026-07-26. Harness + raw results: `scratchpad/preflight_bench.py`,
-`preflight_bench_results.json`._
+_Recorded 2026-07-26. Re-run 2026-09-05 — see **Phase D**, which supersedes the
+numbers below. Harness + raw results: `scratchpad/preflight_bench.py`,
+`preflight_bench_results.json` (2026-07-26 only; the 2026-09-05 harness was not
+kept)._
+
+> **Two things below are out of date, and both matter before you read further.**
+>
+> **The mode enum changed.** ROUTE returned `chat | meta | investigate` when this
+> was written. It now returns `chat | agent` — `meta` is gone and `investigate`
+> is `agent`. Every gold label in the table below is stated in the old
+> vocabulary. A bench run against those labels scores every model at 30–40% and
+> means nothing, which is what happened on the first re-run attempt.
+>
+> **The route budget changed.** 16 tokens then, `MaxTokens: 96` now
+> (`preflight.go`), because 16 fits the mode alone and a reply carrying anything
+> else was cut part-way through and failed to parse.
 
 ## TL;DR
 
@@ -183,6 +197,51 @@ The cost of 32b is in the third column. 206 seconds against 54 is where a
 gateway's own timeout lands, and a deployment running it saw 36% of its calls
 come back as aborted 504s. Neither model is free: one overruns the cap, the
 other overruns the clock.
+
+## Phase D — re-run on the current enum (2026-09-05)
+
+The same ten gold queries, relabelled to the enum that exists — `agent` where
+the table below says `investigate`, and `chat` for Q5, since `meta` no longer
+exists and a capability question is answerable from what the model already
+knows. Real ROUTE prompt (2,272 characters), `MaxTokens: 96`, temperature 0,
+strict schema, **reasoning disabled on every call** — which the engine now does
+for this lane on every send regardless of model.
+
+| model | accuracy | avg | open weights |
+|---|---|---|---|
+| `qwen/qwen3.6-35b-a3b` | **90%** (18/20) | **0.71s** | yes |
+| `upstage/solar-pro4` | 90% (18/20) | 1.87s | yes |
+| `deepseek/deepseek-v4-flash-0731` | 90% (18/20) | 1.73s | yes |
+| `inclusionai/ling-3.0-flash` | 80% (16/20) | 0.89s | yes |
+| `nvidia/nemotron-3.5-lightning` | 80% (16/20) | 0.47s | yes |
+| `qwen/qwen3-30b-a3b-instruct-2507` | 80% (16/20) | 2.26s | yes |
+| `meta-llama/llama-4-scout` | 75% (15/20) | 1.00s | yes |
+| `ibm-granite/granite-4.2-8b` | 60% (12/20) | 0.99s | yes |
+
+`qwen/qwen3.6-35b-a3b` is the new default `RouteModel`: joint-best accuracy,
+three times faster than the other two at 90%, and open-weight — the router was
+the last lane defaulting to a closed model.
+
+**Every miss but one was `agent → chat`**, the under-escalation direction. That
+is the failure this document was written about, and it is still the one that
+happens: the route call fails safe to `chat`, so a wrong answer in that
+direction is silent — no error, no tool, no investigation. The prompt says so
+itself: *"When uncertain, choose agent. The cost of sending a conversation to
+the graph is one extra call. The cost of sending an action to chat is that it
+never happens."*
+
+**Three models in that run were lost to a truncated console.**
+`qwen/qwen3.5-35b-a3b`, `openai/gpt-4.1-mini` and `meituan/longcat-2.0` were
+benched and their rows never printed. `gpt-4.1-mini` is the outgoing default, so
+its current score is unknown — the 100% above is against the old three-mode
+labels at 16 tokens and does not carry over.
+
+**Reasoning is no longer a disqualifier here.** When this document was written,
+a reasoning model on this lane emitted no call at all. It is now a switch the
+request turns off, and the engine turns it off on this lane always
+(`agent/ask.go`) — so the top three above all reason by default and all work.
+What has not changed is the budget: 96 tokens, and a model that will not fit it
+fails silently.
 
 ## Future option: a dedicated classifier (BERT)
 

@@ -40,18 +40,32 @@ const planOverhead = 1000
  * return: the max_tokens to send with a plan call.
  */
 func (a *Agent) planMaxTokens(ctx context.Context) int {
+	c, laneModel := a.heavyLane(ctx)
+	model := resolvedModel(laneModel, c)
+
+	// A model that reasons before answering writes its hidden tokens into the
+	// same cap as its visible ones, so the same plan needs roughly twice the
+	// room. Measured on one planner prompt: 1,401 completion tokens billed for
+	// 470 tokens of visible JSON — two thirds of the generation was thinking.
+	//
+	// Doubled here rather than in the configured value, so the number an
+	// operator sets stays the number a non-thinking model gets.
+	base := a.cfg.MaxTokens
+	if a.cfg.Thinks != nil && model != "" && a.cfg.Thinks(model) {
+		base *= 2
+	}
+
 	need := a.cfg.MaxNodes*stepTokens + planOverhead
-	if need <= a.cfg.MaxTokens {
-		return a.cfg.MaxTokens
+	if need <= base {
+		return base
 	}
 	if a.cfg.Limits == nil {
-		return a.cfg.MaxTokens
+		return base
 	}
-	c, laneModel := a.heavyLane(ctx)
-	_, maxOutput := a.cfg.Limits(resolvedModel(laneModel, c))
+	_, maxOutput := a.cfg.Limits(model)
 	switch {
 	case maxOutput == 0:
-		return a.cfg.MaxTokens
+		return base
 	case maxOutput < need:
 		return maxOutput
 	default:

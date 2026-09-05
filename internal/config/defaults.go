@@ -38,7 +38,7 @@ func Default() *Config {
 		// latency are what a run is actually made of.
 		Executor: ExecutorConfig{
 			Provider: "openrouter",
-			Model:    "qwen/qwen3-30b-a3b-instruct-2507",
+			Model:    "qwen/qwen3.6-35b-a3b",
 		},
 		Chat: ChatConfig{
 			// Tools below is the palette an escalated agent may use, so a
@@ -70,7 +70,7 @@ func Default() *Config {
 			// (a reasoning model like gpt-5-mini starves at 16 tokens → silent chat
 			// fallback). See docs/router-model-bench.md. Overridable everywhere.
 			RouteProvider:     "openrouter",
-			RouteModel:        "openai/gpt-4.1-mini",
+			RouteModel:        "qwen/qwen3.6-35b-a3b",
 			WallClockSec:      180,
 			MaxTurns:          15,
 			RateLimit:         100,

@@ -281,10 +281,18 @@ func stateBudget(req *llm.ChatRequest, cap int) {
 		if strings.Contains(req.Messages[i].Content, budgetMarker) {
 			return
 		}
+		// The ceiling AND a target, because stating only the ceiling reads as
+		// permission to fill it. Measured: a working plan is 700 to 900 tokens
+		// against a 4,096 cap, and the models that failed were not wrong but
+		// verbose — one wrote 1,140 tokens for a job another did in 155. Half
+		// the cap is well above what a good reply has ever needed and still
+		// leaves the model room to be told it went long.
 		req.Messages[i].Content += fmt.Sprintf(
-			"\n\n%s about %d tokens. Generation stops there, so a longer reply is cut "+
-				"off part-way and cannot be used. Plan the length before you start.",
-			budgetMarker, cap)
+			"\n\n%s about %d tokens, and aim for about %d. Generation stops at the "+
+				"limit, so a longer reply is cut off part-way and cannot be used — a "+
+				"reply cut in half is worth less than a shorter one that finishes. "+
+				"Plan the length before you start.",
+			budgetMarker, cap, cap/2)
 		return
 	}
 }

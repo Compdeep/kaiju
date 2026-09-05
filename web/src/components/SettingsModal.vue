@@ -449,12 +449,19 @@ function onChatModelChange() {
  *   Empty provider ⇒ falls back to the executor lane.
  * @returns {Array<Object>}
  */
-const routeModels = computed(() =>
-  // The router is a 96-token forced call, so the same filter as the executor —
-  // see forcedSmallCall. A thinking model here emits no call at all and the
-  // decision silently falls back to "chat", which is what
-  // docs/router-model-bench.md was written about.
-  forcedSmallCall(routeProvider.value || execProvider.value || cfg.value.llm.provider))
+// The router is the exception. Its lane turns reasoning off before every send,
+// and every model released since early 2026 has a reasoning mode — so filtering
+// them out would leave this picker showing nothing newer than 2025, on the one
+// lane where cost is irrelevant (96 tokens, once a turn) and the only question
+// is which model decides best.
+//
+// What a bad choice costs here is invisible: the route call fails safe to
+// "chat", so a model that cannot emit the call does not error, it silently
+// declines to investigate. See docs/router-model-bench.md.
+const routeModels = computed(() => {
+  const p = routeProvider.value || execProvider.value || cfg.value.llm.provider
+  return allModels.value.filter(m => m.provider === p && m.tool_call_ok)
+})
 
 /**
  * desc: Legible dropdown label — name plus params / thinking / tool-call badges so

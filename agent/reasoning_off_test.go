@@ -41,24 +41,40 @@ func TestTheReasoningAndAnswerLanesAreLeftAlone(t *testing.T) {
 	}
 }
 
-// The picker's half of the same rule. Two doors, because a config file reaches a
-// lane without passing a picker — which is how a thinking model drove one
-// deployment's executor for seven days.
-func TestTheForcedSmallCallListExcludesThinkers(t *testing.T) {
+// The picker's half of the rule: offer what can emit the call.
+//
+// It briefly excluded thinking models too, and the measurement killed that. Run
+// against three real preflight prompts with reasoning off, the three best were
+// all reason-capable, and the non-thinking model that had been the default was
+// 25 times slower than the winner and cut at the cap on one prompt of three. The
+// lane turns reasoning off before it sends, so what a model would do if allowed
+// to think decides nothing here.
+func TestTheForcedSmallCallListOffersWhatCanEmitTheCall(t *testing.T) {
 	list := models.ForcedSmallCall()
 	if len(list) == 0 {
 		t.Fatal("no model is fit for a forced small call; both pickers show nothing")
 	}
 	for _, m := range list {
-		if m.Thinks() {
-			t.Errorf("%q thinks and is still offered for the executor and router", m.ID)
-		}
 		if !m.ToolCallOK || !m.Tools {
 			t.Errorf("%q is offered without the flags that qualify it", m.ID)
 		}
 	}
-	// And it must be narrower than the general list, or it is not filtering.
-	if len(list) >= len(models.ToolSafe()) {
-		t.Error("the forced-small-call list is not narrower than ToolSafe")
+	// A reasoning model has to be reachable, or the winners of the bench are not.
+	thinkers := 0
+	for _, m := range list {
+		if m.Thinks() {
+			thinkers++
+		}
+	}
+	if thinkers == 0 {
+		t.Error("no reasoning model is offered; the filter is excluding on Thinking again")
+	}
+	// And a model measured unfit must not be, or the measurement bought nothing.
+	if _, ok := models.Find("qwen/qwen3-30b-a3b-instruct-2507"); ok {
+		for _, m := range list {
+			if m.ID == "qwen/qwen3-30b-a3b-instruct-2507" {
+				t.Error("a model measured as cut at the cap is still offered")
+			}
+		}
 	}
 }

@@ -179,28 +179,58 @@ func (i Info) Thinks() bool { return i.Thinking != nil && *i.Thinking }
 
 /*
  * ForcedSmallCall returns the models fit for a lane that forces a SMALL tool
- * call — the router at 96 tokens, the executor's classifiers.
- * desc: ToolSafe minus the ones that reason before answering. Those are excluded
- *       here and nowhere else: on the reasoning lane thinking earns its cost, and
- *       on answer and chat it is simply better. It is only in a small forced call
- *       that it has no upside — the reasoning consumes the budget the call was to
- *       fill, and the reply arrives empty or unparseable.
+ * call — the router's 96 tokens, the executor's classifiers.
+ * desc: Everything that can emit such a call, whether or not it reasons by
+ *       default, because those lanes turn reasoning off before they send —
+ *       always, for every model, with nothing an operator can set (agent/ask.go).
  *
- *       The engine turns thinking off on those lanes anyway (see agent/ask.go),
- *       so this is the second of two doors rather than the only one. A picker
- *       that offered a thinking model here would be offering a choice the engine
- *       then overrides, which is worse than not offering it: the operator would
- *       have picked a model for a property it is not allowed to use.
+ *       It briefly excluded thinking models, and the measurement killed that.
+ *       Run against three real preflight prompts from a live deployment with
+ *       reasoning off, the three best models were all reason-capable:
+ *       qwen3.6-35b-a3b at 155 tokens and 1.7s, qwen3.5-35b-a3b at 149 and 2.4s,
+ *       deepseek-v4-flash-vision-exp at 238 and 2.9s. The non-thinking model
+ *       that had been the default took 41.9s and was cut at the cap on one of
+ *       the three.
+ *
+ *       So the exclusion did not protect the lane; it hid the models that won
+ *       it. What it was written for was a time when kaiju sent no reasoning
+ *       parameter and got the provider's default, which on this generation is
+ *       ON. That premise is gone.
  * return: a fresh slice, in catalog order.
  */
 func ForcedSmallCall() []Info {
 	out := make([]Info, 0, len(all))
 	for _, m := range all {
-		if m.Tools && m.ToolCallOK && !m.Thinks() {
+		if m.Tools && m.ToolCallOK {
 			out = append(out, m)
 		}
 	}
 	return out
+}
+
+/*
+ * RouterFit returns the models a router picker should offer.
+ * desc: Everything that can emit a small forced call, whether or not it reasons
+ *       by default, because the router lane turns reasoning off before it sends
+ *       — always, for every model, with nothing an operator can set.
+ *
+ *       This is the exception to the rule ForcedSmallCall states, and it exists
+ *       because the rule outlived its evidence. Excluding thinkers made sense
+ *       while kaiju sent no reasoning parameter and got the provider's default,
+ *       which on the current generation is ON. Now the lane forces it off, and
+ *       every model released since early 2026 is reason-capable — so the
+ *       exclusion no longer protects the lane, it just hides everything modern
+ *       from the one picker where cost is irrelevant and quality is the only
+ *       question. The router runs once a turn at 96 tokens.
+ *
+ *       The executor keeps the stricter list. It has the same reasoning forced
+ *       off, so the same argument applies to it; what differs is that the
+ *       executor has good non-thinking choices and the router, on the current
+ *       catalogue, does not.
+ * return: a fresh slice, in catalog order.
+ */
+func RouterFit() []Info {
+	return ToolSafe()
 }
 
 /*

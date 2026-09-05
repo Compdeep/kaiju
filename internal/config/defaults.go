@@ -31,14 +31,22 @@ func Default() *Config {
 			Temperature: 0.3,
 			MaxTokens:   4096,
 		},
-		// The executor: qwen3-30b-a3b-instruct-2507, 3B active per token and the
-		// cheapest thing measured that answers a forced call — 283 to 413 tokens
-		// on the real preflight schema. This lane runs a dozen times per
-		// investigation where the reasoning lane runs once, so its cost and
-		// latency are what a run is actually made of.
+		// The executor: qwen3.6-35b-a3b, 3B active per token. Measured against
+		// three real preflight prompts from a live deployment, reasoning off:
+		// 3 of 3 valid at 155 tokens and 1.7 seconds. The previous default,
+		// qwen3-30b-a3b-instruct-2507, took 41.9 seconds on the same prompts,
+		// wrote 1140 tokens and was cut at the cap on one of the three.
+		//
+		// It reasons by default and this lane turns that off before it sends,
+		// which is what makes it usable here — and what makes it fast: the
+		// failures in that run were length, not correctness, and every model
+		// that failed wrote five times what the winners did.
+		//
+		// This lane runs a dozen times per investigation where the reasoning
+		// lane runs once, so its latency is what a run is actually made of.
 		Executor: ExecutorConfig{
 			Provider: "openrouter",
-			Model:    "qwen/qwen3-30b-a3b-instruct-2507",
+			Model:    "qwen/qwen3.6-35b-a3b",
 		},
 		Chat: ChatConfig{
 			// Tools below is the palette an escalated agent may use, so a

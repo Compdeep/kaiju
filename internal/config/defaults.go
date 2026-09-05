@@ -27,7 +27,7 @@ func Default() *Config {
 		LLM: LLMConfig{
 			Provider:    "openrouter",
 			Endpoint:    "https://openrouter.ai/api/v1",
-			Model:       "qwen/qwen3-235b-a22b-2507",
+			Model:       "qwen/qwen3.5-397b-a17b",
 			Temperature: 0.3,
 			MaxTokens:   4096,
 		},

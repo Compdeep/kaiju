@@ -1151,6 +1151,19 @@ func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
 			Steps  json.RawMessage `json:"steps"`
 		}
 		if err2 := json.Unmarshal([]byte(raw), &flex); err2 != nil {
+			// Cut at the token cap: the JSON never closed, so neither shape
+			// parses. Salvage the steps that finished — see below.
+			if trimmed := salvageTruncatedPlan(raw); trimmed != "" {
+				if err3 := json.Unmarshal([]byte(trimmed), payload); err3 == nil {
+					log.Printf("[dag] executive: plan was cut at the cap; salvaged %d complete step(s)", len(payload.Steps))
+					var salvaged struct {
+						Steps json.RawMessage `json:"steps"`
+					}
+					_ = json.Unmarshal([]byte(trimmed), &salvaged)
+					linkDependsOnTags(salvaged.Steps, payload.Steps)
+					return nil
+				}
+			}
 			return err
 		}
 		payload.Intent = flex.Intent
@@ -1165,10 +1178,86 @@ func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
 			linkDependsOnTags(json.RawMessage(stepsStr), payload.Steps)
 			return nil
 		}
+		// Last rung: the reply was cut at the token cap, so the JSON never
+		// closed. The steps that DID close are whole and paid for — salvage
+		// those and drop the partial one. See salvageTruncatedPlan.
+		if trimmed := salvageTruncatedPlan(raw); trimmed != "" {
+			if err4 := json.Unmarshal([]byte(trimmed), payload); err4 == nil {
+				log.Printf("[dag] executive: plan was cut at the cap; salvaged %d complete step(s)", len(payload.Steps))
+				var salvaged struct {
+					Steps json.RawMessage `json:"steps"`
+				}
+				_ = json.Unmarshal([]byte(trimmed), &salvaged)
+				linkDependsOnTags(salvaged.Steps, payload.Steps)
+				return nil
+			}
+		}
 		return err
 	}
 	linkDependsOnTags(arrived.Steps, payload.Steps)
 	return nil
+}
+
+/*
+ * salvageTruncatedPlan trims a plan cut off at the token cap to the last step
+ * that finished.
+ * desc: A reply that ran into max_tokens stops mid-token: the JSON has an open
+ *       array, an open object, and often an open string. Everything before that
+ *       last partial step is whole, and it was generated and paid for.
+ *
+ *       So this walks the raw text tracking brace depth and string state,
+ *       remembers where each step object inside "steps" closed, cuts at the last
+ *       one and closes the array and the object. What comes back parses, and the
+ *       caller's own parser handles it like any other plan.
+ *
+ *       The alternative was asking the model for a shorter plan, which is what
+ *       used to happen: a second call at seventeen thousand input tokens, to
+ *       re-derive steps already sitting in the reply. That call is still there
+ *       for the case this cannot help — a reply cut before the first step
+ *       closed — and it now fires only then.
+ * param: raw - the tool-call arguments as they arrived, cut.
+ * return: valid JSON carrying the whole steps, or "" when none closed.
+ */
+func salvageTruncatedPlan(raw string) string {
+	i := strings.Index(raw, `"steps"`)
+	if i < 0 {
+		return ""
+	}
+	open := strings.IndexByte(raw[i:], '[')
+	if open < 0 {
+		return ""
+	}
+	start := i + open + 1
+
+	depth, lastClose := 0, -1
+	inStr, esc := false, false
+	for j := start; j < len(raw); j++ {
+		c := raw[j]
+		if esc {
+			esc = false
+			continue
+		}
+		switch {
+		case c == '\\' && inStr:
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+			// Braces inside a string are text, not structure.
+		case c == '{':
+			depth++
+		case c == '}':
+			if depth--; depth == 0 {
+				lastClose = j // one step object finished here
+			}
+		case c == ']' && depth == 0:
+			return "" // the array closed on its own; nothing was cut
+		}
+	}
+	if lastClose < 0 {
+		return "" // cut before the first step finished
+	}
+	return raw[:lastClose+1] + "]}"
 }
 
 /*
@@ -1438,8 +1527,15 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// had chosen to answer in prose — or as "tool_calls" with truncated
 	// arguments, where the parse retry fires and blames the wrong thing. Neither
 	// tells the model what happened, and both retry under the same cap.
-	if choice.FinishReason == "length" {
-		log.Printf("[dag] executive plan cut off at %d tokens — asking for a shorter plan", a.planMaxTokens(ctx))
+	// A cut reply is asked for again ONLY when there is nothing to salvage from
+	// it. The steps that closed before the cut are whole and already paid for,
+	// and re-asking re-derives them at seventeen thousand input tokens a time —
+	// see salvageTruncatedPlan, which the parser applies below.
+	if choice.FinishReason == "length" && salvageTruncatedPlan(planArguments(choice)) != "" {
+		log.Printf("[dag] executive plan cut off at %d tokens — salvaging the steps that finished",
+			a.planMaxTokens(ctx))
+	} else if choice.FinishReason == "length" {
+		log.Printf("[dag] executive plan cut off at %d tokens with nothing to salvage — asking for a shorter plan", a.planMaxTokens(ctx))
 		shorter := append(append([]llm.Message{}, messages...), llm.Message{
 			Role: "user",
 			Content: "Your previous plan was cut off before it finished — it ran past the reply limit. " +
@@ -2935,4 +3031,15 @@ func applyRunTarget(steps []PlanStep, target string, registry *toolapi.Registry)
  */
 func budgetLine(maxNodes, maxLLMCalls int) string {
 	return fmt.Sprintf("\nBudget: at most %d steps and %d LLM calls. This is a ceiling, not a target — plan only the steps the objective needs, and stop there. Do not add steps that examine something the objective did not name.\n", maxNodes, maxLLMCalls)
+}
+
+// planArguments is the plan() call's arguments as they arrived, from whichever
+// field carries them. A schema reply arrives as content and asToolReply moves it
+// into a tool call, leaving Content empty — so a caller reading only one of the
+// two finds nothing on exactly the replies that were cut.
+func planArguments(c llm.Choice) string {
+	if len(c.Message.ToolCalls) > 0 {
+		return c.Message.ToolCalls[0].Function.Arguments
+	}
+	return c.Message.Content
 }

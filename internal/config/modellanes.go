@@ -15,10 +15,15 @@ import (
 // late — which reaches an operator as a run that failed, with the model that
 // caused it named nowhere.
 //
-// The catalog already records which models those are, in Info.Thinking and
-// Info.ToolCallOK. The model pickers filter on the same two fields, but a config
-// file and a custom endpoint reach the lanes without passing a picker, and that
-// is the route this reads.
+// The catalog already records which models those are, in Info.Thinking,
+// Info.ReasoningOptional and Info.ToolCallOK. The model pickers filter on the
+// same fields, but a config file and a custom endpoint reach the lanes without
+// passing a picker, and that is the route this reads.
+//
+// Thinking BY DEFAULT is not the complaint, or this would warn against most of
+// the catalog: the executor and router lanes send reasoning off (agent/ask.go)
+// and a hybrid model obeys. The complaint is reasoning that cannot be switched
+// off, which no request can prevent.
 //
 // The Answer lane is deliberately absent: it writes prose, and a thinking model
 // is a good choice for it.
@@ -73,10 +78,10 @@ func (c *Config) ModelLaneWarnings() []string {
 			continue
 		}
 		switch {
-		case info.Thinks():
+		case info.Thinks() && !info.ReasoningOptional:
 			seen[l.id] = true
 			out = append(out, fmt.Sprintf(
-				"%s is set to %s, which reasons before it answers. This lane forces a tool call inside a small reply budget, so the reasoning consumes the budget and the call returns empty or times out.",
+				"%s is set to %s, which reasons before it answers and cannot be told not to. This lane forces a tool call inside a small reply budget, so the reasoning consumes the budget and the call returns empty or times out.",
 				l.lane, l.id))
 		case !info.ToolCallOK:
 			seen[l.id] = true

@@ -42,29 +42,33 @@
       </div>
     </div>
 
-    <!-- Execution -->
+    <!-- Run mode. Picks the lane, and gates the agent-mode row below: chat_mode
+         suppresses execution_mode on the wire (services/chat.js), so a greyed
+         row is what the request actually does, not a UI courtesy. -->
     <div class="pop-row">
-      <div class="pop-label">Execution</div>
-      <div class="pop-opt" :class="{ active: sessions.executionMode === 'interactive' }" @click="sessions.setExecutionMode('interactive')">
-        <span class="pop-opt-name">Interactive</span>
-        <span class="pop-opt-desc">Checks in as it goes.</span>
-      </div>
-      <div class="pop-opt" :class="{ active: sessions.executionMode === 'autonomous' }" @click="sessions.setExecutionMode('autonomous')">
-        <span class="pop-opt-name">Autonomous</span>
-        <span class="pop-opt-desc">Runs to completion.</span>
-      </div>
-    </div>
-
-    <!-- Chat mode -->
-    <div class="pop-row">
-      <div class="pop-label">Chat mode</div>
+      <div class="pop-label">Run mode</div>
       <div class="pop-opt" :class="{ active: !sessions.chatMode }" @click="setChat(false)">
         <span class="pop-opt-name">Agent</span>
         <span class="pop-opt-desc">Plans &amp; uses tools.</span>
       </div>
       <div class="pop-opt" :class="{ active: sessions.chatMode }" @click="setChat(true)">
-        <span class="pop-opt-name">Direct</span>
+        <span class="pop-opt-name">Chat</span>
         <span class="pop-opt-desc">Reply only, for chat models.</span>
+      </div>
+    </div>
+
+    <!-- Agent mode. Whether the router runs first (scheduler.go), NOT whether
+         anyone is watching — the old "Interactive" label claimed a check-in that
+         never happens. Values stay interactive/autonomous: the wire is unchanged. -->
+    <div class="pop-row" :class="{ 'pop-row-off': sessions.chatMode }">
+      <div class="pop-label">Agent mode</div>
+      <div class="pop-opt" :class="{ active: sessions.executionMode !== 'autonomous' }" @click="setExec('interactive')">
+        <span class="pop-opt-name">Auto</span>
+        <span class="pop-opt-desc">The router decides: answer or plan.</span>
+      </div>
+      <div class="pop-opt" :class="{ active: sessions.executionMode === 'autonomous' }" @click="setExec('autonomous')">
+        <span class="pop-opt-name">Forced</span>
+        <span class="pop-opt-desc">Always plans. Tools needing a human are withheld.</span>
       </div>
     </div>
 
@@ -118,6 +122,16 @@ onMounted(async () => {
 function setChat(val) {
   if (sessions.chatMode !== val) sessions.toggleChatMode()
 }
+
+/**
+ * desc: Set the agent mode. Chat run mode suppresses execution_mode on the wire,
+ * so the row is inert there and this is a no-op rather than silent state.
+ * @param {string} val - "interactive" (Auto) or "autonomous" (Forced)
+ */
+function setExec(val) {
+  if (sessions.chatMode) return
+  sessions.setExecutionMode(val)
+}
 </script>
 
 <style scoped>
@@ -167,6 +181,8 @@ function setChat(val) {
 .pop-opt-name { font-size: 12px; font-weight: 600; color: var(--text); }
 .pop-opt.active .pop-opt-name { color: var(--accent); }
 .pop-opt-desc { font-size: 11px; color: var(--text-muted); }
+
+.pop-row-off { opacity: 0.4; pointer-events: none; }
 
 .pop-divider { border-top: 1px solid var(--border-subtle); margin: 6px 0; }
 .pop-advanced {

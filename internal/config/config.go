@@ -92,6 +92,20 @@ type LLMConfig struct {
 	Model       string  `json:"model"`
 	Temperature float64 `json:"temperature"`
 	MaxTokens   int     `json:"max_tokens"`
+	// Reasoning switches this lane's thinking on or off explicitly: "on", "off",
+	// or empty for whatever the model does by default.
+	//
+	// This lane is the only one that asks. The router and the executor force a
+	// small tool call and send reasoning off whatever is configured, because
+	// reasoning there consumes the budget the call was to fill; answer and chat
+	// take the model's default and are better for it. Here the planning IS the
+	// budget, so which way it goes is a judgement about this deployment: a run
+	// that plans better against one that finishes sooner.
+	//
+	// Empty is the default because a model's own default is a considered choice
+	// by the people who trained it, and because it keeps every existing config
+	// file behaving exactly as it did.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 /*

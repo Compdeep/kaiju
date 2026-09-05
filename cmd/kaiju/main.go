@@ -327,10 +327,12 @@ func createAgent(cfg *config.Config) *agent.Agent {
 			LLMEndpoint: cfg.LLM.Endpoint,
 			LLMAPIKey:   cfg.LLM.APIKey,
 			LLMModel:    cfg.LLM.Model,
-			Providers:   buildProviderCreds(cfg.Providers),
-			Temperature: cfg.LLM.Temperature,
-			MaxTokens:   cfg.LLM.MaxTokens,
-			RateLimit:   cfg.Agent.RateLimit,
+			// "on", "off", or empty for the model's default. Reasoning lane only.
+			LLMReasoning: cfg.LLM.Reasoning,
+			Providers:    buildProviderCreds(cfg.Providers),
+			Temperature:  cfg.LLM.Temperature,
+			MaxTokens:    cfg.LLM.MaxTokens,
+			RateLimit:    cfg.Agent.RateLimit,
 			// The model catalog is the application's, so the engine asks for the
 			// limits rather than carrying a copy of them.
 			Limits: configapi.ModelLimits,

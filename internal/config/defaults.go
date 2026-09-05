@@ -20,10 +20,11 @@ func Default() *Config {
 		// change anything to be safe, and one that wants a closed model is
 		// making a deliberate choice rather than accepting a default.
 		//
-		// The reasoning lane: qwen3-235b-a22b-2507, a 235B mixture-of-experts
-		// with 22B active, so it is large without being slow, and it has no
-		// reasoning phase to pay for. Open weights, ten providers on OpenRouter
-		// and downloadable, so the same default works on-premise.
+		// The reasoning lane: qwen3.5-397b-a17b, a 397B mixture-of-experts with
+		// 17B active, so it is large without being slow. It is a thinking model,
+		// and this is the lane that should have one — planning and synthesis are
+		// what a reasoning phase is for. Open weights and downloadable, so the
+		// same default works on-premise.
 		LLM: LLMConfig{
 			Provider:    "openrouter",
 			Endpoint:    "https://openrouter.ai/api/v1",
@@ -31,11 +32,12 @@ func Default() *Config {
 			Temperature: 0.3,
 			MaxTokens:   4096,
 		},
-		// The executor: qwen3-30b-a3b-instruct-2507, 3B active per token and the
-		// cheapest thing measured that answers a forced call — 283 to 413 tokens
-		// on the real preflight schema. This lane runs a dozen times per
-		// investigation where the reasoning lane runs once, so its cost and
-		// latency are what a run is actually made of.
+		// The executor: qwen3.6-35b-a3b, 3B active per token. It is a thinking
+		// model, but this lane forces reasoning off (agent/ask.go, prepare) —
+		// a forced single-tool call has nothing to reason about, and thinking
+		// tokens would eat the budget before the call is written. This lane runs
+		// a dozen times per investigation where the reasoning lane runs once, so
+		// its cost and latency are what a run is actually made of.
 		Executor: ExecutorConfig{
 			Provider: "openrouter",
 			Model:    "qwen/qwen3.6-35b-a3b",

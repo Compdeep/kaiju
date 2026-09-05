@@ -66,6 +66,9 @@ type ModelConfig struct {
 	LLMEndpoint string
 	LLMAPIKey   string
 	LLMModel    string
+	// LLMReasoning is "on", "off", or empty for the model's own default. Only
+	// the reasoning lane reads it; see internal/config.LLMConfig.Reasoning.
+	LLMReasoning string
 
 	// Providers is the credential catalog for per-request model routing,
 	// keyed by provider name (openai, anthropic, openrouter, selfhosted, …).

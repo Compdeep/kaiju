@@ -158,9 +158,12 @@ type ReasoningControl struct {
 	Enabled bool `json:"enabled"`
 }
 
-// reasoningOff is the value every caller uses. A single shared pointer because
-// nothing mutates it and a fresh allocation per request says otherwise.
-var reasoningOff = &ReasoningControl{Enabled: false}
+// The two values callers use. Shared pointers because nothing mutates them and
+// a fresh allocation per request would say otherwise.
+var (
+	reasoningOff = &ReasoningControl{Enabled: false}
+	reasoningOn  = &ReasoningControl{Enabled: true}
+)
 
 /*
  * WithoutReasoning turns the model's thinking off for this request.
@@ -173,6 +176,25 @@ var reasoningOff = &ReasoningControl{Enabled: false}
 func WithoutReasoning(req *ChatRequest) *ChatRequest {
 	if req != nil {
 		req.Reasoning = reasoningOff
+	}
+	return req
+}
+
+/*
+ * WithReasoning turns the model's thinking ON for this request.
+ * desc: The opposite door to WithoutReasoning, for the one lane that has a
+ *       choice — the reasoning lane, where the planning is what the budget is
+ *       for. A model whose reasoning is mandatory is already reasoning and a
+ *       model that has none ignores this, so it is safe on either.
+ *
+ *       Leaving Reasoning nil is a third answer, and the default one: take
+ *       whatever the provider does. This is only for saying otherwise.
+ * param: req - the request, modified in place.
+ * return: the request, so this reads as part of building one.
+ */
+func WithReasoning(req *ChatRequest) *ChatRequest {
+	if req != nil {
+		req.Reasoning = reasoningOn
 	}
 	return req
 }
@@ -313,15 +335,33 @@ func (c *Client) Thinks(fn ModelThinks) *Client {
 
 /*
  * timeoutFor reports how long this request may take.
- * desc: The ordinary deadline, or the longer one when the model that will
- *       answer reasons first. Reads req.Model where the caller stamped one and
- *       the client's own model otherwise, which is the same order Complete
- *       resolves them in.
+ * desc: The ordinary deadline, or the longer one when the reply will contain
+ *       reasoning. Two sources, in that order:
+ *
+ *       req.Reasoning, when the caller set it. It is the instruction actually
+ *       being sent, so it beats anything the catalog says the model does on its
+ *       own — a lane that switched reasoning ON gets the long deadline even for
+ *       a model that ships it off, and the router and executor, which switch it
+ *       off on every call, stop drawing the long one they never need.
+ *
+ *       The catalog otherwise, through Thinks: no instruction is being sent, so
+ *       the model's own default is what arrives. Reads req.Model where the
+ *       caller stamped one and the client's own model otherwise, which is the
+ *       same order Complete resolves them in.
  * param: req - the request as it will be sent.
  * return: the deadline for this one call.
  */
 func (c *Client) timeoutFor(req *ChatRequest) time.Duration {
-	if c == nil || c.thinks == nil || req == nil {
+	if c == nil || req == nil {
+		return requestTimeout
+	}
+	if req.Reasoning != nil {
+		if req.Reasoning.Enabled {
+			return thinkingRequestTimeout
+		}
+		return requestTimeout
+	}
+	if c.thinks == nil {
 		return requestTimeout
 	}
 	model := req.Model

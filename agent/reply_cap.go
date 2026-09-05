@@ -51,7 +51,7 @@ func (a *Agent) planMaxTokens(ctx context.Context) int {
 	// Doubled here rather than in the configured value, so the number an
 	// operator sets stays the number a non-thinking model gets.
 	base := a.cfg.MaxTokens
-	if a.cfg.Thinks != nil && model != "" && a.cfg.Thinks(model) {
+	if a.heavyThinks(model) {
 		base *= 2
 	}
 
@@ -114,16 +114,37 @@ func resolvedModel(laneModel string, c *llm.Client) string {
  * return: the wall clock for this run, or zero when none is configured — which
  *         means no wall clock at all, and doubling zero must stay zero.
  */
+/*
+ * heavyThinks reports whether the reasoning lane will actually reason.
+ * desc: The catalog says what a model does by DEFAULT; llmReasoning can say
+ *       otherwise for this lane, and the clocks have to size the run that is
+ *       really made rather than the one the catalog describes. An operator who
+ *       switches reasoning on for a model that ships it off would otherwise get
+ *       a thinking run inside a non-thinking budget and clock, which is the
+ *       truncated-plan failure this doubling exists to prevent.
+ * param: model - the reasoning lane's model id.
+ * return: true when reasoning will be part of the reply.
+ */
+func (a *Agent) heavyThinks(model string) bool {
+	switch a.llmReasoning {
+	case "on":
+		return true
+	case "off":
+		return false
+	}
+	return a.cfg.Thinks != nil && model != "" && a.cfg.Thinks(model)
+}
+
 func (a *Agent) wallClock() time.Duration {
 	base := a.cfg.DAGWallClock
-	if base <= 0 || a.cfg.Thinks == nil {
+	if base <= 0 {
 		return base
 	}
 	var model string
 	if a.llm != nil {
 		model = a.llm.Model()
 	}
-	if model != "" && a.cfg.Thinks(model) {
+	if a.heavyThinks(model) {
 		return base * 2
 	}
 	return base

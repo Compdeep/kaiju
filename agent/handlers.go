@@ -86,6 +86,10 @@ func (a *Agent) applyModels(cfg Config) {
 		a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(cfg.Limits).Transport(cfg.LLMTransport)
 	}
 
+	if cfg.LLMReasoning != "" {
+		a.llmReasoning = cfg.LLMReasoning
+	}
+
 	// Per-lane choices. Leaving a lane empty keeps it on the main model.
 	if cfg.VisionProvider != "" || cfg.VisionModel != "" {
 		a.visionProvider, a.visionModel = cfg.VisionProvider, cfg.VisionModel

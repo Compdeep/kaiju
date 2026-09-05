@@ -27,13 +27,41 @@ type anthropicRequest struct {
 	Thinking *anthropicThinking `json:"thinking,omitempty"`
 }
 
-// anthropicThinking is {"type":"disabled"}. Only the off value is modelled, for
-// the same reason ReasoningControl models only the off switch.
+// anthropicThinking is {"type":"disabled"} or {"type":"enabled",
+// "budget_tokens":N}. Anthropic will not take "enabled" without a budget, and
+// requires that budget to be under max_tokens, so the on value is built per
+// request rather than shared.
 type anthropicThinking struct {
-	Type string `json:"type"`
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
 var anthropicThinkingOff = &anthropicThinking{Type: "disabled"}
+
+// anthropicThinkingBudget is Anthropic's floor for a thinking budget. A request
+// asking for less is refused outright.
+const anthropicThinkingBudget = 1024
+
+/*
+ * anthropicThinkingOn builds the enabled value for a reply of the given size.
+ * desc: Half the reply budget, which leaves the other half for the answer, and
+ *       never below Anthropic's floor. A max_tokens too small to hold both
+ *       returns nil: no thinking rather than a request the provider rejects,
+ *       because the caller asked for reasoning and being refused the whole
+ *       completion is the worse of the two failures.
+ * param: maxTokens - the reply cap this request will carry.
+ * return: the thinking value, or nil when there is no room for one.
+ */
+func anthropicThinkingOn(maxTokens int) *anthropicThinking {
+	budget := maxTokens / 2
+	if budget < anthropicThinkingBudget {
+		if maxTokens <= anthropicThinkingBudget {
+			return nil
+		}
+		budget = anthropicThinkingBudget
+	}
+	return &anthropicThinking{Type: "enabled", BudgetTokens: budget}
+}
 
 type anthropicMessage struct {
 	Role    string `json:"role"`
@@ -127,8 +155,12 @@ func buildAnthropicRequest(model string, req *ChatRequest) *anthropicRequest {
 	}
 	// Same instruction, different spelling. A caller sets Reasoning and does not
 	// learn which provider it reached.
-	if req.Reasoning != nil && !req.Reasoning.Enabled {
-		aReq.Thinking = anthropicThinkingOff
+	if req.Reasoning != nil {
+		if req.Reasoning.Enabled {
+			aReq.Thinking = anthropicThinkingOn(aReq.MaxTokens)
+		} else {
+			aReq.Thinking = anthropicThinkingOff
+		}
 	}
 
 	// Extract system messages

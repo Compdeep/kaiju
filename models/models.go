@@ -44,9 +44,10 @@ type Info struct {
 	// its output. Fine for open-ended generation (answer/chat), but it starves on
 	// small forced tool calls — see ToolCallOK.
 	//
-	// A model that thinks BY DEFAULT counts as one: kaiju never sends a thinking
-	// or reasoning parameter (see agent/llm/anthropic.go and client.go), so the
-	// provider's default is what we get.
+	// A model that thinks BY DEFAULT counts as one. On the lanes that make a
+	// small forced call kaiju sends reasoning off (agent/ask.go), so there the
+	// answer that matters is ReasoningOptional; on every other lane no parameter
+	// is sent and the provider's default is what we get.
 	//
 	// A pointer so that ABSENT is not the same as false, and it has to be a
 	// pointer because of which way false leans. Leave tool_call_ok out and the
@@ -60,6 +61,19 @@ type Info struct {
 	// So the dangerous default is the one you get by typing nothing, and load()
 	// refuses an entry that does not say. Read it through Thinks().
 	Thinking *bool `json:"thinking"`
+	// ReasoningOptional reports whether the reasoning phase can be switched OFF
+	// by request — OpenRouter's per-model `reasoning.mandatory` being false. It
+	// is the question the executor and router pickers actually need to ask: they
+	// send reasoning off (agent/ask.go), so a model that merely THINKS BY
+	// DEFAULT is fine there, and only a model that cannot stop is not.
+	//
+	// Not a pointer, and the default leans the other way from Thinking on
+	// purpose. Absent decodes as "cannot be switched off", which keeps an
+	// undeclared entry out of the small-forced-call lanes — the same safe
+	// exclusion ToolCallOK gives.
+	//
+	// A model with no reasoning phase at all has both false: nothing to switch.
+	ReasoningOptional bool `json:"reasoning_optional"`
 	// Tools reports whether the model can call tools at all.
 	Tools bool `json:"tools"`
 	// ToolCallOK reports whether the model reliably emits a SMALL forced tool call
@@ -180,14 +194,21 @@ func (i Info) Thinks() bool { return i.Thinking != nil && *i.Thinking }
 /*
  * ForcedSmallCall returns the models fit for a lane that forces a SMALL tool
  * call — the router at 96 tokens, the executor's classifiers.
- * desc: ToolSafe minus the ones that reason before answering. Those are excluded
- *       here and nowhere else: on the reasoning lane thinking earns its cost, and
- *       on answer and chat it is simply better. It is only in a small forced call
- *       that it has no upside — the reasoning consumes the budget the call was to
- *       fill, and the reply arrives empty or unparseable.
+ * desc: ToolSafe minus the ones that reason before answering AND cannot be told
+ *       to stop. Reasoning is excluded here and nowhere else: on the reasoning
+ *       lane it earns its cost, and on answer and chat it is simply better. It
+ *       is only in a small forced call that it has no upside — the reasoning
+ *       consumes the budget the call was to fill, and the reply arrives empty or
+ *       unparseable.
  *
- *       The engine turns thinking off on those lanes anyway (see agent/ask.go),
- *       so this is the second of two doors rather than the only one. A picker
+ *       Thinking BY DEFAULT is not the test, because the engine sends reasoning
+ *       off on these lanes (see agent/ask.go) and the model obeys. The test is
+ *       whether it can be switched off at all: a mandatory-reasoning model
+ *       reasons through the budget no matter what is sent. Reading the softer
+ *       question cost the picker every modern hybrid model, which is most of
+ *       them — every Qwen since 3.5 ships one line that does both.
+ *
+ *       This remains the second of two doors rather than the only one. A picker
  *       that offered a thinking model here would be offering a choice the engine
  *       then overrides, which is worse than not offering it: the operator would
  *       have picked a model for a property it is not allowed to use.
@@ -196,7 +217,7 @@ func (i Info) Thinks() bool { return i.Thinking != nil && *i.Thinking }
 func ForcedSmallCall() []Info {
 	out := make([]Info, 0, len(all))
 	for _, m := range all {
-		if m.Tools && m.ToolCallOK && !m.Thinks() {
+		if m.Tools && m.ToolCallOK && (!m.Thinks() || m.ReasoningOptional) {
 			out = append(out, m)
 		}
 	}

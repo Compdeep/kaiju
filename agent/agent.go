@@ -338,6 +338,10 @@ type Agent struct {
 	// model routing (see model_route.go). Nil/empty ⇒ routing off, everything
 	// uses llm/executor as today.
 	providerClients map[string]*llm.Client
+	// Reasoning lane thinking: "on", "off", or empty for the model's default.
+	// The only lane that asks — see internal/config.LLMConfig.Reasoning for why
+	// the other four do not.
+	llmReasoning string
 	// Vision lane default — the model that answers image questions directly
 	// (see api handleExecute). Provider is a name from providerClients.
 	visionProvider string

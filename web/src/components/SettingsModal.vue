@@ -42,6 +42,21 @@
                    selector rather than in a log nobody reads until afterwards.
                    The two clocks are raised for it automatically; what the
                    reader still has to know is that the run takes longer. -->
+              <!-- The only lane with a thinking switch. The router and the
+                   executor force a small tool call and always send reasoning
+                   off; answer and chat take the model's default. Here the
+                   planning is what the budget is for, so it is a real choice. -->
+              <div v-if="reasoningCanSwitch" class="reasoning-switch">
+                <span class="reasoning-switch-label">reasoning</span>
+                <div class="seg">
+                  <button class="seg-btn" :class="{ active: cfg.llm.reasoning === 'on' }"
+                          @click="setReasoning('on')">on</button>
+                  <button class="seg-btn" :class="{ active: cfg.llm.reasoning === 'off' }"
+                          @click="setReasoning('off')">off</button>
+                  <button class="seg-btn" :class="{ active: !cfg.llm.reasoning }"
+                          @click="setReasoning('')">default</button>
+                </div>
+              </div>
               <div v-if="reasoningModelThinks" class="model-warn">
                 This model reasons before it answers. It plans well and it is
                 <b>significantly slower</b> — up to twice as long per run.
@@ -74,7 +89,7 @@
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 executor
               </div>
-              <div class="model-desc">reflection, observer, micro-planner, compactor</div>
+              <div class="model-desc">reflection, observer, micro-planner, compactor. Reasoning is switched off on this lane whatever model is chosen.</div>
               <div class="form-row">
                 <div class="form-group">
                   <label>provider</label>
@@ -102,7 +117,7 @@
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="12" r="3"/><path d="M9 6h6a3 3 0 0 1 3 3M9 18h6a3 3 0 0 0 3-3"/></svg>
                 router
               </div>
-              <div class="model-desc">decides chat vs. agent each turn — a small, reliable non-thinking tool-caller (e.g. GPT-4.1 Mini) routes best. Only tool-call-capable models are listed.</div>
+              <div class="model-desc">decides chat vs. agent each turn — a small, reliable tool-caller routes best. Reasoning is switched off on this lane whatever model is chosen, so a model that reasons by default is fine here; one that cannot stop is not listed.</div>
               <div class="form-row">
                 <div class="form-group">
                   <label>provider</label>
@@ -286,7 +301,7 @@ import api from '../api/client'
 defineEmits(['close'])
 const settings = useSettingsStore()
 const tab = ref('models')
-const cfg = ref({ llm: { provider: '', model: '', endpoint: '' }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1, route_provider: '', route_model: '', answer_provider: '', answer_model: '' } })
+const cfg = ref({ llm: { provider: '', model: '', endpoint: '', reasoning: '' }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1, route_provider: '', route_model: '', answer_provider: '', answer_model: '' } })
 const allModels = ref([])
 const apiKey = ref('')
 const execProvider = ref('')
@@ -334,21 +349,52 @@ const reasoningModels = computed(() => {
 // Whether the model chosen for the reasoning lane reasons before it answers.
 // Read from the catalog the picker is already filled from, so it cannot drift
 // from what the engine decides.
+const reasoningModelInfo = computed(() =>
+  allModels.value.find(x => x.id === cfg.value.llm.model) || null)
+
+// Whether reasoning is on for THIS lane as configured — the model's default
+// unless llm.reasoning overrides it. The warning below reads this rather than
+// the catalog, so it describes the run that will actually happen.
 const reasoningModelThinks = computed(() => {
-  const m = allModels.value.find(x => x.id === cfg.value.llm.model)
-  return !!(m && m.thinking)
+  if (cfg.value.llm.reasoning === 'on') return true
+  if (cfg.value.llm.reasoning === 'off') return false
+  return !!(reasoningModelInfo.value && reasoningModelInfo.value.thinking)
 })
 
+// The switch is offered only where there is something to switch: a model whose
+// reasoning is mandatory has no choice, and one with no reasoning phase has
+// nothing to turn on. Both cases would be a control that does nothing.
+const reasoningCanSwitch = computed(() => {
+  const m = reasoningModelInfo.value
+  return !!(m && m.reasoning_optional)
+})
+
+/**
+ * desc: Set the reasoning-lane thinking switch and save. "" hands the lane back
+ * to whatever the model does by default.
+ * @param {string} v - "on", "off", or ""
+ */
+function setReasoning(v) {
+  cfg.value.llm.reasoning = v
+  patchConfig()
+}
+
 // The executor and the router both force a SMALL call, so both are filtered the
-// same way: tool_call_ok AND not a thinking model. The engine turns thinking off
-// on these two lanes regardless (agent/ask.go), so offering one here would offer
-// a choice the engine overrides — the operator would have picked a model for a
-// property it is not allowed to use.
+// same way: tool_call_ok AND reasoning can be off here. The engine sends
+// reasoning off on these two lanes (agent/ask.go), so the question is not
+// whether the model thinks by DEFAULT — it is whether it can be told to stop.
+// reasoning_optional is that answer, read from the provider rather than guessed.
+//
+// Testing m.thinking alone emptied these two pickers of every modern hybrid,
+// which is now most of the catalog: every Qwen since 3.5 ships one line that
+// does both, so the model the router bench chose could not be selected for the
+// router. Only a mandatory-reasoning model is genuinely unfit.
 //
 // This is the only place a reasoning mode excludes a model. On the reasoning lane
 // it earns its cost, and on answer and chat it is better.
 function forcedSmallCall (provider) {
-  return allModels.value.filter(m => m.provider === provider && m.tool_call_ok && !m.thinking)
+  return allModels.value.filter(m =>
+    m.provider === provider && m.tool_call_ok && (!m.thinking || m.reasoning_optional))
 }
 
 const executorModels = computed(() => forcedSmallCall(execProvider.value || cfg.value.llm.provider))
@@ -579,6 +625,27 @@ onMounted(async () => {
   background: rgba(192, 138, 62, 0.1); color: var(--text);
 }
 .model-warn b { font-weight: 600; }
+/* The reasoning switch, above the warning it changes. Sits with the selector it
+   qualifies rather than in the advanced list, because the model and whether it
+   thinks are one decision made twice. */
+.reasoning-switch {
+  display: flex; align-items: center; gap: 10px; margin: -2px 0 10px;
+}
+.reasoning-switch-label {
+  font-size: 11px; color: var(--text-muted); text-transform: lowercase;
+}
+.reasoning-switch .seg {
+  display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+  overflow: hidden;
+}
+.reasoning-switch .seg-btn {
+  padding: 3px 10px; font-size: 11px; font-family: var(--mono);
+  background: none; border: none; border-right: 1px solid var(--border);
+  color: var(--text-secondary); cursor: pointer; transition: all var(--transition);
+}
+.reasoning-switch .seg-btn:last-child { border-right: none; }
+.reasoning-switch .seg-btn:hover { background: var(--surface-hover); }
+.reasoning-switch .seg-btn.active { background: var(--accent-subtle); color: var(--accent); }
 .tool-picker { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .tool-chk { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; user-select: none; }
 .tool-chk input { cursor: pointer; }

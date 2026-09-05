@@ -82,6 +82,8 @@ type configPatch struct {
 		Model       *string  `json:"model,omitempty"`
 		Temperature *float64 `json:"temperature,omitempty"`
 		MaxTokens   *int     `json:"max_tokens,omitempty"`
+		// "on", "off", or "" for the model's own default.
+		Reasoning *string `json:"reasoning,omitempty"`
 	} `json:"llm,omitempty"`
 	Executor *struct {
 		Provider *string `json:"provider,omitempty"`
@@ -143,6 +145,17 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.LLM.MaxTokens != nil {
 			c.cfg.LLM.MaxTokens = *patch.LLM.MaxTokens
+		}
+		if patch.LLM.Reasoning != nil {
+			// "" is a real value here, not an absent one — it is how the picker
+			// hands the lane back to the model's own default.
+			switch v := *patch.LLM.Reasoning; v {
+			case "", "on", "off":
+				c.cfg.LLM.Reasoning = v
+			default:
+				jsonError(w, "llm.reasoning must be \"on\", \"off\" or empty", http.StatusBadRequest)
+				return
+			}
 		}
 	}
 

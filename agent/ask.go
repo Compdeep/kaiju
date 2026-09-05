@@ -222,6 +222,19 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 		llm.WithoutReasoning(req)
 	}
 
+	// Heavy is the one lane that asks. Reasoning helps the planning and costs
+	// time, and which of those a deployment wants is not something the engine
+	// can know — so the operator says, and an unset setting keeps the model's
+	// own default, which is what every config file did before this existed.
+	if l == Heavy {
+		switch a.llmReasoning {
+		case "on":
+			llm.WithReasoning(req)
+		case "off":
+			llm.WithoutReasoning(req)
+		}
+	}
+
 	// Fix the cap here rather than leaving it to the send, so the number stated
 	// below is the number the provider stops at. capReply then finds nothing
 	// left to lower.

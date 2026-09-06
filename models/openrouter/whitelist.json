@@ -1,0 +1,4 @@
+{
+  "_comment": "The ONLY providers OpenRouter may route to. Same slug rules as blacklist.json. Prefer the blacklist: a whitelist removes fallback, so every provider named here being down is a failed call rather than a slower answer from someone else. An empty list sends nothing, which is what leaves routing alone — it does not mean 'allow none'.",
+  "providers": []
+}

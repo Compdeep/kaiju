@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/Compdeep/kaiju/tokens"
+
+	"github.com/Compdeep/kaiju/models/openrouter"
 )
 
 // Message is a single chat message in the OpenAI format.
@@ -149,6 +151,28 @@ type ChatRequest struct {
 	// from configuration: there is no deployment in which thinking helps a
 	// 96-token routing decision, so there is nothing to configure.
 	Reasoning *ReasoningControl `json:"reasoning,omitempty"`
+
+	// Provider steers OpenRouter away from hosts that answer badly, and is
+	// ignored by every other upstream. Set by Complete from the lists in
+	// models/openrouter; nil on every other provider, and nil there too when
+	// both lists are empty.
+	Provider *ProviderRouting `json:"provider,omitempty"`
+}
+
+// ProviderRouting is OpenRouter's provider-routing object, narrowed to the two
+// fields kaiju has a use for.
+//
+// Both are omitted when empty, and that matters more than it looks: OpenRouter
+// reads an EMPTY `only` as "no provider is allowed" and answers 404, so a list
+// that failed to load must not reach the wire as `[]`. Sending nothing is what
+// leaves routing alone.
+type ProviderRouting struct {
+	// Only is the whitelist. Naming anything here refuses every host not named,
+	// fallback included.
+	Only []string `json:"only,omitempty"`
+	// Ignore is the blacklist. The named hosts are skipped and the rest still
+	// serve as fallback.
+	Ignore []string `json:"ignore,omitempty"`
 }
 
 // ReasoningControl is the OpenAI-compatible reasoning parameter. Only the off
@@ -536,6 +560,32 @@ func (c *Client) setAuthHeaders(req *http.Request) {
 	}
 }
 
+/*
+ * routeProviders attaches the OpenRouter provider lists to a request.
+ * desc: OpenRouter only. Every other upstream would either reject the field or
+ *       drop it, and neither is worth discovering one provider at a time.
+ *
+ *       A caller that set its own routing keeps it: the lists are the default
+ *       for calls that said nothing, not an override of a decision made closer
+ *       to the work.
+ *
+ *       Nothing is attached when both lists are empty, which is the shipped
+ *       state. An empty `only` is not the same as no `only` — OpenRouter reads
+ *       it as "no provider is allowed" and answers 404 — so the object is built
+ *       only once there is something to put in it.
+ * param: req - the request, given a Provider block when one applies.
+ */
+func (c *Client) routeProviders(req *ChatRequest) {
+	if c.provider != ProviderOpenRouter || req == nil || req.Provider != nil {
+		return
+	}
+	only, ignore := openrouter.Allowed(), openrouter.Blocked()
+	if len(only) == 0 && len(ignore) == 0 {
+		return
+	}
+	req.Provider = &ProviderRouting{Only: only, Ignore: ignore}
+}
+
 // Complete sends a chat completion request and returns the response.
 // Routes to the appropriate provider backend.
 func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
@@ -547,6 +597,7 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 		return nil, err
 	}
 	c.capReply(req)
+	c.routeProviders(req)
 
 	// A stage asking for one shape gets the wire that enforces it, and gets its
 	// reply back in the shape it asked for. Nothing above this knows — see

@@ -1,0 +1,6 @@
+{
+  "_comment": "Providers OpenRouter must not route to. Each entry is a provider slug exactly as OpenRouter spells it — get them from GET /api/v1/models/{author}/{model}/endpoints, where the `tag` field is the slug. Some carry a quantization suffix: SiliconFlow's is `siliconflow/fp8`, not `siliconflow`. A slug that does not exist is accepted silently and excludes nothing, so a typo here is invisible. An empty list sends nothing.",
+  "providers": [
+    "darkbloom"
+  ]
+}

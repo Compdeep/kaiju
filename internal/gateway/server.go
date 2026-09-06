@@ -29,7 +29,7 @@ func New(addr string) *Server {
 	mux := http.NewServeMux()
 	return &Server{
 		mux:  mux,
-		addr: Loopback(addr),
+		addr: addr,
 		httpServer: &http.Server{
 			Addr:         addr,
 			Handler:      mux,
@@ -41,43 +41,65 @@ func New(addr string) *Server {
 }
 
 /*
- * Loopback confines a listen address to this machine.
- * desc: This server carries no TLS and its first visitor claims the node, so an
- *       address reaching further than the machine publishes both: a password
- *       typed over plain HTTP, and a setup page anyone can reach first.
+ * BindAddr decides where the interface listens.
+ * desc: Loopback unless an operator has both asked for wider and earned it.
  *
- *       A port with no host — ":8090", which is what a port number formats to —
- *       binds every interface. That is the ordinary way to write it and the
- *       reason this exists: the wide bind was never chosen, it was inherited
- *       from the shorthand.
+ *       Asked for: a host written in the configuration. A port alone formats to
+ *       ":8090", which binds every interface — that is the ordinary way to write
+ *       a port and it was how this server came to be published without anyone
+ *       choosing it. So the shorthand is read as "no opinion" and confined, and
+ *       only a host somebody typed counts as a decision.
  *
- *       Confined rather than refused, and said out loud, because a daemon that
- *       will not start over an address is worse than one that starts somewhere
- *       safe and explains. Reaching it from elsewhere is a tunnel's job, which
- *       is a decision made outside this process by somebody who meant it.
+ *       Earned it: the node already has an account. An unclaimed node hands
+ *       ownership to its first visitor, so publishing one is giving it away.
+ *       This is the half that cannot be waived, and the reason the two changes
+ *       arrived together.
+ *
+ *       What is NOT checked is transport, because there is none to check: this
+ *       server has no TLS, so a wide bind sends the password and the session
+ *       token in clear. That is said, loudly, and left to the operator — they
+ *       own the machine and may have a firewall in front of it, and a daemon
+ *       that refuses to start is worse than one that starts and explains.
  * param: addr - the address as configured.
- * return: the address to bind, always on this machine.
+ * param: claimed - whether the node already has an account.
+ * return: the address to bind.
  */
-func Loopback(addr string) string {
+func BindAddr(addr string, claimed bool) string {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		// Not host:port at all. Left alone: this is not the place to reject a
 		// malformed address, and Listen will say so more precisely.
 		return addr
 	}
-	if host == "" || host == "0.0.0.0" || host == "::" || host == "*" {
-		log.Printf("[gateway] %s reaches beyond this machine, and this server has no TLS "+
-			"and lets its first visitor claim the node — binding 127.0.0.1:%s instead. "+
-			"Use a tunnel to reach it from elsewhere.", addr, port)
+	confine := func(why string) string {
+		log.Printf("[gateway] %s reaches beyond this machine — %s. Binding 127.0.0.1:%s instead; "+
+			"use a tunnel, or set channels.web.host once the node has an account.", addr, why, port)
 		return net.JoinHostPort("127.0.0.1", port)
 	}
-	if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() {
-		log.Printf("[gateway] %s reaches beyond this machine, and this server has no TLS "+
-			"and lets its first visitor claim the node — binding 127.0.0.1:%s instead. "+
-			"Use a tunnel to reach it from elsewhere.", addr, port)
-		return net.JoinHostPort("127.0.0.1", port)
+	switch {
+	case host == "":
+		// A port with no host. Nobody chose this; it is what a port number
+		// formats to.
+		return confine("no host was configured, and a port alone binds every interface")
+	case isLoopback(host):
+		return addr
+	case !claimed:
+		return confine("this node has no account yet, so publishing it would let " +
+			"whoever arrives first claim it")
 	}
+	log.Printf("[gateway] listening on %s, which reaches beyond this machine. There is no TLS "+
+		"here, so the password and session token travel in clear — restrict who can reach "+
+		"this port.", addr)
 	return addr
+}
+
+// isLoopback reports whether a configured host stays on this machine.
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 /*

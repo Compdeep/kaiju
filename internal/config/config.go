@@ -257,6 +257,18 @@ type CLIChannelConfig struct {
 type WebChannelConfig struct {
 	Enabled bool `json:"enabled"`
 	Port    int  `json:"port"`
+	// Host is the interface to listen on. Empty means 127.0.0.1, which is where
+	// this server belongs unless somebody decides otherwise: it carries no TLS,
+	// so a wider address sends the password and the session token in clear, and
+	// its first visitor claims the node.
+	//
+	// Set it to 0.0.0.0 to reach the interface from another machine without a
+	// tunnel. Two things then apply, and neither is a formality. The node must
+	// already be claimed — an unclaimed node is forced back to loopback whatever
+	// this says, because a setup page on a network is a giveaway. And the
+	// credentials still travel unencrypted, which is worth a firewall rule
+	// restricting who can reach the port.
+	Host string `json:"host,omitempty"`
 }
 
 /*

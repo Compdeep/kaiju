@@ -2,24 +2,36 @@ package gateway
 
 import "testing"
 
-// The gateway confines itself to this machine.
+// A port with no host is confined, whether the node is claimed or not.
 //
-// It carries no TLS and its first visitor claims the node, so an address
-// reaching further publishes both: a password typed over plain HTTP, and a
-// setup page anyone can reach first. This was not a hypothetical — the daemon
-// formatted its address as ":port", which binds every interface, and ran that
-// way with a configuration endpoint outside the token check.
-func TestAWideAddressIsConfinedToThisMachine(t *testing.T) {
-	for _, addr := range []string{
-		":8090",          // the shorthand a port number formats to
-		"0.0.0.0:8090",   // every interface, said outright
-		"[::]:8090",      // and the same in IPv6
-		"192.168.1.5:80", // a real interface on this host
-		"10.0.0.7:8090",
-	} {
-		got := Loopback(addr)
-		if got != "127.0.0.1:8090" && got != "127.0.0.1:80" {
-			t.Errorf("Loopback(%q) = %q, which still reaches beyond this machine", addr, got)
+// Nobody chooses this address: it is what a port number formats to, and it
+// binds every interface. That is how the daemon came to be published without
+// anyone deciding to publish it — with a configuration endpoint outside the
+// token check, handing out provider keys.
+func TestAPortWithNoHostIsAlwaysConfined(t *testing.T) {
+	for _, claimed := range []bool{false, true} {
+		if got := BindAddr(":8090", claimed); got != "127.0.0.1:8090" {
+			t.Errorf("BindAddr(\":8090\", claimed=%v) = %q; a port alone is not a decision to publish", claimed, got)
+		}
+	}
+}
+
+// An unclaimed node is confined however it is configured. Publishing one gives
+// it away: whoever arrives first sets the password and owns it.
+func TestAnUnclaimedNodeIsConfinedWhateverIsConfigured(t *testing.T) {
+	for _, addr := range []string{"0.0.0.0:8090", "[::]:8090", "192.168.1.5:8090", "10.0.0.7:8090"} {
+		if got := BindAddr(addr, false); got != "127.0.0.1:8090" {
+			t.Errorf("BindAddr(%q, unclaimed) = %q; an unclaimed node must not be published", addr, got)
+		}
+	}
+}
+
+// A claimed node binds where it was told. The operator asked, and has an account
+// standing between the network and the interface.
+func TestAClaimedNodeBindsWhereItWasTold(t *testing.T) {
+	for _, addr := range []string{"0.0.0.0:8090", "192.168.1.5:8090"} {
+		if got := BindAddr(addr, true); got != addr {
+			t.Errorf("BindAddr(%q, claimed) = %q; a configured host is a decision", addr, got)
 		}
 	}
 }
@@ -28,8 +40,10 @@ func TestAWideAddressIsConfinedToThisMachine(t *testing.T) {
 // chose one keeps it — including a port a caller is relying on.
 func TestALoopbackAddressIsLeftAlone(t *testing.T) {
 	for _, addr := range []string{"127.0.0.1:8090", "localhost:8090", "[::1]:8090"} {
-		if got := Loopback(addr); got != addr {
-			t.Errorf("Loopback(%q) = %q; a confined address must not be rewritten", addr, got)
+		for _, claimed := range []bool{false, true} {
+			if got := BindAddr(addr, claimed); got != addr {
+				t.Errorf("BindAddr(%q, claimed=%v) = %q; a confined address must not be rewritten", addr, claimed, got)
+			}
 		}
 	}
 }
@@ -41,8 +55,8 @@ func TestThePortIsNeverChanged(t *testing.T) {
 		":1234":        "127.0.0.1:1234",
 		"0.0.0.0:9999": "127.0.0.1:9999",
 	} {
-		if got := Loopback(addr); got != want {
-			t.Errorf("Loopback(%q) = %q, want %q", addr, got, want)
+		if got := BindAddr(addr, false); got != want {
+			t.Errorf("BindAddr(%q) = %q, want %q", addr, got, want)
 		}
 	}
 }
@@ -51,15 +65,19 @@ func TestThePortIsNeverChanged(t *testing.T) {
 // wrong with it more precisely than this could.
 func TestAMalformedAddressIsLeftForTheListener(t *testing.T) {
 	for _, addr := range []string{"not-an-address", ""} {
-		if got := Loopback(addr); got != addr {
-			t.Errorf("Loopback(%q) = %q; it should pass through untouched", addr, got)
+		if got := BindAddr(addr, true); got != addr {
+			t.Errorf("BindAddr(%q) = %q; it should pass through untouched", addr, got)
 		}
 	}
 }
 
-// And the constructor applies it, or none of the above reaches the socket.
-func TestTheServerBindsWhatLoopbackReturns(t *testing.T) {
-	if got := New(":8090").addr; got != "127.0.0.1:8090" {
-		t.Errorf("New(\":8090\") binds %q", got)
+// And the constructor binds exactly what it is given, so the decision lives in
+// one place rather than being made twice with a chance to differ.
+func TestTheServerBindsWhatItIsGiven(t *testing.T) {
+	if got := New("127.0.0.1:8090").addr; got != "127.0.0.1:8090" {
+		t.Errorf("New binds %q", got)
+	}
+	if got := New("0.0.0.0:8090").addr; got != "0.0.0.0:8090" {
+		t.Errorf("New rewrote its address to %q; BindAddr decides, not this", got)
 	}
 }

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +34,30 @@ import (
 )
 
 var version = "dev"
+
+/*
+ * nodeIsClaimed reports whether this node already has an account.
+ * desc: The gateway needs it to decide whether a configured wide bind may be
+ *       honoured — an unclaimed node hands ownership to its first visitor, so
+ *       publishing one gives it away.
+ *
+ *       Answered as CLAIMED when the database cannot be read, because the
+ *       cautious answer here is the one that keeps the listener on this machine.
+ *       An error must not read as "no accounts" and unlock a wider bind.
+ * param: database - the open database, or nil.
+ * return: whether an account exists.
+ */
+func nodeIsClaimed(database *kaijudb.DB) bool {
+	if database == nil {
+		return false
+	}
+	users, err := database.ListUsers()
+	if err != nil {
+		log.Printf("[kaiju] could not count accounts (%v); treating the node as unclaimed", err)
+		return false
+	}
+	return len(users) > 0
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -839,7 +865,12 @@ func runServe() {
 	}
 
 	// Gateway server
-	gw := gateway.New(fmt.Sprintf(":%d", cfg.Channels.Web.Port))
+	// Where the interface listens. Loopback unless a host was configured AND the
+	// node already has an account — see gateway.BindAddr for why both.
+	gw := gateway.New(gateway.BindAddr(
+		net.JoinHostPort(cfg.Channels.Web.Host, strconv.Itoa(cfg.Channels.Web.Port)),
+		nodeIsClaimed(kaijuDB),
+	))
 	mux := gw.Mux()
 
 	if webCh != nil {

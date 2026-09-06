@@ -10,6 +10,7 @@ package configapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -106,10 +107,14 @@ type configPatch struct {
 		SafetyLevel       *int    `json:"safety_level,omitempty"`
 		MaxInvestigations *int    `json:"max_investigations,omitempty"`
 		MaxReplans        *int    `json:"max_replans,omitempty"`
-		RouteProvider     *string `json:"route_provider,omitempty"`
-		RouteModel        *string `json:"route_model,omitempty"`
-		AnswerProvider    *string `json:"answer_provider,omitempty"`
-		AnswerModel       *string `json:"answer_model,omitempty"`
+		// "interactive" or "autonomous". Validated, because read at use an
+		// unknown value simply compares unequal to "autonomous" and the node
+		// runs the other mode indefinitely without saying so.
+		ExecutionMode  *string `json:"execution_mode,omitempty"`
+		RouteProvider  *string `json:"route_provider,omitempty"`
+		RouteModel     *string `json:"route_model,omitempty"`
+		AnswerProvider *string `json:"answer_provider,omitempty"`
+		AnswerModel    *string `json:"answer_model,omitempty"`
 	} `json:"agent,omitempty"`
 }
 
@@ -152,6 +157,10 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			switch v := *patch.LLM.Reasoning; v {
 			case "", "on", "off":
 				c.cfg.LLM.Reasoning = v
+				// Pushed as well as stored — see the note in the agent block.
+				// This one shipped storing only, so the switch persisted and the
+				// running lane kept its previous answer.
+				c.agent.SetReasoning(v)
 			default:
 				jsonError(w, "llm.reasoning must be \"on\", \"off\" or empty", http.StatusBadRequest)
 				return
@@ -165,17 +174,39 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			c.cfg.Agent.DAGEnabled = *patch.Agent.DAGEnabled
 			c.agent.SetDAGEnabled(*patch.Agent.DAGEnabled)
 		}
+		// Each of these is stored AND pushed. They used to be stored only: the
+		// engine reads its own copy of the config, taken at construction, so a
+		// value changed here was written to the file, persisted, shown back on
+		// the next GET, and ignored by every run until the process restarted.
+		// A setting that persists without taking effect is worse than one that
+		// does neither, because the file then disagrees with the behaviour and
+		// the file is what an operator reads.
 		if patch.Agent.DAGMode != nil {
 			c.cfg.Agent.DAGMode = *patch.Agent.DAGMode
+			c.agent.SetDAGMode(c.cfg.Agent.DAGMode)
 		}
 		if patch.Agent.SafetyLevel != nil {
 			c.cfg.Agent.SafetyLevel = *patch.Agent.SafetyLevel
+			// Reaches the engine as the node's clearance rank.
+			c.agent.SetClearance(c.cfg.Agent.SafetyLevel)
 		}
 		if patch.Agent.MaxInvestigations != nil {
 			c.cfg.Agent.MaxInvestigations = *patch.Agent.MaxInvestigations
+			c.agent.SetPlanLimits(c.cfg.Agent.MaxInvestigations, 0)
 		}
 		if patch.Agent.MaxReplans != nil {
 			c.cfg.Agent.MaxReplans = *patch.Agent.MaxReplans
+			c.agent.SetPlanLimits(0, c.cfg.Agent.MaxReplans)
+		}
+		if patch.Agent.ExecutionMode != nil {
+			// Refused rather than corrected, and refused BEFORE it is stored:
+			// a rejected value must not reach the file either.
+			if !c.agent.SetExecutionMode(*patch.Agent.ExecutionMode) {
+				jsonError(w, fmt.Sprintf("agent.execution_mode %q is not one of %v",
+					*patch.Agent.ExecutionMode, agent.ExecutionModes()), http.StatusBadRequest)
+				return
+			}
+			c.cfg.Agent.ExecutionMode, _ = agent.ParseExecutionMode(*patch.Agent.ExecutionMode)
 		}
 		if patch.Agent.RouteProvider != nil {
 			c.cfg.Agent.RouteProvider = *patch.Agent.RouteProvider

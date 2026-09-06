@@ -54,3 +54,70 @@ func TestTheModeValuesAreTheOnesOnTheWire(t *testing.T) {
 			ExecutionInteractive, ExecutionAutonomous)
 	}
 }
+
+// The setter refuses what the parser refuses, and leaves the mode alone when it
+// does — a config door that accepted a typo and stored it would put the daemon
+// back in the state the parser exists to prevent.
+func TestTheSetterRefusesWhatTheParserRefuses(t *testing.T) {
+	a := &Agent{}
+	a.cfg.ExecutionMode = ExecutionInteractive
+
+	if ok := a.SetExecutionMode("autonomus"); ok {
+		t.Error("a mistyped mode was accepted")
+	}
+	if a.cfg.ExecutionMode != ExecutionInteractive {
+		t.Errorf("a refused mode changed the run to %q", a.cfg.ExecutionMode)
+	}
+	if ok := a.SetExecutionMode(ExecutionAutonomous); !ok {
+		t.Fatal("a real mode was refused")
+	}
+	if a.cfg.ExecutionMode != ExecutionAutonomous {
+		t.Errorf("the mode is %q after being set to autonomous", a.cfg.ExecutionMode)
+	}
+}
+
+// The reasoning switch takes the three values the config API validates, and
+// nothing else.
+func TestTheReasoningSetterTakesOnlyItsThreeValues(t *testing.T) {
+	a := &Agent{}
+	for _, v := range []string{"on", "off", ""} {
+		if ok := a.SetReasoning(v); !ok {
+			t.Errorf("SetReasoning(%q) was refused", v)
+		}
+		if a.llmReasoning != v {
+			t.Errorf("SetReasoning(%q) left the lane on %q", v, a.llmReasoning)
+		}
+	}
+	a.llmReasoning = "off"
+	if ok := a.SetReasoning("disabled"); ok {
+		t.Error("SetReasoning accepted a value the config API rejects")
+	}
+	if a.llmReasoning != "off" {
+		t.Errorf("a refused value changed the lane to %q", a.llmReasoning)
+	}
+}
+
+// A patch carries only the fields it means to change, so the ones it omits
+// arrive as zero — which must leave the limit alone rather than remove it.
+func TestAnOmittedLimitIsLeftAloneRatherThanZeroed(t *testing.T) {
+	a := &Agent{}
+	a.cfg.MaxInvestigations, a.cfg.MaxReplans = 5, 3
+
+	a.SetPlanLimits(0, 7)
+	if a.cfg.MaxInvestigations != 5 {
+		t.Errorf("an omitted investigation limit became %d", a.cfg.MaxInvestigations)
+	}
+	if a.cfg.MaxReplans != 7 {
+		t.Errorf("the replan limit is %d, want 7", a.cfg.MaxReplans)
+	}
+
+	a.SetDAGMode("")
+	if a.cfg.DAGMode != "" {
+		t.Errorf("an empty DAG mode wrote %q", a.cfg.DAGMode)
+	}
+	a.cfg.DAGMode = "orchestrator"
+	a.SetDAGMode("")
+	if a.cfg.DAGMode != "orchestrator" {
+		t.Errorf("an omitted DAG mode cleared it to %q", a.cfg.DAGMode)
+	}
+}

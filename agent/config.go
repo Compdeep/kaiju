@@ -68,6 +68,7 @@ type ModelConfig struct {
 	LLMModel    string
 	// LLMReasoning is "on", "off", or empty for the model's own default. Only
 	// the reasoning lane reads it; see internal/config.LLMConfig.Reasoning.
+	// Set at run time: SetReasoning.
 	LLMReasoning string
 
 	// Providers is the credential catalog for per-request model routing,
@@ -195,7 +196,9 @@ type IdentityConfig struct {
 type DAGConfig struct {
 	// Set at run time: SetDAGEnabled.
 	DAGEnabled bool
-	DAGMode    string // "reflect", "nReflect", "orchestrator" (default: "orchestrator")
+	// "reflect", "nReflect", "orchestrator" (default: "orchestrator").
+	// Set at run time: SetDAGMode.
+	DAGMode string
 
 	MaxTurns         int
 	MaxNodes         int
@@ -204,11 +207,17 @@ type DAGConfig struct {
 	MaxObserverCalls int // separate budget for observer LLM calls (default: 50)
 	BatchSize        int // nodes completed before injecting reflection in nReflect mode (default: 5)
 
-	MaxInvestigations int // max investigation cycles (Holmes + fix attempts) before forcing conclude (default: 1)
-	MaxReplans        int // max EXPAND replan cycles (successful batch → executive plans next steps) before forcing conclude (default: 3)
-	MaxHolmesIters    int // max ReAct iterations per Holmes investigation (default: 5)
+	// max investigation cycles (Holmes + fix attempts) before forcing conclude
+	// (default: 1). Set at run time: SetPlanLimits, with MaxReplans below.
+	MaxInvestigations int
+	// max EXPAND replan cycles (successful batch → executive plans next steps)
+	// before forcing conclude (default: 3). Set at run time: SetPlanLimits.
+	MaxReplans     int
+	MaxHolmesIters int // max ReAct iterations per Holmes investigation (default: 5)
 
-	ExecutionMode string // "interactive" (chat allowed) or "autonomous" (always investigate)
+	// "interactive" (chat allowed) or "autonomous" (always investigate).
+	// Set at run time: SetExecutionMode.
+	ExecutionMode string
 	DAGWallClock  time.Duration
 	// MaxConcurrentInvestigations is the scheduler worker-pool size; 0 =>
 	// defaultConcurrency (1). Raise once per-principal fairness lands.

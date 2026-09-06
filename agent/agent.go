@@ -1140,6 +1140,90 @@ func (a *Agent) DAGEnabled() bool {
 }
 
 /*
+ * SetExecutionMode sets whether a turn is routed before it is planned.
+ * desc: Read at run time by the scheduler, which chooses between routing the
+ *       query and going straight to a plan, and by unattended(), which withholds
+ *       every tool declaring RequiresHuman from an autonomous run. Settable
+ *       because it is a policy, not a connection: an operator changing it means
+ *       the next turn, not the next process. Refuses a value
+ *       ParseExecutionMode does not recognise, leaving the mode as it was —
+ *       a config door that accepted a typo and stored it would put the daemon
+ *       back in the state that parser exists to prevent.
+ * param: mode - "interactive", "autonomous", or "" to mean interactive.
+ * return: whether the mode was recognised and applied.
+ */
+func (a *Agent) SetExecutionMode(mode string) bool {
+	parsed, ok := ParseExecutionMode(mode)
+	if !ok {
+		return false
+	}
+	a.cfg.ExecutionMode = parsed
+	return true
+}
+
+/*
+ * SetReasoning sets the reasoning lane's thinking switch.
+ * desc: Read at run time by prepare(), on every call that lane makes, and by the
+ *       two clocks that size a reasoning run. Settable for the same reason as
+ *       the mode above, and needed for a sharper one: this value was
+ *       reachable through the config API before it was reachable here, so
+ *       setting it wrote the file and left the running lane on its previous
+ *       answer. A setting that persists without taking effect is worse than one
+ *       that does neither, because the file then disagrees with the behaviour
+ *       and the file is what an operator reads.
+ * param: mode - "on", "off", or "" for the model's own default.
+ * return: whether the value was recognised and applied.
+ */
+func (a *Agent) SetReasoning(mode string) bool {
+	switch mode {
+	case "", "on", "off":
+		a.llmReasoning = mode
+		return true
+	default:
+		return false
+	}
+}
+
+/*
+ * SetPlanLimits sets how many times a run may investigate and re-plan.
+ * desc: Both are read at run time by the scheduler, each time it decides whether
+ *       to open another investigation or ask for another plan. Grouped because they are patched together and were orphaned together:
+ *       each was written to the config file and persisted, and each was read by
+ *       the engine from its own copy taken at construction, so an operator
+ *       raising a limit in the settings pane changed the file and nothing else
+ *       until the next restart.
+ *
+ *       A zero or negative value leaves that number alone rather than setting a
+ *       limit of none — the patch carries only the fields it means to change,
+ *       and the ones it omits arrive here as zero.
+ *
+ *       The safety level is not here. It reaches the engine as the node's
+ *       clearance rank, which SetClearance already changes.
+ * param: maxInvestigations, maxReplans - the new values, or zero to leave each unchanged.
+ */
+func (a *Agent) SetPlanLimits(maxInvestigations, maxReplans int) {
+	if maxInvestigations > 0 {
+		a.cfg.MaxInvestigations = maxInvestigations
+	}
+	if maxReplans > 0 {
+		a.cfg.MaxReplans = maxReplans
+	}
+}
+
+/*
+ * SetDAGMode sets which graph shape a run uses.
+ * desc: Read at run time by the scheduler and the executive, each run, when they
+ *       decide what shape of graph to build. Orphaned the same way the limits
+ *       above were.
+ * param: mode - the DAG mode name; empty leaves it unchanged.
+ */
+func (a *Agent) SetDAGMode(mode string) {
+	if mode != "" {
+		a.cfg.DAGMode = mode
+	}
+}
+
+/*
  * SetDAGEnabled toggles DAG mode at runtime.
  * desc: Allows live switching between DAG and ReAct execution for benchmarking.
  * param: enabled - true for DAG, false for ReAct

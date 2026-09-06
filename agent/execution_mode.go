@@ -98,6 +98,22 @@ func executionOf(t Trigger) string {
 	return mode
 }
 
+/*
+ * IsAutonomous reports whether a trigger asks for a run nobody is watching.
+ * desc: Exported because applications answer this question for the engine — an
+ *       application that knows its own kinds of unwatched work supplies a rule,
+ *       and that rule still has to read this field for the triggers that carry
+ *       it. Without this it reads the field itself, which means a copy of the
+ *       current spelling living outside this package, answering "not
+ *       autonomous" for a trigger written with the retired one.
+ *
+ *       That answer is the dangerous direction: it says a person is there, and
+ *       the run is handed the tools that exist to be asked for.
+ * param: t - the trigger.
+ * return: true when the trigger asks for the agent mode, by any accepted name.
+ */
+func IsAutonomous(t Trigger) bool { return executionOf(t) == ExecutionAgent }
+
 // ExecutionModes lists the accepted values, for an error message or a
 // capability listing. Retired names are absent: they are understood, not
 // offered. The unset value is absent too — it is the absence of a choice.

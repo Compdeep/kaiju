@@ -53,3 +53,45 @@ func ParseExecutionMode(s string) (string, bool) {
 func ExecutionModes() []string {
 	return []string{ExecutionInteractive, ExecutionAutonomous}
 }
+
+// The reasoning lane's thinking switch.
+//
+// Only this lane has one. The router and the executor force a small tool call
+// and send reasoning off whatever is configured, because reasoning there
+// consumes the budget the call was to fill; answer and chat take the model's
+// default and are better for it. Here the planning is what the budget is for,
+// so which way it goes is a judgement about the deployment.
+const (
+	// ReasoningOn asks for reasoning even from a model that ships it off.
+	ReasoningOn = "on"
+	// ReasoningOff refuses it even from a model that ships it on.
+	ReasoningOff = "off"
+	// ReasoningDefault takes whatever the model does unasked.
+	ReasoningDefault = ""
+)
+
+/*
+ * ParseReasoning reports whether s names a reasoning setting.
+ * desc: Empty is valid and means the model's own default, which is what every
+ *       config file said before the switch existed. Anything else is refused
+ *       rather than corrected, for the reason ParseExecutionMode gives: the two
+ *       possible corrections are opposite, and each is wrong when the writer
+ *       meant the other.
+ * param: s - the value as written in a request or a config file.
+ * return: the setting, and whether it was one.
+ */
+func ParseReasoning(s string) (string, bool) {
+	switch s {
+	case ReasoningDefault, ReasoningOn, ReasoningOff:
+		return s, true
+	default:
+		return "", false
+	}
+}
+
+// ReasoningModes lists the settings that ask for something, for an error message
+// or a capability listing. The default is not among them: it is the absence of a
+// choice rather than one of the choices.
+func ReasoningModes() []string {
+	return []string{ReasoningOn, ReasoningOff}
+}

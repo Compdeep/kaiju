@@ -1175,13 +1175,12 @@ func (a *Agent) SetExecutionMode(mode string) bool {
  * return: whether the value was recognised and applied.
  */
 func (a *Agent) SetReasoning(mode string) bool {
-	switch mode {
-	case "", "on", "off":
-		a.llmReasoning = mode
-		return true
-	default:
+	parsed, ok := ParseReasoning(mode)
+	if !ok {
 		return false
 	}
+	a.llmReasoning = parsed
+	return true
 }
 
 /*

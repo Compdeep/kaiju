@@ -51,6 +51,7 @@ func (c *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/config", c.handleGetConfig)
 	mux.HandleFunc("PATCH /api/v1/config", c.handleUpdateConfig)
 	mux.HandleFunc("GET /api/v1/models", c.handleListModels)
+	mux.HandleFunc("GET /api/v1/capabilities", c.handleCapabilities)
 }
 
 /*
@@ -154,17 +155,15 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		if patch.LLM.Reasoning != nil {
 			// "" is a real value here, not an absent one — it is how the picker
 			// hands the lane back to the model's own default.
-			switch v := *patch.LLM.Reasoning; v {
-			case "", "on", "off":
-				c.cfg.LLM.Reasoning = v
-				// Pushed as well as stored — see the note in the agent block.
-				// This one shipped storing only, so the switch persisted and the
-				// running lane kept its previous answer.
-				c.agent.SetReasoning(v)
-			default:
-				jsonError(w, "llm.reasoning must be \"on\", \"off\" or empty", http.StatusBadRequest)
+			// Refused before it is stored, and pushed as well as stored — see
+			// the note in the agent block. This one shipped storing only, so the
+			// switch persisted and the running lane kept its previous answer.
+			if !c.agent.SetReasoning(*patch.LLM.Reasoning) {
+				jsonError(w, fmt.Sprintf("llm.reasoning %q is not one of %v or empty",
+					*patch.LLM.Reasoning, agent.ReasoningModes()), http.StatusBadRequest)
 				return
 			}
+			c.cfg.LLM.Reasoning, _ = agent.ParseReasoning(*patch.LLM.Reasoning)
 		}
 	}
 

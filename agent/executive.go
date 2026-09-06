@@ -1134,94 +1134,211 @@ func validatePlanDeps(steps []PlanStep) []string {
 	return errs
 }
 
-// parseExecutivePayload handles LLMs returning steps as a JSON string instead of an array.
+/*
+ * parseExecutivePayload reads a plan out of a reply, however it arrived.
+ * desc: A plan is asked for as one shape and comes back as four. It parses as
+ *       sent; or it is wrapped in a markdown fence; or its steps are
+ *       double-encoded as a JSON string; or the reply ran into the token cap
+ *       and never closed. Each of those is a rung below, tried in order, and
+ *       the first that yields a payload wins.
+ *
+ *       A rung that does not apply says so and the next one runs — that
+ *       fall-through is the robustness, and it is why a plan that is BOTH
+ *       fenced and cut still reaches the salvager. A rung that applies and
+ *       cannot finish stops the ladder, because the shape was recognised and
+ *       running a later rung's parser over it would be guessing.
+ *
+ *       Every failure leaves by the same door, saying which recovery it was
+ *       attempting. What used to come back was the first parser's complaint
+ *       about a byte — "invalid character 'x' after object key" — which names
+ *       neither the stage nor the fact that three recoveries were tried.
+ * param: raw - the tool-call arguments as they arrived.
+ * param: payload - filled in on success; untouched meaningfully on failure.
+ * return: nil when a plan was read, else why no rung could produce one.
+ */
 func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
-	// The steps array as it arrived, so a depends_on entry naming a tag can be
-	// matched before FlexInts decodes it away.
+	// Held for the final error: when no rung applies this is the closest thing
+	// to a reason, and it is what the caller used to receive on its own.
+	asSent := adoptPlan(raw, payload)
+	if asSent == nil {
+		return nil
+	}
+
+	for _, rung := range planRecoveries {
+		recovered, err := rung.try(raw, payload)
+		if recovered {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed to recover %s: %w", rung.what, err)
+		}
+	}
+	return fmt.Errorf("failed to recover a plan from the reply: %w", asSent)
+}
+
+// planRecoveries is the ladder, in the order it is climbed. `what` completes the
+// sentence "failed to recover ...", so a failure names the stage it reached.
+//
+// Order is not arbitrary: unwrapping comes before salvaging, because a fenced
+// plan that is also complete must not be handed to a salvager, and a fenced plan
+// that is also cut reaches the salvager anyway by falling through.
+var planRecoveries = []struct {
+	what string
+	try  func(raw string, payload *executiveCallPayload) (bool, error)
+}{
+	{"the plan payload from a code fence", recoverFencedPlan},
+	{"plan steps from a double-encoded string", recoverStringEncodedSteps},
+	{"plan steps from a reply cut at the token cap", recoverTruncatedPlan},
+}
+
+/*
+ * adoptPlan reads one candidate document into the payload.
+ * desc: The unmarshal and the depends_on tag linking, which have to happen
+ *       together: linkDependsOnTags reads the steps as TEXT, before FlexInts
+ *       has turned a tag into a position, so it must see the same document the
+ *       payload was filled from. Three rungs produce a different document from
+ *       the one that arrived — unfenced, unwrapped, trimmed — and each was
+ *       writing out this pairing by hand.
+ * param: source - JSON to read the plan from.
+ * param: payload - filled in when it parses.
+ * return: nil, or why the document did not parse.
+ */
+func adoptPlan(source string, payload *executiveCallPayload) error {
+	if err := json.Unmarshal([]byte(source), payload); err != nil {
+		return err
+	}
 	var arrived struct {
 		Steps json.RawMessage `json:"steps"`
 	}
-	_ = json.Unmarshal([]byte(raw), &arrived)
-
-	if err := json.Unmarshal([]byte(raw), payload); err != nil {
-		// A fence, before anything else. A provider that ignores the schema it
-		// was sent returns the JSON wrapped in a markdown block, and the parser
-		// then reports a backtick where a brace should be — for a reply whose
-		// contents are complete and correct. Measured on qwen3.6-35b-a3b through
-		// one OpenRouter host: reasoning on, five replies of five arrived fenced;
-		// reasoning off, none did. The schema request is the one this engine
-		// makes most, so the wrapper is stripped here rather than left to the
-		// stage that asked.
-		//
-		// Read the first bytes rather than always cleaning: a reply that does
-		// not open with a fence is not one of these, and running it through a
-		// text cleaner would let a real parse failure through as a silent
-		// recovery from something else.
-		if strings.HasPrefix(strings.TrimSpace(raw), "```") {
-			if fenced := CleanLLMJSON(raw); fenced != "" {
-				if errFence := json.Unmarshal([]byte(fenced), payload); errFence == nil {
-					log.Printf("[dag] executive: plan arrived wrapped in a code fence; unwrapped %d step(s)", len(payload.Steps))
-					var unfenced struct {
-						Steps json.RawMessage `json:"steps"`
-					}
-					_ = json.Unmarshal([]byte(fenced), &unfenced)
-					linkDependsOnTags(unfenced.Steps, payload.Steps)
-					return nil
-				}
-			}
-		}
-		// Try parsing with steps as a string (double-encoded JSON)
-		var flex struct {
-			Intent string          `json:"intent"`
-			Answer string          `json:"answer"`
-			Steps  json.RawMessage `json:"steps"`
-		}
-		if err2 := json.Unmarshal([]byte(raw), &flex); err2 != nil {
-			// Cut at the token cap: the JSON never closed, so neither shape
-			// parses. Salvage the steps that finished — see below.
-			if trimmed := salvageTruncatedPlan(raw); trimmed != "" {
-				if err3 := json.Unmarshal([]byte(trimmed), payload); err3 == nil {
-					log.Printf("[dag] executive: plan was cut at the cap; salvaged %d complete step(s)", len(payload.Steps))
-					var salvaged struct {
-						Steps json.RawMessage `json:"steps"`
-					}
-					_ = json.Unmarshal([]byte(trimmed), &salvaged)
-					linkDependsOnTags(salvaged.Steps, payload.Steps)
-					return nil
-				}
-			}
-			return err
-		}
-		payload.Intent = flex.Intent
-		payload.Answer = flex.Answer
-		// Try unwrapping string-encoded steps
-		var stepsStr string
-		if json.Unmarshal(flex.Steps, &stepsStr) == nil {
-			if err3 := ParseLLMJSON(stepsStr, &payload.Steps); err3 != nil {
-				return fmt.Errorf("steps is a string but not valid JSON: %w", err3)
-			}
-			log.Printf("[dag] executive: unwrapped string-encoded steps (%d steps)", len(payload.Steps))
-			linkDependsOnTags(json.RawMessage(stepsStr), payload.Steps)
-			return nil
-		}
-		// Last rung: the reply was cut at the token cap, so the JSON never
-		// closed. The steps that DID close are whole and paid for — salvage
-		// those and drop the partial one. See salvageTruncatedPlan.
-		if trimmed := salvageTruncatedPlan(raw); trimmed != "" {
-			if err4 := json.Unmarshal([]byte(trimmed), payload); err4 == nil {
-				log.Printf("[dag] executive: plan was cut at the cap; salvaged %d complete step(s)", len(payload.Steps))
-				var salvaged struct {
-					Steps json.RawMessage `json:"steps"`
-				}
-				_ = json.Unmarshal([]byte(trimmed), &salvaged)
-				linkDependsOnTags(salvaged.Steps, payload.Steps)
-				return nil
-			}
-		}
-		return err
-	}
+	_ = json.Unmarshal([]byte(source), &arrived)
 	linkDependsOnTags(arrived.Steps, payload.Steps)
 	return nil
+}
+
+/*
+ * recoverFencedPlan unwraps a plan returned inside a markdown code block.
+ * desc: A provider that ignores the schema it was sent returns the JSON wrapped
+ *       in a fence, and the parser then reports a backtick where a brace should
+ *       be — for a reply whose contents are complete and correct. Measured on
+ *       qwen3.6-35b-a3b through one OpenRouter host: reasoning on, five replies
+ *       of five arrived fenced; reasoning off, none did. The schema request is
+ *       the one this engine makes most, so the wrapper is stripped here rather
+ *       than left to the stage that asked.
+ *
+ *       Gated on the first bytes rather than always cleaning: a reply that does
+ *       not open with a fence is not one of these, and running it through a text
+ *       cleaner would let a real parse failure through as a silent recovery from
+ *       something else.
+ *
+ *       A fence that unwraps to something still broken falls THROUGH rather than
+ *       stopping: a plan can be fenced and cut at the cap at once, and the
+ *       salvager below is the rung that reads that.
+ * return: whether the plan was recovered; no error, this rung never stops the ladder.
+ */
+func recoverFencedPlan(raw string, payload *executiveCallPayload) (bool, error) {
+	if !strings.HasPrefix(strings.TrimSpace(raw), "```") {
+		return false, nil
+	}
+	fenced := CleanLLMJSON(raw)
+	if fenced == "" {
+		return false, nil
+	}
+	if err := adoptPlan(fenced, payload); err != nil {
+		return false, nil
+	}
+	log.Printf("[dag] executive: plan arrived wrapped in a code fence; unwrapped %d step(s)", len(payload.Steps))
+	return true, nil
+}
+
+/*
+ * recoverStringEncodedSteps reads steps that arrived as a JSON string.
+ * desc: Some models answer the steps array by encoding it a second time, so the
+ *       field holds a string of JSON rather than the array. The outer document
+ *       is well-formed, which is what separates this from the rung below.
+ *
+ *       This one DOES stop the ladder when it fails. The shape was recognised —
+ *       steps really is a string — so the reply is not a truncation, and handing
+ *       it to a salvager written for unterminated JSON would have it walk brace
+ *       depth through escaped text and answer for a document it never saw.
+ * return: whether the plan was recovered, and why the string would not parse.
+ */
+func recoverStringEncodedSteps(raw string, payload *executiveCallPayload) (bool, error) {
+	var flex struct {
+		Intent string          `json:"intent"`
+		Answer string          `json:"answer"`
+		Steps  json.RawMessage `json:"steps"`
+	}
+	if json.Unmarshal([]byte(raw), &flex) != nil {
+		return false, nil
+	}
+	var stepsStr string
+	if json.Unmarshal(flex.Steps, &stepsStr) != nil {
+		return false, nil
+	}
+	payload.Intent = flex.Intent
+	payload.Answer = flex.Answer
+	if err := ParseLLMJSON(stepsStr, &payload.Steps); err != nil {
+		return false, fmt.Errorf("steps is a string but not valid JSON: %w", err)
+	}
+	log.Printf("[dag] executive: unwrapped string-encoded steps (%d steps)", len(payload.Steps))
+	linkDependsOnTags(json.RawMessage(stepsStr), payload.Steps)
+	return true, nil
+}
+
+/*
+ * stripFence takes a markdown wrapper off a reply and changes nothing else.
+ * desc: Deliberately not CleanLLMJSON. That one also closes unclosed braces
+ *       (repairUnclosed), and a plan cut at the cap is the one input where doing
+ *       so is wrong: it would keep the half-written step with whatever fields it
+ *       had reached, where salvageTruncatedPlan drops that step and keeps only
+ *       the ones that closed. Here the wrapper is the only thing in the way, so
+ *       the wrapper is the only thing that comes off.
+ *
+ *       Gated on the first bytes, like the fence rung, so a reply that never had
+ *       a wrapper is handed back exactly as it arrived.
+ * param: raw - the reply as it arrived.
+ * return: the reply without its fence, or unchanged when it had none.
+ */
+func stripFence(raw string) string {
+	s := strings.TrimSpace(raw)
+	if !strings.HasPrefix(s, "```") {
+		return raw
+	}
+	if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+		s = s[nl+1:]
+	}
+	// A line that is only a fence closes the block. A cut reply never reached
+	// one, which is the case this exists for; looking for it costs nothing.
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "```" {
+			return strings.Join(lines[:i], "\n")
+		}
+	}
+	return s
+}
+
+/*
+ * recoverTruncatedPlan keeps the steps of a reply that ran into the token cap.
+ * desc: The JSON never closed, so no shape above parses. The steps that DID
+ *       close are whole and were paid for — see salvageTruncatedPlan, which
+ *       trims to the last one.
+ *
+ *       Falls through rather than stopping: when the trim still will not parse
+ *       there is nothing left to try, and the ladder's own error is the better
+ *       one to report.
+ * return: whether the plan was recovered; no error, this rung never stops the ladder.
+ */
+func recoverTruncatedPlan(raw string, payload *executiveCallPayload) (bool, error) {
+	trimmed := salvageTruncatedPlan(stripFence(raw))
+	if trimmed == "" {
+		return false, nil
+	}
+	if err := adoptPlan(trimmed, payload); err != nil {
+		return false, nil
+	}
+	log.Printf("[dag] executive: plan was cut at the cap; salvaged %d complete step(s)", len(payload.Steps))
+	return true, nil
 }
 
 /*

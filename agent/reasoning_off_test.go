@@ -44,14 +44,20 @@ func TestTheReasoningAndAnswerLanesAreLeftAlone(t *testing.T) {
 // The picker's half of the same rule. Two doors, because a config file reaches a
 // lane without passing a picker — which is how a thinking model drove one
 // deployment's executor for seven days.
-func TestTheForcedSmallCallListExcludesThinkers(t *testing.T) {
+//
+// The rule is about reasoning that CANNOT be switched off, not reasoning that
+// happens to be on. The lane above sends it off and a hybrid model obeys, so
+// excluding one here would refuse a choice the engine already neutralises —
+// and would empty both pickers, since most of the catalog now reasons by
+// default.
+func TestTheForcedSmallCallListExcludesMandatoryThinkers(t *testing.T) {
 	list := models.ForcedSmallCall()
 	if len(list) == 0 {
 		t.Fatal("no model is fit for a forced small call; both pickers show nothing")
 	}
 	for _, m := range list {
-		if m.Thinks() {
-			t.Errorf("%q thinks and is still offered for the executor and router", m.ID)
+		if m.Thinks() && !m.ReasoningOptional {
+			t.Errorf("%q cannot be told to stop reasoning and is still offered for the executor and router", m.ID)
 		}
 		if !m.ToolCallOK || !m.Tools {
 			t.Errorf("%q is offered without the flags that qualify it", m.ID)

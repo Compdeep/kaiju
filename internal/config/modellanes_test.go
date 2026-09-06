@@ -7,22 +7,41 @@ import (
 	"github.com/Compdeep/kaiju/models"
 )
 
-// A thinking model on a lane that forces a tool call is the case this exists
-// for: qwen3-32b drove both lanes of a live install for four hours and 36% of
-// its calls failed, with nothing at startup naming the model.
-func TestModelLaneWarnings_ThinkingOnForcedLane(t *testing.T) {
+// A model whose reasoning cannot be switched off, on a lane that forces a tool
+// call. The case this exists for is a live install where qwen3-32b drove both
+// lanes for four hours and 36% of its calls failed, with nothing at startup
+// naming the model.
+//
+// The fixture is no longer that model, because the complaint changed. Thinking
+// BY DEFAULT stopped being the test when these lanes began sending reasoning
+// off: qwen3-32b obeys that and is fine here now. What no request can prevent
+// is reasoning declared mandatory, and gpt-oss-120b is one of those.
+func TestModelLaneWarnings_ReasoningThatCannotBeSwitchedOffOnAForcedLane(t *testing.T) {
 	c := &Config{}
-	c.LLM.Model = "qwen/qwen3-32b"
+	c.LLM.Model = "openai/gpt-oss-120b"
 
 	warnings := c.ModelLaneWarnings()
 	if len(warnings) != 1 {
 		t.Fatalf("got %d warnings, want 1: %v", len(warnings), warnings)
 	}
-	if !strings.Contains(warnings[0], "qwen/qwen3-32b") {
+	if !strings.Contains(warnings[0], "openai/gpt-oss-120b") {
 		t.Errorf("warning does not name the model: %q", warnings[0])
 	}
 	if !strings.Contains(warnings[0], "llm.model") {
 		t.Errorf("warning does not name the lane: %q", warnings[0])
+	}
+}
+
+// A model that reasons by default but can be told not to is fine on these
+// lanes: they send reasoning off on every call, and it obeys. Warning about it
+// would empty the pickers of most of the catalog for a fault that does not
+// happen — every Qwen since 3.5 ships one line that does both.
+func TestModelLaneWarnings_SwitchableReasoningDoesNotWarn(t *testing.T) {
+	c := &Config{}
+	c.LLM.Model = "qwen/qwen3-32b"
+
+	if warnings := c.ModelLaneWarnings(); len(warnings) != 0 {
+		t.Fatalf("a model that can be told not to reason warned: %v", warnings)
 	}
 }
 
@@ -42,8 +61,8 @@ func TestModelLaneWarnings_AnswerLaneExempt(t *testing.T) {
 // an operator looking for a second.
 func TestModelLaneWarnings_SameModelBothLanesWarnsOnce(t *testing.T) {
 	c := &Config{}
-	c.LLM.Model = "qwen/qwen3-32b"
-	c.Executor.Model = "qwen/qwen3-32b"
+	c.LLM.Model = "openai/gpt-oss-120b"
+	c.Executor.Model = "openai/gpt-oss-120b"
 
 	if warnings := c.ModelLaneWarnings(); len(warnings) != 1 {
 		t.Fatalf("got %d warnings, want 1: %v", len(warnings), warnings)
@@ -82,7 +101,7 @@ func TestModelLaneWarnings_UnknownModelSaysItIsUntested(t *testing.T) {
 // the same an operator learns to skip both.
 func TestModelLaneWarnings_MeasuredAndUntestedReadDifferently(t *testing.T) {
 	measured := &Config{}
-	measured.LLM.Model = "qwen/qwen3-32b"
+	measured.LLM.Model = "openai/gpt-oss-120b"
 	untested := &Config{}
 	untested.LLM.Model = "our-own-finetune-v3"
 
@@ -150,8 +169,10 @@ func TestTheDefaultsSuitTheirLanes(t *testing.T) {
 		if !ok {
 			continue // reported by the test above
 		}
-		if m.Thinks() {
-			t.Errorf("%s defaults to %q, which reasons before it answers", c.lane, c.id)
+		// Not "does it think" — these lanes send reasoning off and the model
+		// obeys. The default must be one that CAN be told to stop.
+		if m.Thinks() && !m.ReasoningOptional {
+			t.Errorf("%s defaults to %q, whose reasoning cannot be switched off", c.lane, c.id)
 		}
 		if !m.ToolCallOK {
 			t.Errorf("%s defaults to %q, which the catalog does not record as fit for a forced call", c.lane, c.id)

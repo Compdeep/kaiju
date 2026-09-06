@@ -876,7 +876,18 @@ func runServe() {
 		log.Fatalf("[kaiju] %v", err)
 	}
 
-	// Config API (available without JWT — needed for initial setup via UI)
+	// The configuration endpoint, behind the same token check as everything else.
+	//
+	// It used to be outside it, for initial setup: nothing else could create the
+	// first account, so the endpoint that configures the node had to be reachable
+	// without one. The exception then stayed. What it left open was a read that
+	// returned provider API keys and a write that could repoint the model
+	// endpoint — applied live and persisted — to anyone who could reach the port,
+	// on a server that bound every interface.
+	//
+	// Two changes replaced the reason for it. The gateway confines itself to this
+	// machine, and the first sign-in on a node with no accounts creates one. So
+	// setting a node up no longer needs a door that stays open afterwards.
 	cfgPath := ""
 	for i, arg := range os.Args {
 		if arg == "--config" && i+1 < len(os.Args) {
@@ -885,7 +896,12 @@ func runServe() {
 		}
 	}
 	configAPI := configapi.New(cfg, cfgPath, ag)
-	configAPI.RegisterRoutes(mux)
+	configMux := http.NewServeMux()
+	configAPI.RegisterRoutes(configMux)
+	protect := ui.Protect(authenticator)
+	for _, path := range configapi.Paths {
+		mux.Handle(path, protect(configMux))
+	}
 
 	// Health check
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {

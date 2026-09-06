@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"net/http"
+
 	"github.com/Compdeep/kaiju/internal/auth"
 	"github.com/Compdeep/kaiju/internal/db"
+	"github.com/Compdeep/kaiju/internal/gateway"
 )
 
 // The two things the interface needs from outside itself, and neither is a
@@ -92,6 +95,27 @@ func NewAuthenticator(secret, dataDir string, expiryHours int) (Authenticator, e
 		return nil, err
 	}
 	return kaijuAuth{svc: svc}, nil
+}
+
+/*
+ * Protect puts a handler behind the same token check the interface uses.
+ * desc: Exported so a daemon mounting its own routes on the same server can
+ *       hold them to the same standard, without a second token service or a
+ *       second idea of what a valid token is. The signing service itself stays
+ *       unexported: a caller may protect a handler and may not inspect or issue.
+ *
+ *       A nil Authenticator returns the handler untouched, which is the same
+ *       thing the interface does — there is no token check to apply when no
+ *       token service was built.
+ * param: a - the authenticator, or nil.
+ * return: a wrapper that requires a valid bearer token.
+ */
+func Protect(a Authenticator) func(http.Handler) http.Handler {
+	if a == nil {
+		return func(h http.Handler) http.Handler { return h }
+	}
+	svc := a.jwt()
+	return func(h http.Handler) http.Handler { return gateway.WithJWTAuth(svc)(h) }
 }
 
 /*

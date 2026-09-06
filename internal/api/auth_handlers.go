@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -40,6 +42,31 @@ func (a *AuthAPI) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/auth/me", a.handleMe)
 }
 
+// firstUserIntent is the clearance the claiming account gets: the highest, so
+// the person who set the node up can operate it. Every account after it is
+// created deliberately, through the user endpoints, at whatever level its
+// creator chooses.
+const firstUserIntent = 100
+
+/*
+ * nodeIsClaimed reports whether this node has any account yet.
+ * desc: Separated so the read is one place and its failure has one meaning: an
+ *       error is answered as CLAIMED, because a database that cannot be counted
+ *       must not be treated as empty — that would let a sign-in create an
+ *       account on a node that already has one.
+ * return: whether an account exists, and any error reading that.
+ */
+func (a *AuthAPI) nodeIsClaimed() (bool, error) {
+	if a.db == nil {
+		return true, fmt.Errorf("no database")
+	}
+	users, err := a.db.ListUsers()
+	if err != nil {
+		return true, err
+	}
+	return len(users) > 0, nil
+}
+
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -67,6 +94,31 @@ func (a *AuthAPI) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if req.Username == "" || req.Password == "" {
 		jsonError(w, "username and password required", http.StatusBadRequest)
 		return
+	}
+
+	// A node with no accounts is claimed by whoever signs in first, and what
+	// they type becomes the account.
+	//
+	// The alternative is a setup path that runs without credentials, which is
+	// what this daemon had: its configuration endpoint was left outside the
+	// token check because nothing else could create the first user, and it then
+	// stayed outside forever — readable and writable by anyone who could reach
+	// the port, on a server that bound every interface.
+	//
+	// Safe because of where the server listens, not because of anything here:
+	// the gateway confines itself to this machine (see gateway.Loopback), so
+	// first is whoever is already on it. Both halves are needed and neither is
+	// sufficient — a claim page reachable from a network is a giveaway, and a
+	// loopback bind with no way to make the first account is a locked room.
+	//
+	// Losing the password is recovered by emptying the table: `kaiju user
+	// remove <name>`, after which the next sign-in claims it again.
+	if claimed, cerr := a.nodeIsClaimed(); cerr == nil && !claimed {
+		if err := a.db.CreateUser(req.Username, req.Password, firstUserIntent, []string{"default"}); err != nil {
+			jsonError(w, "could not create the first account", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("[auth] no accounts existed; %q signed in and now owns this node", req.Username)
 	}
 
 	dbUser, err := a.db.AuthenticateUser(req.Username, req.Password)

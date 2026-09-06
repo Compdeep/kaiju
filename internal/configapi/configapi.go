@@ -47,6 +47,16 @@ func New(cfg *config.Config, cfgPath string, ag *agent.Agent) *API {
  * desc: Registers get-config, update-config, and list-models endpoints.
  * param: mux - the HTTP serve mux to attach routes to
  */
+// Paths are the routes this API serves, so a caller mounting it behind its own
+// middleware wraps exactly what RegisterRoutes registers. Kept beside the
+// registration on purpose: a route added there and forgotten here is a route
+// that answers without whatever the caller wrapped the rest in.
+var Paths = []string{
+	"/api/v1/config",
+	"/api/v1/models",
+	"/api/v1/capabilities",
+}
+
 func (c *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/config", c.handleGetConfig)
 	mux.HandleFunc("PATCH /api/v1/config", c.handleUpdateConfig)
@@ -56,20 +66,57 @@ func (c *API) RegisterRoutes(mux *http.ServeMux) {
 
 /*
  * handleGetConfig returns the current configuration with secrets masked.
- * desc: Copies the config, masks the API key and JWT secret, and returns it as JSON.
+ * desc: Every credential the document carries, not the one that was thought of
+ *       first. The reasoning lane's key was masked and the providers block was
+ *       not, so a reply that looked redacted handed over every other key in
+ *       full — the masking was there, it just did not cover what had been added
+ *       since.
+ *
+ *       Masked rather than removed, because an interface shows whether a key is
+ *       set and its last characters are how a person recognises which one it is.
+ *       The signing secret and the legacy token are removed outright: nothing
+ *       needs to see any part of them.
  * param: w - HTTP response writer
  */
 func (c *API) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
-	// Return config with API key masked
 	safe := *c.cfg
-	if len(safe.LLM.APIKey) > 8 {
-		safe.LLM.APIKey = safe.LLM.APIKey[:4] + "****" + safe.LLM.APIKey[len(safe.LLM.APIKey)-4:]
-	} else if safe.LLM.APIKey != "" {
-		safe.LLM.APIKey = "****"
+	safe.LLM.APIKey = maskKey(safe.LLM.APIKey)
+	safe.Executor.APIKey = maskKey(safe.Executor.APIKey)
+
+	// The providers map is shared with the live config, so its entries are
+	// copied before they are masked. Writing through would redact the keys the
+	// daemon runs on.
+	if len(safe.Providers) > 0 {
+		masked := make(map[string]config.ProviderConfig, len(safe.Providers))
+		for name, p := range safe.Providers {
+			p.APIKey = maskKey(p.APIKey)
+			masked[name] = p
+		}
+		safe.Providers = masked
 	}
+
 	safe.API.JWTSecret = ""
 	safe.API.AuthToken = ""
 	jsonResponse(w, safe, http.StatusOK)
+}
+
+/*
+ * maskKey reduces a credential to something recognisable and unusable.
+ * desc: First four and last four, which is enough to tell two keys apart and
+ *       not enough to be one. A short key is replaced entirely — there is no
+ *       length at which showing most of it is better than showing none.
+ * param: key - the credential, possibly empty.
+ * return: the masked form, or empty for an empty key.
+ */
+func maskKey(key string) string {
+	switch {
+	case key == "":
+		return ""
+	case len(key) > 8:
+		return key[:4] + "****" + key[len(key)-4:]
+	default:
+		return "****"
+	}
 }
 
 /*

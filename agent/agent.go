@@ -56,7 +56,7 @@ type Trigger struct {
 	SessionID     string          `json:"session_id,omitempty"`     // conversation session for memory
 	History       []llm.Message   `json:"history,omitempty"`        // conversation history
 	AggMode       int             `json:"agg_mode,omitempty"`       // 0=skip aggregator, 1=executor model (default), 2=reasoning model
-	ExecutionMode string          `json:"execution_mode,omitempty"` // per-request override: "interactive" or "autonomous"
+	ExecutionMode string          `json:"execution_mode,omitempty"` // per-request override: "chat", "auto" or "agent"
 	// Per-request model routing (all optional; empty ⇒ configured default).
 	// Provider is a name in cfg.Providers; Model is that provider's model id.
 	// Heavy lane = executive/aggregator/reasoning; Light lane = the executor
@@ -1149,7 +1149,7 @@ func (a *Agent) DAGEnabled() bool {
  *       ParseExecutionMode does not recognise, leaving the mode as it was —
  *       a config door that accepted a typo and stored it would put the daemon
  *       back in the state that parser exists to prevent.
- * param: mode - "interactive", "autonomous", or "" to mean interactive.
+ * param: mode - "chat", "auto", "agent", or "" to mean auto.
  * return: whether the mode was recognised and applied.
  */
 func (a *Agent) SetExecutionMode(mode string) bool {

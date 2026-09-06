@@ -39,10 +39,10 @@ func (a *Agent) unattended(t Trigger) (out bool) {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("[agent] the watching rule panicked, reading the trigger instead: %v", r)
-				out = t.ExecutionMode == "autonomous"
+				out = executionOf(t) == ExecutionAgent
 			}
 		}()
 		return a.isUnattended(t)
 	}
-	return t.ExecutionMode == "autonomous"
+	return executionOf(t) == ExecutionAgent
 }

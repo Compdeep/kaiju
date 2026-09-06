@@ -344,9 +344,11 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		if !budget.TrySpawnNode("", true) {
 			return nil, fmt.Errorf("budget exhausted before preflight")
 		}
-		execMode := a.cfg.ExecutionMode
-		if trigger.ExecutionMode != "" {
-			execMode = trigger.ExecutionMode
+		// Both through the same understanding, so a trigger built in Go with a
+		// retired name means what it says.
+		execMode, _ := ParseExecutionMode(a.cfg.ExecutionMode)
+		if m := executionOf(trigger); m != "" {
+			execMode = m
 		}
 		query := a.formatTrigger(trigger)
 
@@ -362,13 +364,20 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			ID: "preflight", Type: "preflight", State: "running", Tag: "reading the request"}})
 
 		var pf *PreflightResult
-		if execMode == "autonomous" {
-			// Pure agent: no routing (its result would only be discarded). Prepare
-			// the plan directly, so autonomous always has full skills/context.
+		switch execMode {
+		case ExecutionAgent:
+			// No routing: its answer would only be discarded. Prepare the plan
+			// directly, so this mode always has full skills and context.
 			pf = a.classifyInvestigate(ctx, trigger.ID, query, trigger.History)
 			pf.Mode = "agent"
-		} else {
-			// Interactive: route first; chat short-circuits before plan-prep, agent plans.
+		case ExecutionChat:
+			// No routing either, for the opposite reason. A turn reaching the
+			// graph in this mode arrives from a caller that does not go through
+			// the chat front door, and asking the router whether to plan it would
+			// be asking a question the mode has already answered.
+			pf = &PreflightResult{Mode: "chat"}
+		default:
+			// Auto: route first; a chat answer short-circuits before plan-prep.
 			mode, _ := a.routeQuery(ctx, trigger.ID, query, trigger.History)
 			switch mode {
 			case "chat":

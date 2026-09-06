@@ -269,6 +269,27 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		AnswerModel:      req.AnswerModel,
 	}
 
+	// How this turn is handled, resolved once, before anything reads it.
+	//
+	// Refused rather than corrected: the three modes differ in whether tools run
+	// at all, so guessing on the caller's behalf is not a small error. chat_mode
+	// is the older spelling of "chat" and is read only when execution_mode says
+	// nothing, so the two can never disagree about a single turn.
+	if req.ExecutionMode != "" {
+		mode, ok := agent.ParseExecutionMode(req.ExecutionMode)
+		if !ok {
+			jsonError(w, fmt.Sprintf("execution_mode %q is not one of %v",
+				req.ExecutionMode, agent.ExecutionModes()), http.StatusBadRequest)
+			return
+		}
+		trigger.ExecutionMode = mode
+	} else if req.ChatMode {
+		trigger.ExecutionMode = agent.ExecutionChat
+	}
+	// One answer for the rest of this handler, so no later branch re-derives it
+	// from chat_mode and drifts.
+	chatLane := trigger.ExecutionMode == agent.ExecutionChat
+
 	// ── Memory boundary (chat input) ──────────────────────────────────────
 	//
 	// THIS IS THE ONLY PLACE memory enters the agent's reasoning context.
@@ -299,7 +320,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		// receive the planner's truncated history or cross-session long-term
 		// memory. So skip both entirely in chat mode (also saves two DB searches
 		// per chat turn). Only the message WRITE below is shared.
-		if !req.ChatMode {
+		if !chatLane {
 			// Load conversation history
 			if history, err := memMgr.LoadHistory(r.Context(), req.SessionID, 50); err == nil {
 				trigger.History = history
@@ -344,18 +365,6 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		}
 		trigger.DAGMode = mode
 	}
-	if req.ExecutionMode != "" {
-		// Refused rather than corrected. Both corrections are wrong: reading an
-		// unknown value as interactive skips planning the caller asked for, and
-		// reading it as autonomous plans work nobody requested.
-		mode, ok := agent.ParseExecutionMode(req.ExecutionMode)
-		if !ok {
-			jsonError(w, fmt.Sprintf("execution_mode %q is not one of %v",
-				req.ExecutionMode, agent.ExecutionModes()), http.StatusBadRequest)
-			return
-		}
-		trigger.ExecutionMode = mode
-	}
 	if req.AggMode != nil {
 		trigger.AggMode = *req.AggMode
 	} else {
@@ -399,11 +408,11 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// the turn to the configured vision model below, so an attached image is
 	// actually read instead of silently dropped. A vision-capable chat model keeps
 	// the turn and the images ride along in the chat lane.
-	if req.ChatMode && len(visionImgs) > 0 {
+	if chatLane && len(visionImgs) > 0 {
 		if _, cm := a.resolveChat(req); !agent.IsVisionModel(cm) {
 			if _, vm := a.resolveVision(req); vm != "" {
 				log.Printf("[vision] chat model %q can't see images; routing %d image(s) to the vision lane instead of chat", cm, len(visionImgs))
-				req.ChatMode = false
+				chatLane = false
 			}
 		}
 	}
@@ -412,10 +421,10 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// planner/DAG/tools — so plain conversation and non-tool models (roleplay
 	// fine-tunes) work. Takes precedence over the vision lane; if the session has
 	// images and the chat model is vision-capable, they ride along.
-	if req.ChatMode {
+	if chatLane {
 		cp, cm := a.resolveChat(req)
 		dp, dmodel := a.agent.ChatModel()
-		log.Printf("[chat] chat_mode=true → direct to provider=%q model=%q (req.chat_model=%q, agent default=%q/%q, tools=%v)", cp, cm, req.ChatModel, dp, dmodel, req.ChatTools)
+		log.Printf("[chat] execution_mode=chat → direct to provider=%q model=%q (req.chat_model=%q, agent default=%q/%q, tools=%v)", cp, cm, req.ChatModel, dp, dmodel, req.ChatTools)
 		// History: recent, verbatim, no cross-session long-term memory. The user's
 		// current message was already stored above, so it's the last turn here.
 		var history []llm.Message
@@ -442,7 +451,6 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 			Images:    visionImgs,
 			TriggerID: trigger.ID,
 			SessionID: req.SessionID,
-			Agent:     req.Agent, // nil/true ⇒ escalation allowed; false ⇒ pure chat
 			// Base carries the whole request (models, intent, scope, session, history)
 			// so an escalated agent sub-run inherits it by value — nothing dropped.
 			Base: trigger,

@@ -86,7 +86,7 @@ func (c *API) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 				Key:        "agent.execution_mode",
 				Where:      whereConfig,
 				Values:     agent.ExecutionModes(),
-				EmptyMeans: "interactive",
+				EmptyMeans: "auto",
 				Applies:    "every turn this node runs, unless the request overrides it",
 			},
 			{
@@ -121,12 +121,11 @@ func (c *API) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 			{
 				Key:   "chat_mode",
 				Where: whereRequest,
-				// No values: it is a boolean, and the JSON type says so. What a
-				// caller cannot guess is which way the default falls, and that
-				// is below.
-				EmptyMeans: "false — the turn goes to the agent, not the chat lane",
-				Applies: "this one turn: true answers it directly with no planner and no " +
-					"tools, and the node's execution mode does not apply to it",
+				// No values: it is a boolean, and the JSON type says so.
+				EmptyMeans: "false",
+				Applies: "the older spelling of execution_mode \"chat\", kept so clients " +
+					"written against it keep working. Read only when execution_mode says " +
+					"nothing. Prefer execution_mode, which can say all three things",
 			},
 		},
 		PluginsCompiled:       plugins.Compiled(),

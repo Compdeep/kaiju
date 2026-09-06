@@ -8,8 +8,21 @@ export const useSessionsStore = defineStore('sessions', () => {
   const intent = ref('')
   const runMode = ref(localStorage.getItem('kaiju_run_mode') || 'reflect')
   const aggMode = ref(localStorage.getItem('kaiju_agg_mode') || '-1')
-  const executionMode = ref(localStorage.getItem('kaiju_exec_mode') || 'interactive')
-  const chatMode = ref(localStorage.getItem('kaiju_chat_mode') === '1')
+  // How a turn is handled: 'chat', 'auto' or 'agent'. One setting, because it
+  // used to be two — a chat toggle and an execution mode — and the second was
+  // ignored whenever the first was on, so two of their four combinations were
+  // the same and nothing said so.
+  //
+  // Reads the two old keys once so a browser that remembers the old pair keeps
+  // the behaviour it had: the chat toggle wins where it was on, since it was the
+  // one that decided the lane.
+  const executionMode = ref(readMode())
+  function readMode() {
+    const current = localStorage.getItem('kaiju_exec_mode')
+    if (current === 'chat' || current === 'auto' || current === 'agent') return current
+    if (localStorage.getItem('kaiju_chat_mode') === '1') return 'chat'
+    return current === 'autonomous' ? 'agent' : 'auto'
+  }
 
   // Per-session state: messages + loading
   const perSession = reactive(new Map())
@@ -68,18 +81,13 @@ export const useSessionsStore = defineStore('sessions', () => {
     localStorage.setItem('kaiju_exec_mode', mode)
   }
 
-  function toggleChatMode() {
-    chatMode.value = !chatMode.value
-    localStorage.setItem('kaiju_chat_mode', chatMode.value ? '1' : '0')
-  }
-
   /** Clean up on session delete. */
   function dropSession(sid) { perSession.delete(sid) }
 
   return {
     sessionId, sessions, messages, loading, attachments, intent,
-    runMode, aggMode, executionMode, chatMode,
-    setRunMode, setAggMode, setExecutionMode, toggleChatMode, setSessionId,
+    runMode, aggMode, executionMode,
+    setRunMode, setAggMode, setExecutionMode, setSessionId,
     getSession, dropSession,
   }
 })

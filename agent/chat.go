@@ -23,10 +23,6 @@ type ChatTurn struct {
 	// conversation so the UI can show the agent working live. It is used for event
 	// attribution only — the sub-run writes no memory to it.
 	SessionID string
-	// Agent permits escalation: nil/true ⇒ the router MAY escalate this turn to the
-	// agent; false ⇒ stays in chat, never escalates. From the request's `agent`
-	// field. (Run the agent directly via execute mode, not this flag.)
-	Agent *bool
 	// Base is the request's Trigger. When the turn goes to the agent, the sub-run
 	// is a COPY of this — so it inherits everything the request specified (models,
 	// intent, scope, session, history) with nothing to thread by hand.
@@ -68,28 +64,23 @@ type ChatResult struct {
 // The agent's steps stream as DAG events for live progress; its models, intent,
 // scope, and history are inherited from the request's Base trigger.
 func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
-	// Escalate to the agent only when this turn is PERMITTED to (t.Agent, default
-	// true — nil means allowed) AND the tuned router — reading the latest message in
-	// context (running summary + last exchange) — judges it needs more than a
-	// conversational answer. agent=false ⇒ pure chat, never escalates. To run the
-	// agent directly, callers use execute mode (chat_mode=false), not this lane.
-	// ChatTools is the palette the agent uses if it escalates, never the trigger.
-	mayEscalate := t.Agent == nil || *t.Agent
-	mode, lacking := "chat", []string(nil)
-	if mayEscalate {
-		mode, lacking = a.routeQuery(ctx, t.TriggerID, t.Query, t.History)
-	}
-	if mode == "agent" {
-		// Chat answers can be long. Force the aggregator (agg_mode=2, reasoning
-		// lane, full synthesis budget) so a reflection-concluded run doesn't hand
-		// back the 1024-token-capped reflection outcome truncated mid-sentence.
-		t.Base.AggMode = 2
-		outcome, nodes, llmCalls, err := a.RunAgentTask(ctx, t.Base, t.Query)
-		return ChatResult{Content: outcome, Nodes: nodes, LLMCalls: llmCalls}, err
-	}
-	// Tool-less conversation. The router may have said the answer needs something
-	// said before the part of the conversation the model is sent; the agent side
-	// needs no such step, since message_search is a tool it can call.
+	// This lane answers and stays answering. It used to ask the router first and
+	// leave for the planner mid-turn when the router said the message needed
+	// tools, which meant asking for chat bought a conversation that might not
+	// stay one — and a caller who wanted the guarantee had to send a second flag
+	// that no interface offered.
+	//
+	// A turn that should be allowed to become an investigation says so with the
+	// auto mode, which is the one that asks the router. Chat is now the answer to
+	// "keep this a conversation", and the only answer needed.
+	//
+	// The router is still asked, and only half its answer is read. It returns two
+	// things: whether the turn needs the agent, and what the answer refers to but
+	// cannot see. The first is not consulted here — that is the whole of what
+	// this mode means — and the second is the only source of recall terms, so
+	// dropping the call would quietly remove the ability to answer "what did we
+	// say about X earlier" in the one lane where there are no tools to ask with.
+	_, lacking := a.routeQuery(ctx, t.TriggerID, t.Query, t.History)
 	t.Recalled, t.RecallTerms = a.recall(ctx, t, lacking), lacking
 	return a.Converse(ctx, t)
 }

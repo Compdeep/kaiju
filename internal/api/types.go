@@ -7,7 +7,7 @@ type ExecuteRequest struct {
 	Intent        string `json:"intent,omitempty"`         // any intent name registered in the intent registry (loaded from config/DB)
 	SessionID     string `json:"session_id,omitempty"`     // conversation session for memory
 	AggMode       *int   `json:"agg_mode,omitempty"`       // 0=skip, 1=executor model (default), 2=reasoning model
-	ExecutionMode string `json:"execution_mode,omitempty"` // "interactive" or "autonomous" (per-request override)
+	ExecutionMode string `json:"execution_mode,omitempty"` // "chat", "auto" or "agent" (per-request override)
 	// Per-request model routing (optional; empty ⇒ configured default). The
 	// host selects a provider name (as configured in kaiju's providers block)
 	// and a model id for each lane — heavy (answer/reasoning) and executor
@@ -23,10 +23,12 @@ type ExecuteRequest struct {
 	// directly (no planner/tools). Empty ⇒ the configured default vision model.
 	VisionProvider string `json:"vision_provider,omitempty"`
 	VisionModel    string `json:"vision_model,omitempty"`
-	// Chat lane: when ChatMode is true, the turn is answered by a direct
-	// completion (no planner/DAG/tools) — for plain conversation and non-tool
-	// models. The model is the override below, else the configured chat default,
-	// else the reasoning model.
+	// ChatMode is the older spelling of ExecutionMode "chat", kept so clients
+	// written against it keep working. True means the same thing: answer the turn
+	// directly, no planner, no tools, no escalation.
+	//
+	// ExecutionMode wins where both are sent, because it is the one that can say
+	// all three things. Prefer it; this is read only when ExecutionMode is empty.
 	ChatMode     bool   `json:"chat_mode,omitempty"`
 	ChatProvider string `json:"chat_provider,omitempty"`
 	ChatModel    string `json:"chat_model,omitempty"`
@@ -35,13 +37,6 @@ type ExecuteRequest struct {
 	// is tool-less. The signed token grant, not this field, is the authority on
 	// which tools an escalated run may reach.
 	ChatTools []string `json:"chat_tools,omitempty"`
-	// Agent permits chat→agent escalation. nil (omitted) ⇒ DEFAULT: allowed — the
-	// router may route this turn to the agent when it needs more than a
-	// conversational answer. false ⇒ pure chat, never escalates. true ⇒ explicit
-	// allow (same as default). ChatTools is the palette the agent uses if it runs.
-	// To run the agent directly, use execute mode (ChatMode=false), not this flag.
-	// Only consulted when ChatMode is true.
-	Agent *bool `json:"agent,omitempty"`
 	// Regenerate re-runs the last turn: the previous assistant reply is dropped
 	// and the last user message is answered again. Query is ignored (taken from
 	// history). Session-scoped and ownership-checked.

@@ -4,7 +4,7 @@ import "testing"
 
 // The two modes, and the absence of a choice, are the whole of what is accepted.
 func TestTheAcceptedExecutionModes(t *testing.T) {
-	for _, in := range []string{ExecutionInteractive, ExecutionAutonomous, ExecutionUnset} {
+	for _, in := range []string{ExecutionChat, ExecutionAuto, ExecutionAgent, ExecutionUnset} {
 		if got, ok := ParseExecutionMode(in); !ok || got != in {
 			t.Errorf("ParseExecutionMode(%q) = %q, %v; want it accepted unchanged", in, got, ok)
 		}
@@ -12,13 +12,43 @@ func TestTheAcceptedExecutionModes(t *testing.T) {
 }
 
 // A near miss is refused rather than corrected. This is the failure the parser
-// exists for: read by comparing against "autonomous", a typo ran interactive
+// exists for: read by comparing against one name, a typo took the other branch
 // forever and said nothing, so a node configured to plan every turn routed
 // every turn instead.
 func TestANearMissIsRefusedRatherThanCorrected(t *testing.T) {
-	for _, in := range []string{"autonomus", "Autonomous", "AUTONOMOUS", "auto", "interactve", "agent", " autonomous"} {
+	for _, in := range []string{"autonomus", "Agent", "AGENT", "cht", "aut", " agent", "interactve"} {
 		if got, ok := ParseExecutionMode(in); ok {
 			t.Errorf("ParseExecutionMode(%q) accepted it as %q; a typo must not choose a mode", in, got)
+		}
+	}
+}
+
+// The retired names are understood and answered with the current one, so a
+// config file or a client written against them keeps working and nothing
+// downstream ever sees two spellings of one mode.
+func TestTheRetiredNamesAreUnderstood(t *testing.T) {
+	for in, want := range map[string]string{
+		"interactive": ExecutionAuto,
+		"autonomous":  ExecutionAgent,
+	} {
+		got, ok := ParseExecutionMode(in)
+		if !ok {
+			t.Errorf("%q is no longer understood; every config file naming it stops loading", in)
+			continue
+		}
+		if got != want {
+			t.Errorf("%q was answered with %q, want %q", in, got, want)
+		}
+	}
+}
+
+// And they are not offered. "interactive" promised a run that checks in with a
+// person and nothing about it ever did, so it is understood on the way in and
+// never produced on the way out.
+func TestTheRetiredNamesAreNotOffered(t *testing.T) {
+	for _, m := range ExecutionModes() {
+		if m == "interactive" || m == "autonomous" {
+			t.Errorf("ExecutionModes() offers the retired name %q", m)
 		}
 	}
 }
@@ -35,7 +65,7 @@ func TestARefusedValueComesBackEmpty(t *testing.T) {
 // choices — and not the unset value, which is the absence of one.
 func TestTheListingNamesOnlyTheChoices(t *testing.T) {
 	got := ExecutionModes()
-	if len(got) != 2 || got[0] != ExecutionInteractive || got[1] != ExecutionAutonomous {
+	if len(got) != 3 || got[0] != ExecutionChat || got[1] != ExecutionAuto || got[2] != ExecutionAgent {
 		t.Fatalf("ExecutionModes() = %v", got)
 	}
 	for _, m := range got {
@@ -49,9 +79,9 @@ func TestTheListingNamesOnlyTheChoices(t *testing.T) {
 // unattended.go by the same string. If the constant and those comparisons ever
 // drift the run silently changes mode, so the value is pinned here.
 func TestTheModeValuesAreTheOnesOnTheWire(t *testing.T) {
-	if ExecutionInteractive != "interactive" || ExecutionAutonomous != "autonomous" {
-		t.Fatalf("the wire values changed: %q / %q — every config file and client says the old ones",
-			ExecutionInteractive, ExecutionAutonomous)
+	if ExecutionChat != "chat" || ExecutionAuto != "auto" || ExecutionAgent != "agent" {
+		t.Fatalf("the wire values changed: %q / %q / %q — every config file and client says the old ones",
+			ExecutionChat, ExecutionAuto, ExecutionAgent)
 	}
 }
 
@@ -60,19 +90,19 @@ func TestTheModeValuesAreTheOnesOnTheWire(t *testing.T) {
 // back in the state the parser exists to prevent.
 func TestTheSetterRefusesWhatTheParserRefuses(t *testing.T) {
 	a := &Agent{}
-	a.cfg.ExecutionMode = ExecutionInteractive
+	a.cfg.ExecutionMode = ExecutionAuto
 
 	if ok := a.SetExecutionMode("autonomus"); ok {
 		t.Error("a mistyped mode was accepted")
 	}
-	if a.cfg.ExecutionMode != ExecutionInteractive {
+	if a.cfg.ExecutionMode != ExecutionAuto {
 		t.Errorf("a refused mode changed the run to %q", a.cfg.ExecutionMode)
 	}
-	if ok := a.SetExecutionMode(ExecutionAutonomous); !ok {
+	if ok := a.SetExecutionMode(ExecutionAgent); !ok {
 		t.Fatal("a real mode was refused")
 	}
-	if a.cfg.ExecutionMode != ExecutionAutonomous {
-		t.Errorf("the mode is %q after being set to autonomous", a.cfg.ExecutionMode)
+	if a.cfg.ExecutionMode != ExecutionAgent {
+		t.Errorf("the mode is %q after being set to agent", a.cfg.ExecutionMode)
 	}
 }
 

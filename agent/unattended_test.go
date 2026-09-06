@@ -14,8 +14,14 @@ import (
 
 func TestUnattendedDefaultsToExecutionMode(t *testing.T) {
 	a := &Agent{}
-	if !a.unattended(Trigger{ExecutionMode: "autonomous"}) {
-		t.Error("an autonomous run was treated as watched")
+	// Both spellings. A trigger built in Go never passes the parser, and an
+	// application marking its unwatched work wrote the retired name straight into
+	// the field — read as unrecognised, that run would be treated as watched and
+	// handed the tools reserved for a person to approve.
+	for _, mode := range []string{ExecutionAgent, "autonomous"} {
+		if !a.unattended(Trigger{ExecutionMode: mode}) {
+			t.Errorf("a run marked %q was treated as watched", mode)
+		}
 	}
 	if a.unattended(Trigger{Type: "chat_query"}) {
 		t.Error("an ordinary run was treated as unattended")

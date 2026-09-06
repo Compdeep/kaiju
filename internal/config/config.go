@@ -165,7 +165,7 @@ type AgentConfig struct {
 	MaxReplans        int    `json:"max_replans"`
 	MaxConcurrent     int    `json:"max_concurrent"` // scheduler worker-pool size (concurrent investigations); 0 => default (3)
 	DisableCoding     bool   `json:"disable_coding"` // true = refuse deep compute (codebase building); enterprise deployments set this
-	ExecutionMode     string `json:"execution_mode"` // "interactive" (default) or "autonomous"
+	ExecutionMode     string `json:"execution_mode"` // "chat", "auto" (default) or "agent"
 	// RouteProvider/RouteModel pin the model for the cheap chat-vs-investigate
 	// routing decision (preflight). Empty ⇒ the executor lane. A small capable
 	// model here makes the run-the-agent decision reliable without making every

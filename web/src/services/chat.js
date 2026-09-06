@@ -218,7 +218,6 @@ export async function regenerate() {
     await api.post('/api/v1/execute', {
       session_id: sid,
       regenerate: true,
-      chat_mode: s.chatMode || undefined,
       mode: s.runMode,
       agg_mode: parseInt(s.aggMode),
       execution_mode: s.executionMode || undefined,
@@ -318,14 +317,12 @@ export async function send(text) {
       query: queryWithAttachments,
       session_id: sendingSid,
       intent: s.intent,
-      // The chat toggle picks the lane. ON ⇒ chat_mode ⇒ the chat lane: a direct
-      // reply from the chat model (e.g. an unrestricted tune). OFF ⇒ the agent — but we
-      // do NOT force a plan on every message. We pass the execution-mode toggle
-      // (default "interactive"), which lets preflight classify each query: chatter
-      // gets a quick conversational reply, a real task gets the planner + tools +
-      // DAG. Flip the bolt to "autonomous" to force a plan on every turn.
-      chat_mode: s.chatMode || undefined,
-      execution_mode: s.chatMode ? undefined : (s.executionMode || undefined),
+      // One setting says how the turn is handled. 'chat' answers it directly and
+      // never plans; 'auto' lets the router read the message and decide; 'agent'
+      // plans every turn. It used to be two settings, and the second was ignored
+      // whenever the first was on — which is why this line used to have to decide
+      // which of them to suppress.
+      execution_mode: s.executionMode || undefined,
     }, { signal: stopController.signal, timeoutMs: 0 })  // no auto-abort — Stop button + server 30-min wall clock only
     const msg = {
       role: 'assistant',

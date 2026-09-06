@@ -1,57 +1,108 @@
 package agent
 
-// The two ways a run decides whether to enter the graph.
+// How a turn is handled: whether it is answered directly, planned, or routed
+// between the two.
 //
-// Interactive routes first: one small model call reads the query and answers
-// chat or agent, and a chat answer short-circuits before any planning. It is the
-// default because most turns are not investigations, and planning one that did
-// not need it costs a plan.
+// One setting with three values, because it used to be two settings with four
+// combinations and only three behaviours. chat_mode picked a lane, execution
+// mode decided whether the router ran, and execution mode was not read at all on
+// the chat lane — so two of the four combinations were identical and nothing
+// said so. A third control existed to narrow the chat lane and no interface
+// sent it.
 //
-// Autonomous skips that call and always plans. It also marks the run unattended
-// (see unattended.go), which withholds every tool declaring RequiresHuman — the
-// two go together because a run nobody is watching is one nobody can be asked.
+// The three are what a caller actually wants to say, and each is reachable:
 //
-// These are strings on the wire and in config files, so they are typed nowhere
-// and mistyped anywhere. ParseExecutionMode is the one place that decides what
-// counts, and it is deliberately strict: the mode was previously read by
-// comparing against "autonomous" and nothing else, so "autonomus" was silently
-// interactive and the run that was meant to plan every turn quietly routed
-// instead — with nothing said at any point.
+//	chat   answer it, and only answer it. No planner, no tools, no escalation,
+//	       whatever the message says. Uses the chat model where one is set,
+//	       falling back to the reasoning model. This is what people assume "chat
+//	       mode" means, and what the old chat lane did NOT promise: that lane
+//	       still asked the router and could leave for the planner mid-turn.
+//
+//	auto   let the router read the message and decide — a conversational answer
+//	       where that is enough, the planner and tools where it is not.
+//
+//	agent  plan it, always, whatever the message says. Also marks the run as one
+//	       nobody is watching (see unattended.go), which withholds every tool
+//	       declaring RequiresHuman. The two go together because a run nobody is
+//	       watching is one nobody can be asked.
 const (
-	// ExecutionInteractive routes each turn before planning it.
-	ExecutionInteractive = "interactive"
-	// ExecutionAutonomous plans every turn and treats the run as unwatched.
-	ExecutionAutonomous = "autonomous"
+	// ExecutionChat answers directly and never escalates.
+	ExecutionChat = "chat"
+	// ExecutionAuto lets the router choose between answering and planning.
+	ExecutionAuto = "auto"
+	// ExecutionAgent always plans, and treats the run as unwatched.
+	ExecutionAgent = "agent"
 	// ExecutionUnset inherits: a trigger takes the configured default, and the
-	// configured default takes ExecutionInteractive.
+	// configured default takes ExecutionAuto.
 	ExecutionUnset = ""
 )
 
+// The names these values used to have, accepted so that config files and
+// clients written against them keep working.
+//
+// "interactive" is gone as a name rather than kept as a preference: it promised
+// a run that checks in with a person, and nothing about it ever did — what it
+// meant was "let the router decide", which is what auto says. "autonomous" was
+// accurate and is retired only to sit alongside the other two.
+//
+// Accepted on the way in, never produced on the way out: ParseExecutionMode
+// returns the current name for both, so nothing downstream has to know two
+// spellings and no listing offers a name we would rather nobody wrote.
+var executionAliases = map[string]string{
+	"interactive": ExecutionAuto,
+	"autonomous":  ExecutionAgent,
+}
+
 /*
- * ParseExecutionMode reports whether s names an execution mode.
+ * ParseExecutionMode reports whether s names a way of handling a turn.
  * desc: Empty is valid and means unset — a request that says nothing takes the
  *       node's configured mode, and a config that says nothing takes
- *       ExecutionInteractive. Anything else is a typo, and the caller is
- *       expected to refuse it rather than pick a mode on the writer's behalf:
- *       both choices are wrong here, because one plans work nobody asked for and
- *       the other skips work somebody did.
+ *       ExecutionAuto. A retired name is accepted and answered with the current
+ *       one, so a caller writing "autonomous" is understood and everything
+ *       downstream sees only "agent".
+ *
+ *       Anything else is a typo, and the caller is expected to refuse it rather
+ *       than pick a mode on the writer's behalf: the three choices differ in
+ *       whether tools run at all, so guessing is not a small error.
  * param: s - the value as written in a request or a config file.
- * return: the mode, and whether it was one.
+ * return: the current name for the mode, and whether it was one.
  */
 func ParseExecutionMode(s string) (string, bool) {
 	switch s {
-	case ExecutionUnset, ExecutionInteractive, ExecutionAutonomous:
+	case ExecutionUnset, ExecutionChat, ExecutionAuto, ExecutionAgent:
 		return s, true
-	default:
-		return "", false
 	}
+	if current, ok := executionAliases[s]; ok {
+		return current, true
+	}
+	return "", false
+}
+
+/*
+ * executionOf reports the mode a trigger is asking for, by its current name.
+ * desc: A trigger reaching the engine from an application is built in Go and
+ *       never passes the parser, so it can carry a retired name — and one does:
+ *       an application marking its unwatched work wrote "autonomous" into the
+ *       field directly. Comparing that against the current name alone would
+ *       answer "not agent", and the run would be treated as watched, which is
+ *       the answer that hands it the tools reserved for a person to approve.
+ *
+ *       So the comparison goes through the same understanding the doors use.
+ *       An unrecognised value answers empty, which reads as unset — the
+ *       cautious end of every question asked of it.
+ * param: t - the trigger.
+ * return: the current name for its mode, or empty.
+ */
+func executionOf(t Trigger) string {
+	mode, _ := ParseExecutionMode(t.ExecutionMode)
+	return mode
 }
 
 // ExecutionModes lists the accepted values, for an error message or a
-// capability listing. The unset value is not among them: it is the absence of a
-// choice rather than one of the choices.
+// capability listing. Retired names are absent: they are understood, not
+// offered. The unset value is absent too — it is the absence of a choice.
 func ExecutionModes() []string {
-	return []string{ExecutionInteractive, ExecutionAutonomous}
+	return []string{ExecutionChat, ExecutionAuto, ExecutionAgent}
 }
 
 // The reasoning lane's thinking switch.

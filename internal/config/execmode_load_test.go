@@ -31,22 +31,33 @@ func TestAMistypedExecutionModeIsRefusedAtLoad(t *testing.T) {
 	if err == nil {
 		t.Fatal("a mistyped execution_mode loaded")
 	}
-	for _, want := range []string{"autonomus", "execution_mode", "autonomous", "interactive"} {
+	for _, want := range []string{"autonomus", "execution_mode", "chat", "auto", "agent"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not mention %q: %v", want, err)
 		}
 	}
 }
 
-// Both real values load, and survive resolve() unchanged.
+// All three load and survive resolve() unchanged.
 func TestTheRealExecutionModesLoad(t *testing.T) {
-	for _, mode := range []string{"interactive", "autonomous"} {
+	for _, mode := range []string{"chat", "auto", "agent"} {
 		c, err := loadWithExecMode(t, mode)
 		if err != nil {
 			t.Fatalf("%q did not load: %v", mode, err)
 		}
 		if c.Agent.ExecutionMode != mode {
 			t.Errorf("loaded %q as %q", mode, c.Agent.ExecutionMode)
+		}
+	}
+}
+
+// A file written against the retired names still loads. Refusing them would
+// stop every existing deployment on the version that renamed them, for a
+// spelling change.
+func TestAFileWithARetiredNameStillLoads(t *testing.T) {
+	for _, mode := range []string{"interactive", "autonomous"} {
+		if _, err := loadWithExecMode(t, mode); err != nil {
+			t.Errorf("a config naming %q no longer loads: %v", mode, err)
 		}
 	}
 }
@@ -62,7 +73,7 @@ func TestAFileThatSaysNothingTakesAValidDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an empty config did not load: %v", err)
 	}
-	if c.Agent.ExecutionMode != "interactive" {
-		t.Errorf("default execution mode is %q, want interactive", c.Agent.ExecutionMode)
+	if c.Agent.ExecutionMode != "auto" {
+		t.Errorf("default execution mode is %q, want auto", c.Agent.ExecutionMode)
 	}
 }

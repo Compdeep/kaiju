@@ -36,7 +36,7 @@ func (a *Agent) RunAgentTask(ctx context.Context, base Trigger, task string) (ou
 	trigger.ID = fmt.Sprintf("agent-%d", time.Now().UnixNano())
 	trigger.Data = data
 	trigger.Source = "agent"
-	trigger.ExecutionMode = "autonomous" // always investigate; never chat-escape a delegated task
+	trigger.ExecutionMode = ExecutionAgent // always plan; never chat-escape a delegated task
 	res, rerr := a.RunDAGSync(ctx, trigger)
 	if rerr != nil {
 		// A conversational fallback (trivial task) isn't a failure — return its text.

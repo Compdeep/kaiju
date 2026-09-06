@@ -1,6 +1,9 @@
 package config
 
-import "github.com/Compdeep/kaiju/ui"
+import (
+	"github.com/Compdeep/kaiju/agent"
+	"github.com/Compdeep/kaiju/ui"
+)
 
 /*
  * Default returns a Config with sensible defaults.
@@ -65,7 +68,7 @@ func Default() *Config {
 			MaxInvestigations: 5,
 			MaxReplans:        3,
 			MaxConcurrent:     3,
-			ExecutionMode:     "interactive",
+			ExecutionMode:     agent.ExecutionAuto,
 			// Default the routing decision to a small, NON-reasoning tool-caller so
 			// "does this need the agent?" is reliable within the router's 16-token
 			// budget. gpt-4.1-mini benched 100% route-acc / 100% budget-fit / ~700ms

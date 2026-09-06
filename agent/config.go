@@ -215,7 +215,7 @@ type DAGConfig struct {
 	MaxReplans     int
 	MaxHolmesIters int // max ReAct iterations per Holmes investigation (default: 5)
 
-	// "interactive" (chat allowed) or "autonomous" (always investigate).
+	// "chat" (never plans), "auto" (the router decides) or "agent" (always plans).
 	// Set at run time: SetExecutionMode.
 	ExecutionMode string
 	DAGWallClock  time.Duration

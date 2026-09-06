@@ -40,13 +40,24 @@ func TestCapabilitiesAnswersOnAnUnconfiguredNode(t *testing.T) {
 func TestEveryPublishedValueIsAccepted(t *testing.T) {
 	parsers := map[string]func(string) (string, bool){
 		"agent.execution_mode": agent.ParseExecutionMode,
+		"agent.dag_mode":       agent.ParseDAGMode,
 		"llm.reasoning":        agent.ParseReasoning,
+		"execution_mode":       agent.ParseExecutionMode,
+		"mode":                 agent.ParseDAGMode,
 	}
 	for _, s := range capabilities(t).Settings {
 		parse, ok := parsers[s.Key]
 		if !ok {
-			t.Errorf("setting %q is published with no parser to check it against; "+
-				"either it is free-form and should list no values, or this test needs it", s.Key)
+			// A setting with no enumerable values is free-form — a model id, an
+			// endpoint, a boolean whose type already says what it takes — and
+			// there is nothing for a parser to check. Publishing values without
+			// one is the fault this is looking for: a hand-written list beside
+			// the code that enforces it, which is what the endpoint exists to
+			// stop being the only source.
+			if len(s.Values) > 0 {
+				t.Errorf("setting %q publishes values with no parser to check them "+
+					"against, so the list can drift from what is accepted", s.Key)
+			}
 			continue
 		}
 		if len(s.Values) == 0 {

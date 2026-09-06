@@ -103,7 +103,7 @@ func TestEveryRunExitRecords(t *testing.T) {
 func TestAdmissionIsAskedBeforeTheModeIsChosen(t *testing.T) {
 	body := funcBody(t, readSource(t, "scheduler.go"), "RunDAGSync")
 	admit := strings.Index(body, "a.admit(trigger)")
-	branch := strings.Index(body, `trigger.DAGMode == "react"`)
+	branch := strings.Index(body, "trigger.DAGMode == DAGModeReAct")
 	if admit < 0 || branch < 0 {
 		t.Fatalf("cannot find both the check (%d) and the branch (%d)", admit, branch)
 	}

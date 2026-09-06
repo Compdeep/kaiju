@@ -2353,7 +2353,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	}
 
 	// Route to ReAct loop if mode=react
-	if trigger.DAGMode == "react" {
+	if trigger.DAGMode == DAGModeReAct {
 		return a.RunReActSync(ctx, trigger)
 	}
 

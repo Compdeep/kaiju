@@ -181,6 +181,11 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		// does neither, because the file then disagrees with the behaviour and
 		// the file is what an operator reads.
 		if patch.Agent.DAGMode != nil {
+			if _, ok := agent.ParseDAGMode(*patch.Agent.DAGMode); !ok {
+				jsonError(w, fmt.Sprintf("agent.dag_mode %q is not one of %v",
+					*patch.Agent.DAGMode, agent.DAGModes()), http.StatusBadRequest)
+				return
+			}
 			c.cfg.Agent.DAGMode = *patch.Agent.DAGMode
 			c.agent.SetDAGMode(c.cfg.Agent.DAGMode)
 		}

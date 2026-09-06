@@ -333,7 +333,16 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Mode != "" {
-		trigger.DAGMode = req.Mode
+		// Unchecked, an unrecognised mode fails every comparison in turn and the
+		// run takes whichever branch is written last — a shape nobody asked for,
+		// chosen by the order of the code.
+		mode, ok := agent.ParseDAGMode(req.Mode)
+		if !ok {
+			jsonError(w, fmt.Sprintf("mode %q is not one of %v",
+				req.Mode, agent.DAGModes()), http.StatusBadRequest)
+			return
+		}
+		trigger.DAGMode = mode
 	}
 	if req.ExecutionMode != "" {
 		// Refused rather than corrected. Both corrections are wrong: reading an

@@ -363,6 +363,10 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.resolve()
 	cfg.path = path
+	if _, ok := agent.ParseDAGMode(cfg.Agent.DAGMode); !ok {
+		return nil, fmt.Errorf("config: %s: agent.dag_mode is %q, not one of %v",
+			path, cfg.Agent.DAGMode, agent.DAGModes())
+	}
 	if _, ok := agent.ParseExecutionMode(cfg.Agent.ExecutionMode); !ok {
 		// Refused at load rather than corrected at use. Read at use, an unknown
 		// value compares unequal to "autonomous" and the node runs interactive

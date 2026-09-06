@@ -22,10 +22,26 @@ import (
 // "on" and "off" while the parser also takes "enabled", because it asks the
 // parser.
 
-// Setting is one config key a caller may write, and what it takes.
+// Where a setting is accepted.
+const (
+	whereConfig  = "config"
+	whereRequest = "request"
+)
+
+// Setting is one thing a caller may set, and what it takes.
 type Setting struct {
-	// Key is the dotted path into the config document, as PATCH expects it.
+	// Key is the name as the caller writes it: a dotted path into the config
+	// document for a saved setting, or a field name for a request one.
 	Key string `json:"key"`
+	// Where says which surface accepts it — "config" for PATCH /api/v1/config,
+	// "request" for a field on POST /api/v1/execute.
+	//
+	// Both are listed because a caller has to configure both, and only one of
+	// them is readable anywhere else: the config document can be fetched and its
+	// current values inspected, while a request field appears nowhere until it
+	// is sent. Publishing the saved settings alone described half the surface
+	// and left the more discoverable half as the documented one.
+	Where string `json:"where"`
 	// Values are the accepted values. Empty means the setting is free-form —
 	// a model id, an endpoint — and this listing does not enumerate it.
 	Values []string `json:"values,omitempty"`
@@ -68,16 +84,49 @@ func (c *API) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 		Settings: []Setting{
 			{
 				Key:        "agent.execution_mode",
+				Where:      whereConfig,
 				Values:     agent.ExecutionModes(),
 				EmptyMeans: "interactive",
 				Applies:    "every turn this node runs, unless the request overrides it",
 			},
 			{
 				Key:        "llm.reasoning",
+				Where:      whereConfig,
 				Values:     agent.ReasoningModes(),
 				EmptyMeans: "whatever the chosen model does unasked",
 				Applies: "the reasoning lane only — the router and the executor send " +
 					"reasoning off whatever is configured, and answer and chat take the model's default",
+			},
+			{
+				Key:        "agent.dag_mode",
+				Where:      whereConfig,
+				Values:     agent.DAGModes(),
+				EmptyMeans: "orchestrator",
+				Applies:    "the shape of the graph a run builds",
+			},
+			{
+				Key:        "execution_mode",
+				Where:      whereRequest,
+				Values:     agent.ExecutionModes(),
+				EmptyMeans: "whatever agent.execution_mode is set to",
+				Applies:    "this one turn, overriding the node's setting",
+			},
+			{
+				Key:        "mode",
+				Where:      whereRequest,
+				Values:     agent.DAGModes(),
+				EmptyMeans: "whatever agent.dag_mode is set to",
+				Applies:    "this one turn, overriding the node's setting",
+			},
+			{
+				Key:   "chat_mode",
+				Where: whereRequest,
+				// No values: it is a boolean, and the JSON type says so. What a
+				// caller cannot guess is which way the default falls, and that
+				// is below.
+				EmptyMeans: "false — the turn goes to the agent, not the chat lane",
+				Applies: "this one turn: true answers it directly with no planner and no " +
+					"tools, and the node's execution mode does not apply to it",
 			},
 		},
 		PluginsCompiled:       plugins.Compiled(),

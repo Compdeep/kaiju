@@ -35,7 +35,49 @@ const (
 	DAGModeReflect      = "reflect"
 	DAGModeNReflect     = "nReflect"
 	DAGModeOrchestrator = "orchestrator"
+	// DAGModeReAct leaves the graph entirely: the run goes to the ReAct loop
+	// instead (see RunReActSync). For testing only, and deliberately NOT
+	// reachable from outside: ParseDAGMode refuses it, so it is absent from the
+	// request field, from the config file and from the capability listing. A
+	// Trigger built in Go can still carry it, which is how the tests reach it.
+	//
+	// Named here rather than left as a bare literal at the one place that reads
+	// it, so that "which modes are there" has an answer in one file.
+	DAGModeReAct = "react"
+	// DAGModeUnset inherits: a request takes the node's configured mode, and the
+	// configured default is orchestrator.
+	DAGModeUnset = ""
 )
+
+/*
+ * ParseDAGMode reports whether s names a graph shape a caller may ask for.
+ * desc: Empty is valid and means unset. Anything else is refused rather than
+ *       corrected, for the reason ParseExecutionMode gives — and with a sharper
+ *       edge here, because an unrecognised mode does not fall back to a named
+ *       default: it fails every comparison in turn and the run takes whichever
+ *       branch is written last.
+ *
+ *       DAGModeReAct is refused with everything else. It exists for testing and
+ *       is not offered, so the one door it can come through is a Trigger built
+ *       in Go by a test.
+ * param: s - the value as written in a request or a config file.
+ * return: the mode, and whether it was one.
+ */
+func ParseDAGMode(s string) (string, bool) {
+	switch s {
+	case DAGModeUnset, DAGModeReflect, DAGModeNReflect, DAGModeOrchestrator:
+		return s, true
+	default:
+		return "", false
+	}
+}
+
+// DAGModes lists the shapes a caller may ask for, for an error message or a
+// capability listing. Two absences are deliberate: the unset value, which is the
+// absence of a choice, and DAGModeReAct, which is for testing.
+func DAGModes() []string {
+	return []string{DAGModeReflect, DAGModeNReflect, DAGModeOrchestrator}
+}
 
 /*
  * NodeType classifies what a DAG node does.

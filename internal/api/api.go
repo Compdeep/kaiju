@@ -336,7 +336,16 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		trigger.DAGMode = req.Mode
 	}
 	if req.ExecutionMode != "" {
-		trigger.ExecutionMode = req.ExecutionMode
+		// Refused rather than corrected. Both corrections are wrong: reading an
+		// unknown value as interactive skips planning the caller asked for, and
+		// reading it as autonomous plans work nobody requested.
+		mode, ok := agent.ParseExecutionMode(req.ExecutionMode)
+		if !ok {
+			jsonError(w, fmt.Sprintf("execution_mode %q is not one of %v",
+				req.ExecutionMode, agent.ExecutionModes()), http.StatusBadRequest)
+			return
+		}
+		trigger.ExecutionMode = mode
 	}
 	if req.AggMode != nil {
 		trigger.AggMode = *req.AggMode

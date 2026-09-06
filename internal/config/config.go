@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/ui"
 )
 
@@ -105,7 +106,12 @@ type LLMConfig struct {
 	// Empty is the default because a model's own default is a considered choice
 	// by the people who trained it, and because it keeps every existing config
 	// file behaving exactly as it did.
-	Reasoning string `json:"reasoning,omitempty"`
+	//
+	// Always present in a GET, never omitempty: a caller reading this config to
+	// discover what the build supports cannot tell a key that is absent because
+	// the feature does not exist from one absent because it is at its default.
+	// Empty IS the default, and saying so is the point.
+	Reasoning string `json:"reasoning"`
 }
 
 /*
@@ -357,6 +363,14 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.resolve()
 	cfg.path = path
+	if _, ok := agent.ParseExecutionMode(cfg.Agent.ExecutionMode); !ok {
+		// Refused at load rather than corrected at use. Read at use, an unknown
+		// value compares unequal to "autonomous" and the node runs interactive
+		// forever — which is a working daemon doing the opposite of what the
+		// file asks, and nothing anywhere says so.
+		return nil, fmt.Errorf("config: %s: agent.execution_mode is %q, not one of %v",
+			path, cfg.Agent.ExecutionMode, agent.ExecutionModes())
+	}
 	return cfg, nil
 }
 

@@ -57,11 +57,6 @@
                           @click="setReasoning('')">default</button>
                 </div>
               </div>
-              <div v-if="reasoningModelThinks" class="model-warn">
-                This model reasons before it answers. It plans well and it is
-                <b>significantly slower</b> — up to twice as long per run.
-                The call and run deadlines are doubled to allow for it.
-              </div>
               <div class="form-row">
                 <div class="form-group">
                   <label>provider</label>
@@ -347,19 +342,11 @@ const reasoningModels = computed(() => {
  * @returns {Array<Object>} Models available for the selected executor provider
  */
 // Whether the model chosen for the reasoning lane reasons before it answers.
-// Read from the catalog the picker is already filled from, so it cannot drift
-// from what the engine decides.
+// The catalog entry for the model chosen on the reasoning lane, read from the
+// same list the picker is filled from so it cannot drift from what the engine
+// decides.
 const reasoningModelInfo = computed(() =>
   allModels.value.find(x => x.id === cfg.value.llm.model) || null)
-
-// Whether reasoning is on for THIS lane as configured — the model's default
-// unless llm.reasoning overrides it. The warning below reads this rather than
-// the catalog, so it describes the run that will actually happen.
-const reasoningModelThinks = computed(() => {
-  if (cfg.value.llm.reasoning === 'on') return true
-  if (cfg.value.llm.reasoning === 'off') return false
-  return !!(reasoningModelInfo.value && reasoningModelInfo.value.thinking)
-})
 
 // The switch is offered only where there is something to switch: a model whose
 // reasoning is mandatory has no choice, and one with no reasoning phase has
@@ -614,15 +601,6 @@ onMounted(async () => {
   color: var(--text); margin-bottom: 2px;
 }
 .model-desc { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; }
-/* The tradeoff, next to the selector that makes it. A thinking model suits this
-   lane and costs time; the engine doubles both clocks for it, and this is what
-   the reader still has to be told. */
-.model-warn {
-  font-size: 11px; line-height: 1.45; margin: -4px 0 10px;
-  padding: 6px 9px; border-left: 2px solid #c08a3e; border-radius: 2px;
-  background: rgba(192, 138, 62, 0.1); color: var(--text);
-}
-.model-warn b { font-weight: 600; }
 /* The reasoning switch, above the warning it changes. Sits with the selector it
    qualifies rather than in the advanced list, because the model and whether it
    thinks are one decision made twice. */

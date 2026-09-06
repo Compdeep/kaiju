@@ -32,6 +32,7 @@ var embeddedPrompts string
 var (
 	Soul           string
 	Route          string
+	Recall         string
 	Preflight      string
 	Executive      string
 	ReframePlan    string
@@ -57,6 +58,7 @@ var (
 var sectionOrder = []string{
 	"SOUL",
 	"ROUTE",
+	"RECALL",
 	"PREFLIGHT",
 	"EXECUTIVE",
 	"AGGREGATOR",
@@ -81,6 +83,7 @@ var sectionOrder = []string{
 var targets = map[string]*string{
 	"SOUL":            &Soul,
 	"ROUTE":           &Route,
+	"RECALL":          &Recall,
 	"PREFLIGHT":       &Preflight,
 	"EXECUTIVE":       &Executive,
 	"AGGREGATOR":      &Aggregator,

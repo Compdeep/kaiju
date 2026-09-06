@@ -74,13 +74,15 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// auto mode, which is the one that asks the router. Chat is now the answer to
 	// "keep this a conversation", and the only answer needed.
 	//
-	// The router is still asked, and only half its answer is read. It returns two
-	// things: whether the turn needs the agent, and what the answer refers to but
-	// cannot see. The first is not consulted here — that is the whole of what
-	// this mode means — and the second is the only source of recall terms, so
-	// dropping the call would quietly remove the ability to answer "what did we
-	// say about X earlier" in the one lane where there are no tools to ask with.
-	_, lacking := a.routeQuery(ctx, t.TriggerID, t.Query, t.History)
+	// One question, asked with this lane's own prompt: what does answering need
+	// from earlier in this conversation? Nothing is classified here — the mode
+	// already said this turn is a conversation — and the reply carries no mode
+	// to ask about, which is what stops the words spending the budget the
+	// decision used to need.
+	//
+	// This is the only way to reach back on this lane: there are no tools here,
+	// so "what did we say about X earlier" is answerable only by looking.
+	lacking := a.recallTerms(ctx, t.TriggerID, t.Query, t.History)
 	t.Recalled, t.RecallTerms = a.recall(ctx, t, lacking), lacking
 	return a.Converse(ctx, t)
 }

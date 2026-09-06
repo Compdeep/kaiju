@@ -53,18 +53,23 @@ type frozenPrompt struct {
 // and logging walk, and a section added in the middle is a different file from
 // one added at the end.
 var frozenPromptOrder = []string{
-	"SOUL", "ROUTE", "PREFLIGHT", "EXECUTIVE", "AGGREGATOR",
+	"SOUL", "ROUTE", "RECALL", "PREFLIGHT", "EXECUTIVE", "AGGREGATOR",
 	"REFRAME_PLAN", "REFRAME_REFLECT", "REFRAME_ANSWER", "REFRAME_HOOK", "HOLMES", "MICROPLANNER", "OBSERVER", "GROUPREVIEW", "REFLECTOR",
 	"INTERJECTION", "CLASSIFIER", "CURATOR", "CHAT", "VISION", "REACT",
 }
 
 var frozenPrompts = map[string]frozenPrompt{
-	"SOUL":            {"03802a1782d4ffb3", 6524},
-	"ROUTE":           {"4e8fabcf0237bdb3", 2280},
+	"SOUL": {"03802a1782d4ffb3", 6524},
+	// The auto lane's, and only its own now: the chat lane asks a different
+	// question with a different prompt, so this one says which lane it is for.
+	"ROUTE": {"4e8fabcf0237bdb3", 2280},
+	// The chat lane's. Split out of ROUTE because the two lanes ask different
+	// things, and asking both in one reply let the words starve the decision.
+	"RECALL":          {"0f18f8f6a32b1fe9", 897},
 	"PREFLIGHT":       {"a2b9b41e91f4a918", 6354},
 	"EXECUTIVE":       {"b0f4adb72d8df1be", 8265},
 	"AGGREGATOR":      {"a782c5558ef001d0", 3631},
-	"REFRAME_PLAN":    {"99ef89fec31ed3aa", 3450},
+	"REFRAME_PLAN":    {"f683d50f3645b047", 3763},
 	"REFRAME_REFLECT": {"9135887028deee2a", 3434},
 	"REFRAME_ANSWER":  {"6fa65607e7574724", 2074},
 	"REFRAME_HOOK":    {"fb587325040e5c47", 585},
@@ -85,7 +90,7 @@ var frozenPrompts = map[string]frozenPrompt{
 // after the package's init has filled them from the embedded prompts.md.
 func liveSections() map[string]string {
 	return map[string]string{
-		"SOUL": prompt.Soul, "ROUTE": prompt.Route, "PREFLIGHT": prompt.Preflight,
+		"SOUL": prompt.Soul, "ROUTE": prompt.Route, "RECALL": prompt.Recall, "PREFLIGHT": prompt.Preflight,
 		"EXECUTIVE": prompt.Executive, "AGGREGATOR": prompt.Aggregator,
 		"REFRAME_PLAN": prompt.ReframePlan, "REFRAME_REFLECT": prompt.ReframeReflect,
 		"REFRAME_ANSWER": prompt.ReframeAnswer, "REFRAME_HOOK": prompt.ReframeHook,

@@ -378,10 +378,16 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			pf = &PreflightResult{Mode: "chat"}
 		default:
 			// Auto: route first; a chat answer short-circuits before plan-prep.
-			mode, _ := a.routeQuery(ctx, trigger.ID, query, trigger.History)
+			//
+			// Both halves of the reply are kept. The words the router names are
+			// what this turn refers to and cannot see, and they were being
+			// discarded here — so the same question answered conversationally
+			// got the earlier conversation looked up in the chat mode and not in
+			// this one. Same question, answered worse, depending on a setting.
+			mode, lacking := a.routeQuery(ctx, trigger.ID, query, trigger.History)
 			switch mode {
 			case "chat":
-				pf = &PreflightResult{Mode: "chat"}
+				pf = &PreflightResult{Mode: "chat", LackingContext: lacking}
 			default: // "agent"
 				pf = a.classifyInvestigate(ctx, trigger.ID, query, trigger.History)
 			}
@@ -2436,6 +2442,25 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 				}
 				chatPrompt += "\n\nThis turn is a quick conversational reply — no tools were invoked because the request was classified as chat. If the user is actually asking for an action (run X, fetch Y, build Z, fix this, find that, compute, search, edit a file, restart a service, anything imperative), do NOT refuse on the basis that you can't execute tools. The full toolchain (compute, file_*, bash, web_*, service, edit_file, etc.) IS available — the next turn will route through it. Acknowledge what they're asking for, restate it as an actionable request, and tell them to confirm so the next turn can run it. Never say 'I cannot execute code' or 'I have no tools' — that is false in this system."
 				chatPrompt += "\n\n## Output format\n" + a.FormatRule()
+
+				// What this turn refers to and cannot see, looked up in the
+				// earlier conversation and put in front of the model.
+				//
+				// The words come from the router, which named them in the same
+				// reply that chose this lane. They were being dropped here, so a
+				// turn answered conversationally on this path had no way to reach
+				// anything older than the window — while the same turn in the
+				// chat mode did. There are no tools on this path either: the run
+				// short-circuits before the planner, so looking is the only way
+				// back.
+				if graph != nil && graph.Preflight != nil {
+					if terms := graph.Preflight.LackingContext; len(terms) > 0 {
+						found := a.recall(answerCtx, ChatTurn{SessionID: trigger.SessionID, History: trigger.History}, terms)
+						if block := recallBlock(found, terms); block != "" {
+							chatPrompt += "\n\n" + block
+						}
+					}
+				}
 
 				// The answer, as a node. Same call as before; it now has a place
 				// on the graph, which is what gives an interjection somewhere to

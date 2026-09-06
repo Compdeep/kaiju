@@ -31,19 +31,23 @@ func TestTheChatLaneCannotReachThePlanner(t *testing.T) {
 	}
 }
 
-// The router is still asked, and only for what it names. It returns two things:
-// whether the turn needs the agent, and what the answer refers to but cannot
-// see. The second is the only source of recall terms, and dropping the call
-// would quietly remove the ability to answer "what did we say about X earlier"
-// in the one mode with no tools to ask with.
-func TestTheChatLaneReadsOnlyWhatTheRouterNames(t *testing.T) {
+// The chat lane asks its own question with its own prompt and its own tool.
+//
+// It used to borrow the router's, which decides chat-or-agent, and throw half
+// the answer away — asking a model to decide something already decided, and
+// putting that decision in the same small reply as the words. The words could
+// then spend the budget before the decision was written, and an unparseable
+// reply routes to chat: a decision this lane had already made, arrived at by
+// failure. With no mode in the reply there is nothing left to starve.
+func TestTheChatLaneAsksOnlyWhatItNeeds(t *testing.T) {
 	body := funcBody(t, readSource(t, "chat.go"), "Chat")
-	if !strings.Contains(body, "a.routeQuery(") {
-		t.Fatal("the router is not asked at all, so recall terms have no source")
+	if strings.Contains(body, "a.routeQuery(") {
+		t.Error("the chat lane is calling the router again, which asks it to decide " +
+			"a mode this lane has already been told")
 	}
-	if !strings.Contains(body, "_, lacking := a.routeQuery(") {
-		t.Error("the router's verdict is being read again; in this mode it has " +
-			"already been answered by the mode itself")
+	if !strings.Contains(body, "a.recallTerms(") {
+		t.Fatal("the chat lane no longer asks what to look up, so it cannot reach " +
+			"anything older than the window and has no tools to ask with")
 	}
 }
 

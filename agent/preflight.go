@@ -229,6 +229,8 @@ func asksToTakePrivilege(query string) bool {
  * never loads the skills it won't use. Fails safe to "chat" (the cheap lane) on
  * any classifier error.
  */
+// Only reached when nothing has decided yet. A turn set to answer uses
+// recallTerms and its own prompt; a turn set to plan asks nothing at all.
 func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history []llm.Message) (string, []string) {
 	if a.classifyStub != nil {
 		pf := a.classifyStub(query, history)
@@ -268,7 +270,7 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 		// Room for the mode and a handful of words to look up. It was 16, which
 		// fits the mode alone: a reply carrying anything else would be cut part
 		// way through and fail to parse, taking the routing decision with it.
-		MaxTokens: 96,
+		MaxTokens: routeReplyBudget,
 	})
 	// On ANY classifier failure — the model errored, refused, or returned
 	// unparseable output — fall back to "chat", which the ROUTE prompt itself calls
@@ -302,6 +304,69 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 		return "chat", lacking
 	}
 }
+
+/*
+ * recallTerms asks what this turn needs from earlier in the conversation.
+ * desc: The chat lane's own call. It used to borrow routeQuery and discard half
+ *       the answer, which asked a model to decide something already decided and
+ *       put that decision in the same small reply as the words — where the words
+ *       could and did spend the whole budget before the decision was written.
+ *
+ *       Its own prompt and its own tool, so the reply carries one thing. On any
+ *       failure the answer is no terms: the turn is answered from what is in
+ *       front of it, which is what happens on most turns anyway.
+ * param: ctx, triggerID, query, history - as routeQuery.
+ * return: the words to look up, or nothing.
+ */
+func (a *Agent) recallTerms(ctx context.Context, triggerID, query string, history []llm.Message) []string {
+	if a.classifyStub != nil {
+		return a.classifyStub(query, history).LackingContext
+	}
+	msgs := []llm.Message{{Role: "system", Content: prompt.Recall}}
+	msgs = append(msgs, routeContext(history)...)
+	msgs = append(msgs, llm.Message{Role: "user", Content: query})
+	ctx = withTrace(ctx, TraceID{NodeType: "preflight", Tag: "recall"})
+	resp, err := a.completeRoute(ctx, &llm.ChatRequest{
+		Messages:    msgs,
+		Tools:       []llm.ToolDef{recallSchema()},
+		ToolChoice:  "required",
+		Temperature: 0.0,
+		MaxTokens:   routeReplyBudget,
+	})
+	if err != nil {
+		return nil
+	}
+	raw, err := extractToolArgs(resp)
+	if err != nil {
+		traceFault(ctx, "no tool args returned")
+		return nil
+	}
+	var out struct {
+		Lacking []string `json:"lacking_context"`
+	}
+	if err := ParseLLMJSON(raw, &out); err != nil {
+		traceFault(ctx, "parse failed: "+err.Error())
+		return nil
+	}
+	return cleanTerms(out.Lacking)
+}
+
+// routeReplyBudget is what a router reply must fit in.
+//
+// Named because the schemas are sized against it: the bound on lacking_context
+// is only correct relative to this number, and changing one without the other
+// reopens the truncation both exist to prevent.
+//
+// It was 16, which fits a mode and nothing else. Then 96, which a reply listing
+// fifteen phrases ran out of part way through the fifteenth — taking the mode
+// with it, because the mode had not been written yet.
+//
+// 128 is margin, not the fix. Raising it alone buys a few more items from a
+// model with no reason to stop: the same reply would have been cut in the same
+// paragraph, four items later. What stops it is the bound in the schemas. This
+// is here so a provider that pretty-prints its JSON, or spells the enum in
+// full, is not the difference between an answer and a truncation.
+const routeReplyBudget = 128
 
 // actionVerbs are the words a person uses to ask for something to be DONE.
 //

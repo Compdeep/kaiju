@@ -361,8 +361,21 @@ func preflightSchema() llm.ToolDef {
 	}
 }
 
-// routeSchema is the minimal tool for the cheap first-pass router: mode only,
-// no skills/intent/categories — those are decided only on the agentic path.
+// routeSchema is the auto lane's tool: the decision, and the words to look up.
+// No skills, intent or categories — those are decided only on the agentic path.
+//
+// lacking_context is bounded, and that is not tidiness. The request is rewritten
+// into a closed schema before it is sent (llm.closedSchema), which requires
+// every property and orders them as Go sorts map keys — so on most providers
+// this array is both compelled and generated BEFORE mode, the field the call
+// exists to produce. Unbounded, it can spend the whole reply budget: measured
+// against the prompt that failed, three replies of five were cut mid-array with
+// the mode never written, and an unparseable reply is answered by routing to
+// chat. Bounded, five of five answered.
+//
+// Four short items is more than this has ever needed — it names a word to look
+// up, not a summary of the conversation — and leaves the budget for the
+// decision.
 func routeSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
@@ -375,11 +388,47 @@ func routeSchema() llm.ToolDef {
 					"mode": { "type": "string", "enum": ["chat", "agent"] },
 					"lacking_context": {
 						"type": "array",
-						"items": { "type": "string" },
-						"description": "Words to look up in earlier messages, when answering needs something said earlier that is not in the summary or the messages shown. Use the words the conversation itself would have used — they are matched against the earlier text as written. Leave empty when what is shown is enough."
+						"items": { "type": "string", "maxLength": 40 },
+						"maxItems": 4,
+						"description": "Up to four short words or phrases to look up in earlier messages, when answering needs something said earlier that is not in the summary or the messages shown. Use the words the conversation itself would have used — they are matched against the earlier text as written. Leave empty when what is shown is enough."
 					}
 				},
 				"required": ["mode"]
+			}`),
+		},
+	}
+}
+
+// recallSchema is the chat lane's tool: the words to look up, and nothing else.
+//
+// Separate from routeSchema rather than shared with it, because the two lanes
+// ask different questions. The chat lane's mode is already decided, and asking
+// for it again is not merely wasteful — the request is rewritten into a closed
+// schema before it is sent (llm.closedSchema), which makes every property
+// required and orders them as Go sorts map keys. So a mode nobody wanted was
+// compelled, and the words were generated before it, inside one small budget.
+// One turn spent that whole budget listing words, was cut off mid-value, and
+// the reply would not parse — which is answered by routing to chat, a decision
+// this lane had already made.
+//
+// With no mode in the reply there is nothing for the words to starve.
+func recallSchema() llm.ToolDef {
+	return llm.ToolDef{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name:        "recall",
+			Description: "Name what this turn needs from earlier in the conversation.",
+			Parameters: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"lacking_context": {
+						"type": "array",
+						"items": { "type": "string", "maxLength": 40 },
+						"maxItems": 4,
+						"description": "Up to four short words or phrases to look up in the earlier messages of this conversation. They are matched against the earlier text as written, one at a time. Empty when what is shown is enough, which is most of the time."
+					}
+				},
+				"required": ["lacking_context"]
 			}`),
 		},
 	}

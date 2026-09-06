@@ -1187,6 +1187,7 @@ var planRecoveries = []struct {
 	try  func(raw string, payload *executiveCallPayload) (bool, error)
 }{
 	{"the plan payload from a code fence", recoverFencedPlan},
+	{"plan steps sent without their envelope", recoverBareStepsArray},
 	{"plan steps from a double-encoded string", recoverStringEncodedSteps},
 	{"plan steps from a reply cut at the token cap", recoverTruncatedPlan},
 }
@@ -1247,6 +1248,44 @@ func recoverFencedPlan(raw string, payload *executiveCallPayload) (bool, error) 
 		return false, nil
 	}
 	log.Printf("[dag] executive: plan arrived wrapped in a code fence; unwrapped %d step(s)", len(payload.Steps))
+	return true, nil
+}
+
+/*
+ * recoverBareStepsArray reads a reply that is the steps and nothing else.
+ * desc: The same provider fault as the fence, one step further: instead of
+ *       wrapping the object it drops the object, and the reply opens with `[`.
+ *       The steps inside are whole and correctly wired — one arrived that way
+ *       during the fence measurements, chaining ${step.tag...} references
+ *       properly — so the only thing missing is the envelope.
+ *
+ *       Both envelope fields survive being absent, which is why this is a
+ *       recovery and not a guess. answer is read only where there are no steps
+ *       (see the ExecutiveConversationalError paths), and an intent of zero is
+ *       an established route rather than a hole: validatePlanSteps derives one
+ *       from the impacts of the tools actually planned, and preflight is a floor
+ *       under it either way. Nothing is invented here — a field the model did
+ *       not send stays unset and the code that reads it already knows how.
+ *
+ *       Runs after the fence rung because the one reply seen was both: fenced
+ *       AND bare. Unwrapping leaves the array, and this is what reads it.
+ * return: whether the plan was recovered; no error, this rung never stops the ladder.
+ */
+func recoverBareStepsArray(raw string, payload *executiveCallPayload) (bool, error) {
+	source := strings.TrimSpace(raw)
+	if strings.HasPrefix(source, "```") {
+		source = strings.TrimSpace(CleanLLMJSON(raw))
+	}
+	if !strings.HasPrefix(source, "[") {
+		return false, nil
+	}
+	var steps []PlanStep
+	if err := json.Unmarshal([]byte(source), &steps); err != nil || len(steps) == 0 {
+		return false, nil
+	}
+	payload.Steps = steps
+	linkDependsOnTags(json.RawMessage(source), payload.Steps)
+	log.Printf("[dag] executive: plan arrived as a bare steps array; adopted %d step(s)", len(payload.Steps))
 	return true, nil
 }
 

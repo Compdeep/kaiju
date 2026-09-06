@@ -1144,6 +1144,32 @@ func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
 	_ = json.Unmarshal([]byte(raw), &arrived)
 
 	if err := json.Unmarshal([]byte(raw), payload); err != nil {
+		// A fence, before anything else. A provider that ignores the schema it
+		// was sent returns the JSON wrapped in a markdown block, and the parser
+		// then reports a backtick where a brace should be — for a reply whose
+		// contents are complete and correct. Measured on qwen3.6-35b-a3b through
+		// one OpenRouter host: reasoning on, five replies of five arrived fenced;
+		// reasoning off, none did. The schema request is the one this engine
+		// makes most, so the wrapper is stripped here rather than left to the
+		// stage that asked.
+		//
+		// Read the first bytes rather than always cleaning: a reply that does
+		// not open with a fence is not one of these, and running it through a
+		// text cleaner would let a real parse failure through as a silent
+		// recovery from something else.
+		if strings.HasPrefix(strings.TrimSpace(raw), "```") {
+			if fenced := CleanLLMJSON(raw); fenced != "" {
+				if errFence := json.Unmarshal([]byte(fenced), payload); errFence == nil {
+					log.Printf("[dag] executive: plan arrived wrapped in a code fence; unwrapped %d step(s)", len(payload.Steps))
+					var unfenced struct {
+						Steps json.RawMessage `json:"steps"`
+					}
+					_ = json.Unmarshal([]byte(fenced), &unfenced)
+					linkDependsOnTags(unfenced.Steps, payload.Steps)
+					return nil
+				}
+			}
+		}
 		// Try parsing with steps as a string (double-encoded JSON)
 		var flex struct {
 			Intent string          `json:"intent"`

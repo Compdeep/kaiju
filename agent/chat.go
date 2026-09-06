@@ -23,10 +23,6 @@ type ChatTurn struct {
 	// conversation so the UI can show the agent working live. It is used for event
 	// attribution only — the sub-run writes no memory to it.
 	SessionID string
-	// Agent permits escalation: nil/true ⇒ the router MAY escalate this turn to the
-	// agent; false ⇒ stays in chat, never escalates. From the request's `agent`
-	// field. (Run the agent directly via execute mode, not this flag.)
-	Agent *bool
 	// Base is the request's Trigger. When the turn goes to the agent, the sub-run
 	// is a COPY of this — so it inherits everything the request specified (models,
 	// intent, scope, session, history) with nothing to thread by hand.
@@ -68,17 +64,19 @@ type ChatResult struct {
 // The agent's steps stream as DAG events for live progress; its models, intent,
 // scope, and history are inherited from the request's Base trigger.
 func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
-	// Escalate to the agent only when this turn is PERMITTED to (t.Agent, default
-	// true — nil means allowed) AND the tuned router — reading the latest message in
-	// context (running summary + last exchange) — judges it needs more than a
-	// conversational answer. agent=false ⇒ pure chat, never escalates. To run the
-	// agent directly, callers use execute mode (chat_mode=false), not this lane.
-	// ChatTools is the palette the agent uses if it escalates, never the trigger.
-	mayEscalate := t.Agent == nil || *t.Agent
-	mode, lacking := "chat", []string(nil)
-	if mayEscalate {
-		mode, lacking = a.routeQuery(ctx, t.TriggerID, t.Query, t.History)
-	}
+	// Escalate when the tuned router — reading the latest message in context
+	// (running summary + last exchange) — judges the turn needs more than a
+	// conversational answer. To run the agent directly, callers use execute mode
+	// (chat_mode=false), not this lane. ChatTools is the palette the agent uses
+	// if it escalates, never the trigger.
+	//
+	// There used to be a per-turn permission here as well, read only on this
+	// path. It answered the same question the execute path answers with
+	// execution_mode, under a different name and an opposite default, and no
+	// interface sent it — two ways to say one thing, one of them unreachable
+	// except by hand. Withholding the agent from a turn is what the chat lane
+	// itself is for.
+	mode, lacking := a.routeQuery(ctx, t.TriggerID, t.Query, t.History)
 	if mode == "agent" {
 		// Chat answers can be long. Force the aggregator (agg_mode=2, reasoning
 		// lane, full synthesis budget) so a reflection-concluded run doesn't hand

@@ -380,21 +380,19 @@ function setReasoning(v) {
 }
 
 // The executor and the router both force a SMALL call, so both are filtered the
-// same way: tool_call_ok AND reasoning can be off here. The engine sends
-// reasoning off on these two lanes (agent/ask.go), so the question is not
-// whether the model thinks by DEFAULT — it is whether it can be told to stop.
-// reasoning_optional is that answer, read from the provider rather than guessed.
+// same way — and the rule is the server's, not this file's. fits_small_call is
+// models.Info.FitsForcedSmallCall, computed once where the catalog is loaded.
 //
-// Testing m.thinking alone emptied these two pickers of every modern hybrid,
-// which is now most of the catalog: every Qwen since 3.5 ships one line that
-// does both, so the model the router bench chose could not be selected for the
-// router. Only a mandatory-reasoning model is genuinely unfit.
+// It used to be re-derived here from three flags. So was the same rule in the
+// daemon's startup check and in the other settings page, and when what
+// disqualifies a model changed, one of the four was missed: this picker offered
+// models the daemon was warning about. Reading the answer instead of recomputing
+// it is what stops that recurring.
 //
 // This is the only place a reasoning mode excludes a model. On the reasoning lane
 // it earns its cost, and on answer and chat it is better.
 function forcedSmallCall (provider) {
-  return allModels.value.filter(m =>
-    m.provider === provider && m.tool_call_ok && (!m.thinking || m.reasoning_optional))
+  return allModels.value.filter(m => m.provider === provider && m.fits_small_call)
 }
 
 const executorModels = computed(() => forcedSmallCall(execProvider.value || cfg.value.llm.provider))

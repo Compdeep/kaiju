@@ -78,7 +78,7 @@ func (c *Config) ModelLaneWarnings() []string {
 			continue
 		}
 		switch {
-		case info.Thinks() && !info.ReasoningOptional:
+		case info.ReasoningLocked():
 			seen[l.id] = true
 			out = append(out, fmt.Sprintf(
 				"%s is set to %s, which reasons before it answers and cannot be told not to. This lane forces a tool call inside a small reply budget, so the reasoning consumes the budget and the call returns empty or times out.",

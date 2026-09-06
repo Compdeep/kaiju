@@ -86,6 +86,16 @@ type Info struct {
 	// Available reports whether this model's provider is configured with a key.
 	// Computed at serve time by whoever serves the catalog, not stored in it.
 	Available bool `json:"available"`
+	// FitsSmallCall is FitsForcedSmallCall as a value, so a settings page reads
+	// one boolean instead of re-deriving the rule from Tools, ToolCallOK,
+	// Thinking and ReasoningOptional. Two of them did, in two languages, and
+	// they disagreed with the daemon for a day.
+	//
+	// Derived, never read from models.json: load() sets it, so it is right on
+	// every path that serves the catalog rather than only the one that
+	// remembered. Marshalled unconditionally — absent, a client cannot tell a
+	// model that does not fit from a server too old to say.
+	FitsSmallCall bool `json:"fits_small_call"`
 	// Vision reports whether the model accepts image input.
 	Vision bool `json:"vision,omitempty"`
 	// Chat marks a model suited to the chat lane (conversation / roleplay tunes).
@@ -132,6 +142,7 @@ func load() []Info {
 				"which is the answer that gets it offered for a forced tool call", m.ID)
 			continue
 		}
+		m.FitsSmallCall = m.FitsForcedSmallCall()
 		out = append(out, m)
 	}
 	return out
@@ -192,6 +203,39 @@ func ToolSafe() []Info {
 func (i Info) Thinks() bool { return i.Thinking != nil && *i.Thinking }
 
 /*
+ * ReasoningLocked reports a model that reasons and cannot be told not to.
+ * desc: The complaint the lanes that force a small call actually have. Those
+ *       lanes send reasoning off on every call (agent/ask.go) and a hybrid model
+ *       obeys, so reasoning BY DEFAULT is not a fault there — and reading it as
+ *       one excludes most of the catalog, every Qwen since 3.5 included.
+ *
+ *       Split from FitsForcedSmallCall because the two callers need different
+ *       granularity: a picker wants one answer, and the startup lane warning
+ *       has to say WHICH fault it found, in different words for each.
+ * return: true when no request can stop this model reasoning.
+ */
+func (i Info) ReasoningLocked() bool { return i.Thinks() && !i.ReasoningOptional }
+
+/*
+ * FitsForcedSmallCall reports whether a lane that pins one tool inside a small
+ * reply budget can rely on this model.
+ * desc: The single definition of that rule. It was written out four times —
+ *       here, both startup lane checks, and both settings pages — so changing
+ *       what disqualifies a model meant locating all four. One was missed for a
+ *       day, which is how a picker came to offer models the daemon then warned
+ *       about.
+ *
+ *       Computed in load() rather than read from models.json, so every path that
+ *       serves the catalog carries it without having to remember to. That is
+ *       also why the two settings pages read one boolean instead of deriving it
+ *       from three flags each.
+ * return: true when the model can be asked for one small forced call.
+ */
+func (i Info) FitsForcedSmallCall() bool {
+	return i.Tools && i.ToolCallOK && !i.ReasoningLocked()
+}
+
+/*
  * ForcedSmallCall returns the models fit for a lane that forces a SMALL tool
  * call — the router at 96 tokens, the executor's classifiers.
  * desc: ToolSafe minus the ones that reason before answering AND cannot be told
@@ -217,7 +261,7 @@ func (i Info) Thinks() bool { return i.Thinking != nil && *i.Thinking }
 func ForcedSmallCall() []Info {
 	out := make([]Info, 0, len(all))
 	for _, m := range all {
-		if m.Tools && m.ToolCallOK && (!m.Thinks() || m.ReasoningOptional) {
+		if m.FitsForcedSmallCall() {
 			out = append(out, m)
 		}
 	}

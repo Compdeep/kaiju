@@ -969,40 +969,29 @@ func linkDependsOnTags(stepsArray json.RawMessage, steps []PlanStep) {
 }
 
 /*
- * resolvePlanNames gives every step a name exactly one reference can reach.
- * desc: The fourth plan-time validator, and the one the other three assume. A
- *       name is what a reference resolves against, so it has to be unique
- *       within the plan and has to be something a reference can spell.
+ * validatePlanNames reports names a reference could not spell.
+ * desc: A name is what a reference resolves against, so it has to be something
+ *       ${step.<name>.<field>} can address. One holding a space or a bracket
+ *       ends somewhere the writer did not mean, and nothing reaches the step.
  *
- *       Neither was checked while a name was only a label on a trace line. Two
- *       steps could share one, and stepIndexFor would take the first — so a
- *       reference meant for the second read the first, silently. And a name
- *       could hold a space or a bracket, which no reference can address at all.
+ *       There is no safe rewrite for such a name — picking one would guess at
+ *       where the planner wanted the step — so it is reported and the planner
+ *       is asked again.
  *
- *       The two faults are not answered the same way. A name a reference cannot
- *       spell is reported, because rewriting it would guess at what the planner
- *       meant. A repeated name is renamed here instead, because sending it back
- *       did not work: it cost a reasoning-model call per correction and, after
- *       three, ended the run with no answer at all — a live run died that way
- *       on two steps that had taken a third's name.
- *
- *       The renaming is safe because the first occurrence keeps the name. Every
- *       ${step.<name>.<field>} written against it still resolves where it
- *       resolved before, since stepIndexFor takes the first occurrence anyway.
- *       Nothing else can be holding the old name yet: no step has run, so there
- *       is no worklog line or tool result to carry it, and a plan addresses only
- *       the steps it is itself writing. What changes is that the later steps
- *       become addressable rather than the whole plan being thrown away.
- * param: steps - the plan; a repeated name is renamed in place
+ *       A repeated name is the other half of the same concern and is NOT
+ *       reported here. fixDuplicateStepNames settles it after the corrections
+ *       are finished: a plan being corrected is replaced whole, so a name fixed
+ *       mid-loop is discarded with it, and the hints built from the fixed steps
+ *       would offer a name appearing in no plan the planner can see.
+ * param: steps - the plan
  * return: one message per unusable name, empty when every name can be spelled
  */
-func resolvePlanNames(steps []PlanStep) []string {
+func validatePlanNames(steps []PlanStep) []string {
 	var errs []string
-	seen := make(map[string]int, len(steps))
 	for i := range steps {
 		name := steps[i].Tag
 		if name == "" {
-			continue // unnamed steps are addressed by position; nothing to clash
+			continue // unnamed steps are addressed by position; nothing to spell
 		}
 		if !stepNameRe.MatchString(name) {
 			errs = append(errs, fmt.Sprintf(
@@ -1010,28 +999,67 @@ func resolvePlanNames(steps []PlanStep) []string {
 					"digits, _ or - with no spaces, dots or brackets, because a reference "+
 					"is written ${step.<name>.<field>}",
 				i, steps[i].Tool, name))
-			continue
 		}
-		if first, dup := seen[name]; dup {
-			// _2, _3, … and past any suffix the plan already spends itself. The
-			// suffix is digits and an underscore, so the result is still a name
-			// stepNameRe accepts and a reference can spell.
-			var unique string
-			for n := 2; ; n++ {
-				unique = fmt.Sprintf("%s_%d", name, n)
-				if _, taken := seen[unique]; !taken {
-					break
-				}
-			}
-			log.Printf("[dag] plan: step %d (%s) reuses step %d's name %q → renamed %q",
-				i, steps[i].Tool, first, name, unique)
-			steps[i].Tag = unique
-			seen[unique] = i
-			continue
-		}
-		seen[name] = i
 	}
 	return errs
+}
+
+/*
+ * fixDuplicateStepNames leaves a repeated name on one step and renames the rest.
+ * desc: stepIndexFor takes the first step carrying a name, so two steps sharing
+ *       one meant a reference silently read whichever came first. Reporting it
+ *       did not fix it: three corrections cost a reasoning-model call each and
+ *       still ended a run with no answer, on two steps that had taken a third's.
+ *
+ *       Runs after the correction loop rather than inside it, so it touches
+ *       only the plan that actually dispatches.
+ *
+ *       The first occurrence keeps the name. Every ${step.<name>.<field>}
+ *       already written against it resolves where it resolved before, since
+ *       stepIndexFor takes the first either way — which makes that choice
+ *       load-bearing, not incidental: renaming a first occurrence would break
+ *       every param referencing it in the same pass.
+ *
+ *       The suffix skips every name the plan holds ANYWHERE, not only the ones
+ *       already walked past. Taking a name a later step owns would leave that
+ *       step second in line for it, pointing its own references here instead.
+ * param: steps - the plan, renamed in place
+ */
+func fixDuplicateStepNames(steps []PlanStep) {
+	held := make(map[string]bool, len(steps))
+	for i := range steps {
+		if steps[i].Tag != "" {
+			held[steps[i].Tag] = true
+		}
+	}
+	seen := make(map[string]int, len(steps))
+	for i := range steps {
+		name := steps[i].Tag
+		// A name no reference can spell is validatePlanNames' to refuse, and it
+		// already has: nothing reaches here carrying one.
+		if name == "" || !stepNameRe.MatchString(name) {
+			continue
+		}
+		first, dup := seen[name]
+		if !dup {
+			seen[name] = i
+			continue
+		}
+		// _2, _3, … The suffix is an underscore and digits, so the result is
+		// still a name stepNameRe accepts and a reference can spell.
+		var unique string
+		for n := 2; ; n++ {
+			unique = fmt.Sprintf("%s_%d", name, n)
+			if !held[unique] {
+				break
+			}
+		}
+		log.Printf("[dag] plan: step %d (%s) reuses step %d's name %q → renamed %q",
+			i, steps[i].Tool, first, name, unique)
+		steps[i].Tag = unique
+		held[unique] = true
+		seen[unique] = i
+	}
 }
 
 /*
@@ -1933,7 +1961,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		curToolCalls := choice.Message.ToolCalls
 		curToolCallID := tc.ID
 		for corrections := 0; ; corrections++ {
-			nameErrs := resolvePlanNames(steps)
+			nameErrs := validatePlanNames(steps)
 			refErrs := validatePlanReferencesIn(steps, a.registry, graph)
 			paramErrs := validatePlanParams(steps, a.registry)
 			depErrs := validatePlanDeps(steps)
@@ -2036,6 +2064,11 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			curToolCalls = replanResp.Choices[0].Message.ToolCalls
 			curToolCallID = rtc.ID
 		}
+
+		// Every exit above that dispatches arrives here; the one that does not
+		// returns. So this is the last point before the plan becomes nodes, and
+		// the only pass whose names outlive the planner.
+		fixDuplicateStepNames(steps)
 
 		isAuto := trigger.Intent() == gates.IntentAuto
 

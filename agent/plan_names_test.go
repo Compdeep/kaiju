@@ -1,25 +1,54 @@
 package agent
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 // A name is what a reference resolves against, so it has to name one step.
 //
 // stepIndexFor takes the FIRST match, so two steps sharing a name meant every
-// reference to it silently read one of them. Nothing rejected the plan, and
-// nothing said which step a reference had reached.
-func TestValidatePlanNames_RejectsADuplicate(t *testing.T) {
-	errs := validatePlanNames([]PlanStep{
+// reference to it silently read one of them. Reporting it back did not fix it:
+// three corrections cost a reasoning-model call each and still ended a live
+// run with no answer. The later step is renamed instead, and the first keeps
+// the name so the references already written against it land where they did.
+func TestResolvePlanNames_RenamesADuplicate(t *testing.T) {
+	steps := []PlanStep{
 		{Tool: "web_fetch", Tag: "fetch_page"},
 		{Tool: "web_fetch", Tag: "fetch_page"},
-	})
-	if len(errs) != 1 {
-		t.Fatalf("want one error for the duplicate, got %d: %v", len(errs), errs)
+		{Tool: "web_fetch", Tag: "fetch_page"},
 	}
-	if !strings.Contains(errs[0], "fetch_page") || !strings.Contains(errs[0], "step 0") {
-		t.Errorf("the error must name the clash and the step it clashes with: %q", errs[0])
+	if errs := resolvePlanNames(steps); len(errs) != 0 {
+		t.Fatalf("a duplicate is renamed, not reported: %v", errs)
+	}
+	if steps[0].Tag != "fetch_page" {
+		t.Errorf("the first occurrence keeps the name, so existing references still resolve: %q", steps[0].Tag)
+	}
+	if steps[1].Tag != "fetch_page_2" || steps[2].Tag != "fetch_page_3" {
+		t.Errorf("each later step needs its own name, got %q and %q", steps[1].Tag, steps[2].Tag)
+	}
+}
+
+// The suffix has to skip a name the plan already spends, or the rename walks
+// straight into a second clash.
+func TestResolvePlanNames_SkipsASuffixThePlanAlreadyUses(t *testing.T) {
+	steps := []PlanStep{
+		{Tool: "web_fetch", Tag: "fetch_page"},
+		{Tool: "web_fetch", Tag: "fetch_page_2"},
+		{Tool: "web_fetch", Tag: "fetch_page"},
+	}
+	if errs := resolvePlanNames(steps); len(errs) != 0 {
+		t.Fatalf("a duplicate is renamed, not reported: %v", errs)
+	}
+	if steps[2].Tag != "fetch_page_3" {
+		t.Errorf("want fetch_page_3, past the name step 1 holds, got %q", steps[2].Tag)
+	}
+}
+
+// A renamed step still has to be a name a reference can spell, or the rename
+// has swapped a duplicate for something unreachable.
+func TestResolvePlanNames_RenameStaysSpellable(t *testing.T) {
+	steps := []PlanStep{{Tool: "bash", Tag: "check"}, {Tool: "bash", Tag: "check"}}
+	resolvePlanNames(steps)
+	if !stepNameRe.MatchString(steps[1].Tag) {
+		t.Errorf("a reference cannot address %q", steps[1].Tag)
 	}
 }
 
@@ -33,7 +62,7 @@ func TestValidatePlanNames_RejectsWhatAReferenceCannotSpell(t *testing.T) {
 		"read.csv",               // the separator
 		"read}csv",               // the terminator
 	} {
-		errs := validatePlanNames([]PlanStep{{Tool: "file_read", Tag: name}})
+		errs := resolvePlanNames([]PlanStep{{Tool: "file_read", Tag: name}})
 		if len(errs) != 1 {
 			t.Errorf("%q was accepted as a name: %v", name, errs)
 		}
@@ -43,7 +72,7 @@ func TestValidatePlanNames_RejectsWhatAReferenceCannotSpell(t *testing.T) {
 // Any script, because the rule is about delimiters and not about English.
 func TestValidatePlanNames_AcceptsAnyScript(t *testing.T) {
 	for _, name := range []string{"read_csv", "read-csv", "step2", "读取文件", "чтение"} {
-		if errs := validatePlanNames([]PlanStep{{Tool: "file_read", Tag: name}}); len(errs) != 0 {
+		if errs := resolvePlanNames([]PlanStep{{Tool: "file_read", Tag: name}}); len(errs) != 0 {
 			t.Errorf("%q was rejected: %v", name, errs)
 		}
 	}
@@ -54,7 +83,7 @@ func TestValidatePlanNames_AcceptsAnyScript(t *testing.T) {
 
 // An unnamed step is addressed by position, so there is nothing to clash.
 func TestValidatePlanNames_UnnamedStepsAreFine(t *testing.T) {
-	if errs := validatePlanNames([]PlanStep{
+	if errs := resolvePlanNames([]PlanStep{
 		{Tool: "web_fetch"}, {Tool: "web_fetch"},
 	}); len(errs) != 0 {
 		t.Errorf("unnamed steps were rejected: %v", errs)
@@ -80,7 +109,7 @@ func TestNode_ARetryDoesNotRenameTheStep(t *testing.T) {
 	if n.Retry != "blind" {
 		t.Errorf("the tier was not recorded, so nothing stops a second retry: %q", n.Retry)
 	}
-	if errs := validatePlanNames([]PlanStep{{Tool: "bash", Tag: n.Tag}}); len(errs) != 0 {
+	if errs := resolvePlanNames([]PlanStep{{Tool: "bash", Tag: n.Tag}}); len(errs) != 0 {
 		t.Errorf("the name stopped being referenceable after a retry: %v", errs)
 	}
 	if info := g.SnapshotNode(id); info == nil || info.Retry != "blind" {

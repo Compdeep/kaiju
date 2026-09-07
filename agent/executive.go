@@ -969,7 +969,7 @@ func linkDependsOnTags(stepsArray json.RawMessage, steps []PlanStep) {
 }
 
 /*
- * validatePlanNames reports names a reference could not resolve to one step.
+ * resolvePlanNames gives every step a name exactly one reference can reach.
  * desc: The fourth plan-time validator, and the one the other three assume. A
  *       name is what a reference resolves against, so it has to be unique
  *       within the plan and has to be something a reference can spell.
@@ -978,10 +978,25 @@ func linkDependsOnTags(stepsArray json.RawMessage, steps []PlanStep) {
  *       steps could share one, and stepIndexFor would take the first — so a
  *       reference meant for the second read the first, silently. And a name
  *       could hold a space or a bracket, which no reference can address at all.
- * param: steps - the plan
- * return: one message per unusable name, empty when the plan is clean
+ *
+ *       The two faults are not answered the same way. A name a reference cannot
+ *       spell is reported, because rewriting it would guess at what the planner
+ *       meant. A repeated name is renamed here instead, because sending it back
+ *       did not work: it cost a reasoning-model call per correction and, after
+ *       three, ended the run with no answer at all — a live run died that way
+ *       on two steps that had taken a third's name.
+ *
+ *       The renaming is safe because the first occurrence keeps the name. Every
+ *       ${step.<name>.<field>} written against it still resolves where it
+ *       resolved before, since stepIndexFor takes the first occurrence anyway.
+ *       Nothing else can be holding the old name yet: no step has run, so there
+ *       is no worklog line or tool result to carry it, and a plan addresses only
+ *       the steps it is itself writing. What changes is that the later steps
+ *       become addressable rather than the whole plan being thrown away.
+ * param: steps - the plan; a repeated name is renamed in place
+ * return: one message per unusable name, empty when every name can be spelled
  */
-func validatePlanNames(steps []PlanStep) []string {
+func resolvePlanNames(steps []PlanStep) []string {
 	var errs []string
 	seen := make(map[string]int, len(steps))
 	for i := range steps {
@@ -998,10 +1013,20 @@ func validatePlanNames(steps []PlanStep) []string {
 			continue
 		}
 		if first, dup := seen[name]; dup {
-			errs = append(errs, fmt.Sprintf(
-				"step %d (%s): the name %q is already step %d's — a reference naming it "+
-					"cannot say which step it means; give every step its own name",
-				i, steps[i].Tool, name, first))
+			// _2, _3, … and past any suffix the plan already spends itself. The
+			// suffix is digits and an underscore, so the result is still a name
+			// stepNameRe accepts and a reference can spell.
+			var unique string
+			for n := 2; ; n++ {
+				unique = fmt.Sprintf("%s_%d", name, n)
+				if _, taken := seen[unique]; !taken {
+					break
+				}
+			}
+			log.Printf("[dag] plan: step %d (%s) reuses step %d's name %q → renamed %q",
+				i, steps[i].Tool, first, name, unique)
+			steps[i].Tag = unique
+			seen[unique] = i
 			continue
 		}
 		seen[name] = i
@@ -1908,7 +1933,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		curToolCalls := choice.Message.ToolCalls
 		curToolCallID := tc.ID
 		for corrections := 0; ; corrections++ {
-			nameErrs := validatePlanNames(steps)
+			nameErrs := resolvePlanNames(steps)
 			refErrs := validatePlanReferencesIn(steps, a.registry, graph)
 			paramErrs := validatePlanParams(steps, a.registry)
 			depErrs := validatePlanDeps(steps)

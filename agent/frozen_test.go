@@ -67,7 +67,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	// things, and asking both in one reply let the words starve the decision.
 	"RECALL":          {"0f18f8f6a32b1fe9", 897},
 	"PREFLIGHT":       {"a2b9b41e91f4a918", 6354},
-	"EXECUTIVE":       {"401eac235e36dc7d", 8277},
+	"EXECUTIVE":       {"a417aa26aac75e09", 8291},
 	"AGGREGATOR":      {"a782c5558ef001d0", 3631},
 	"REFRAME_PLAN":    {"d29f36e12276e5d3", 3503},
 	"REFRAME_REFLECT": {"9135887028deee2a", 3434},

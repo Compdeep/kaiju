@@ -7,28 +7,22 @@ import (
 )
 
 // A plan cut off at the cap is asked for again, shorter — that is
-// TestATruncatedPlanIsAskedForAgainShorter. The SECOND cut has no branch, and
-// this is what the run does instead.
+// TestATruncatedPlanIsAskedForAgainShorter. When the shorter one is cut too,
+// the steps that finished before the cut are run rather than thrown away.
 //
-// The retry's finish_reason is still "length", so the `== "tool_calls"` gate
-// below the re-ask is skipped and execution falls to the prose fallback. There
-// the fragment is already gone: asToolReply moved it into ToolCalls and emptied
-// Content, so `raw` is "" and the executive reports a conversational answer with
-// nothing in it. The scheduler reads that empty text as "no plan, no reply" and
-// answers from the chat lane.
+// They used to be thrown away. A cut reply says "length" and not "tool_calls":
+// asToolReply leaves the reason alone so a stage asking for a shorter plan can
+// still see it was cut, and moves the arguments into the call regardless. The
+// executive gated its parse on the reason alone, so a reply carrying a plan was
+// refused and execution fell to the prose branch — which reads Content, emptied
+// by that same move. The run then answered from the chat lane: an application
+// supplying Answer got SyncResult.Data nil and reported no result, and a chat
+// caller got a confident answer with no tool behind it.
 //
-// Two things follow, and neither is a failure the caller can see:
-//
-//   - an application supplying Answer gets SyncResult.Data nil, because the
-//     chat-lane return never calls writeAnswer. An application that casts Data
-//     back to its own type has nothing to cast, and reports the run as having
-//     produced no result.
-//   - a chat caller gets a confident answer written with no evidence at all —
-//     no tool ran, and nothing in the reply says so.
-//
-// Asserted as a description of today's behaviour. When the second cut is
-// handled, this test fails and says which half changed.
-func TestAPlanTruncatedTwiceAnswersFromTheChatLaneInstead(t *testing.T) {
+// One live run showed what that costs. The planner looped, was cut at 8,192
+// tokens, and the reply held twenty-four real steps before the repetition
+// began. All twenty-four were discarded and the run produced nothing.
+func TestAPlanTruncatedTwiceRunsTheStepsThatFinished(t *testing.T) {
 	tool := &countingTool{name: "process_list"}
 	model := newStubModel(t, map[string]stubReply{
 		"submit_preflight": {Args: map[string]any{
@@ -53,23 +47,20 @@ func TestAPlanTruncatedTwiceAnswersFromTheChatLaneInstead(t *testing.T) {
 		t.Fatal("the run returned no result at all")
 	}
 
-	// The retry happened, and it bought nothing.
+	// The shorter re-ask still happens: the first reply was cut with nothing to
+	// salvage, which is what that branch is for.
 	if n := model.callsTo("plan"); n != 2 {
 		t.Errorf("the planner was called %d times, want 2 — the cut plan and the shorter one", n)
 	}
-	if tool.calls != 0 {
-		t.Errorf("a step ran off a plan that never parsed (%d calls)", tool.calls)
+
+	// And the second cut is no longer wasted. The step that finished before the
+	// cut is whole, was already paid for, and runs.
+	if tool.calls == 0 {
+		t.Error("no step ran: the steps that finished before the cut were thrown away again")
 	}
 
-	// An answer with no evidence behind it. This is the half a chat caller sees.
+	// An answer with a tool behind it, rather than the chat lane inventing one.
 	if res.Outcome == "" {
-		t.Error("outcome is empty; the chat fallback is expected to answer, which is the defect this records")
-	}
-
-	// No Data, because the chat-lane return never reaches writeAnswer. This is
-	// the half an application supplying Answer sees: it casts Data back to its
-	// own type, finds nothing, and reports a run that produced no result.
-	if res.Data != nil {
-		t.Errorf("Data = %v; today's chat-lane return carries none, so a change here is the fix landing", res.Data)
+		t.Error("the run produced no outcome")
 	}
 }

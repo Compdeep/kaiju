@@ -1789,7 +1789,19 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	}
 
 	// Did the plan come back in the shape it was asked for
-	if choice.FinishReason == "tool_calls" && len(choice.Message.ToolCalls) > 0 {
+	// A cut reply is read too. It says "length" rather than "tool_calls" —
+	// asToolReply leaves that alone on purpose, so a stage asking for a shorter
+	// plan keeps seeing that it was cut — and it moves the arguments into the
+	// call either way. Gating on the reason alone therefore refused a reply
+	// whose plan was sitting in it, and sent execution to the prose branch,
+	// which reads Content: emptied by that same move. Every step already
+	// generated was thrown away, and the run answered with nothing.
+	//
+	// The branch above has already decided what a cut reply is worth: it asks
+	// for a shorter plan when nothing salvages, and falls through to here when
+	// something does. This is where that salvage happens — parseExecutivePayload
+	// applies it. Refusing the reply here made that branch a dead end.
+	if len(choice.Message.ToolCalls) > 0 && (choice.FinishReason == "tool_calls" || choice.FinishReason == "length") {
 		tc := choice.Message.ToolCalls[0]
 
 		// It named a tool from the index instead of wrapping it in a plan.

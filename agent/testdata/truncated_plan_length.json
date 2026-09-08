@@ -1,0 +1,730 @@
+{
+  "answer": "Debugging the Syscall Storm alert for uvicorn (PID 1686265) targeting vma on port 5000.",
+  "intent": "analyze",
+  "steps": [
+    {
+      "depends_on": [],
+      "params": {
+        "name_or_pid": "1686265"
+      },
+      "tag": "get_process_detail",
+      "tool": "get_process"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "pid": 1686265
+      },
+      "tag": "inspect_process",
+      "tool": "inspect_process"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "name_or_pid": "1686264"
+      },
+      "tag": "get_parent_detail",
+      "tool": "get_process"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "query": "RaceStorm vma",
+        "section": "processes"
+      },
+      "tag": "search_telemetry_race",
+      "tool": "search_telemetry"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "filter": "1686265"
+      },
+      "tag": "get_connections",
+      "tool": "get_connections"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null || echo 'Binary not readable'; file /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null || echo 'file command failed'",
+        "timeout_sec": 10
+      },
+      "tag": "check_uvicorn_binary",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "ls -la /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null; ls -la /home/sites/kaiju/kaiju/plugins/ 2>/dev/null; ls -la /home/sites/kaiju/ 2>/dev/null",
+        "timeout_sec": 10
+      },
+      "tag": "check_file_structure",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "ps aux | grep -E 'uvicorn|vma' 2>/dev/null; ps -ef | grep -E '1686265|1686264' 2>/dev/null",
+        "timeout_sec": 10
+      },
+      "tag": "check_current_processes",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "ss -tlnp 2>/dev/null | grep -E '5000|vma' || netstat -tlnp 2>/dev/null | grep -E '5000|vma'",
+        "timeout_sec": 10
+      },
+      "tag": "check_port_5000",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "grep -r 'vma' /home/sites/kaiju/ 2>/dev/null | head -50 || echo 'No vma references found'",
+        "timeout_sec": 15
+      },
+      "tag": "search_vma_refs",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "grep -r 'RaceStorm\\|race.*storm\\|storm.*race' /home/sites/kaiju/ 2>/dev/null | head -20 || echo 'No RaceStorm references found'",
+        "timeout_sec": 15
+      },
+      "tag": "search_racestorm_refs",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /proc/1686265/cmdline 2>/dev/null | tr '\\0' ' ' || echo 'Process 1686265 not found in /proc'",
+        "timeout_sec": 10
+      },
+      "tag": "check_proc_cmdline",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /proc/1686264/cmdline 2>/dev/null | tr '\\0' ' ' || echo 'Process 1686264 not found in /proc'",
+        "timeout_sec": 10
+      },
+      "tag": "check_parent_cmdline",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "ls -la /proc/1686265/exe 2>/dev/null || echo 'Cannot read /proc/1686265/exe'",
+        "timeout_sec": 10
+      },
+      "tag": "check_exe_link",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "ls -la /proc/1686264/exe 2>/dev/null || echo 'Cannot read /proc/1686264/exe'",
+        "timeout_sec": 10
+      },
+      "tag": "check_parent_exe_link",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "grep -r 'uvicorn' /home/sites/kaiju/ --include='*.py' --include='*.sh' --include='*.yaml' --include='*.yml' --include='*.json' --include='*.toml' --include='*.cfg' 2>/dev/null | head -30 || echo 'No uvicorn references found'",
+        "timeout_sec": 15
+      },
+      "tag": "search_uvicorn_refs",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -5 || echo 'Cannot read uvicorn binary'",
+        "timeout_sec": 10
+      },
+      "tag": "read_uvicorn_header",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "ls -la /home/sites/kaiju/kaiju/plugins/venv/bin/ | head -20",
+        "timeout_sec": 10
+      },
+      "tag": "list_venv_bin",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | file - || echo 'Cannot determine file type'",
+        "timeout_sec": 10
+      },
+      "tag": "determine_file_type",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "ls -la /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null; stat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null",
+        "timeout_sec": 10
+      },
+      "tag": "stat_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | strings | grep -i 'race\\|storm\\|vma\\|5000' | head -20 || echo 'No relevant strings found'",
+        "timeout_sec": 15
+      },
+      "tag": "strings_in_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | xxd | head -20 || echo 'Cannot hexdump uvicorn'",
+        "timeout_sec": 10
+      },
+      "tag": "hexdump_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | sha256sum || echo 'Cannot compute hash'",
+        "timeout_sec": 10
+      },
+      "tag": "hash_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | wc -c || echo 'Cannot count bytes'",
+        "timeout_sec": 10
+      },
+      "tag": "size_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -1 || echo 'Cannot read first line'",
+        "timeout_sec": 10
+      },
+      "tag": "first_line_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -5 || echo 'Cannot read first 5 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_5_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -10 || echo 'Cannot read first 10 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_10_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -20 || echo 'Cannot read first 20 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_20_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -50 || echo 'Cannot read first 50 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_50_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -100 || echo 'Cannot read first 100 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_100_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -200 || echo 'Cannot read first 200 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_200_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -500 || echo 'Cannot read first 500 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_500_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -1000 || echo 'Cannot read first 1000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_1000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -2000 || echo 'Cannot read first 2000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_2000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -5000 || echo 'Cannot read first 5000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_5000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -10000 || echo 'Cannot read first 10000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_10000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -20000 || echo 'Cannot read first 20000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_20000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -50000 || echo 'Cannot read first 50000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_50000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -100000 || echo 'Cannot read first 100000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_100000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -200000 || echo 'Cannot read first 200000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_200000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -500000 || echo 'Cannot read first 500000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_500000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -1000000 || echo 'Cannot read first 1000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_1000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -2000000 || echo 'Cannot read first 2000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_2000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -5000000 || echo 'Cannot read first 5000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_5000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -10000000 || echo 'Cannot read first 10000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_10000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -20000000 || echo 'Cannot read first 20000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_20000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -50000000 || echo 'Cannot read first 50000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_50000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -100000000 || echo 'Cannot read first 100000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_100000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -200000000 || echo 'Cannot read first 200000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_200000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -500000000 || echo 'Cannot read first 500000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_500000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -1000000000 || echo 'Cannot read first 1000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_1000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -2000000000 || echo 'Cannot read first 2000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_2000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -5000000000 || echo 'Cannot read first 5000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_5000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -10000000000 || echo 'Cannot read first 10000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_10000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -20000000000 || echo 'Cannot read first 20000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_20000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -50000000000 || echo 'Cannot read first 50000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_50000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -100000000000 || echo 'Cannot read first 100000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_100000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -200000000000 || echo 'Cannot read first 200000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_200000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -500000000000 || echo 'Cannot read first 500000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_500000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -1000000000000 || echo 'Cannot read first 1000000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_1000000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -2000000000000 || echo 'Cannot read first 2000000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_2000000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -5000000000000 || echo 'Cannot read first 5000000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_5000000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -10000000000000 || echo 'Cannot read first 10000000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_10000000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -20000000000000 || echo 'Cannot read first 20000000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_20000000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -50000000000000 || echo 'Cannot read first 50000000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_50000000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites/kaiju/kaiju/plugins/venv/bin/uvicorn 2>/dev/null | head -100000000000000 || echo 'Cannot read first 100000000000000 lines'",
+        "timeout_sec": 10
+      },
+      "tag": "first_100000000000000_lines_uvicorn",
+      "tool": "bash"
+    ,
+      "type": "compute"
+    },
+    {
+      "depends_on": [],
+      "params": {
+        "command": "cat /home/sites

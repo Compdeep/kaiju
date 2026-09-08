@@ -80,6 +80,14 @@ type stubReply struct {
 	// provider says the reply stopped at the token cap rather than because the
 	// model had finished.
 	Cut bool
+	// RawArgs is the arguments verbatim, for a reply that is not valid JSON.
+	//
+	// Args goes through json.Marshal, which cannot carry a document that does
+	// not parse — and a reply cut at the cap is exactly that: an open string, an
+	// open object, an open array. Marshalling one yields nothing and the stage
+	// under test receives an empty plan, which is a different fault from the one
+	// being tested.
+	RawArgs string
 }
 
 // newStubModel starts an endpoint that answers each stage from the script.
@@ -206,7 +214,9 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := "{}"
-	if reply.Args != nil {
+	if reply.RawArgs != "" {
+		args = reply.RawArgs
+	} else if reply.Args != nil {
 		b, _ := json.Marshal(reply.Args)
 		args = string(b)
 	}

@@ -297,3 +297,52 @@ func TestAsToolReply_LeavesACutReplyCut(t *testing.T) {
 		t.Errorf("finish reason %q: a cut reply must stay cut, or it is parsed as a whole plan", got)
 	}
 }
+
+// A reply cut off at the cap keeps saying so, while its arguments are moved
+// where a caller can find them.
+//
+// Both halves matter, and they are what makes the planner's cut plan
+// unreachable: the arguments ARE carried, so nothing is lost on the wire, and
+// the reason stays "length", so a stage that gates on "tool_calls" concludes no
+// tool was called. Content is blanked by the move, so the branch such a stage
+// falls to has nothing left to read.
+func TestAsToolReply_ACutReplyKeepsSayingLength(t *testing.T) {
+	const cut = `{"answer":"debugging","intent":"analyze","steps":[{"tool":"get_process","tag":"a"},{"tool":"bash","params":{"command":"cat /home`
+	resp := &ChatResponse{Choices: []Choice{{
+		Message:      Message{Content: cut},
+		FinishReason: "length",
+	}}}
+	tool := &ToolDef{Type: "function", Function: FunctionDef{Name: "plan"}}
+	asToolReply(resp, tool)
+
+	c := resp.Choices[0]
+	if len(c.Message.ToolCalls) != 1 {
+		t.Fatalf("the arguments were not moved into a call: %+v", c.Message.ToolCalls)
+	}
+	if c.Message.ToolCalls[0].Function.Arguments != cut {
+		t.Error("the cut arguments did not survive the move")
+	}
+	if c.Message.Content != "" {
+		t.Errorf("Content was left behind as well as moved: %q", c.Message.Content)
+	}
+	if c.FinishReason != "length" {
+		t.Errorf("FinishReason = %q, want length — a cut reply must keep saying it was cut", c.FinishReason)
+	}
+	// The consequence, stated as the caller sees it.
+	if c.FinishReason == "tool_calls" {
+		t.Error("a caller gating on tool_calls would now proceed")
+	}
+}
+
+// A complete reply is rewritten, which is what makes the case above the
+// exception rather than the rule.
+func TestAsToolReply_ACompleteReplyBecomesAToolCall(t *testing.T) {
+	resp := &ChatResponse{Choices: []Choice{{
+		Message:      Message{Content: `{"intent":"analyze","steps":[]}`},
+		FinishReason: "stop",
+	}}}
+	asToolReply(resp, &ToolDef{Type: "function", Function: FunctionDef{Name: "plan"}})
+	if resp.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("FinishReason = %q, want tool_calls", resp.Choices[0].FinishReason)
+	}
+}

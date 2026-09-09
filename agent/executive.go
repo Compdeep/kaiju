@@ -1243,6 +1243,13 @@ func fixDuplicateStepNames(steps []PlanStep) {
 func validatePlanComputeInputs(steps []PlanStep) []string {
 	var errs []string
 	for i, s := range steps {
+		// A step that names a tool is a tool call, whatever `type` says. The
+		// planner emits web_fetch steps typed "compute"; judging those by the
+		// compute rule spends three corrections telling a fetch to wire
+		// ${step.<tag>.<field>}, which is not something a fetch can do.
+		if s.Tool != "" && s.Tool != "compute" {
+			continue
+		}
 		if s.Type != "compute" && s.Tool != "compute" {
 			continue
 		}

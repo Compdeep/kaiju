@@ -176,11 +176,31 @@ func isModelStage(n *Node) bool {
 	if n == nil {
 		return false
 	}
+	// A node that ran a tool reports the tool's error, whatever type the plan
+	// gave it. The planner labels tool steps "compute" often enough that the
+	// node type alone cannot be trusted here: a web_fetch step typed compute
+	// answered 403 to a Cloudflare bot challenge, and the run stopped as if our
+	// key had been rejected — taking a second fetch running beside it, and the
+	// reflection that would have chosen another source, with it.
+	if n.ToolName != "" && !modelBackedTools[n.ToolName] {
+		return false
+	}
 	switch n.Type {
 	case NodeTool, NodeActuator:
 		return false
 	}
 	return true
+}
+
+// modelBackedTools are the tools that call a model on OUR credentials, so their
+// 401 or 403 can be about this deployment. Every other tool's is about whatever
+// it was talking to. A model-backed tool missing from this set only means the
+// run continues past a rejected key instead of stopping early — and the planner,
+// which calls a model before any tool node exists, stops it there anyway.
+var modelBackedTools = map[string]bool{
+	computeToolName: true,
+	"edit_file":     true,
+	"image_read":    true,
 }
 
 /*

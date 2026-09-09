@@ -78,6 +78,8 @@ func TestAModelAuthFailureStillStopsTheRun(t *testing.T) {
 		want bool
 	}{
 		{"a tool's 403 belongs to the site it fetched", &Node{Type: NodeTool, ToolName: "web_fetch"}, false},
+		{"a compute-typed web_fetch's 403 still belongs to the site", &Node{Type: NodeCompute, ToolName: "web_fetch"}, false},
+		{"a compute's own 401 is ours", &Node{Type: NodeCompute, ToolName: "compute"}, true},
 		{"an actuator's 403 belongs to what it acted on", &Node{Type: NodeActuator}, false},
 		{"the planner's 401 is ours", &Node{Type: NodeExecutive}, true},
 		{"the reflector's 401 is ours", &Node{Type: NodeReflection}, true},

@@ -126,3 +126,21 @@ func TestComputeInputs_IsAdvisoryAndDoesNotFailTheRun(t *testing.T) {
 		t.Error("inputErrs no longer reaches the correction feedback")
 	}
 }
+
+// The planner emits tool steps typed "compute": two web_fetch steps arrived as
+// {"tool":"web_fetch","type":"compute"}, and the compute rule read them as
+// calculations that ignored the plan. That spent all three corrections telling a
+// fetch to wire ${step.<tag>.<field>} — something a fetch cannot do — and the
+// plan ran unchanged anyway. A step that names a tool is a tool call, whatever
+// `type` says.
+func TestComputeInputs_AToolStepTypedComputeIsStillAToolStep(t *testing.T) {
+	plan := []PlanStep{
+		{Type: "compute", Tool: "web_fetch", Tag: "fetch_predictz", Params: map[string]any{
+			"url": "https://www.predictz.com/results/", "format": "extract"}},
+		{Type: "compute", Tool: "web_fetch", Tag: "fetch_livescore", Params: map[string]any{
+			"url": "https://www.livescore.com/en/", "format": "extract"}},
+	}
+	if errs := validatePlanComputeInputs(plan); len(errs) != 0 {
+		t.Errorf("two independent fetches were reported as unwired computes: %v", errs)
+	}
+}

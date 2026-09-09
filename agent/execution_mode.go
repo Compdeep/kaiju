@@ -162,3 +162,40 @@ func ParseReasoning(s string) (string, bool) {
 func ReasoningModes() []string {
 	return []string{ReasoningOn, ReasoningOff}
 }
+
+// How hard to think when thinking. A different question from whether to think,
+// which is what ReasoningOn and ReasoningOff answer.
+const (
+	EffortLow    = "low"
+	EffortMedium = "medium"
+	EffortHigh   = "high"
+	// EffortDefault says nothing, and is what every deployment says today.
+	EffortDefault = ""
+)
+
+/*
+ * ParseReasoningEffort reports whether s names an effort.
+ * desc: Empty is valid and means nothing is asked, which is the default and
+ *       what a model that has never been measured gets regardless.
+ *
+ *       Naming one here does not make it happen. The value is sent only where
+ *       the catalog says the model acts on it — every provider accepts the
+ *       parameter and none errors on it, so a setting sent blindly is one that
+ *       appears to work. See agent.applyReasoningBudget.
+ * param: s - the value as written in a request or a config file.
+ * return: the effort, and whether it was one.
+ */
+func ParseReasoningEffort(s string) (string, bool) {
+	switch s {
+	case EffortDefault, EffortLow, EffortMedium, EffortHigh:
+		return s, true
+	default:
+		return "", false
+	}
+}
+
+// ReasoningEfforts lists the efforts that ask for something. As with
+// ReasoningModes, the default is not among them.
+func ReasoningEfforts() []string {
+	return []string{EffortLow, EffortMedium, EffortHigh}
+}

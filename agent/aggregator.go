@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -69,6 +70,32 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 	if aggMaxTokens < 8192 {
 		aggMaxTokens = 8192
 	}
+
+	// Doubled again when the model reasons, because the reasoning is spent from
+	// this same budget and the answer is what is left.
+	//
+	// The doubling above is for the work: an aggregator reads every step and
+	// writes the whole reply, so it needs more room than a tool call. It is the
+	// same number for every model, which is the fault — a reasoning model was
+	// given a non-reasoning model's budget, spent all 8,192 of it thinking, and
+	// returned nothing. The run then failed with "empty response", seventeen
+	// minutes in, describing the symptom.
+	//
+	// planMaxTokens already asks this question, and wallClock already widens the
+	// clock on the same grounds. This is the third place that has to know, and
+	// the last one that did not.
+	//
+	// Raising the ASK is safe on its own: capReply lowers it again to whatever
+	// the model's window and published reply ceiling allow, and never raises it.
+	// So a model that cannot take this gets what it can, rather than a request
+	// it must refuse.
+	c, model := a.lane(ctx, l)
+	if model == "" && c != nil {
+		model = c.Model()
+	}
+	if a.heavyThinks(model) {
+		aggMaxTokens *= 2
+	}
 	aggID := TraceID{
 		NodeID:   "aggregator",
 		NodeType: "aggregator",
@@ -102,6 +129,14 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 	if err != nil {
 		rec.Err = err.Error()
 		graph.recordStage(rec)
+		// A cut reply with nothing in it is the budget, not the provider, and
+		// saying which is the difference between a person changing a setting and
+		// a person retrying the same run. askStream reports it only when there
+		// was nothing to keep — a partial answer is still an answer.
+		if errors.Is(err, llm.ErrReplyTruncated) {
+			return "", nil, fmt.Errorf("aggregator ran out of reply budget at %d tokens with nothing written — "+
+				"the model spent it reasoning: %w", aggMaxTokens, err)
+		}
 		return "", nil, fmt.Errorf("aggregator LLM call: %w", err)
 	}
 	if raw == "" {

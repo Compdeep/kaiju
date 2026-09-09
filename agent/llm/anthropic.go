@@ -155,9 +155,16 @@ func buildAnthropicRequest(model string, req *ChatRequest) *anthropicRequest {
 	}
 	// Same instruction, different spelling. A caller sets Reasoning and does not
 	// learn which provider it reached.
-	if req.Reasoning != nil {
-		if req.Reasoning.Enabled {
+	if req.Reasoning != nil && req.Reasoning.Enabled != nil {
+		if req.Reasoning.On() {
+			// A budget asked for is spelled here, because Anthropic takes one
+			// directly rather than as an effort. Absent — or below Anthropic's
+			// own floor, or not leaving room for an answer — the previous share
+			// of the reply stands, which is what this did before.
 			aReq.Thinking = anthropicThinkingOn(aReq.MaxTokens)
+			if want := req.Reasoning.MaxTokens; want >= anthropicThinkingBudget && want < aReq.MaxTokens {
+				aReq.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: want}
+			}
 		} else {
 			aReq.Thinking = anthropicThinkingOff
 		}

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -92,6 +93,47 @@ func (a *Agent) lane(ctx context.Context, l Lane) (*llm.Client, string) {
 }
 
 /*
+ * applyReasoningBudget asks for as much thinking as the deployment wants and
+ * the model will act on.
+ * desc: Two settings, each sent only where the catalog says it lands. An effort
+ *       the model ignores and a budget it overruns are the same fault — an
+ *       operator sets something, nothing changes, and nothing says why.
+ *
+ *       Never turns thinking ON. A request that said nothing about it keeps
+ *       saying nothing, and one that turned it off is left alone by the caller.
+ * param: req - the request, modified in place.
+ * param: model - the model this lane will send to.
+ */
+func (a *Agent) applyReasoningBudget(req *llm.ChatRequest, model string) {
+	if req == nil || a.cfg.Reasoning == nil || model == "" {
+		return
+	}
+	effort, budget := a.cfg.LLMReasoningEffort, a.cfg.LLMReasoningBudget
+	if effort == "" && budget <= 0 {
+		return
+	}
+	allowed, takesBudget := a.cfg.Reasoning(model)
+	if effort != "" && !slices.Contains(allowed, effort) {
+		effort = ""
+	}
+	if budget > 0 && !takesBudget {
+		budget = 0
+	}
+	if effort == "" && budget <= 0 {
+		return
+	}
+	if req.Reasoning == nil {
+		req.Reasoning = &llm.ReasoningControl{}
+	}
+	if effort != "" {
+		req.Reasoning.Effort = effort
+	}
+	if budget > 0 {
+		req.Reasoning.MaxTokens = budget
+	}
+}
+
+/*
  * ask sends one completion through a lane.
  * desc: Resolve the lane, stamp its model on the request, send. The client
  *       sizes the reply against that model as it sends, which is why the model
@@ -143,10 +185,19 @@ func (a *Agent) askParsed(ctx context.Context, l Lane, req *llm.ChatRequest) (*l
  *       chunks arrive through onChunk as they come; the assembled text is
  *       returned at the end.
  *
- *       Streaming has no truncation check. finish_reason arrives in the final
+ *       A PARTIAL reply is never failed. finish_reason arrives in the final
  *       frame and a stage that streams is showing text to a person as it
  *       lands — by the time the cut is known, the short answer has already been
  *       read, and there is nothing to fail.
+ *
+ *       An EMPTY one is different, and used to be reported as though it were
+ *       the same. Nothing was shown, so nothing was read, and the caller fails
+ *       regardless — the only question is what it says. A reasoning model that
+ *       spends its whole budget thinking returns exactly this, and the
+ *       aggregator called it "empty response": true, and no help at all, on a
+ *       run that had taken seventeen minutes to get there.
+ *
+ *       So the cut is reported only when there is nothing to keep.
  * param: as ask, plus onChunk, called for each chunk with its kind.
  * return: the assembled reply.
  */
@@ -155,11 +206,27 @@ func (a *Agent) askStream(ctx context.Context, l Lane, req *llm.ChatRequest,
 
 	c := a.prepare(ctx, l, req)
 	started := time.Now()
-	text, err := c.CompleteStream(ctx, req, onChunk)
-	// A streamed reply carries no response to read, so the trace records what
-	// was asked and what came back as text.
-	a.writeTrace(ctx, req, streamedResponse(text), err, started)
-	return text, err
+	resp, err := c.CompleteStreamResp(ctx, req, onChunk)
+	text := streamedText(resp)
+	// The response is recorded rather than a reconstruction of it: it carries
+	// the finish reason and whatever counts the provider sent.
+	a.writeTrace(ctx, req, resp, err, started)
+	if err != nil {
+		return text, err
+	}
+	if text == "" && llm.Truncated(resp) {
+		return "", llm.TruncationError(req.MaxTokens)
+	}
+	return text, nil
+}
+
+// streamedText is the assembled reply from a streamed response, and "" when
+// there is none — a nil response, no choice, or a choice with no content.
+func streamedText(resp *llm.ChatResponse) string {
+	if resp == nil || len(resp.Choices) == 0 {
+		return ""
+	}
+	return resp.Choices[0].Message.Content
 }
 
 /*
@@ -233,6 +300,22 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 		case "off":
 			llm.WithoutReasoning(req)
 		}
+	}
+
+	// How much thinking, for the lanes that are having any.
+	//
+	// Separate from the switch above because it is a different question: that
+	// one is whether to think, this is how hard. It applies to every lane the
+	// switch has not turned off, since a lane that forces a small call has
+	// nothing to narrow.
+	//
+	// Asked only where the catalog says the model acts on it. Every provider
+	// accepts the parameter and none errors on it, so sending one blindly gives
+	// a setting that appears to work: qwen3.6-35b-a3b reasoned 1,498 tokens by
+	// default and 1,548 at "low". A control that does nothing is worse than one
+	// that is not offered.
+	if req.Reasoning == nil || req.Reasoning.On() {
+		a.applyReasoningBudget(req, model)
 	}
 
 	// Fix the cap here rather than leaving it to the send, so the number stated
@@ -309,12 +392,8 @@ func stateBudget(req *llm.ChatRequest, cap int) {
 	}
 }
 
-// streamedResponse wraps assembled stream text as a response, so a streamed
-// call traces the same shape as any other. Token counts are absent because a
-// stream does not report them.
-func streamedResponse(text string) *llm.ChatResponse {
-	if text == "" {
-		return nil
-	}
-	return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.Message{Content: text}}}}
-}
+// streamedResponse wrapped assembled stream text as a response, so a streamed
+// call traced the same shape as any other. It is gone: askStream now keeps the
+// provider's own response, which carries the finish reason a reconstruction
+// could not — and that reason is the difference between "empty" and "cut off
+// with nothing to show".

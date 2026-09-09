@@ -190,8 +190,21 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
+		// A cut stream carries the reason in its final frame, which is the only
+		// place a caller learns the reply stopped at the cap rather than because
+		// the model had finished. Without it a stream could only be scripted as
+		// complete, and the case that matters — cut with nothing written, which
+		// is a model that spent its budget reasoning — could not be expressed at
+		// all.
+		if reply.Cut && reply.Content == "" && scripted {
+			content = "" // nothing was written before the cut
+		}
+		if content != "" {
+			fmt.Fprintf(w, "data: %s\n\n", fmt.Sprintf(
+				`{"choices":[{"delta":{"content":%s}}]}`, mustJSON(content)))
+		}
 		fmt.Fprintf(w, "data: %s\n\n", fmt.Sprintf(
-			`{"choices":[{"delta":{"content":%s}}]}`, mustJSON(content)))
+			`{"choices":[{"delta":{},"finish_reason":%s}]}`, mustJSON(finishReason(reply, "stop"))))
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()

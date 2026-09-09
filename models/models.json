@@ -1,5 +1,5 @@
 {
-  "_comment": "kaiju model catalog. thinking = the model reasons BY DEFAULT, which is what kaiju gets since it sends no parameter unless a lane forces one off. A model that merely SUPPORTS reasoning but does not default to it \u2014 every Claude \u2014 is false; on the modern lines it is a SWITCH the request can turn off, not a fixed property, so it no longer excludes a model from a tool-calling lane. tool_call_ok = can emit a small forced tool call (router/executor budgets) with reasoning off where it has one; BENCH-VERIFIED where verified=true (docs/router-model-bench.md), else inferred from the family. roles: which lanes a picker should offer the model for. Refreshed 2026-09-05 against the live OpenRouter catalogue: context_tokens and max_output_tokens are that provider's published figures.",
+  "_comment": "kaiju model catalog. thinking = the model reasons BY DEFAULT, which is what kaiju gets since it sends no parameter unless a lane forces one off. A model that merely SUPPORTS reasoning but does not default to it — every Claude — is false; on the modern lines it is a SWITCH the request can turn off, not a fixed property, so it no longer excludes a model from a tool-calling lane. tool_call_ok = can emit a small forced tool call (router/executor budgets) with reasoning off where it has one; BENCH-VERIFIED where verified=true (docs/router-model-bench.md), else inferred from the family. roles: which lanes a picker should offer the model for. Refreshed 2026-09-05 against the live OpenRouter catalogue: context_tokens and max_output_tokens are that provider's published figures.",
   "version": 3,
   "models": [
     {
@@ -22,7 +22,8 @@
         "answer",
         "planner",
         "vision"
-      ]
+      ],
+      "reasoning_budget": true
     },
     {
       "id": "anthropic/claude-haiku-4.5",
@@ -86,7 +87,8 @@
       "roles": [
         "answer",
         "planner"
-      ]
+      ],
+      "reasoning_budget": true
     },
     {
       "id": "anthropic/claude-sonnet-4.6",
@@ -130,7 +132,8 @@
         "answer",
         "planner",
         "executor"
-      ]
+      ],
+      "reasoning_budget": true
     },
     {
       "id": "deepseek/deepseek-v3.2",
@@ -219,6 +222,11 @@
       "roles": [
         "answer",
         "planner"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
       ]
     },
     {

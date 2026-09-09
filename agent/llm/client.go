@@ -176,18 +176,39 @@ type ProviderRouting struct {
 	Ignore []string `json:"ignore,omitempty"`
 }
 
-// ReasoningControl is the OpenAI-compatible reasoning parameter. Only the off
-// switch is modelled: the lanes that set it want thinking gone, and the lanes
-// that want it leave the field nil and take the provider's default.
+// ReasoningControl is the OpenAI-compatible reasoning parameter.
+//
+// Enabled is a pointer because the three fields are independent and false is a
+// meaningful value. A caller asking only for an effort must not be read as
+// asking for thinking to be OFF, which is what a bare bool would have sent.
+//
+// Effort and MaxTokens are ASKED FOR, not enforced. Measured on the same
+// prompt: deepseek-v4-pro reasoned for 916 tokens by default and 571 at
+// effort=low, so it listens; qwen3.6-35b-a3b returned 1,498 and 1,548, so it
+// does not. Neither honoured max_tokens as a ceiling — 512 asked, 648 and 1,160
+// spent. So this narrows a habit, and the things that actually bound a reply
+// remain the completion cap and the run's clock.
 type ReasoningControl struct {
-	Enabled bool `json:"enabled"`
+	Enabled *bool `json:"enabled,omitempty"`
+	// Effort is "low", "medium" or "high" where the provider takes one.
+	Effort string `json:"effort,omitempty"`
+	// MaxTokens is the reasoning budget asked for, in tokens.
+	MaxTokens int `json:"max_tokens,omitempty"`
+}
+
+// On reports whether this control asks for thinking. Absent means the caller
+// said nothing about it, which is not the same as asking for it off.
+func (r *ReasoningControl) On() bool {
+	return r != nil && r.Enabled != nil && *r.Enabled
 }
 
 // The two values callers use. Shared pointers because nothing mutates them and
 // a fresh allocation per request would say otherwise.
 var (
-	reasoningOff = &ReasoningControl{Enabled: false}
-	reasoningOn  = &ReasoningControl{Enabled: true}
+	reasoningTrue  = true
+	reasoningFalse = false
+	reasoningOff   = &ReasoningControl{Enabled: &reasoningFalse}
+	reasoningOn    = &ReasoningControl{Enabled: &reasoningTrue}
 )
 
 /*
@@ -342,6 +363,16 @@ type ModelLimits func(model string) (contextTokens, maxOutputTokens int)
 // than the long one.
 type ModelThinks func(model string) bool
 
+// ModelReasoning reports what a model does with a reasoning instruction: the
+// effort values it acts on, and whether a budget in tokens is honoured as one.
+//
+// Both are measurements. Every provider ACCEPTS the parameter and none errors
+// on it, so asking the provider tells you nothing — on one prompt
+// deepseek-v4-pro reasoned 916 tokens by default and 571 at "low", while
+// qwen3.6-35b-a3b returned 1,498 and 1,548. An empty list and a false mean the
+// model has not been measured, so nothing is asked of it that it may ignore.
+type ModelReasoning func(model string) (efforts []string, budget bool)
+
 /*
  * Thinks tells a client which of its models reason before answering.
  * desc: Only the request deadline reads it. A thinking model is given
@@ -380,8 +411,8 @@ func (c *Client) timeoutFor(req *ChatRequest) time.Duration {
 	if c == nil || req == nil {
 		return requestTimeout
 	}
-	if req.Reasoning != nil {
-		if req.Reasoning.Enabled {
+	if req.Reasoning != nil && req.Reasoning.Enabled != nil {
+		if req.Reasoning.On() {
 			return thinkingRequestTimeout
 		}
 		return requestTimeout

@@ -20,7 +20,7 @@ func oneTool(params string) *ChatRequest {
 // call; that is the request that gets the wire which actually enforces it.
 func TestAsSchemaRequest_ConvertsAForcedSingleTool(t *testing.T) {
 	req := oneTool(`{"type":"object","properties":{"mode":{"type":"string"},"intent":{"type":"string"}}}`)
-	replaced := asSchemaRequest(req, "openai")
+	replaced := asSchemaRequest(req, "openai", "gpt-4o")
 
 	if replaced == nil {
 		t.Fatal("a forced single-tool call was left on the advisory wire")
@@ -51,7 +51,7 @@ func TestAsSchemaRequest_LeavesRealToolCallingAlone(t *testing.T) {
 		},
 		ToolChoice: "required",
 	}
-	if asSchemaRequest(req, "openai") != nil {
+	if asSchemaRequest(req, "openai", "gpt-4o") != nil {
 		t.Error("a multi-tool call was converted; the model can no longer choose")
 	}
 	if len(req.Tools) != 2 {
@@ -64,7 +64,7 @@ func TestAsSchemaRequest_LeavesRealToolCallingAlone(t *testing.T) {
 func TestAsSchemaRequest_LeavesAnOptionalCallAlone(t *testing.T) {
 	req := oneTool(`{"type":"object","properties":{"a":{"type":"string"}}}`)
 	req.ToolChoice = "auto"
-	if asSchemaRequest(req, "openai") != nil {
+	if asSchemaRequest(req, "openai", "gpt-4o") != nil {
 		t.Error("an optional tool call was forced into a schema")
 	}
 }
@@ -79,7 +79,7 @@ func TestAsSchemaRequest_ConvertsAToolPinnedByName(t *testing.T) {
 	req.Tools[0].Function.Name = "plan"
 	req.ToolChoice = ForceToolChoice("plan")
 
-	replaced := asSchemaRequest(req, "openai")
+	replaced := asSchemaRequest(req, "openai", "gpt-4o")
 	if replaced == nil {
 		t.Fatal("the planner was left on the advisory wire; a pinned call is still a request for one shape")
 	}
@@ -97,7 +97,7 @@ func TestAsSchemaRequest_ConvertsAToolPinnedByName(t *testing.T) {
 func TestAsSchemaRequest_LeavesAPinForAnotherToolAlone(t *testing.T) {
 	req := oneTool(`{"type":"object","properties":{"a":{"type":"string"}}}`)
 	req.ToolChoice = ForceToolChoice("some_other_tool")
-	if asSchemaRequest(req, "openai") != nil {
+	if asSchemaRequest(req, "openai", "gpt-4o") != nil {
 		t.Error("a request pinned to a tool it does not carry was rewritten")
 	}
 }
@@ -105,7 +105,7 @@ func TestAsSchemaRequest_LeavesAPinForAnotherToolAlone(t *testing.T) {
 // Anthropic constrains tool input itself and speaks a different shape.
 func TestAsSchemaRequest_LeavesAnthropicAlone(t *testing.T) {
 	req := oneTool(`{"type":"object","properties":{"a":{"type":"string"}}}`)
-	if asSchemaRequest(req, ProviderAnthropic) != nil {
+	if asSchemaRequest(req, ProviderAnthropic, "claude-sonnet-4.6") != nil {
 		t.Error("an Anthropic request was rewritten")
 	}
 }
@@ -234,7 +234,7 @@ func TestAsToolRequestAgain_RestoresWhatTheCallerWrote(t *testing.T) {
 	req.Tools[0].Function.Name = "plan"
 	req.ToolChoice = ForceToolChoice("plan")
 
-	replaced := asSchemaRequest(req, "openai")
+	replaced := asSchemaRequest(req, "openai", "gpt-4o")
 	if replaced == nil {
 		t.Fatal("the request did not convert, so there is nothing to restore")
 	}
@@ -265,7 +265,7 @@ func TestAsToolReply_RestoresTheFinishReason(t *testing.T) {
 	req := oneTool(`{"type":"object","properties":{"steps":{"type":"array"}}}`)
 	req.Tools[0].Function.Name = "plan"
 	req.ToolChoice = ForceToolChoice("plan")
-	replaced := asSchemaRequest(req, "openai")
+	replaced := asSchemaRequest(req, "openai", "gpt-4o")
 	if replaced == nil {
 		t.Fatal("the request did not convert, so there is no reply to restore")
 	}
@@ -286,7 +286,7 @@ func TestAsToolReply_RestoresTheFinishReason(t *testing.T) {
 // hand a truncated plan to the parser instead.
 func TestAsToolReply_LeavesACutReplyCut(t *testing.T) {
 	req := oneTool(`{"type":"object","properties":{"steps":{"type":"array"}}}`)
-	replaced := asSchemaRequest(req, "openai")
+	replaced := asSchemaRequest(req, "openai", "gpt-4o")
 	resp := &ChatResponse{Choices: []Choice{{
 		Message:      Message{Content: `{"steps":[{"tool":"file_wr`},
 		FinishReason: "length",
@@ -344,5 +344,89 @@ func TestAsToolReply_ACompleteReplyBecomesAToolCall(t *testing.T) {
 	asToolReply(resp, &ToolDef{Type: "function", Function: FunctionDef{Name: "plan"}})
 	if resp.Choices[0].FinishReason != "tool_calls" {
 		t.Errorf("FinishReason = %q, want tool_calls", resp.Choices[0].FinishReason)
+	}
+}
+
+// An Anthropic model keeps the tool wire however it is reached.
+//
+// The provider says who carries a request. It used to say which wire the model
+// wants too, back when a client pointed at api.anthropic.com served Anthropic
+// models and nothing else. An aggregator separates those: OpenRouter carries
+// it, Anthropic answers it, and only the model id knows which — so a guard
+// reading the provider alone put an Anthropic model on the wire it exists to
+// keep it off. Its replies came back as prose, deterministically, six runs of
+// six.
+func TestAsSchemaRequest_AnthropicKeepsTheToolWireThroughAnAggregator(t *testing.T) {
+	for _, model := range []string{
+		"anthropic/claude-opus-4.8",
+		"anthropic/claude-haiku-4.5",
+		"claude-sonnet-4.6",
+	} {
+		req := oneTool(`{"type":"object","properties":{"steps":{"type":"array"}}}`)
+		req.Model = model
+		// Carried by OpenRouter, which is not the Anthropic provider.
+		if replaced := asSchemaRequest(req, ProviderOpenAI, model); replaced != nil {
+			t.Errorf("%s was moved onto the schema wire", model)
+		}
+		if req.ResponseFormat != nil {
+			t.Errorf("%s: a schema request was built", model)
+		}
+		if req.Tools == nil {
+			t.Errorf("%s: the tool call was taken away", model)
+		}
+	}
+}
+
+// Every other model still gets the wire that enforces the shape.
+func TestAsSchemaRequest_OtherModelsStillGetTheSchema(t *testing.T) {
+	for _, model := range []string{"qwen/qwen3.6-35b-a3b", "z-ai/glm-5.3", "gpt-4o"} {
+		req := oneTool(`{"type":"object","properties":{"steps":{"type":"array"}}}`)
+		req.Model = model
+		if replaced := asSchemaRequest(req, ProviderOpenAI, model); replaced == nil {
+			t.Errorf("%s was left on the advisory wire", model)
+		}
+	}
+}
+
+// A reply of sentences, from a call that forced a shape, is a rewrite that was
+// not honoured — whatever the status code said.
+func TestIgnoredTheSchema_ProseFromAForcedShape(t *testing.T) {
+	resp := &ChatResponse{Choices: []Choice{{
+		Message: Message{Content: "# Investigation Notes\n\n## Summary\n- the process was started by…"},
+	}}}
+	if !ignoredTheSchema(resp) {
+		t.Error("prose was accepted as an answer to a forced shape")
+	}
+}
+
+// A provider answering correctly on the schema wire returns the document as
+// content. That must never be mistaken for prose.
+func TestIgnoredTheSchema_JSONContentIsNotProse(t *testing.T) {
+	for _, body := range []string{`{"steps":[]}`, `  {"steps":[]}`, `[{"tool":"bash"}]`} {
+		resp := &ChatResponse{Choices: []Choice{{Message: Message{Content: body}}}}
+		if ignoredTheSchema(resp) {
+			t.Errorf("a correct schema reply was treated as prose: %q", body)
+		}
+	}
+}
+
+// A real tool call is the tool wire working, not a failure.
+func TestIgnoredTheSchema_AToolCallIsNotProse(t *testing.T) {
+	resp := &ChatResponse{Choices: []Choice{{Message: Message{
+		ToolCalls: []ToolCall{{Function: FunctionCall{Name: "plan", Arguments: `{"steps":[]}`}}},
+	}}}}
+	if ignoredTheSchema(resp) {
+		t.Error("a tool call was treated as prose")
+	}
+}
+
+// An empty reply has its own handling and must not be re-sent as this fault.
+func TestIgnoredTheSchema_EmptyIsNotProse(t *testing.T) {
+	resp := &ChatResponse{Choices: []Choice{{Message: Message{Content: ""}}}}
+	if ignoredTheSchema(resp) {
+		t.Error("an empty reply was treated as prose")
+	}
+	if ignoredTheSchema(nil) || ignoredTheSchema(&ChatResponse{}) {
+		t.Error("a missing reply was treated as prose")
 	}
 }

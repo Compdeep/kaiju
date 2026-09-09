@@ -32,7 +32,7 @@ func planLikeRequest() *ChatRequest {
 // schema below cannot carry a free-form object.
 func TestAsSchemaRequest_AnthropicKeepsTheToolWire(t *testing.T) {
 	req := planLikeRequest()
-	if replaced := asSchemaRequest(req, ProviderAnthropic); replaced != nil {
+	if replaced := asSchemaRequest(req, ProviderAnthropic, "claude-sonnet-4.6"); replaced != nil {
 		t.Fatal("an Anthropic model was moved onto the schema wire")
 	}
 	if req.ResponseFormat != nil {
@@ -54,7 +54,7 @@ func TestAsSchemaRequest_AnthropicKeepsTheToolWire(t *testing.T) {
 // nothing.
 func TestAsSchemaRequest_StrictCannotCarryFreeFormParams(t *testing.T) {
 	req := planLikeRequest()
-	if replaced := asSchemaRequest(req, ProviderOpenAI); replaced == nil {
+	if replaced := asSchemaRequest(req, ProviderOpenAI, "gpt-4o"); replaced == nil {
 		t.Fatal("the request was not converted, so there is no schema to inspect")
 	}
 	if !req.ResponseFormat.JSONSchema.Strict {

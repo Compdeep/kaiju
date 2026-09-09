@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -602,7 +603,14 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 	// A stage asking for one shape gets the wire that enforces it, and gets its
 	// reply back in the shape it asked for. Nothing above this knows — see
 	// structured.go for what this buys and what it was measured against.
-	replaced := asSchemaRequest(req, c.provider)
+	// The model as it WILL be sent: the request's own, or the client's default
+	// that completeOpenAI would otherwise fill in later. Resolved here because
+	// the wire depends on it — same order Complete resolves it in below.
+	effModel := req.Model
+	if effModel == "" {
+		effModel = c.model
+	}
+	replaced := asSchemaRequest(req, c.provider, effModel)
 
 	var resp *ChatResponse
 	var err error
@@ -615,6 +623,17 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 		// wrote it and send it once more: the rewrite buys enforcement, and it
 		// must never cost a stage the ability to run at all.
 		if replaced != nil && rejectsSchemas(err) {
+			asToolRequestAgain(req, replaced)
+			replaced = nil
+			resp, err = c.completeOpenAI(ctx, req)
+		} else if replaced != nil && err == nil && ignoredTheSchema(resp) {
+			// The other way a rewrite fails: no error, and prose where the
+			// document should be. Nothing above can tell that from a model
+			// choosing to answer in sentences, and the stage that forced a
+			// shape then reports having been answered conversationally — which
+			// is a run ending with no result and nothing saying why.
+			log.Printf("[llm] %s answered %q in prose on the schema wire — asking again as a tool call",
+				effModel, replaced.Function.Name)
 			asToolRequestAgain(req, replaced)
 			replaced = nil
 			resp, err = c.completeOpenAI(ctx, req)

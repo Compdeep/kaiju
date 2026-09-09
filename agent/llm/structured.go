@@ -93,10 +93,44 @@ func asksForOneShape(req *ChatRequest) bool {
  * param: provider - which API this is going to.
  * return: the tool that was replaced, or nil when nothing was changed.
  */
-func asSchemaRequest(req *ChatRequest, provider string) *ToolDef {
+/*
+ * speaksAnthropic reports whether the model behind a request is Anthropic's,
+ * whoever is carrying the request.
+ * desc: The provider says who serves a call. It used to say which wire the
+ *       model wants too, back when those were the same fact — a client pointed
+ *       at api.anthropic.com served Anthropic models and nothing else.
+ *
+ *       An aggregator separates them. OpenRouter serves the request and
+ *       Anthropic answers it, and only the model id knows which. The guard
+ *       below is keyed on the provider, so an Anthropic model reached that way
+ *       was put on the wire the guard exists to keep it off — and its replies
+ *       came back as prose, deterministically, six times out of six.
+ *
+ *       Matched on the id's vendor prefix, which every id on that route carries
+ *       ("anthropic/claude-opus-4.8"), and on "claude" for a deployment that
+ *       names the model without one.
+ * param: model - the model the request will run on.
+ * return: true when it is Anthropic's, however it is reached.
+ */
+func speaksAnthropic(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "anthropic/") || strings.Contains(m, "claude")
+}
+
+func asSchemaRequest(req *ChatRequest, provider, model string) *ToolDef {
 	// Anthropic constrains tool input on its own and speaks a different shape —
-	// see completeAnthropic. Nothing to rewrite there.
+	// see completeAnthropic. Nothing to rewrite there, and that holds however
+	// the request reaches it: the provider names the carrier, the model names
+	// the wire.
+	//
+	// model is passed in rather than read off the request because the request
+	// may not carry one yet — completeOpenAI fills it from the client's default
+	// afterwards, so a caller relying on that default would look like a model
+	// with no name here.
 	if provider == ProviderAnthropic || !asksForOneShape(req) {
+		return nil
+	}
+	if speaksAnthropic(model) {
 		return nil
 	}
 	tool := req.Tools[0]
@@ -260,6 +294,45 @@ func asToolRequestAgain(req *ChatRequest, tool *ToolDef) {
 	req.ResponseFormat = nil
 	req.Tools = []ToolDef{*tool}
 	req.ToolChoice = ForceToolChoice(tool.Function.Name)
+}
+
+/*
+ * ignoredTheSchema reports a reply that came back as prose from a call that
+ * forced a shape.
+ * desc: The rewrite is meant to be enforced. A provider that cannot enforce it
+ *       usually says so with a 400 — rejectsSchemas reads that, and the caller
+ *       puts the request back as a tool call and sends it again.
+ *
+ *       Not every provider says so. An Anthropic model reached through an
+ *       aggregator that emulates json_schema answered 200 with markdown, six
+ *       times out of six on the same request. Nothing errored, so the retry
+ *       never fired, and the prose travelled on as a successful reply — the
+ *       executive read no plan in it, reported a conversational answer, and the
+ *       run ended with no result at all.
+ *
+ *       So the test is the reply, not the status: a stage that forced one shape
+ *       and got sentences did not get what it asked for, whoever says otherwise.
+ *
+ *       Deliberately narrow. Only a reply with no tool call AND content that
+ *       does not begin as JSON counts — a provider answering correctly on the
+ *       schema wire returns the document as content, and that must not be
+ *       mistaken for prose.
+ * param: resp - what came back.
+ * return: true when the shape was asked for and not honoured.
+ */
+func ignoredTheSchema(resp *ChatResponse) bool {
+	if resp == nil || len(resp.Choices) == 0 {
+		return false
+	}
+	c := resp.Choices[0]
+	if len(c.Message.ToolCalls) > 0 {
+		return false
+	}
+	body := strings.TrimSpace(c.Message.Content)
+	if body == "" {
+		return false // an empty reply is its own fault, and has its own handling
+	}
+	return !strings.HasPrefix(body, "{") && !strings.HasPrefix(body, "[")
 }
 
 // rejectsSchemas reports whether an error is the provider saying this model has

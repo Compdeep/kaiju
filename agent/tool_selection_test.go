@@ -18,7 +18,7 @@ import (
 // work has run and cannot know what the task will turn out to need.
 func TestRelevantTools_RanksWithoutRemoving(t *testing.T) {
 	a := agentWithTools(t)
-	got := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "raise a ticket for the customer")
+	got, _ := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "raise a ticket for the customer")
 
 	if len(got) != len(a.registry.List()) {
 		t.Errorf("ranking dropped tools: %d of %d (%v)", len(got), len(a.registry.List()), got)
@@ -30,7 +30,7 @@ func TestRelevantTools_RanksWithoutRemoving(t *testing.T) {
 // passes nothing has made a mistake this must not turn into an empty toolbox.
 func TestRelevantTools_EmptyObjectiveStillReturnsTools(t *testing.T) {
 	a := agentWithTools(t)
-	got := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "")
+	got, _ := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "")
 	if len(got) == 0 {
 		t.Fatal("an empty objective emptied the toolbox")
 	}
@@ -52,7 +52,7 @@ func TestRelevantTools_ShellLeads(t *testing.T) {
 	}
 	a := &Agent{registry: reg}
 
-	got := a.relevantTools(context.Background(), nil, Trigger{}, "read a web page about something")
+	got, _ := a.relevantTools(context.Background(), nil, Trigger{}, "read a web page about something")
 	if len(got) == 0 || got[0] != shellToolName {
 		t.Errorf("the shell did not lead: %v", got)
 	}
@@ -67,7 +67,7 @@ func TestRelevantTools_ShellLeads(t *testing.T) {
 // A registry with no shell is returned as it was ranked.
 func TestRelevantTools_NoShellToPin(t *testing.T) {
 	a := agentWithTools(t)
-	got := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "anything")
+	got, _ := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "anything")
 	if len(got) != len(a.registry.List()) {
 		t.Errorf("a registry without a shell lost tools: %v", got)
 	}
@@ -76,7 +76,7 @@ func TestRelevantTools_NoShellToPin(t *testing.T) {
 // Ranking says what is RELEVANT, never what is PERMITTED. A human-only tool
 // stays withheld from an unattended run however highly it ranked.
 func TestRelevantTools_RankingCannotGrantAccess(t *testing.T) {
-	got := agentWithTools(t).relevantTools(context.Background(), nil,
+	got, _ := agentWithTools(t).relevantTools(context.Background(), nil,
 		Trigger{Type: "event", ExecutionMode: "autonomous"}, "raise a ticket")
 
 	if has(got, "raise_ticket") {
@@ -191,14 +191,64 @@ func TestRelevantTools_ReplanRanksOnWhatIsNowMissing(t *testing.T) {
 	}
 	trigger := chatTrigger("read the customer's rows out of the database")
 
-	first := a.relevantTools(context.Background(), nil, trigger, a.objective(trigger, nil))
+	first, _ := a.relevantTools(context.Background(), nil, trigger, a.objective(trigger, nil))
 	if first[0] != "list_records" {
 		t.Fatalf("the first plan ranked wrongly: %v", first)
 	}
 
-	replan := a.relevantTools(context.Background(), nil, trigger,
+	replan, _ := a.relevantTools(context.Background(), nil, trigger,
 		a.objective(trigger, nil, "\n\n## Re-plan\nReflector says the next move is: open a support ticket for a person to work on."))
 	if replan[0] != "raise_ticket" {
 		t.Errorf("the re-plan did not rank on what was now missing: %v", replan)
+	}
+}
+
+// The narrowing is written down whether or not it narrowed.
+//
+// Six steps stand between the registry and the planner's prompt and only one
+// removes a tool for being irrelevant. The other five leave the list alone in
+// the ordinary case, so a planner shown everything looks the same as one shown
+// a chosen everything — and the difference is the whole answer when a run is
+// being read back. Each step reports its counts and its reason.
+func TestRelevantTools_RecordsHowTheListWasNarrowed(t *testing.T) {
+	a := agentWithTools(t)
+	_, narrowing := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "list some records")
+
+	if len(narrowing) == 0 {
+		t.Fatal("nothing was recorded, so a run cannot say why the planner saw what it saw")
+	}
+	joined := strings.Join(narrowing, " | ")
+	for _, want := range []string{"rank", "shell-first", "unattended", "scope", "categories", "fit-budget"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("step %q is missing from the record: %s", want, joined)
+		}
+	}
+	// Every entry says what it did, in counts.
+	for _, e := range narrowing {
+		if !strings.Contains(e, "->") {
+			t.Errorf("entry %q does not say what it did", e)
+		}
+	}
+}
+
+// A step that changed nothing still says WHY, because "54->54" reads the same
+// for four different reasons and only one of them is the answer.
+func TestRelevantTools_ANoOpStepStillGivesItsReason(t *testing.T) {
+	a := agentWithTools(t)
+	_, narrowing := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "list some records")
+
+	var categories string
+	for _, e := range narrowing {
+		if strings.HasPrefix(e, "categories ") {
+			categories = e
+		}
+	}
+	if categories == "" {
+		t.Fatal("the category step recorded nothing")
+	}
+	// With no graph there is no preflight, so it must say so rather than leave
+	// the reader to infer it from equal counts.
+	if !strings.Contains(categories, "no categories") && !strings.Contains(categories, "below the floor") {
+		t.Errorf("the category step did not say why it did nothing: %q", categories)
 	}
 }

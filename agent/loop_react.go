@@ -58,7 +58,8 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	// nil preflight: the react loop does not run one, so no narrowing applies
 	// and it keeps seeing every tool, exactly as before.
 	// The ReAct loop builds no graph, so nothing tallies what its caps cut.
-	relevant := a.relevantTools(ctx, nil, trigger, a.formatTrigger(trigger))
+	// The ReAct loop keeps no trace, so the narrowing record has nowhere to go.
+	relevant, _ := a.relevantTools(ctx, nil, trigger, a.formatTrigger(trigger))
 	toolDefs := a.registry.ToolDefsForNames(relevant)
 
 	// Build initial messages — no skill guidance injection (same as native planner).

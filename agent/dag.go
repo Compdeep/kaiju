@@ -328,6 +328,19 @@ type NodeInfo struct {
 	// nodes only; every other node type leaves them empty.
 	Tools     []string `json:"tools,omitempty"`
 	Objective string   `json:"objective,omitempty"`
+	// ToolNarrowing is how the registry became that list, step by step.
+	//
+	// Six things stand between the registry and the planner's prompt, and only
+	// one of them removes a tool for being irrelevant. Four leave the list
+	// untouched in the ordinary case and say nothing when they do, so a planner
+	// shown fifty-four of fifty-four looks the same as one shown a chosen
+	// fifty-four — and answering "why did it see them all" meant reading five
+	// functions instead of one line.
+	//
+	// Each entry is "<step> <before>-><after><, why>", recorded whether or not
+	// the step changed anything, because a step that changed nothing IS the
+	// answer most of the time.
+	ToolNarrowing []string `json:"tool_narrowing,omitempty"`
 }
 
 /*

@@ -790,18 +790,39 @@ func (a *Agent) InitEmbeddings(context.Context) error { return nil }
  * param: scope - resolved tool access scope (nil for full access).
  * return: ordered slice of tool names visible to the executive.
  */
-func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger, objective string) []string {
+func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger, objective string) ([]string, []string) {
 	scope := trigger.Scope
 	if objective == "" {
 		objective = a.formatTrigger(trigger)
 	}
 
+	// How the registry becomes the list, step by step.
+	//
+	// Written whether or not a step changes anything: four of the six leave the
+	// list alone in the ordinary case, and a step that changed nothing is the
+	// answer most of the time. Reading "why was the planner shown all of them"
+	// used to mean reading five functions.
+	var narrowing []string
+	step := func(name string, before int, after int, why string) {
+		entry := fmt.Sprintf("%s %d->%d", name, before, after)
+		if why != "" {
+			entry += ", " + why
+		}
+		narrowing = append(narrowing, entry)
+	}
+
 	var base []string
+	ranked := "words"
 	if a.toolIndex != nil {
 		base = a.toolIndex.Rank(ctx, objective)
+		if a.cfg.EmbeddingsEnabled {
+			ranked = "vectors"
+		}
 	} else {
 		base = a.registry.List()
+		ranked = "registry order, no index"
 	}
+	step("rank", len(base), len(base), "ordered by "+ranked)
 
 	// The agent tool is never offered to the executive/planner — that would let
 	// an agent spawn an agent (unbounded recursion). It is reachable only when a
@@ -813,7 +834,9 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 				pruned = append(pruned, n)
 			}
 		}
+		before := len(base)
 		base = pruned
+		step("strip-agent-tool", before, len(base), "")
 	}
 
 	// The shell goes first, whatever the ranking made of it.
@@ -825,12 +848,14 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 	// answer. Ranking answers "what is this task about"; the shell is there for
 	// when the answer to that question turns out to be wrong.
 	base = shellFirst(base)
+	step("shell-first", len(base), len(base), "bash promoted, none removed")
 
 	// A run with nobody watching does not get the tools that exist to be asked
 	// for. A tool says so itself (toolapi.InteractiveOnly); this package only
 	// asks whether anyone is there, which the application states by marking the
 	// run autonomous.
 	if a.unattended(trigger) {
+		before := len(base)
 		kept := base[:0]
 		for _, name := range base {
 			if tool, ok := a.registry.Get(name); ok && toolapi.RequiresHuman(tool) {
@@ -839,12 +864,16 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 			kept = append(kept, name)
 		}
 		base = kept
+		step("unattended", before, len(base), "dropped tools that exist to be asked for")
+	} else {
+		step("unattended", len(base), len(base), "someone is watching, nothing dropped")
 	}
 
 	// Apply scope filtering — tools not in scope are invisible to the executive.
 	// nil scope = full access (CLI local user).
 	// Wildcard "*" in AllowedTools means all tools.
 	if scope != nil && !scope.AllowedTools["*"] {
+		before := len(base)
 		filtered := base[:0]
 		for _, name := range base {
 			if scope.AllowedTools[name] {
@@ -852,28 +881,69 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 			}
 		}
 		base = filtered
+		step("scope", before, len(base), "caller's allowed tools")
+	} else {
+		step("scope", len(base), len(base), "no scope set, all allowed")
 	}
 
 	// Narrowed by what the run is FOR, before it is narrowed by what fits.
+	beforeWork := len(base)
 	base = a.scopeToWork(graph, base)
+	step("categories", beforeWork, len(base), a.scopeToWorkReason(graph, beforeWork))
 
 	// Last, and only here, does the list get shorter for reasons of size. The
 	// planner is shown a signature and a return shape per tool, and that is what
 	// stops fitting once a registry is large. Trimming after the visibility
 	// rules means the budget is spent on tools this run could actually call.
-	return a.fitToolIndex(graph, base)
+	beforeFit := len(base)
+	base = a.fitToolIndex(graph, base)
+	step("fit-budget", beforeFit, len(base), "trimmed from the bottom only if over budget")
+	return base, narrowing
+}
+
+/*
+ * scopeToWorkReason says why the category step did what it did.
+ * desc: The step returns the list unchanged in four different circumstances,
+ *       and which one it was is the whole answer when a planner was shown
+ *       everything. Reported alongside the counts rather than inferred from
+ *       them, because "54->54" is the same number for all four.
+ * param: graph - for the preflight result the step reads.
+ * param: n - how many tools the step was given.
+ * return: a short phrase for the narrowing record.
+ */
+func (a *Agent) scopeToWorkReason(graph *Graph, n int) string {
+	if n <= scopeFloor {
+		return fmt.Sprintf("below the floor of %d, nothing considered", scopeFloor)
+	}
+	if graph == nil || graph.Preflight == nil || len(graph.Preflight.RequiredCategories) == 0 {
+		return "preflight named no categories"
+	}
+	return fmt.Sprintf("categories %v, floor %d keeps the first %d whatever their category",
+		graph.Preflight.RequiredCategories, scopeFloor, scopeFloor)
 }
 
 // scopeFloor is how many of the ranking's best are kept whatever their
-// category, and it is deliberately far above what a plan is known to need.
+// category, and it is deliberately above what a plan is known to need.
 //
-// Measured over twenty-four plans on a large registry: a plan named 15 distinct
-// tools at the median, 21 at p90 and 22 at most. A floor of ten — which is what
-// "show the best handful" sounds like — would have starved half of them. Thirty
-// leaves room for a plan more ambitious than any yet seen, and still removes the
-// twenty-six tools of sixty-five that no plan has ever reached for, which is
-// where the saving actually is.
-const scopeFloor = 30
+// The number is a margin over how WIDE a plan is, which is a fact about the
+// work and not about how many tools happen to be registered. A plan that names
+// three tools needs those three present whether the registry holds fifty or
+// five hundred, so this does not scale with the registry — and scaling it that
+// way would keep most on the large registries where cutting matters most.
+//
+// Thirty came from twenty-four plans on a large registry: 15 distinct tools at
+// the median, 21 at p90, 22 at most. Seventy-eight plans from a narrower application are a
+// different shape entirely — 3 at the median, 6 at p90, 8 at p95, and 9 the
+// widest genuine plan. The only one above ten used 32, and it was a planner
+// repeating itself into the token cap rather than a plan.
+//
+// Twelve is a third over that widest plan and twice p90, and it lets the
+// category filter reach 42 of 54 rather than 24. It relies on the ranking to
+// put a needed tool in the first twelve, which is the trade: a prompt that is
+// too big costs money, and a plan that cannot reach its tool costs the run. So
+// the floor comes down only where the ranking is worth trusting — see
+// EmbeddingsEnabled, without which the ranking is word-matching alone.
+const scopeFloor = 12
 
 /*
  * scopeToWork keeps the tools this run is plausibly for, generously.

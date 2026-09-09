@@ -91,6 +91,17 @@
               <span class="t-objective-label">ranked against</span>
               <span class="t-objective-text">{{ item.node.objective }}</span>
             </div>
+            <!-- How the registry became that list. Every step reports its counts
+                 and its reason, including the steps that changed nothing —
+                 which is the answer most of the time. -->
+            <div v-if="item.node.tool_narrowing && item.node.tool_narrowing.length" class="t-narrowing">
+              <span class="t-narrowing-label">narrowed by</span>
+              <div v-for="(n, ni) in item.node.tool_narrowing" :key="ni" class="t-narrowing-row">
+                <span class="t-narrowing-step">{{ n.split(' ')[0] }}</span>
+                <span class="t-narrowing-counts" :class="{ cut: narrowingCut(n) }">{{ narrowingCounts(n) }}</span>
+                <span class="t-narrowing-why">{{ narrowingWhy(n) }}</span>
+              </div>
+            </div>
           </div>
 
           <div v-if="item.type === 'interject'" class="tl tl-sub" :style="indent(item.depth)">
@@ -484,6 +495,23 @@ function errLabel(t) { return { gate: '\u26D4 GATE', clearance: '\uD83D\uDD12 CL
  */
 function indent(d) { return { paddingLeft: (d || 0) * 13 + 'px' } }
 
+// A narrowing entry is "<step> <before>-><after>[, why]". Split for display so
+// the counts can be coloured when a step actually removed something — four of
+// the six steps normally do not, and telling them apart at a glance is the
+// point of showing this at all.
+function narrowingCounts(entry) {
+  const m = /(\d+)->(\d+)/.exec(entry || '')
+  return m ? `${m[1]} → ${m[2]}` : ''
+}
+function narrowingCut(entry) {
+  const m = /(\d+)->(\d+)/.exec(entry || '')
+  return !!m && m[1] !== m[2]
+}
+function narrowingWhy(entry) {
+  const i = (entry || '').indexOf(', ')
+  return i === -1 ? '' : entry.slice(i + 2)
+}
+
 // ── JSON, coloured ────────────────────────────────────────────────────────────
 // One pass over the text, splitting it into the five things worth telling apart:
 // a key, a string, a number, a literal, and the punctuation between them. Not a
@@ -866,6 +894,35 @@ function parseRCA(result) {
   text-transform: uppercase; letter-spacing: 0.06em; margin-right: 6px;
 }
 .t-objective-text { color: var(--text-secondary); font-size: 10px; line-height: 1.45; }
+
+/* How the registry became the list shown. One row per step, aligned so the
+   counts read as a column — a step that removed nothing is the common case and
+   should be skimmable, not studied. */
+.t-narrowing {
+  margin-top: 6px; padding-top: 5px;
+  border-top: 1px solid var(--border-subtle, rgba(127,127,127,0.2));
+  white-space: normal;
+}
+.t-narrowing-label {
+  color: var(--text-dim); font-size: 9px; font-style: italic;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.t-narrowing-row {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 9.5px; line-height: 1.6;
+}
+.t-narrowing-step {
+  color: var(--text-secondary); font-family: var(--font-mono, monospace);
+  min-width: 96px; flex: none;
+}
+/* Tabular figures so the arrows line up down the column. Dim when a step
+   changed nothing, which is most of them; only a real cut earns the accent. */
+.t-narrowing-counts {
+  color: var(--text-dim); font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums; min-width: 58px; flex: none;
+}
+.t-narrowing-counts.cut { color: var(--accent, #4a9fd4); font-weight: 600; }
+.t-narrowing-why { color: var(--text-dim); font-size: 9px; }
 .t-skill-chip {
   display: inline-block;
   font-size: 9px;

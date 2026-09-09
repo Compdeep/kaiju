@@ -804,6 +804,9 @@ type PlanResult struct {
 	// anyone reading a bad run needs.
 	Tools     []string
 	Objective string
+	// ToolNarrowing is how the registry became Tools — one entry per step,
+	// recorded whether or not the step changed anything. See NodeInfo.
+	ToolNarrowing []string
 }
 
 /*
@@ -1607,11 +1610,12 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// search. A run that needed a tool it had not been shown could not ask for
 	// one, could not be given one, and concluded the work impossible.
 	objective := a.objective(trigger, graph, replanFrame...)
-	relevant := a.relevantTools(ctx, graph, trigger, objective)
+	relevant, narrowing := a.relevantTools(ctx, graph, trigger, objective)
 	// Recorded on whatever plan this call produces — see PlanResult.Tools.
 	defer func() {
 		if planOut != nil {
 			planOut.Tools, planOut.Objective = relevant, objective
+			planOut.ToolNarrowing = narrowing
 		}
 	}()
 	log.Printf("[dag] executive (native) sees %d tools: %v", len(relevant), relevant)

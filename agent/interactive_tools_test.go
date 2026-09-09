@@ -63,7 +63,7 @@ func has(list []string, name string) bool {
 }
 
 func TestInteractiveToolsAreOfferedWhenSomeoneIsThere(t *testing.T) {
-	got := agentWithTools(t).relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "list some records")
+	got, _ := agentWithTools(t).relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "list some records")
 	if !has(got, "raise_ticket") {
 		t.Errorf("a human-only tool was withheld from an attended run: %v", got)
 	}
@@ -73,7 +73,7 @@ func TestInteractiveToolsAreOfferedWhenSomeoneIsThere(t *testing.T) {
 }
 
 func TestInteractiveToolsAreWithheldFromUnattendedRuns(t *testing.T) {
-	got := agentWithTools(t).relevantTools(context.Background(), nil,
+	got, _ := agentWithTools(t).relevantTools(context.Background(), nil,
 		Trigger{Type: "event", ExecutionMode: "autonomous"}, "list some records")
 	if has(got, "raise_ticket") {
 		t.Errorf("a human-only tool was offered to an unattended run: %v", got)

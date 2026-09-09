@@ -871,7 +871,16 @@ var executivePlanSchemaTemplate = `{
 		},
 		"steps": {
 			"type": "array",
-			"items": {
+			"items": %s
+		}
+	},
+	"required": ["steps"]
+}`
+
+// executivePlanStepOpen is steps.items when the tools cannot be described: one
+// object whose params accepts anything. Every model tested filled it with
+// something invented, so it is the fallback and not the intent.
+var executivePlanStepOpen = `{
 				"type": "object",
 				"required": ["tool", "params", "tag"],
 				"properties": {
@@ -881,11 +890,114 @@ var executivePlanSchemaTemplate = `{
 					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Rarely needed. A step that references another already depends on it, and the wiring is done for you. Use this ONLY to order two steps that pass no data between them."},
 					"tag":        {"type": "string", "description": "This step's name, unique within the plan: letters, digits, _ or - with no spaces. Other steps reference this step by it."}
 				}
-			}
+			}`
+
+/*
+ * planStepBranches describes each tool's own parameters, so the shape the
+ * planner is held to knows what a step of that tool looks like.
+ * desc: params cannot be described in one object. It carries whatever the
+ *       NAMED tool's signature needs, and the tool is chosen by a sibling
+ *       field — so a single object can only say "anything", and that is what it
+ *       said. Under a strict wire "anything" is a contradiction: the shape
+ *       binds, and the shape is unbounded.
+ *
+ *       Each model resolved that differently, and all three resolved it wrong.
+ *       Given one real objective and today's schema, qwen invented ps, readlink
+ *       and cat as tool names with step_number and analysis_points as
+ *       parameters; GLM invented shell; Anthropic honoured the schema literally,
+ *       supplied no properties because none were declared, and answered
+ *       process_info() with empty params — which is the production failure,
+ *       "required parameter command is not supplied", three corrections and a
+ *       dead run.
+ *
+ *       A branch per candidate tool answers it. The model picks one by writing
+ *       the tool's name, and that same act binds params to that tool's
+ *       parameters, in the same object — so there is no moment where the choice
+ *       is known and the shape is not. Measured on the same objective: real
+ *       tools with real parameters on every model tried.
+ *
+ *       Built from the tools this run was SHOWN, not the registry. A branch for
+ *       a tool the planner cannot see would let it name one it was not offered.
+ *
+ *       Falls back to the open object when the list is empty or nothing can be
+ *       described, because a planner with an unconstrained params is worse than
+ *       one with no plan schema at all — and the second is what refusing here
+ *       would produce.
+ * param: names - the tools shown to the planner, in the order shown.
+ * param: registry - where each tool's own parameter schema comes from.
+ * return: the JSON for steps.items, and false when no branch could be built.
+ */
+func planStepBranches(names []string, registry *toolapi.Registry) (json.RawMessage, bool) {
+	if len(names) == 0 || registry == nil {
+		return nil, false
+	}
+	var branches []json.RawMessage
+	for _, name := range names {
+		tool, ok := registry.Get(name)
+		if !ok {
+			continue
 		}
-	},
-	"required": ["steps"]
-}`
+		params := tool.Parameters()
+		if !describesSomething(params) {
+			continue // nothing to describe; it keeps the open shape below
+		}
+		nameJSON, err := json.Marshal(name)
+		if err != nil {
+			continue
+		}
+		branches = append(branches, json.RawMessage(fmt.Sprintf(`{
+			"type": "object",
+			"required": ["tool", "params", "tag"],
+			"properties": {
+				"tool": {"const": %s},
+				"params": %s,
+				"tag": {"type": "string", "description": "This step's name, unique within the plan: letters, digits, _ or - with no spaces. Other steps reference this step by it."},
+				"type": {"type": "string", "enum": ["tool","compute"]},
+				"depends_on": {"type": "array", "items": {"type": "integer"}}
+			}
+		}`, nameJSON, params)))
+	}
+	if len(branches) == 0 {
+		return nil, false
+	}
+	joined := make([]string, len(branches))
+	for i, b := range branches {
+		joined[i] = string(b)
+	}
+	return json.RawMessage("{\"anyOf\": [" + strings.Join(joined, ",") + "]}"), true
+}
+
+/*
+ * describesSomething reports whether a parameter schema constrains anything.
+ * desc: An empty object is valid JSON and valid JSON Schema, and it means "any
+ *       value". A branch carrying one is exactly as permissive as the open
+ *       shape it was meant to replace — the same fault, written per tool, and
+ *       harder to see because the schema now looks specific.
+ *
+ *       A tool that genuinely takes nothing says so differently: properties {}
+ *       with additionalProperties false, which forbids every key. That is a
+ *       real constraint and is kept.
+ *
+ *       So the test is whether the document says anything at all about shape,
+ *       not whether it parses.
+ * param: raw - the tool's declared parameter schema.
+ * return: true when it constrains the value.
+ */
+func describesSomething(raw json.RawMessage) bool {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return false
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return false // not an object: nothing here describes a params object
+	}
+	for _, k := range []string{"type", "properties", "required", "additionalProperties", "anyOf", "oneOf", "$ref"} {
+		if _, ok := doc[k]; ok {
+			return true
+		}
+	}
+	return false
+}
 
 /*
  * executivePlanSchema returns the shape a plan takes.
@@ -898,7 +1010,7 @@ var executivePlanSchemaTemplate = `{
  *       an operator added is a value the model may return.
  * return: the schema, in the shape the provider takes.
  */
-func (a *Agent) executivePlanSchema() llm.ToolDef {
+func (a *Agent) executivePlanSchema(shown ...[]string) llm.ToolDef {
 	// Build the intent enum dynamically from the registry. If the registry
 	// hasn't been loaded the enum is omitted entirely — Go has no knowledge
 	// of specific intent names to fall back on.
@@ -906,8 +1018,26 @@ func (a *Agent) executivePlanSchema() llm.ToolDef {
 	if a.intentRegistry != nil {
 		names = a.intentRegistry.AllowedNames(-1)
 	}
+	// An empty list marshals to null, and "enum": null is not a schema — a
+	// provider enforcing the document rejects the whole request, which is a
+	// planner that cannot run at all rather than one missing an enum. Send the
+	// empty list instead: it says the same thing and parses.
+	if names == nil {
+		names = []string{}
+	}
 	enumJSON, _ := json.Marshal(names)
-	schema := json.RawMessage(fmt.Sprintf(executivePlanSchemaTemplate, string(enumJSON)))
+
+	// A step is described per tool when the tools are known, and left open when
+	// they are not — see planStepBranches for what the open shape costs. Passed
+	// variadically so a caller with nothing to say (the schema check, which
+	// asks only what shape a stage declares) needs no list.
+	step := json.RawMessage(executivePlanStepOpen)
+	if len(shown) > 0 {
+		if described, ok := planStepBranches(shown[0], a.registry); ok {
+			step = described
+		}
+	}
+	schema := json.RawMessage(fmt.Sprintf(executivePlanSchemaTemplate, string(enumJSON), string(step)))
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -1717,7 +1847,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	})
 	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
 		Messages: messages,
-		Tools:    []llm.ToolDef{a.executivePlanSchema()},
+		Tools:    []llm.ToolDef{a.executivePlanSchema(relevant)},
 		// PIN the model to `plan` — not just "call some tool". A weak reasoning
 		// model, seeing web_search/web_fetch named all over the guidance, otherwise
 		// emits a direct tool call instead of wrapping it in a plan; that hard-fails
@@ -1796,7 +1926,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		})
 		retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_shorter"), &llm.ChatRequest{
 			Messages:    shorter,
-			Tools:       []llm.ToolDef{a.executivePlanSchema()},
+			Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 			ToolChoice:  llm.ForceToolChoice("plan"),
 			Temperature: a.cfg.Temperature,
 			MaxTokens:   a.planMaxTokens(ctx),
@@ -1844,7 +1974,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			})
 			retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_wrap"), &llm.ChatRequest{
 				Messages:    again,
-				Tools:       []llm.ToolDef{a.executivePlanSchema()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: a.cfg.Temperature,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -1874,7 +2004,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			)
 			retryResp, retryErr := a.completeHeavyChecked(retracing(ctx, "plan_reparse"), &llm.ChatRequest{
 				Messages:    retryMessages,
-				Tools:       []llm.ToolDef{a.executivePlanSchema()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -1947,7 +2077,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			)
 			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
 				Messages:    replanMessages,
-				Tools:       []llm.ToolDef{a.executivePlanSchema()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -2070,7 +2200,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			)
 			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
 				Messages:    replanMessages,
-				Tools:       []llm.ToolDef{a.executivePlanSchema()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.planMaxTokens(ctx),

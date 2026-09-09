@@ -937,13 +937,27 @@ func (a *Agent) scopeToWorkReason(graph *Graph, n int) string {
 // widest genuine plan. The only one above ten used 32, and it was a planner
 // repeating itself into the token cap rather than a plan.
 //
-// Twelve is a third over that widest plan and twice p90, and it lets the
-// category filter reach 42 of 54 rather than 24. It relies on the ranking to
-// put a needed tool in the first twelve, which is the trade: a prompt that is
-// too big costs money, and a plan that cannot reach its tool costs the run. So
-// the floor comes down only where the ranking is worth trusting — see
-// EmbeddingsEnabled, without which the ranking is word-matching alone.
-const scopeFloor = 12
+// Twelve was tried and put back, and why is the useful part.
+//
+// The argument for it was plan WIDTH: three tools at the median, nine in the
+// widest. But the floor does not protect a count, it protects the tools at the
+// TOP of the ranking — so what matters is whether a needed tool is ranked
+// there, which is a different question and had never been measured.
+//
+// Measured since, on seventy real plans, against the tools each one actually
+// used: every used tool inside the first twelve for 11 of them, inside twenty
+// for 22, inside thirty for 44. A floor of twelve would leave fifty-nine of
+// seventy plans with a used tool outside the protected band, and the misses are
+// ordinary — get_connections at 51, process_list at 49, get_process at 35 on an
+// investigation that needed it.
+//
+// The reason is visible in the objectives. They describe a situation, and tool
+// descriptions state a capability; a vector search over those two is weak, and
+// that does not improve by lowering what depends on it. So thirty stands until
+// the ranking is measured against the objective string the planner really uses
+// (a.objective, not the plan's own answer text, which is what was measured
+// here) and found to be better than this.
+const scopeFloor = 30
 
 /*
  * scopeToWork keeps the tools this run is plausibly for, generously.

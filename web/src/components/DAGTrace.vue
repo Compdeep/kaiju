@@ -104,6 +104,24 @@
             </div>
           </div>
 
+          <div v-if="item.type === 'decided'" class="tl tl-sub tl-clickable"
+               :style="indent(item.depth)" @click="toggleResult('decided-' + item.node.id)">
+            <span class="t-branch">└</span>
+            <span class="t-sub-label">decided</span>
+            <span class="t-sub-val">{{ item.node.decided.length }}</span>
+            <span class="t-sub-label">things</span>
+            <span v-if="!expandedResults['decided-' + item.node.id]" class="t-tool-peek">{{ decidedPeek(item.node.decided) }}</span>
+            <span class="t-expand">{{ expandedResults['decided-' + item.node.id] ? '−' : '+' }}</span>
+          </div>
+
+          <div v-if="item.type === 'decided' && expandedResults['decided-' + item.node.id]"
+               class="tl-result executive" :style="indent(item.depth + 1)">
+            <div v-for="(d, di) in item.node.decided" :key="di" class="t-decided-row">
+              <span class="t-decided-label">{{ d.split(': ')[0] }}</span>
+              <span class="t-decided-value">{{ d.slice(d.indexOf(': ') + 2) }}</span>
+            </div>
+          </div>
+
           <div v-if="item.type === 'interject'" class="tl tl-sub" :style="indent(item.depth)">
             <span class="t-branch">└</span>
             <span class="t-interject-label">you asked</span>
@@ -423,6 +441,11 @@ function pushNode(items, n, depth, last) {
   if (n.tools && n.tools.length) {
     items.push({ type: 'tools', key: `tl-${n.id}`, node: n, depth: sub })
   }
+  // What a classifying node settled — the categories among them, which is what
+  // the tool index is then narrowed by. See NodeInfo.Decided.
+  if (n.decided && n.decided.length) {
+    items.push({ type: 'decided', key: `dc-${n.id}`, node: n, depth: sub })
+  }
   // Interjection nodes show the operator's original query directly under the
   // node, so it reads as "you asked X → decided Y" instead of the query
   // blurring into the reflection decision.
@@ -499,6 +522,14 @@ function indent(d) { return { paddingLeft: (d || 0) * 13 + 'px' } }
 // the counts can be coloured when a step actually removed something — four of
 // the six steps normally do not, and telling them apart at a glance is the
 // point of showing this at all.
+// The categories first when there are any — they are what the tool index is
+// narrowed by, and the reason anyone opens this row.
+function decidedPeek(decided) {
+  const cats = (decided || []).find(d => d.startsWith('categories: '))
+  if (cats) return cats
+  return (decided || []).slice(0, 2).join(' · ')
+}
+
 function narrowingCounts(entry) {
   const m = /(\d+)->(\d+)/.exec(entry || '')
   return m ? `${m[1]} → ${m[2]}` : ''
@@ -923,6 +954,19 @@ function parseRCA(result) {
 }
 .t-narrowing-counts.cut { color: var(--accent, #4a9fd4); font-weight: 600; }
 .t-narrowing-why { color: var(--text-dim); font-size: 9px; }
+
+/* What a classifying node settled. Label column narrow and dim, value normal —
+   read down the values, glance left only when one surprises you. */
+.t-decided-row {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 10px; line-height: 1.65;
+}
+.t-decided-label {
+  color: var(--text-dim); font-size: 9px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  min-width: 92px; flex: none;
+}
+.t-decided-value { color: var(--text-secondary); white-space: normal; }
 .t-skill-chip {
   display: inline-block;
   font-size: 9px;

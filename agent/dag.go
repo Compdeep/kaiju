@@ -341,6 +341,14 @@ type NodeInfo struct {
 	// the step changed anything, because a step that changed nothing IS the
 	// answer most of the time.
 	ToolNarrowing []string `json:"tool_narrowing,omitempty"`
+	// Decided is what a classifying node settled, as "<label>: <value>" lines.
+	//
+	// Set on preflight nodes. Its one-line summary says the lane, the rank and
+	// the guidance, which is what a reader needs first — but the categories it
+	// chose are what the tool index is then narrowed by, and they were visible
+	// nowhere. A run showing every tool and a run showing a chosen few looked
+	// the same, and the reason was in a field nothing rendered.
+	Decided []string `json:"decided,omitempty"`
 }
 
 /*

@@ -234,6 +234,49 @@ func (a *Agent) aggregatorWillWriteTheAnswer(trigger Trigger, graph *Graph) bool
  * param: pf - the result. Nil gives an empty line rather than a panic.
  * return: the line, or "".
  */
+/*
+ * preflightDecided is what preflight settled, for the trace to show on demand.
+ * desc: The summary line carries the lane, the rank and the guidance, which is
+ *       what a reader wants first. This is the rest — and the categories in
+ *       particular, because the tool index is narrowed by them and a reader
+ *       asking why a planner saw fifty-four tools had nowhere to look.
+ *
+ *       An empty value is left out rather than rendered blank, except the
+ *       categories: "none named" is the answer to a question people ask, and
+ *       an absent line reads as one nobody thought about.
+ * param: pf - the result. Nil gives nothing rather than a panic.
+ * return: "<label>: <value>" lines, or nil.
+ */
+func preflightDecided(pf *PreflightResult) []string {
+	if pf == nil {
+		return nil
+	}
+	var out []string
+	add := func(label, value string) {
+		if value != "" {
+			out = append(out, label+": "+value)
+		}
+	}
+	add("mode", pf.Mode)
+	add("intent", pf.Intent.String())
+	if len(pf.RequiredCategories) > 0 {
+		add("categories", strings.Join(pf.RequiredCategories, ", "))
+	} else {
+		add("categories", "none named")
+	}
+	if len(pf.Skills) > 0 {
+		add("guidance", strings.Join(pf.Skills, ", "))
+	}
+	add("compute", pf.ComputeMode)
+	if pf.NeedsSynthesis {
+		add("synthesis", "required — the run must end with a written answer")
+	}
+	if len(pf.LackingContext) > 0 {
+		add("lacking context", strings.Join(pf.LackingContext, ", "))
+	}
+	return out
+}
+
 func preflightSummary(pf *PreflightResult) string {
 	if pf == nil {
 		return ""
@@ -399,7 +442,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "preflight", Node: &NodeInfo{
 			ID: "preflight", Type: "preflight", State: "resolved", Tag: "reading the request",
-			Summary: preflightSummary(pf)}})
+			Summary: preflightSummary(pf), Decided: preflightDecided(pf)}})
 
 		// Per-investigation preflight + card list live on the Graph, not the
 		// Agent, so concurrent investigations never clobber each other's state.

@@ -252,3 +252,40 @@ func TestRelevantTools_ANoOpStepStillGivesItsReason(t *testing.T) {
 		t.Errorf("the category step did not say why it did nothing: %q", categories)
 	}
 }
+
+// Preflight's decisions reach the trace, the categories among them.
+//
+// The summary line says the lane, the rank and the guidance. The categories are
+// what the tool index is then narrowed by, and they were on no line at all — so
+// a run that showed every tool and one that showed a chosen few read the same,
+// and the reason was in a field nothing rendered.
+func TestPreflightDecided_CarriesWhatNarrowsTheToolIndex(t *testing.T) {
+	pf := &PreflightResult{
+		Mode:               "agent",
+		RequiredCategories: []string{"process", "network"},
+		Skills:             []string{"security"},
+		ComputeMode:        "shallow",
+		NeedsSynthesis:     true,
+	}
+	got := strings.Join(preflightDecided(pf), " | ")
+	for _, want := range []string{"categories: process, network", "mode: agent", "guidance: security", "compute: shallow", "synthesis"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q missing from: %s", want, got)
+		}
+	}
+}
+
+// Naming none is an answer, not an absence: it is the first thing anyone asks
+// when a planner was shown everything.
+func TestPreflightDecided_SaysWhenNoCategoriesWereNamed(t *testing.T) {
+	got := strings.Join(preflightDecided(&PreflightResult{Mode: "agent"}), " | ")
+	if !strings.Contains(got, "categories: none named") {
+		t.Errorf("an empty category list left no line: %s", got)
+	}
+}
+
+func TestPreflightDecided_NilIsNotAPanic(t *testing.T) {
+	if got := preflightDecided(nil); got != nil {
+		t.Errorf("want nil, got %v", got)
+	}
+}

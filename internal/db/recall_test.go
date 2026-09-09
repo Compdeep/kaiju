@@ -20,7 +20,7 @@ func recallDB(t *testing.T) *DB {
 		t.Fatal(err)
 	}
 	say := func(role, text string) {
-		if err := d.AddMessage("s1", role, text); err != nil {
+		if _, err := d.AddMessage("s1", role, text); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -254,11 +254,17 @@ func (m *Manager) LoadChatHistory(ctx context.Context, sessionID string, maxMess
  * param: sessionID - the session to store the message in
  * param: role - the message role (user, assistant, system)
  * param: content - the message content
- * return: any error from the database write
+ * return: the stored message's id, and any error from the database write.
+ *
+ *         Most callers store and move on, and a call statement may drop both.
+ *         The one that cannot is the run that produces a DAG trace: the trace
+ *         belongs to THAT message, and saying so by id is the only way to be
+ *         sure a later write does not land on it.
  */
-func (m *Manager) StoreMessage(sessionID, role, content string) error {
-	if err := m.db.AddMessage(sessionID, role, content); err != nil {
-		return fmt.Errorf("memory: store message: %w", err)
+func (m *Manager) StoreMessage(sessionID, role, content string) (int64, error) {
+	id, err := m.db.AddMessage(sessionID, role, content)
+	if err != nil {
+		return 0, fmt.Errorf("memory: store message: %w", err)
 	}
 
 	// Auto-title: set session title from first user message
@@ -272,7 +278,7 @@ func (m *Manager) StoreMessage(sessionID, role, content string) error {
 			m.db.UpdateSessionTitle(sessionID, title)
 		}
 	}
-	return nil
+	return id, nil
 }
 
 /*

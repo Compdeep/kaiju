@@ -22,7 +22,7 @@ func newSearchDB(t *testing.T, session string, texts ...string) *DB {
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		if err := d.AddMessage(session, role, text); err != nil {
+		if _, err := d.AddMessage(session, role, text); err != nil {
 			t.Fatalf("add message %d: %v", i, err)
 		}
 	}
@@ -72,7 +72,7 @@ func TestSearchMessagesScopedToASession(t *testing.T) {
 	if err := d.CreateSession("s2", "test", "tester", ""); err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
-	if err := d.AddMessage("s2", "user", "another whale entirely"); err != nil {
+	if _, err := d.AddMessage("s2", "user", "another whale entirely"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 

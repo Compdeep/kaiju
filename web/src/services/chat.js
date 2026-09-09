@@ -312,6 +312,11 @@ export async function send(text) {
   const stopController = new AbortController()
   stopControllers.set(sendingSid, stopController)
 
+  // The message the server stored this run's answer as, read off the execute
+  // response. The finally block posts the trace against it; zero means the
+  // answer was never stored, and there is nothing for a trace to belong to.
+  let savedMessageID = 0
+
   try {
     const data = await api.post('/api/v1/execute', {
       query: queryWithAttachments,
@@ -326,11 +331,17 @@ export async function send(text) {
     }, { signal: stopController.signal, timeoutMs: 0 })  // no auto-abort — Stop button + server 30-min wall clock only
     const msg = {
       role: 'assistant',
+      // The row the server stored this answer as. A trace posted below says
+      // which message it describes, and without it the server saved onto
+      // whichever assistant message was newest — a different one as soon as
+      // anything else had answered.
+      id: data.message_id || 0,
       content: data.error ? `[error] ${data.error}` : (data.verdict || dag.streamingVerdict || 'No response'),
     }
     if (dag.nodes.length) msg.trace = [...dag.nodes]
     if (data.gaps && data.gaps.length) msg.gaps = data.gaps
     sendingSess.messages.push(msg)
+    savedMessageID = msg.id
     dag.streamingVerdict = ''
   } catch (err) {
     // A manual Stop is not an error: keep whatever streamed so far and mark it
@@ -349,8 +360,17 @@ export async function send(text) {
     sendingSess.loading = false
     dag.interjectMode = false
     dag.interjections = []
-    if (sendingSid && dag.nodes.length) {
-      try { await api.post(`/api/v1/sessions/${sendingSid}/trace`, { nodes: dag.nodes }) } catch {}
+    // Only when the server told us which message this run's answer became. The
+    // trace belongs to that one; posting without it asked the server to guess,
+    // and its guess was "the newest assistant message" — which is how a
+    // one-node interjection replaced the trace of the run that did the work.
+    if (sendingSid && savedMessageID && dag.nodes.length) {
+      try {
+        await api.post(`/api/v1/sessions/${sendingSid}/trace`, {
+          message_id: savedMessageID,
+          nodes: dag.nodes,
+        })
+      } catch {}
     }
     // Trace is now persisted. Clear the in-flight flag *after* /trace
     // so any late-arriving SSE 'done' for this session sees us still

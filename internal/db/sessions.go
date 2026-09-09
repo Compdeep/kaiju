@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -117,19 +118,34 @@ func (d *DB) DeleteSession(id string) error {
  * param: sessionID - the session to add the message to
  * param: role - message role ("user", "assistant", or "system")
  * param: content - the message text content
- * return: error on insertion or update failure, nil on success
+ * return: the new message's id, and error on insertion or update failure.
+ *
+ *         The id is how a caller says WHICH message a later write belongs to.
+ *         A DAG trace used to be saved against "the newest assistant message in
+ *         this session", which is not the same thing: a second run, or the
+ *         browser posting its own copy, landed on a row that had nothing to do
+ *         with it — and created_at is whole seconds, so two messages in one
+ *         second have no order at all.
  */
-func (d *DB) AddMessage(sessionID, role, content string) error {
+func (d *DB) AddMessage(sessionID, role, content string) (int64, error) {
 	now := time.Now().Unix()
-	_, err := d.conn.Exec(
+	res, err := d.conn.Exec(
 		`INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)`,
 		sessionID, role, content, now,
 	)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, err = d.conn.Exec(`UPDATE sessions SET updated_at = ? WHERE id = ?`, now, sessionID)
-	return err
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := d.conn.Exec(`UPDATE sessions SET updated_at = ? WHERE id = ?`, now, sessionID); err != nil {
+		// The message is written and has an id. A failed timestamp bump is worth
+		// reporting but does not unwrite it, so the id goes back with the error.
+		return id, err
+	}
+	return id, nil
 }
 
 // ReconcileDanglingTurns writes a terminal assistant reply to every session whose
@@ -161,7 +177,7 @@ func (d *DB) ReconcileDanglingTurns() (int, error) {
 	rows.Close()
 	n := 0
 	for _, sid := range sids {
-		if err := d.AddMessage(sid, "assistant", note); err == nil {
+		if _, err := d.AddMessage(sid, "assistant", note); err == nil {
 			n++
 		}
 	}
@@ -415,20 +431,53 @@ func (d *DB) GetFullTranscript(sessionID string, limit, offset int) ([]Message, 
 	return msgs, rows.Err()
 }
 
+// ErrNoSuchMessage is returned when a trace names a message that is not in the
+// session it claims. Distinguishable so a caller can say the write went nowhere
+// rather than logging a silent success.
+var ErrNoSuchMessage = errors.New("no such message in this session")
+
 /*
- * SetDAGTrace saves a DAG trace on the most recent assistant message in a session.
- * desc: Updates the dag_trace column on the latest assistant-role message for the given session
- * param: sessionID - the session containing the target message
- * param: trace - JSON string of the DAG execution trace
- * return: error on query failure, nil on success
+ * SetDAGTrace saves a DAG trace on the message it belongs to.
+ * desc: The message is named, not looked up. It used to be "the newest
+ *       assistant message in this session":
+ *
+ *         UPDATE ... WHERE id = (SELECT id ... ORDER BY created_at DESC LIMIT 1)
+ *
+ *       which is a different message as soon as anything else answers. Two
+ *       writers race for that row — the run saves its own snapshot, and the
+ *       browser posts the nodes it watched — so the last to arrive won and
+ *       landed wherever the newest message happened to be. A one-node
+ *       interjection replaced the trace of the run that had done the work, and
+ *       created_at is whole seconds, so two messages in one second had no order
+ *       to break the tie with.
+ *
+ *       sessionID stays as a guard rather than a lookup: an id belonging to
+ *       another conversation matches nothing and is reported, instead of
+ *       writing one session's trace onto another's message.
+ * param: messageID - the message the trace was produced for.
+ * param: sessionID - the session it must belong to.
+ * param: trace - JSON string of the DAG execution trace.
+ * return: ErrNoSuchMessage when the pair names no row; otherwise the query's error.
  */
-func (d *DB) SetDAGTrace(sessionID, trace string) error {
-	_, err := d.conn.Exec(
-		`UPDATE messages SET dag_trace = ? WHERE id = (
-			SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at DESC LIMIT 1
-		)`, trace, sessionID,
+func (d *DB) SetDAGTrace(messageID int64, sessionID, trace string) error {
+	res, err := d.conn.Exec(
+		`UPDATE messages SET dag_trace = ? WHERE id = ? AND session_id = ?`,
+		trace, messageID, sessionID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// A write that matched nothing is the failure this function exists to make
+	// visible: the trace has not been saved, and saying so is what stops it
+	// being discovered later as an empty panel.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNoSuchMessage
+	}
+	return nil
 }
 
 /*

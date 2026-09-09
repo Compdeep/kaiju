@@ -546,9 +546,16 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		outcome = emptyOutcomeNotice
 	}
 
-	// Store assistant response and auto-compact
+	// Store assistant response and auto-compact. The id is kept: the trace below
+	// belongs to THIS message, and naming it is what stops a later write — a
+	// second run, or the browser posting its own copy — landing on it.
+	var answerID int64
 	if memMgr != nil {
-		memMgr.StoreMessage(req.SessionID, "assistant", outcome)
+		id, serr := memMgr.StoreMessage(req.SessionID, "assistant", outcome)
+		if serr != nil {
+			log.Printf("[api] failed to store assistant message (%s): %v", trigger.ID, serr)
+		}
+		answerID = id
 		if shouldCompact, _ := memMgr.ShouldCompact(req.SessionID); shouldCompact {
 			go memMgr.Compact(context.Background(), req.SessionID)
 		}
@@ -560,9 +567,13 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// SSE/return race can leave it empty at save time, so the trace silently
 	// vanished on reload. Saving the run's own final snapshot here makes the
 	// trace reliably survive regardless of client state.
-	if a.db != nil && req.SessionID != "" && len(result.Trace) > 0 {
-		if err := a.db.SetDAGTrace(req.SessionID, string(result.Trace)); err != nil {
-			log.Printf("[api] failed to persist DAG trace (%s): %v", trigger.ID, err)
+	//
+	// answerID of zero means the message was not stored, so there is nothing to
+	// attach to. Writing it anyway is what the old "newest assistant message"
+	// lookup did, and it is how one run's trace reached another run's answer.
+	if a.db != nil && req.SessionID != "" && answerID != 0 && len(result.Trace) > 0 {
+		if err := a.db.SetDAGTrace(answerID, req.SessionID, string(result.Trace)); err != nil {
+			log.Printf("[api] failed to persist DAG trace (%s, message %d): %v", trigger.ID, answerID, err)
 		}
 	}
 
@@ -574,6 +585,9 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 
 	resp := execResult(ctx, trigger.ID, outcome, result.Nodes, result.LLMCalls, tokens.RunTotal(ctx), elapsed)
 	resp.Actions = apiActions
+	// So a client posting the nodes it watched can say which message they are
+	// the trace of. Only this branch produces a DAG, so only this branch has one.
+	resp.MessageID = answerID
 	jsonResponse(w, resp, http.StatusOK)
 }
 

@@ -17,7 +17,7 @@ func seedConversation(t *testing.T, d *DB, sessionID string, n int) {
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		if err := d.AddMessage(sessionID, role, string(rune('a'+i%26))+"-message"); err != nil {
+		if _, err := d.AddMessage(sessionID, role, string(rune('a'+i%26))+"-message"); err != nil {
 			t.Fatalf("add message: %v", err)
 		}
 	}
@@ -140,7 +140,7 @@ func TestMarkCompacted_DoesNotReassignWhatIsAlreadyCompacted(t *testing.T) {
 func seedMore(t *testing.T, d *DB, sessionID string, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		if err := d.AddMessage(sessionID, "user", "later-message"); err != nil {
+		if _, err := d.AddMessage(sessionID, "user", "later-message"); err != nil {
 			t.Fatalf("add message: %v", err)
 		}
 	}

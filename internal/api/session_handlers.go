@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -224,10 +225,14 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 }
 
 /*
- * handleSaveTrace saves a DAG execution trace to the most recent assistant message in a session.
- * desc: Verifies session ownership, then persists the provided DAG node trace JSON.
+ * handleSaveTrace saves a DAG execution trace onto the message it describes.
+ * desc: Verifies session ownership, then persists the trace against the message
+ *       the body names. The name is required: without one this saved onto the
+ *       newest assistant message in the session, which is a different message as
+ *       soon as anything else has answered.
  * param: w - HTTP response writer
- * param: r - HTTP request with JWT claims in context, an id path parameter, and a JSON body with nodes
+ * param: r - HTTP request with JWT claims in context, an id path parameter, and a
+ *            JSON body of {message_id, nodes}
  */
 func (a *API) handleSaveTrace(w http.ResponseWriter, r *http.Request) {
 	claims, ok := gateway.ClaimsFromContext(r.Context())
@@ -246,15 +251,35 @@ func (a *API) handleSaveTrace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Nodes json.RawMessage `json:"nodes"`
+		MessageID int64           `json:"message_id"`
+		Nodes     json.RawMessage `json:"nodes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 
-	// Save trace on the most recent assistant message in this session
-	if err := a.db.SetDAGTrace(id, string(req.Nodes)); err != nil {
+	// The message is named or the trace is refused.
+	//
+	// Without it this saved onto "the newest assistant message in the session",
+	// which is a different message as soon as anything else has answered — a
+	// second run, or a one-node interjection, replacing the trace of the run
+	// that did the work. A client that does not know which message it watched
+	// cannot say, and a guess is what caused that.
+	//
+	// The id comes back on the execute response as message_id.
+	if req.MessageID == 0 {
+		jsonError(w, "message_id is required: a trace belongs to one message", http.StatusBadRequest)
+		return
+	}
+
+	// The session came from the path and was checked against the caller above,
+	// so a message id from another conversation matches no row here.
+	if err := a.db.SetDAGTrace(req.MessageID, id, string(req.Nodes)); err != nil {
+		if errors.Is(err, db.ErrNoSuchMessage) {
+			jsonError(w, "no such message in this session", http.StatusNotFound)
+			return
+		}
 		jsonError(w, "failed to save trace", http.StatusInternalServerError)
 		return
 	}

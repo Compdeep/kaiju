@@ -57,15 +57,26 @@ type ExecuteResponse struct {
 	// the caller did not grant. Nothing ran. A client showing this can offer to
 	// run it again at the rank named, which is why the rank is here as a number
 	// and not only inside the outcome's wording.
-	IntentGap  *IntentGapInfo `json:"intent_gap,omitempty"`
-	DAGID      string         `json:"dag_id,omitempty"`
-	Nodes      int            `json:"nodes"`
-	LLMCalls   int            `json:"llm_calls"`
-	Tokens     int64          `json:"tokens"`     // total LLM tokens for THIS request (non-streamed calls; see llm.CompleteStream)
-	TokensIn   int64          `json:"tokens_in"`  // prompt tokens (for host-side cost split)
-	TokensOut  int64          `json:"tokens_out"` // completion tokens
-	DurationMs int64          `json:"duration_ms"`
-	Error      string         `json:"error,omitempty"`
+	IntentGap *IntentGapInfo `json:"intent_gap,omitempty"`
+	DAGID     string         `json:"dag_id,omitempty"`
+	// MessageID is the assistant message this run's answer was stored as.
+	//
+	// A client that watched the run live holds nodes the server's own snapshot
+	// may not, and posts them back to /sessions/{id}/trace. It has to say which
+	// message they describe: naming none meant "the newest assistant message",
+	// which is a different one as soon as anything else answers.
+	//
+	// Zero when the answer was not stored — a run with no session, or a store
+	// that failed. A client seeing zero has nothing to attach to and must not
+	// post a trace.
+	MessageID  int64  `json:"message_id,omitempty"`
+	Nodes      int    `json:"nodes"`
+	LLMCalls   int    `json:"llm_calls"`
+	Tokens     int64  `json:"tokens"`     // total LLM tokens for THIS request (non-streamed calls; see llm.CompleteStream)
+	TokensIn   int64  `json:"tokens_in"`  // prompt tokens (for host-side cost split)
+	TokensOut  int64  `json:"tokens_out"` // completion tokens
+	DurationMs int64  `json:"duration_ms"`
+	Error      string `json:"error,omitempty"`
 }
 
 // IntentGapInfo is a run refused for want of permission: what it needed, what

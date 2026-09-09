@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -54,7 +55,20 @@ func compileToolIndex(registry *toolapi.Registry, names []string) string {
 	var sb strings.Builder
 	sb.WriteString("## Tools (* = required param, name: a|b|c = the only values that parameter takes)\n")
 	sb.WriteString("The parameters shown for each tool are the only ones available — use only the parameters listed.\n")
-	for _, name := range names {
+	// Listed in a fixed order, not the order they were ranked in.
+	//
+	// A provider caches a prompt as far as the first character that differs
+	// from the last one, and relevance order differs with the question: two
+	// planning calls a quarter of an hour apart listed check_containers and
+	// service_control in the same position. The index is the largest block in
+	// the prompt, so ranking it re-charged all of it every call.
+	//
+	// Nothing reads the order. Ranking decides what is SHOWN, and it shows
+	// everything in scope — so the sequence carried no meaning the model or the
+	// trace could act on, only a cost.
+	ordered := append([]string(nil), names...)
+	sort.Strings(ordered)
+	for _, name := range ordered {
 		sb.WriteString(toolIndexEntry(registry, name))
 	}
 	return sb.String()

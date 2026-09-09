@@ -431,15 +431,40 @@ func (g *ContextGate) Get(ctx context.Context, req ContextRequest) (*ContextResp
 	}
 	resp.Trimmed = trimmedNames
 
-	// Inject "Current time:" into the first non-empty source so every LLM
-	// that receives gate context knows "now" for timestamp comparison.
+	// "Current time:" goes into any source but the tool index.
+	//
+	// It is the one line here that differs on every call, and a provider reuses
+	// its work on a prompt only as far as the first character that differs from
+	// the one before. The tool index is the largest block any stage sends —
+	// 39,564 characters of a 61,399-character planner prompt, measured — and it
+	// does not change between calls. Leading it with a clock put the break at
+	// character 17,242, so the index and everything below it was re-read, and
+	// charged for, every time: 28% of that prompt could cache.
+	//
+	// Any other returned source will do, and the ones there are — a worklog, a
+	// workspace tree — change anyway, so a clock in front of them costs nothing
+	// that was not already lost. The index is the only one worth protecting.
+	//
+	// It still goes there when nothing else is returned: a stage that asked for
+	// the index alone would otherwise be told the date by nobody, and a model
+	// guessing at "now" writes a plausible wrong date into a parameter.
 	if !req.OmitCurrentTime {
 		tsLine := "Current time: " + time.Now().UTC().Format(llmTimeFormat) + "\n\n"
+		target := ""
 		for _, spec := range req.ReturnSources {
-			if v := resp.Sources[spec.Name]; v != "" {
-				resp.Sources[spec.Name] = tsLine + v
+			if resp.Sources[spec.Name] == "" {
+				continue
+			}
+			if target == "" {
+				target = spec.Name // the fallback: first non-empty, whatever it is
+			}
+			if spec.Name != SourceToolIndex {
+				target = spec.Name
 				break
 			}
+		}
+		if target != "" {
+			resp.Sources[target] = tsLine + resp.Sources[target]
 		}
 	}
 

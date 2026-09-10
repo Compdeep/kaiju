@@ -1256,6 +1256,16 @@ const unknownModelWindowChars = 16000
 // unknownModelReplyTokens is the same idea for the reply.
 const unknownModelReplyTokens = 1024
 
+// maxExtractReplyTokens is the most an extraction is given to write, and the
+// most that is reserved for it when working out how much page fits in a pass.
+//
+// An extraction quotes what it found; it does not rewrite the page. Eight
+// thousand tokens is a long answer for that and far more than any observed
+// reply. What it replaces is the model's published output ceiling, which is
+// what the model COULD return — on qwen3.6-35b-a3b that is 235,929 tokens
+// against a 262,144-token window, so reserving it left nothing for the page.
+const maxExtractReplyTokens = 8000
+
 // Characters per token, for turning a model's token window into a number of
 // characters of page. Deliberately pessimistic: over-estimating the tokens in a
 // piece of text makes the piece smaller and the reading slower, while
@@ -1272,6 +1282,19 @@ const charsPerToken = 3
  *
  *       Both fall back to this file's one unknown-model number when the client
  *       carries no limits or does not know the model.
+ *
+ *       The reply's room is what THIS reply is allowed, not the largest the
+ *       model could ever produce. Those are different numbers and using the
+ *       second one broke the first: qwen3.6-35b-a3b publishes a 262,144-token
+ *       window and a 235,929-token output ceiling, so subtracting the ceiling
+ *       from the window left −99, the guard below caught it, and a model with a
+ *       quarter-million-token window read pages 16,000 characters at a time.
+ *
+ *       That is not a small waste. Every extra pass is another model call, made
+ *       in sequence, and web_research does this for four sources at once — so
+ *       one research step on 60,000-character pages cost sixteen calls where
+ *       four would do. None of them appear in a run's trace, because this reads
+ *       through the client directly, so it looks like the run is doing nothing.
  * param: promptChars - how much the instruction itself takes.
  * return: characters of page per pass, and tokens of reply.
  */
@@ -1281,9 +1304,15 @@ func (w *WebFetch) readingWindow(promptChars int) (perPassChars, replyTokens int
 		ctxTokens, outTokens = w.executor.WindowFor()
 	}
 
+	// What this reply is allowed. A model's published ceiling is what it COULD
+	// return, and on several models it is most of the window — so it is capped
+	// to what an extraction actually needs before any arithmetic uses it.
 	replyTokens = outTokens
 	if replyTokens <= 0 {
+		// Nothing published. Keep what this tool did before it could ask.
 		replyTokens = unknownModelReplyTokens
+	} else if replyTokens > maxExtractReplyTokens {
+		replyTokens = maxExtractReplyTokens
 	}
 
 	if ctxTokens <= 0 {

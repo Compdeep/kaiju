@@ -150,3 +150,49 @@ func TestFetch_KeepsMoreThanExtractionNeeds(t *testing.T) {
 		t.Errorf("kept %d bytes of a %d-byte page — the read cap is still cutting it", len(kept), len(big))
 	}
 }
+
+// A model whose published output ceiling is most of its own window still reads
+// a long page in one pass.
+//
+// The ceiling is what a model COULD return, not what this reply is allowed, and
+// reserving the ceiling left nothing for the page. qwen3.6-35b-a3b publishes a
+// 262,144-token window and a 235,929-token ceiling: subtracting one from the
+// other gave −99, the guard for "the model would not say" caught it, and a
+// model with a quarter-million-token window read pages 16,000 characters at a
+// time.
+//
+// Every extra pass is another model call, made in sequence, and web_research
+// does this for four sources at once. One research step over 60,000-character
+// pages cost sixteen calls where four would do — and none of them appear in a
+// run's trace, so it reads as the run doing nothing.
+func TestReadingWindow_AHugeOutputCeilingDoesNotEatTheWindow(t *testing.T) {
+	w := &WebFetch{executor: clientWithWindow(262_144, 235_929), limits: FetchLimits{}.resolve()}
+
+	pass, reply := w.readingWindow(400)
+
+	if pass == unknownModelWindowChars {
+		t.Fatalf("a 262k-token window fell back to the unknown-model number (%d), "+
+			"which is what subtracting the output ceiling used to cause", pass)
+	}
+	if pass < 200_000 {
+		t.Errorf("pass = %d characters; a quarter-million-token window should read "+
+			"a long page whole", pass)
+	}
+	if reply > maxExtractReplyTokens {
+		t.Errorf("reply = %d, above the %d an extraction is given — the model's own "+
+			"ceiling is not what this reply is allowed", reply, maxExtractReplyTokens)
+	}
+	// A page that used to take four sequential calls now takes one.
+	if got := len(splitForReading(strings.Repeat("word ", 12_000), pass)); got != 1 {
+		t.Errorf("a 60,000-character page split into %d pieces, want 1", got)
+	}
+}
+
+// A model whose ceiling is modest keeps it: the cap is an upper bound, not a
+// replacement.
+func TestReadingWindow_AModestCeilingIsKept(t *testing.T) {
+	w := &WebFetch{executor: clientWithWindow(128_000, 4_096), limits: FetchLimits{}.resolve()}
+	if _, reply := w.readingWindow(400); reply != 4_096 {
+		t.Errorf("reply = %d, want the model's own 4096", reply)
+	}
+}

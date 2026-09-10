@@ -894,12 +894,12 @@ var executivePlanSchemaTemplate = `{
 // because none were given, and calling process_info() with empty params.
 var executivePlanStepOpen = `{
 				"type": "object",
-				"required": ["tool", "params", "tag"],
+				"required": ["tool", "params", "tag", "depends_on"],
 				"properties": {
 					"type":       {"type": "string", "enum": ["tool","compute"], "description": "Node type: tool (default) or compute (LLM code generation)"},
 					"tool":       {"type": "string", "description": "Tool name from the Tools list"},
 					"params":     {"type": "object", "additionalProperties": true, "description": "The tool's input parameters, as an object whose keys are the parameter names in that tool's signature. ALWAYS populate for tools with required params marked *; write {} when the tool takes none. A value is either something you have — {\"command\": \"ls -la\"} — or a REFERENCE to an earlier step's output, written ${step.<that step's tag>.<dot-path into its output>}. Example: a fetch reading the first result of a search tagged find_docs is {\"url\": \"${step.find_docs.results.0.url}\"}."},
-					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Rarely needed. A step that references another already depends on it, and the wiring is done for you. Use this ONLY to order two steps that pass no data between them."},
+					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Which earlier steps must finish before this one starts, by position. Write [] when none do. Using another step's OUTPUT needs nothing here — the ${step.tag.field} reference orders it for you. This is for the other kind: a step that must simply happen first. A command that writes a file, then a step that reads that file; an install, then the thing that needs it. Those pass no value between them, so nothing else can see the order."},
 					"tag":        {"type": "string", "description": "This step's name, unique within the plan: letters, digits, _ or - with no spaces. Other steps reference this step by it."}
 				}
 			}
@@ -2510,6 +2510,13 @@ func (a *Agent) parseExecutiveOutput(raw string, isAuto bool) ([]PlanStep, gates
 			return str, false
 		})
 	}
+
+	// The dependency the planner did not declare, taken from the params.
+	//
+	// After the reference repair above, so a step already ordered by a
+	// ${step.N} reference is not ordered twice, and before cycle detection, so
+	// an edge added here is checked by the same pass that checks the model's.
+	linkPathDeps(steps)
 
 	// Cycle detection — a DAG must be acyclic. Detect and break any cycles.
 	// Uses topological sort; steps involved in cycles have their offending deps removed.

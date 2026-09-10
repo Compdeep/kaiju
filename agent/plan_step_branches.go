@@ -61,13 +61,13 @@ func planStepBranches(names []string, registry *toolapi.Registry) (json.RawMessa
 		}
 		branches = append(branches, fmt.Sprintf(`{
 			"type": "object",
-			"required": ["tool", "params", "tag"],
+			"required": ["tool", "params", "tag", "depends_on"],
 			"properties": {
 				"tool": {"const": %s},
 				"params": %s,
 				"tag": {"type": "string", "description": "This step's name, unique within the plan: letters, digits, _ or - with no spaces. Other steps reference this step by it."},
 				"type": {"type": "string", "enum": ["tool","compute"]},
-				"depends_on": {"type": "array", "items": {"type": "integer"}}
+				"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Which earlier steps must finish before this one starts, by position. Write [] when none do. Using another step's OUTPUT needs nothing here — the ${step.tag.field} reference orders it for you. This is for the other kind: a step that must simply happen first."}
 			}
 		}`, nameJSON, params))
 	}

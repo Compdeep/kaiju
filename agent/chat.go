@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"log"
+	"strings"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
@@ -130,30 +132,71 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		llm.AttachImages(messages, t.Images)
 	}
 
-	// One completion, streamed token-by-token to the frontend as outcome events
-	// (the same channel the agent lane streams on). With no tools in play, no
-	// tool-call JSON can ever reach the stream.
-	res := ChatResult{LLMCalls: 1}
-	resp, err := a.askStreamResp(ctx, Answer, &llm.ChatRequest{
+	stream := func(chunk, kind string) {
+		if t.SessionID == "" {
+			return
+		}
+		evType := "outcome"
+		if kind == "reasoning" {
+			evType = "reasoning"
+		}
+		a.broadcastDAGEvent(nil, DAGEvent{Type: evType, Text: chunk, SessionID: t.SessionID})
+	}
+
+	req := &llm.ChatRequest{
 		Model:       t.Model,
 		Messages:    messages,
 		Temperature: 0.7,
 		MaxTokens:   a.replyBudget(replyBriefBudget),
-	}, func(chunk, kind string) {
-		if t.SessionID != "" {
-			evType := "outcome"
-			if kind == "reasoning" {
-				evType = "reasoning"
-			}
-			a.broadcastDAGEvent(nil, DAGEvent{Type: evType, Text: chunk, SessionID: t.SessionID})
-		}
-	})
+	}
+
+	// A clock on the call, for the same reason the planner has one: max_tokens
+	// bounds the reply, not the wait. A model that reasons before answering can
+	// spend an unbounded amount of time doing it, and this is the lane where a
+	// person is sitting and waiting.
+	//
+	// The deadline is not a failure to report. What comes back is a cut-off
+	// reply, and the recovery below reads it — cancelling would throw away the
+	// thinking already paid for.
+	chatCtx, cancelChat := context.WithTimeout(ctx, a.roundBudget(t.Base))
+	defer cancelChat()
+
+	// One completion, streamed token-by-token to the frontend as outcome events
+	// (the same channel the agent lane streams on). With no tools in play, no
+	// tool-call JSON can ever reach the stream.
+	res := ChatResult{LLMCalls: 1}
+	resp, err := a.askStreamResp(chatCtx, Answer, req, stream)
 	if err != nil {
 		return res, err
 	}
 	res.Tokens += resp.Usage.TotalTokens
 	if len(resp.Choices) > 0 {
 		res.Content = resp.Choices[0].Message.Content
+	}
+
+	// The whole budget went on reasoning and the reply never started.
+	//
+	// This lane had no answer for that. It returned the empty string, and the
+	// caller turned it into "the request finished but produced no answer —
+	// nothing usable was gathered", which describes a failure to gather and
+	// tells the reader to rephrase. Neither was true: one live turn spent 112
+	// seconds and all 4,096 tokens thinking, and rephrasing would not have
+	// helped.
+	//
+	// So the same recovery the planner has: re-ask with thinking off, handing
+	// back the reasoning already produced. A model that cannot think has
+	// nothing to spend the budget on but the answer.
+	if len(resp.Choices) > 0 && strings.TrimSpace(res.Content) == "" && nothingVisible(resp.Choices[0]) {
+		log.Printf("[chat] %s returned nothing — the reply budget went on reasoning; re-asking with thinking off", t.Model)
+		recovered, rerr := a.recoverDeadThought(retracing(ctx, "chat_recover_thought"), Answer, req, resp)
+		if rerr == nil && len(recovered.Choices) > 0 {
+			res.LLMCalls++
+			res.Tokens += recovered.Usage.TotalTokens
+			res.Content = recovered.Choices[0].Message.Content
+			// The first attempt streamed nothing a reader could use, so the
+			// recovered answer has to reach them the way the first would have.
+			stream(res.Content, "outcome")
+		}
 	}
 	return res, nil
 }

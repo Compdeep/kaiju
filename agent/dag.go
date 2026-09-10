@@ -320,6 +320,9 @@ type NodeInfo struct {
 	TokensIn   int             `json:"tokens_in,omitempty"`   // prompt tokens
 	TokensOut  int             `json:"tokens_out,omitempty"`  // completion tokens
 	StartedAt  string          `json:"started_at,omitempty"`  // "Apr 13 11:30:05"
+	// StartedMs is the same instant in epoch milliseconds. StartedAt is to the
+	// second, and a run's length is one of these subtracted from another.
+	StartedMs int64 `json:"started_ms,omitempty"`
 	// OperatorMessage is the human's injected query on an interjection node.
 	OperatorMessage string `json:"operator_message,omitempty"`
 
@@ -522,6 +525,7 @@ func (g *Graph) nodeInfo(n *Node) *NodeInfo {
 		}
 		info.Ms = end.Sub(n.StartedAt).Milliseconds()
 		info.StartedAt = n.StartedAt.UTC().Format(llmTimeFormat)
+		info.StartedMs = n.StartedAt.UnixMilli()
 	}
 	if n.Result != "" {
 		info.ResultSize = len(n.Result)

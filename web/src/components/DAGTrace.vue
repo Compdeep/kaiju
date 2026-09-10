@@ -159,7 +159,7 @@
           <span class="t-rail footer"></span>
           <span class="t-dim">{{ nodes.length }} nodes</span>
           <span class="t-dim">·</span>
-          <span class="t-dim">{{ totalMs }}ms</span>
+          <span class="t-dim" title="wall clock: the last stage to finish, minus the first to start">{{ fmtDuration(totalMs) }}</span>
           <span v-if="totalTokens > 0" class="t-dim">·</span>
           <span v-if="totalTokens > 0" class="t-dim">{{ fmtTokens(totalTokens) }} tokens ({{ fmtTokens(totalTokensIn) }}in · {{ fmtTokens(totalTokensOut) }}out)</span>
           <span class="t-dim">·</span>
@@ -341,10 +341,44 @@ const statusLabel = computed(() => {
 })
 
 /**
- * desc: Compute the total execution time in milliseconds across all nodes
- * @returns {number} Sum of all node ms values
+ * desc: How long the run took: the last stage to finish, minus the first to
+ *       start.
+ *
+ *       This was the sum of every node's ms, which is not a run's length. Nodes
+ *       run in concurrent batches — five searches starting together and
+ *       finishing in 2.4 seconds were counted as 8.5 — and the stages that call
+ *       a model carried no duration at all. One run showed 54 seconds against a
+ *       real 313.
+ *
+ *       Falls back to the sum for a trace saved before nodes carried a start,
+ *       which is wrong in the old way rather than showing nothing.
+ * @returns {number} Elapsed milliseconds for the run
  */
-const totalMs = computed(() => props.nodes.reduce((s, n) => s + (n.ms || 0), 0))
+const totalMs = computed(() => {
+  let first = Infinity
+  let last = -Infinity
+  for (const n of props.nodes) {
+    if (!n.started_ms) continue
+    first = Math.min(first, n.started_ms)
+    last = Math.max(last, n.started_ms + (n.ms || 0))
+  }
+  if (first === Infinity) return props.nodes.reduce((s, n) => s + (n.ms || 0), 0)
+  return Math.max(0, last - first)
+})
+
+/**
+ * desc: A duration a person reads at a glance. A run that took five minutes
+ *       should not be reported as 313144ms.
+ * @param {number} ms
+ * @returns {string}
+ */
+function fmtDuration(ms) {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60000)
+  const s = Math.round((ms % 60000) / 1000)
+  return s ? `${m}m ${s}s` : `${m}m`
+}
 
 /**
  * desc: Compute the number of failed nodes in the trace

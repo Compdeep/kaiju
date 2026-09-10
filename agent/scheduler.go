@@ -162,6 +162,27 @@ func triggerIsAwaited(t Trigger) bool {
 	return false
 }
 
+// stamp puts a stage's span on the node about to be broadcast.
+//
+// preflight, the executive and the aggregator are not graph nodes — they are
+// broadcast as bare labels — so nothing gave them a start or a duration, and
+// the trace's own total counted the slowest work in a run as zero. One run
+// showed 54 seconds for 313: 112 of the missing seconds ran before the first
+// timed node existed, and 12 after the last one finished.
+//
+// Only the two bookends are stamped. A run's length is the last finish minus
+// the first start, and preflight and the aggregator are those two; everything
+// between them is covered without needing a clock of its own.
+func stamp(at time.Time, n *NodeInfo) *NodeInfo {
+	if n == nil || at.IsZero() {
+		return n
+	}
+	n.Ms = time.Since(at).Milliseconds()
+	n.StartedAt = at.UTC().Format(llmTimeFormat)
+	n.StartedMs = at.UnixMilli()
+	return n
+}
+
 /*
  * isModelStage reports whether a node's failure could be OUR credentials being
  * rejected.
@@ -423,6 +444,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		// interface simply sits there. This says what is happening while it is
 		// happening; the node is synthetic, like the executive's and the
 		// aggregator's.
+		preflightAt := time.Now()
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "preflight", Node: &NodeInfo{
 			ID: "preflight", Type: "preflight", State: "running", Tag: "reading the request"}})
 
@@ -460,9 +482,9 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		// the trigger is, rather than inside the validation of the model's reply.
 		a.reconcileComputeIntent(trigger, pf)
 
-		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "preflight", Node: &NodeInfo{
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "preflight", Node: stamp(preflightAt, &NodeInfo{
 			ID: "preflight", Type: "preflight", State: "resolved", Tag: "reading the request",
-			Summary: preflightSummary(pf), Decided: preflightDecided(pf)}})
+			Summary: preflightSummary(pf), Decided: preflightDecided(pf)})})
 
 		// Per-investigation preflight + card list live on the Graph, not the
 		// Agent, so concurrent investigations never clobber each other's state.
@@ -2626,6 +2648,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		}
 		log.Printf("[dag] aggregator using %s model (agg_mode=%d)", aggLane, aggMode)
 
+		aggregatorAt := time.Now()
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "running", Tag: "synthesize"}})
 
 		var aggErr error
@@ -2648,7 +2671,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 			Intent: resolvedIntent, History: trigger.History,
 		})
 		if ansErr != nil {
-			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: ansErr.Error()}})
+			a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: stamp(aggregatorAt, &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: ansErr.Error()})})
 			a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: "aggregator_failed", Status: "failed"})
 			return nil, fmt.Errorf("supplied answer failed: %w", ansErr)
 		}
@@ -2661,12 +2684,12 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		} else {
 			outcome, actions, aggErr = a.runAggregator(answerCtx, trigger, graph, resolvedIntent, trigger.History, aggLane, aggCtxResp2)
 			if aggErr != nil {
-				a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()}})
+				a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: stamp(aggregatorAt, &NodeInfo{ID: "aggregator", Type: "aggregator", State: "failed", Tag: "synthesize", Error: aggErr.Error()})})
 				a.recordRun(trigger, startTime, graph, budget, resolvedIntent, Conclusion{Outcome: "aggregator_failed", Status: "failed"})
 				return nil, fmt.Errorf("aggregator failed: %w", aggErr)
 			}
 		}
-		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize"}})
+		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "aggregator", Node: stamp(aggregatorAt, &NodeInfo{ID: "aggregator", Type: "aggregator", State: "resolved", Tag: "synthesize"})})
 	}
 
 	elapsed := time.Since(startTime)

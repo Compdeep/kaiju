@@ -57,6 +57,36 @@
                           @click="setReasoning('')">default</button>
                 </div>
               </div>
+              <!-- How hard, and how much of it — a different question from the
+                   switch above, which is whether to think at all. Both are one
+                   value for every lane, not this lane's, and both are shown
+                   only where a configured model has been MEASURED to act on
+                   them: every provider accepts the parameters and none errors
+                   on either, so a control offered regardless would save, show
+                   back, and change nothing. -->
+              <div v-if="effortOpts.length" class="reasoning-switch">
+                <span class="reasoning-switch-label">effort</span>
+                <div class="seg">
+                  <button v-for="e in effortOpts" :key="e" class="seg-btn"
+                          :class="{ active: cfg.llm.reasoning_effort === e }"
+                          @click="setReasoningEffort(e)">{{ e }}</button>
+                  <button class="seg-btn" :class="{ active: !cfg.llm.reasoning_effort }"
+                          @click="setReasoningEffort('')">default</button>
+                </div>
+              </div>
+              <div v-if="budgetIsHonoured" class="reasoning-switch">
+                <span class="reasoning-switch-label">max tokens</span>
+                <input
+                  class="reasoning-budget"
+                  type="number"
+                  min="0"
+                  step="256"
+                  placeholder="none"
+                  :value="cfg.llm.reasoning_max_tokens || ''"
+                  @change="setReasoningBudget"
+                />
+                <span class="reasoning-note">thinking only; it does not bound the reply</span>
+              </div>
               <div class="form-row">
                 <div class="form-group">
                   <label>provider</label>
@@ -292,11 +322,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import api from '../api/client'
+import { effortOptions, budgetHonoured } from '../services/reasoning'
 
 defineEmits(['close'])
 const settings = useSettingsStore()
 const tab = ref('models')
-const cfg = ref({ llm: { provider: '', model: '', endpoint: '', reasoning: '' }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1, route_provider: '', route_model: '', answer_provider: '', answer_model: '' } })
+const cfg = ref({ llm: { provider: '', model: '', endpoint: '', reasoning: '', reasoning_effort: '', reasoning_max_tokens: 0 }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1, route_provider: '', route_model: '', answer_provider: '', answer_model: '' } })
 const allModels = ref([])
 const apiKey = ref('')
 const execProvider = ref('')
@@ -363,6 +394,41 @@ const reasoningCanSwitch = computed(() => {
  */
 function setReasoning(v) {
   cfg.value.llm.reasoning = v
+  patchConfig()
+}
+
+// Which effort values are worth offering, and whether a token budget is
+// honoured as one. The rule is in services/reasoning.js because the chat
+// header asks it too, and a rule re-derived per picker is the fault
+// fits_small_call already demonstrated here.
+const effortOpts = computed(() => effortOptions(cfg.value, allModels.value))
+const budgetIsHonoured = computed(() => budgetHonoured(cfg.value, allModels.value))
+
+/**
+ * desc: Set how hard to think when thinking, and save. "" asks nothing and
+ * leaves the model at whatever it does anyway.
+ * @param {string} v - an offered effort, or ""
+ */
+function setReasoningEffort(v) {
+  cfg.value.llm.reasoning_effort = v
+  patchConfig()
+}
+
+/**
+ * desc: Set the thinking allowance in tokens, and save. Empty or zero asks for
+ * none. Anything that is not a non-negative number is put back rather than
+ * sent: the endpoint refuses a negative, and putting it back means the field
+ * never shows a number the server does not hold.
+ * @param {Event} ev - the change event from the number field
+ */
+function setReasoningBudget(ev) {
+  const raw = ev.target.value
+  const n = raw === '' ? 0 : Number(raw)
+  if (!Number.isFinite(n) || n < 0) {
+    ev.target.value = cfg.value.llm.reasoning_max_tokens || ''
+    return
+  }
+  cfg.value.llm.reasoning_max_tokens = Math.floor(n)
   patchConfig()
 }
 
@@ -528,7 +594,18 @@ function onAnswerProviderChange() {
 async function patchConfig() {
   try {
     await api.patch('/api/v1/config', {
-      llm: { provider: cfg.value.llm.provider, model: cfg.value.llm.model, endpoint: cfg.value.llm.endpoint },
+      // reasoning, reasoning_effort and reasoning_max_tokens travel here too.
+      // The switch did not: setReasoning wrote it into local state and this
+      // body never carried it, so on/off/default saved nothing and read back
+      // from the server as whatever it had been.
+      llm: {
+        provider: cfg.value.llm.provider,
+        model: cfg.value.llm.model,
+        endpoint: cfg.value.llm.endpoint,
+        reasoning: cfg.value.llm.reasoning || '',
+        reasoning_effort: cfg.value.llm.reasoning_effort || '',
+        reasoning_max_tokens: cfg.value.llm.reasoning_max_tokens || 0,
+      },
       executor: { provider: cfg.value.executor.provider || undefined, model: cfg.value.executor.model || undefined },
       vision: { provider: cfg.value.vision.provider, model: cfg.value.vision.model },
       chat: { provider: cfg.value.chat.provider, model: cfg.value.chat.model, tools: cfg.value.chat.tools || [] },
@@ -611,8 +688,8 @@ onMounted(async () => {
   font-size: 11px; color: var(--text-muted); text-transform: lowercase;
 }
 .reasoning-switch .seg {
-  display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
-  overflow: hidden;
+  display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border);
+  border-radius: 4px; overflow: hidden;
 }
 .reasoning-switch .seg-btn {
   padding: 3px 10px; font-size: 11px; font-family: var(--mono);
@@ -622,6 +699,15 @@ onMounted(async () => {
 .reasoning-switch .seg-btn:last-child { border-right: none; }
 .reasoning-switch .seg-btn:hover { background: var(--surface-hover); }
 .reasoning-switch .seg-btn.active { background: var(--accent-subtle); color: var(--accent); }
+/* Sized to the four or five digits a budget is, so it does not read as a field
+   waiting for prose. */
+.reasoning-budget {
+  width: 90px; padding: 3px 8px; font-size: 11px; font-family: var(--mono);
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px;
+}
+.reasoning-budget:focus { outline: none; border-color: var(--accent); }
+.reasoning-note { font-size: 10px; color: var(--text-muted); }
 .tool-picker { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .tool-chk { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; user-select: none; }
 .tool-chk input { cursor: pointer; }

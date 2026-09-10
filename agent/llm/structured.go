@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"log"
 	"strings"
 )
 
@@ -138,6 +139,26 @@ func asSchemaRequest(req *ChatRequest, provider, model string) *ToolDef {
 	if schema == nil {
 		return nil // not an object schema; leave the call as it was
 	}
+
+	// Closed is not the same as closeable. What is left after closing is asked
+	// of the checker, which walks the same document by the same route, and a
+	// schema that still breaks a rule is not sent as one.
+	//
+	// Both outcomes of sending it are bad and neither is visible from the reply:
+	// a provider that enforces refuses the request, and the client reads that
+	// refusal as a missing capability and stops offering schemas to the model
+	// for the rest of the process; one that does not enforce accepts it and
+	// answers unconstrained, which looks exactly like enforcement working.
+	//
+	// This is also what keeps the fault from recurring. Whatever shape is added
+	// next, a document that cannot carry strict is never labelled strict — the
+	// call stays on tool calling, deliberately, and says which stage and why.
+	if problems := StrictProblems(schema); len(problems) > 0 {
+		log.Printf("[schema] %s stays on tool calling: strict cannot carry it (%s)",
+			tool.Function.Name, problems[0])
+		return nil
+	}
+
 	replaced := tool
 	req.ResponseFormat = &ResponseFormat{
 		Type: "json_schema",
@@ -208,24 +229,16 @@ func closedSchema(raw json.RawMessage) json.RawMessage {
 	if t, _ := m["type"].(string); t != "object" {
 		return nil
 	}
-	props, ok := m["properties"].(map[string]any)
-	if !ok || len(props) == 0 {
+	if !declaresProperties(m) {
 		return nil
 	}
-	m["additionalProperties"] = false
-	required := make([]string, 0, len(props))
-	for k := range props {
-		required = append(required, k)
-	}
-	// Sorted, so the same schema marshals the same way twice — a request that
-	// differs only in map order defeats a provider's prompt cache.
-	for i := 1; i < len(required); i++ {
-		for j := i; j > 0 && required[j] < required[j-1]; j-- {
-			required[j], required[j-1] = required[j-1], required[j]
-		}
-	}
-	m["required"] = required
-	closeNested(props)
+
+	// Every node the document reaches, through every kind of link — see
+	// eachSchemaNode. This used to follow properties and items.properties only,
+	// so a shape nesting through anyOf was reached at the array above it and
+	// left untouched below.
+	eachSchemaNode(m, "", closeOne)
+
 	out, err := json.Marshal(m)
 	if err != nil {
 		return nil
@@ -233,28 +246,91 @@ func closedSchema(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-// closeNested applies the same closure to nested object schemas, which a strict
-// decoder walks the same way as the top level.
-func closeNested(props map[string]any) {
-	for _, v := range props {
-		p, ok := v.(map[string]any)
-		if !ok {
-			continue
+/*
+ * closeOne makes one node acceptable to a strict decoder, where it can be.
+ * desc: Two rules, both the provider's: an object must forbid keys it did not
+ *       declare, and must require every key it did.
+ *
+ *       An object that declares no keys is left exactly as it is. Closing it
+ *       would permit nothing, so {} becomes its only legal value — a stricter
+ *       schema than anyone asked for, and a useless one. Strict has no way to
+ *       express "keys I cannot name in advance", so this is not a thing to
+ *       repair here: StrictProblems reports it, and asSchemaRequest declines to
+ *       claim strict for the document at all.
+ * param: m - the node, modified in place.
+ */
+func closeOne(_ string, m map[string]any) {
+	if !declaresProperties(m) {
+		return
+	}
+	props := m["properties"].(map[string]any)
+	m["additionalProperties"] = false
+
+	// Strict requires every declared key in required, so an optional field has
+	// to become required. A field that is required and has nothing to say needs
+	// a value it may legally take, so its type gains null — which is how strict
+	// writes an optional field, and what the checker's own message says to do.
+	//
+	// Widening rather than compelling. Without it, closing a schema quietly made
+	// every optional field mandatory with no empty value available, and the
+	// model had to invent one: plan.answer is required today for that reason,
+	// which is a good part of why it arrives holding prose.
+	was := requiredSet(m["required"])
+	for k, v := range props {
+		if !was[k] {
+			nullable(v)
 		}
-		if items, ok := p["items"].(map[string]any); ok {
-			if inner, ok := items["properties"].(map[string]any); ok {
-				items["additionalProperties"] = false
-				items["required"] = keysOf(inner)
-				closeNested(inner)
+	}
+	m["required"] = keysOf(props)
+}
+
+/*
+ * nullable lets a node hold null as well as what it already held.
+ * desc: Applied to a field that was optional and is being made required.
+ *
+ *       An enum is widened with it, because a value outside the enum is not
+ *       legal however the type reads — a field typed string-or-null whose enum
+ *       lists neither can hold nothing at all, and the schema is unsatisfiable.
+ *
+ *       Left alone where widening would guess: a const says exactly one value
+ *       and null is not it, and a type this does not recognise is not something
+ *       to edit. What is left over is reported by the checker rather than
+ *       repaired blindly.
+ * param: node - the field's schema, modified in place.
+ */
+func nullable(node any) {
+	m, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	if _, pinned := m["const"]; pinned {
+		return
+	}
+
+	switch t := m["type"].(type) {
+	case string:
+		if t == "null" {
+			return
+		}
+		m["type"] = []any{t, "null"}
+	case []any:
+		for _, x := range t {
+			if s, _ := x.(string); s == "null" {
+				return
 			}
 		}
-		inner, ok := p["properties"].(map[string]any)
-		if !ok {
-			continue
+		m["type"] = append(t, "null")
+	default:
+		return // no type to widen; leave it for the checker to report
+	}
+
+	if enum, ok := m["enum"].([]any); ok {
+		for _, v := range enum {
+			if v == nil {
+				return
+			}
 		}
-		p["additionalProperties"] = false
-		p["required"] = keysOf(inner)
-		closeNested(inner)
+		m["enum"] = append(enum, nil)
 	}
 }
 

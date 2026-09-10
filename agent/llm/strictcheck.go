@@ -45,10 +45,10 @@ func (p StrictProblem) String() string {
  *       will either be rejected, or accepted by a provider that is not checking
  *       — and the caller has no way to tell which from the reply.
  *
- *       Objects are walked wherever they can appear: a property, an array's
- *       items, an open map's value schema, and each branch of anyOf, oneOf and
- *       allOf. closeNested reaches the first two, which is why a schema using
- *       either of the last two can pass through it untouched.
+ *       Objects are walked by eachSchemaNode, which is the same walk the closer
+ *       uses. That is deliberate: these two were separate walks over one tree
+ *       and diverged, so the checker could see faults the closer had made and
+ *       nothing put the two together.
  * param: schema - the schema as it would be sent.
  * return: the problems, in path order. Empty when there are none.
  */
@@ -58,7 +58,9 @@ func StrictProblems(schema json.RawMessage) []StrictProblem {
 		return []StrictProblem{{Why: "not valid JSON: " + err.Error()}}
 	}
 	var out []StrictProblem
-	walkStrict("", root, &out)
+	eachSchemaNode(root, "", func(path string, m map[string]any) {
+		checkOne(path, m, &out)
+	})
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Path != out[j].Path {
 			return out[i].Path < out[j].Path
@@ -72,12 +74,16 @@ func StrictProblems(schema json.RawMessage) []StrictProblem {
 // needs to branch.
 func StrictOK(schema json.RawMessage) bool { return len(StrictProblems(schema)) == 0 }
 
-func walkStrict(path string, node any, out *[]StrictProblem) {
-	m, ok := node.(map[string]any)
-	if !ok {
-		return
-	}
-
+/*
+ * checkOne reports what a strict decoder would refuse about one node.
+ * desc: The per-node half of the check. Reaching every node is eachSchemaNode's
+ *       job, and is shared with the closer so the two cannot disagree about
+ *       what the document contains.
+ * param: path - where this node sits.
+ * param: m - the node.
+ * param: out - problems found, appended to.
+ */
+func checkOne(path string, m map[string]any, out *[]StrictProblem) {
 	// An enum the model is meant to choose from, with nothing in it. A schema
 	// build that produced this has lost its list somewhere upstream; the model
 	// is being offered no legal value for the field.
@@ -88,6 +94,14 @@ func walkStrict(path string, node any, out *[]StrictProblem) {
 		}
 	}
 
+	// A reference this package does not resolve. Following one needs a base
+	// document and a cycle guard; what it points at is therefore unchecked, and
+	// an unchecked node is not one to call strict.
+	if _, has := m["$ref"]; has {
+		*out = append(*out, StrictProblem{path,
+			"$ref is not resolved here, so what it points at cannot be checked"})
+	}
+
 	// An object is one that says so, with or without a property list. A bare
 	// {"type":"object"} declares no keys and closes nothing, which reads as
 	// harmless and is the same open map as any other — every key it carries is
@@ -95,7 +109,17 @@ func walkStrict(path string, node any, out *[]StrictProblem) {
 	// stages that pass a tool's parameters that way.
 	props, hasProps := m["properties"].(map[string]any)
 	declaredType, _ := m["type"].(string)
-	if hasProps || declaredType == "object" {
+	isObject := hasProps || declaredType == "object"
+	if !isObject {
+		if types, ok := m["type"].([]any); ok {
+			for _, t := range types {
+				if s, _ := t.(string); s == "object" {
+					isObject = true
+				}
+			}
+		}
+	}
+	if isObject {
 		if ap, has := m["additionalProperties"]; !has {
 			*out = append(*out, StrictProblem{path, "additionalProperties is absent, and strict requires it to be false"})
 		} else if b, isBool := ap.(bool); !isBool || b {
@@ -117,43 +141,14 @@ func walkStrict(path string, node any, out *[]StrictProblem) {
 				"strict requires every property in required, and these are not: %v "+
 					"(an optional field is written as a null union, not left out)", missing)})
 		}
-
-		for k, v := range props {
-			walkStrict(path+"."+k, v, out)
-		}
 	}
 
 	// A map with keys nobody declared. Strict has no way to describe one: the
 	// grammar needs to know what may follow, and "any name at all" does not say.
 	// A stage that needs one cannot be enforced, whatever the request claims.
-	if ap, isSchema := m["additionalProperties"].(map[string]any); isSchema {
+	if _, isSchema := m["additionalProperties"].(map[string]any); isSchema {
 		*out = append(*out, StrictProblem{path,
 			"additionalProperties holds a schema, which is a map with undeclared keys — strict cannot express one"})
-		walkStrict(path+".<key>", ap, out)
-	}
-
-	if items, has := m["items"].(map[string]any); has {
-		walkStrict(path+"[]", items, out)
-	}
-
-	for _, branchKind := range []string{"anyOf", "oneOf", "allOf"} {
-		arr, has := m[branchKind].([]any)
-		if !has {
-			continue
-		}
-		for i, branch := range arr {
-			walkStrict(fmt.Sprintf("%s.%s[%d]", path, branchKind, i), branch, out)
-		}
-	}
-
-	for _, defsKind := range []string{"$defs", "definitions"} {
-		defs, has := m[defsKind].(map[string]any)
-		if !has {
-			continue
-		}
-		for name, def := range defs {
-			walkStrict(fmt.Sprintf("%s.%s.%s", path, defsKind, name), def, out)
-		}
 	}
 }
 

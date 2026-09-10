@@ -43,38 +43,50 @@ func TestAsSchemaRequest_AnthropicKeepsTheToolWire(t *testing.T) {
 	}
 }
 
-// Every other label gets the schema wire — including a model reached through an
-// aggregator, whose provider says who serves the request and not which wire the
-// model behind it can take.
+// A schema strict cannot carry is not sent as one.
 //
-// What that wire then asks for is a contradiction: strict mode requires every
-// object to declare its properties and forbid the rest, and params declares
-// none and permits everything. A provider resolving that by emitting {} gives
-// every step empty params, which is a plan that names a tool and supplies it
-// nothing.
-func TestAsSchemaRequest_StrictCannotCarryFreeFormParams(t *testing.T) {
+// This test used to assert the opposite, and existed to record a contradiction:
+// strict mode requires every object to declare its properties and forbid the
+// rest, params declares none and permits everything, and the request went out
+// saying strict anyway. Both ways that resolves are invisible from the reply —
+// a provider that enforces refuses the call, and one that does not accepts it
+// and answers unconstrained.
+//
+// Anthropic resolved it a third way, by honouring the empty schema literally
+// and answering the forced call with empty params: "required parameter command
+// is not supplied", three corrections, a dead run.
+//
+// So the call now stays on tool calling, which is the wire that can express it.
+func TestAsSchemaRequest_DeclinesASchemaStrictCannotCarry(t *testing.T) {
 	req := planLikeRequest()
-	if replaced := asSchemaRequest(req, ProviderOpenAI, "gpt-4o"); replaced == nil {
-		t.Fatal("the request was not converted, so there is no schema to inspect")
+	if replaced := asSchemaRequest(req, ProviderOpenAI, "gpt-4o"); replaced != nil {
+		t.Fatal("a schema with a free-form params object was converted anyway")
 	}
-	if !req.ResponseFormat.JSONSchema.Strict {
-		t.Fatal("the schema does not bind")
+	if req.ResponseFormat != nil {
+		t.Error("the request was labelled strict for a schema that cannot be enforced")
 	}
+	if req.Tools == nil || req.ToolChoice == nil {
+		t.Error("the forced tool call was taken away, leaving the stage no way to run")
+	}
+}
 
-	var got map[string]any
-	if err := json.Unmarshal(req.ResponseFormat.JSONSchema.Schema, &got); err != nil {
-		t.Fatalf("schema is not JSON: %v", err)
+// A schema that CAN be carried still is. The guard refuses what strict cannot
+// express; it must not refuse everything.
+func TestAsSchemaRequest_StillConvertsWhatStrictCanCarry(t *testing.T) {
+	closeable := `{"type":"object","properties":{"verdict":{"type":"string"}},"required":["verdict"]}`
+	req := &ChatRequest{
+		Tools: []ToolDef{{Type: "function", Function: FunctionDef{
+			Name: "judge", Parameters: json.RawMessage(closeable)}}},
+		ToolChoice: ForceToolChoice("judge"),
 	}
-	steps := got["properties"].(map[string]any)["steps"].(map[string]any)
-	item := steps["items"].(map[string]any)
-	params := item["properties"].(map[string]any)["params"].(map[string]any)
-
-	if params["additionalProperties"] != true {
-		t.Errorf("params additionalProperties = %v; the free-form object was closed", params["additionalProperties"])
+	replaced := asSchemaRequest(req, ProviderOpenAI, "gpt-4o")
+	if replaced == nil {
+		t.Fatal("a schema strict can carry was left on tool calling")
 	}
-	if _, declared := params["properties"]; declared {
-		t.Error("params gained properties it does not have")
+	if req.ResponseFormat == nil || !req.ResponseFormat.JSONSchema.Strict {
+		t.Fatal("the converted request does not bind")
 	}
-	t.Logf("strict=%v, params=%v — an object declaring nothing and permitting everything, inside a schema that binds",
-		req.ResponseFormat.JSONSchema.Strict, params)
+	if p := StrictProblems(req.ResponseFormat.JSONSchema.Schema); len(p) > 0 {
+		t.Errorf("a request went out labelled strict with %d problem(s): %s", len(p), p[0])
+	}
 }

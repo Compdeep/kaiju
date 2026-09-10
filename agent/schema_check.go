@@ -102,15 +102,23 @@ func (a *Agent) LogStageSchemas() int {
 			continue
 		}
 		unenforceable++
-		log.Printf("[schema] %s is sent with strict set, but a provider that enforces strict would refuse it:", s.Stage)
+		log.Printf("[schema] %s cannot be carried by strict, so it stays on tool calling:", s.Stage)
 		for _, p := range s.Problems {
 			log.Printf("[schema]   %s", p)
 		}
 	}
 	if unenforceable > 0 {
-		log.Printf("[schema] %d stage(s) ask for enforcement they are not getting. "+
-			"On a provider that checks, each is a 400 the client reads as a missing capability "+
-			"and answers by falling back to tool calling — see rejectsSchemas.", unenforceable)
+		// Said as a count rather than a warning per stage: these are not faults
+		// to go and fix. A params object holds whatever the tool a sibling field
+		// names requires, and strict has no way to write "keys I cannot list in
+		// advance" — so the stage runs on the wire that can express it.
+		//
+		// This message used to say each was "a 400 the client reads as a missing
+		// capability", which was true when the request went out claiming strict
+		// anyway. asSchemaRequest now asks the checker before sending, so the
+		// round trip and the model-wide fallback it triggered no longer happen.
+		log.Printf("[schema] %d stage(s) run on tool calling because strict cannot express "+
+			"their shape. Nothing is sent claiming enforcement it would not get.", unenforceable)
 	}
 	return unenforceable
 }

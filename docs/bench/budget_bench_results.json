@@ -1,0 +1,37 @@
+[
+ {
+  "model": "qwen/qwen3.8-flash",
+  "asks": {
+   "128": [
+    128
+   ],
+   "4096": [
+    118,
+    157
+   ]
+  },
+  "cost": 0.00026304,
+  "errors": [
+   "128: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l",
+   "128: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l",
+   "4096: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l"
+  ]
+ },
+ {
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "asks": {
+   "128": [
+    114,
+    114
+   ],
+   "4096": []
+  },
+  "cost": 0.00018458,
+  "errors": [
+   "128: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"nvidia/nemotron-3-super-120b-a12b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul",
+   "4096: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"nvidia/nemotron-3-super-120b-a12b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul",
+   "4096: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"nvidia/nemotron-3-super-120b-a12b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul",
+   "4096: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"nvidia/nemotron-3-super-120b-a12b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul"
+  ]
+ }
+]

@@ -1,0 +1,1840 @@
+[
+ {
+  "model": "anthropic/claude-fable-5.1",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 161,
+     "completion": 221,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 159,
+     "completion": 240,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 153,
+     "completion": 228,
+     "finish": "stop"
+    }
+   ],
+   "xhigh": [
+    {
+     "reasoning": 153,
+     "completion": 213,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 112,
+     "completion": 145,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 137,
+     "completion": 169,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 0,
+     "completion": 70,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 64,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 64,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 0,
+     "completion": 103,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 70,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 65,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 0,
+     "completion": 71,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 65,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 76,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 0,
+    "completion": 70,
+    "finish": "stop"
+   }
+  ],
+  "budget": {
+   "256": [
+    {
+     "reasoning": 0,
+     "completion": 70,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 65,
+     "finish": "stop"
+    }
+   ],
+   "2048": [
+    {
+     "reasoning": 0,
+     "completion": 70,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 70,
+     "finish": "stop"
+    }
+   ]
+  },
+  "cost": 0.12925,
+  "errors": []
+ },
+ {
+  "model": "anthropic/claude-opus-4.8",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 183,
+     "completion": 214,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 181,
+     "completion": 228,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 269,
+     "completion": 299,
+     "finish": "stop"
+    }
+   ],
+   "xhigh": [
+    {
+     "reasoning": 167,
+     "completion": 245,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 165,
+     "completion": 212,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 181,
+     "completion": 228,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 137,
+     "completion": 169,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 116,
+     "completion": 147,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 121,
+     "completion": 152,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 115,
+     "completion": 162,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 121,
+     "completion": 152,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 113,
+     "completion": 144,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 114,
+     "completion": 140,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 111,
+     "completion": 142,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 121,
+     "completion": 182,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 0,
+    "completion": 31,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.07853500000000001,
+  "errors": []
+ },
+ {
+  "model": "anthropic/claude-opus-5",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 133,
+     "completion": 205,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 134,
+     "completion": 220,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 115,
+     "completion": 193,
+     "finish": "stop"
+    }
+   ],
+   "xhigh": [
+    {
+     "reasoning": 136,
+     "completion": 208,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 119,
+     "completion": 200,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 115,
+     "completion": 173,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 113,
+     "completion": 192,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 113,
+     "completion": 197,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 113,
+     "completion": 193,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 112,
+     "completion": 170,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 113,
+     "completion": 171,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 112,
+     "completion": 192,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 98,
+     "completion": 130,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 99,
+     "completion": 131,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 99,
+     "completion": 131,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 113,
+    "completion": 185,
+    "finish": "stop"
+   }
+  ],
+  "budget": {
+   "256": [
+    {
+     "reasoning": 113,
+     "completion": 198,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 126,
+     "completion": 206,
+     "finish": "stop"
+    }
+   ],
+   "2048": [
+    {
+     "reasoning": 113,
+     "completion": 190,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 114,
+     "completion": 195,
+     "finish": "stop"
+    }
+   ]
+  },
+  "cost": 0.10120000000000001,
+  "errors": []
+ },
+ {
+  "model": "anthropic/claude-sonnet-4.6",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 256,
+     "completion": 310,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 259,
+     "completion": 335,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 259,
+     "completion": 335,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 229,
+     "completion": 274,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 229,
+     "completion": 276,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 229,
+     "completion": 277,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 143,
+     "completion": 188,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 143,
+     "completion": 193,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 141,
+     "completion": 241,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 133,
+     "completion": 184,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 127,
+     "completion": 178,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 127,
+     "completion": 178,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 0,
+    "completion": 44,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.04804200000000001,
+  "errors": []
+ },
+ {
+  "model": "anthropic/claude-sonnet-5",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 489,
+     "completion": 571,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 446,
+     "completion": 513,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 292,
+     "completion": 358,
+     "finish": "stop"
+    }
+   ],
+   "xhigh": [
+    {
+     "reasoning": 172,
+     "completion": 244,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 157,
+     "completion": 222,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 170,
+     "completion": 232,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 152,
+     "completion": 231,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 125,
+     "completion": 171,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 188,
+     "completion": 252,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 140,
+     "completion": 174,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 140,
+     "completion": 204,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 139,
+     "completion": 211,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 140,
+     "completion": 177,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 119,
+     "completion": 152,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 122,
+     "completion": 159,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 203,
+    "completion": 293,
+    "finish": "stop"
+   }
+  ],
+  "budget": {
+   "256": [
+    {
+     "reasoning": 166,
+     "completion": 238,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 154,
+     "completion": 220,
+     "finish": "stop"
+    }
+   ],
+   "2048": [
+    {
+     "reasoning": 150,
+     "completion": 232,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 149,
+     "completion": 186,
+     "finish": "stop"
+    }
+   ]
+  },
+  "cost": 0.05407999999999998,
+  "errors": []
+ },
+ {
+  "model": "deepseek/deepseek-v4-flash-0731",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 90,
+     "completion": 155,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 123,
+     "completion": 133,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 131,
+     "completion": 141,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 111,
+     "completion": 121,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 93,
+     "completion": 102,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 91,
+     "completion": 101,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 445,
+     "completion": 619,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 349,
+     "completion": 359,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 289,
+     "completion": 298,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 105,
+    "completion": 115,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.000669969456,
+  "errors": []
+ },
+ {
+  "model": "deepseek/deepseek-v4-flash-vision-exp",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 86,
+     "completion": 128,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 161,
+     "completion": 181,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 86,
+     "completion": 128,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 66,
+     "completion": 115,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 116,
+     "completion": 126,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 87,
+     "completion": 96,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 256,
+     "completion": 351,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 105,
+     "completion": 115,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 115,
+     "completion": 126,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 73,
+    "completion": 115,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.0014572755999999998,
+  "errors": []
+ },
+ {
+  "model": "deepseek/deepseek-v4-pro-0813",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 128,
+     "completion": 155,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 102,
+     "completion": 113,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 114,
+     "completion": 125,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 176,
+     "completion": 185,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 122,
+     "completion": 131,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 189,
+     "completion": 198,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 156,
+     "completion": 167,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 158,
+     "completion": 167,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 117,
+     "completion": 128,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 151,
+    "completion": 161,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.00488166624,
+  "errors": []
+ },
+ {
+  "model": "google/gemini-3.5-flash-lite",
+  "efforts": {
+   "high": [
+    {
+     "reasoning": 649,
+     "completion": 658,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 617,
+     "completion": 642,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 550,
+     "completion": 559,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 331,
+     "completion": 340,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 420,
+     "completion": 429,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 454,
+     "completion": 463,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 278,
+     "completion": 287,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 199,
+     "completion": 208,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 291,
+     "completion": 300,
+     "finish": "stop"
+    }
+   ],
+   "minimal": [
+    {
+     "reasoning": 0,
+     "completion": 12,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 9,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 0,
+     "completion": 9,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 0,
+    "completion": 12,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.0100267,
+  "errors": []
+ },
+ {
+  "model": "google/gemini-3.7-flash",
+  "efforts": {
+   "high": [
+    {
+     "reasoning": 424,
+     "completion": 431,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 453,
+     "completion": 460,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 624,
+     "completion": 633,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 342,
+     "completion": 363,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 343,
+     "completion": 351,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 355,
+     "completion": 378,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 142,
+     "completion": 149,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 145,
+     "completion": 170,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 145,
+     "completion": 153,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 336,
+    "completion": 356,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.0133125,
+  "errors": []
+ },
+ {
+  "model": "google/gemini-3.8-flash",
+  "efforts": {
+   "high": [
+    {
+     "reasoning": 424,
+     "completion": 445,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 404,
+     "completion": 411,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 462,
+     "completion": 471,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 365,
+     "completion": 374,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 423,
+     "completion": 448,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 180,
+     "completion": 188,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 170,
+     "completion": 191,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 137,
+     "completion": 145,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 133,
+     "completion": 141,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 203,
+    "completion": 211,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.01174125,
+  "errors": []
+ },
+ {
+  "model": "z-ai/glm-5.2",
+  "efforts": {
+   "xhigh": [
+    {
+     "reasoning": 357,
+     "completion": 481,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 713,
+     "completion": 732,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 353,
+     "completion": 491,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 323,
+     "completion": 467,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 411,
+     "completion": 565,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 411,
+     "completion": 565,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 297,
+    "completion": 396,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.014925339999999999,
+  "errors": []
+ },
+ {
+  "model": "z-ai/glm-5.3",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 116,
+     "completion": 168,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 113,
+     "completion": 163,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 116,
+     "completion": 168,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 62,
+     "completion": 114,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 62,
+     "completion": 114,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 62,
+     "completion": 114,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 60,
+     "completion": 110,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 61,
+     "completion": 110,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 61,
+     "completion": 110,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 113,
+    "completion": 163,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.006779600000000001,
+  "errors": []
+ },
+ {
+  "model": "z-ai/glm-5.3-flash",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 104,
+     "completion": 156,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 119,
+     "completion": 171,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 111,
+     "completion": 163,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 69,
+     "completion": 121,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 61,
+     "completion": 113,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 61,
+     "completion": 113,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 63,
+     "completion": 113,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 63,
+     "completion": 98,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 63,
+     "completion": 103,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 99,
+    "completion": 140,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.000735025,
+  "errors": []
+ },
+ {
+  "model": "openai/gpt-oss-120b",
+  "efforts": {
+   "high": [
+    {
+     "reasoning": 248,
+     "completion": 320,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 261,
+     "completion": 355,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 301,
+     "completion": 414,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 105,
+     "completion": 188,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 102,
+     "completion": 192,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 102,
+     "completion": 192,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 54,
+     "completion": 118,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 62,
+     "completion": 127,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 56,
+     "completion": 119,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 116,
+    "completion": 200,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.000947829,
+  "errors": []
+ },
+ {
+  "model": "openai/gpt-oss-20b",
+  "efforts": {
+   "high": [
+    {
+     "reasoning": 367,
+     "completion": 520,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 339,
+     "completion": 487,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 339,
+     "completion": 487,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 89,
+     "completion": 163,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 89,
+     "completion": 163,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 89,
+     "completion": 163,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 52,
+     "completion": 105,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 52,
+     "completion": 105,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 52,
+     "completion": 105,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 89,
+    "completion": 163,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.00039715000000000003,
+  "errors": []
+ },
+ {
+  "model": "ibm-granite/granite-4.2-8b",
+  "efforts": {
+   "high": [
+    {
+     "reasoning": 1083,
+     "completion": 1611,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 674,
+     "completion": 1061,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 846,
+     "completion": 1259,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 70,
+     "completion": 130,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 71,
+     "completion": 127,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 70,
+     "completion": 130,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 922,
+    "completion": 1282,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.0014136199999999998,
+  "errors": []
+ },
+ {
+  "model": "thinkingmachines/inkling-small",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 156,
+     "completion": 219,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 108,
+     "completion": 217,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 156,
+     "completion": 219,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 160,
+     "completion": 185,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 109,
+     "completion": 221,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 139,
+     "completion": 205,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 83,
+     "completion": 191,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 146,
+     "completion": 171,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 128,
+     "completion": 152,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 116,
+     "completion": 141,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 81,
+     "completion": 157,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 78,
+     "completion": 140,
+     "finish": "stop"
+    }
+   ],
+   "minimal": [
+    {
+     "reasoning": 107,
+     "completion": 130,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 107,
+     "completion": 130,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 88,
+     "completion": 151,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 99,
+    "completion": 210,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.003927699999999999,
+  "errors": []
+ },
+ {
+  "model": "moonshotai/kimi-k3",
+  "efforts": {
+   "max": [
+    {
+     "reasoning": 16001,
+     "completion": 16000,
+     "finish": "length"
+    },
+    {
+     "reasoning": 16001,
+     "completion": 16000,
+     "finish": "length"
+    },
+    {
+     "reasoning": 138,
+     "completion": 196,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 111,
+     "completion": 142,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 116,
+     "completion": 147,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 105,
+     "completion": 131,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 98,
+     "completion": 124,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 95,
+     "completion": 121,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 95,
+     "completion": 121,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 16002,
+    "completion": 16000,
+    "finish": "length"
+   }
+  ],
+  "budget": {},
+  "cost": 0.6390845599999999,
+  "errors": []
+ },
+ {
+  "model": "meituan/longcat-2.0",
+  "efforts": {},
+  "baseline": [
+   {
+    "reasoning": 315,
+    "completion": 325,
+    "finish": "stop"
+   }
+  ],
+  "budget": {
+   "256": [
+    {
+     "reasoning": 286,
+     "completion": 296,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 342,
+     "completion": 352,
+     "finish": "stop"
+    }
+   ],
+   "2048": [
+    {
+     "reasoning": 284,
+     "completion": 294,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 296,
+     "completion": 306,
+     "finish": "stop"
+    }
+   ]
+  },
+  "cost": 0.0019776,
+  "errors": []
+ },
+ {
+  "model": "meta/muse-glimmer-30b",
+  "efforts": {
+   "xhigh": [
+    {
+     "reasoning": 332,
+     "completion": 443,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 424,
+     "completion": 532,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 366,
+     "completion": 498,
+     "finish": "stop"
+    }
+   ],
+   "high": [
+    {
+     "reasoning": 387,
+     "completion": 514,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 324,
+     "completion": 441,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 338,
+     "completion": 435,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 193,
+     "completion": 288,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 240,
+     "completion": 360,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 170,
+     "completion": 248,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 131,
+     "completion": 200,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 128,
+     "completion": 215,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 139,
+     "completion": 238,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 367,
+    "completion": 484,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.007637639999999999,
+  "errors": []
+ },
+ {
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "efforts": {
+   "medium": [],
+   "low": []
+  },
+  "baseline": [],
+  "budget": {
+   "256": [],
+   "2048": []
+  },
+  "cost": 0.0,
+  "errors": [
+   "baseline: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"nvidia/nemotron-3-super-120b-a12b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul",
+   "medium: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"nvidia/nemotron-3-super-120b-a12b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul",
+   "low: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"nvidia/nemotron-3-super-120b-a12b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul",
+   "budget 256: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"nvidia/nemotron-3-super-120b-a12b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul",
+   "budget 2048: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"nvidia/nemotron-3-super-120b-a12b is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumul"
+  ]
+ },
+ {
+  "model": "qwen/qwen3.7-flash",
+  "efforts": {},
+  "baseline": [
+   {
+    "reasoning": 582,
+    "completion": 594,
+    "finish": "stop"
+   }
+  ],
+  "budget": {
+   "256": [
+    {
+     "reasoning": 256,
+     "completion": 268,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 256,
+     "completion": 269,
+     "finish": "stop"
+    }
+   ],
+   "2048": [
+    {
+     "reasoning": 861,
+     "completion": 873,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 1348,
+     "completion": 1359,
+     "finish": "stop"
+    }
+   ]
+  },
+  "cost": 0.00044664,
+  "errors": []
+ },
+ {
+  "model": "qwen/qwen3.8-2.4t-a95b",
+  "efforts": {
+   "xhigh": [
+    {
+     "reasoning": 124,
+     "completion": 135,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 116,
+     "completion": 127,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 81,
+     "completion": 127,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 133,
+     "completion": 246,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 121,
+     "completion": 222,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 207,
+     "completion": 246,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 201,
+     "completion": 225,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 201,
+     "completion": 224,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 201,
+     "completion": 224,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 125,
+    "completion": 136,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.013589,
+  "errors": []
+ },
+ {
+  "model": "qwen/qwen3.8-27b",
+  "efforts": {
+   "xhigh": [
+    {
+     "reasoning": 417,
+     "completion": 427,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 391,
+     "completion": 401,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 387,
+     "completion": 397,
+     "finish": "stop"
+    }
+   ],
+   "medium": [
+    {
+     "reasoning": 244,
+     "completion": 254,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 244,
+     "completion": 254,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 244,
+     "completion": 254,
+     "finish": "stop"
+    }
+   ],
+   "low": [
+    {
+     "reasoning": 65,
+     "completion": 87,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 65,
+     "completion": 87,
+     "finish": "stop"
+    },
+    {
+     "reasoning": 65,
+     "completion": 87,
+     "finish": "stop"
+    }
+   ]
+  },
+  "baseline": [
+   {
+    "reasoning": 387,
+    "completion": 397,
+    "finish": "stop"
+   }
+  ],
+  "budget": {},
+  "cost": 0.008093799999999998,
+  "errors": []
+ },
+ {
+  "model": "qwen/qwen3.8-flash",
+  "efforts": {},
+  "baseline": [
+   {
+    "reasoning": 117,
+    "completion": 128,
+    "finish": "stop"
+   }
+  ],
+  "budget": {
+   "256": [
+    {
+     "reasoning": 132,
+     "completion": 238,
+     "finish": "stop"
+    }
+   ],
+   "2048": []
+  },
+  "cost": 0.00019857000000000002,
+  "errors": [
+   "budget 256: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l",
+   "budget 2048: HTTP 429 {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate l"
+  ]
+ }
+]

@@ -561,7 +561,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: "executive", Node: &NodeInfo{
 		ID: "executive", Type: "executive", State: "resolved", Tag: "plan",
 		Tools: planResult.Tools, Objective: planResult.Objective,
-		ToolNarrowing: planResult.ToolNarrowing}})
+		ToolNarrowing: planResult.ToolNarrowing, Reasoning: planResult.Reasoning}})
 
 	initialNodes, err := planStepsToNodes(planResult.Steps, graph, budget, a.registry, dagMode)
 	if err != nil {
@@ -1717,7 +1717,8 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						}
 						a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: planID, Node: &NodeInfo{
 							ID: planID, Type: "executive", State: "resolved", Tag: fmt.Sprintf("replan %d", replanCount),
-							Tools: replanResult.Tools, Objective: replanResult.Objective}})
+							Tools: replanResult.Tools, Objective: replanResult.Objective,
+							Reasoning: replanResult.Reasoning}})
 
 						newNodes, gerr := planStepsToNodes(replanResult.Steps, graph, budget, a.registry, dagMode)
 						if gerr != nil {

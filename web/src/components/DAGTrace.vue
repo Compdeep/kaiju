@@ -67,6 +67,24 @@
             </template>
           </div>
 
+          <!-- What the planner thought on the way to the plan. The first line
+               is the preview, because a model opens by saying what it takes the
+               question to mean, and that one line is usually the whole answer to
+               "why did it plan THAT". -->
+          <div v-if="item.type === 'thinking'" class="tl tl-sub tl-clickable"
+               :style="indent(item.depth)" @click="toggleResult('think-' + item.node.id)">
+            <span class="t-branch">└</span>
+            <span class="t-sub-label">thought</span>
+            <span v-if="!expandedResults['think-' + item.node.id]" class="t-think-peek">{{ firstLine(item.node.reasoning) }}</span>
+            <span class="t-gap"></span>
+            <span class="t-expand">{{ expandedResults['think-' + item.node.id] ? '−' : '+' }}</span>
+          </div>
+
+          <div v-if="item.type === 'thinking' && expandedResults['think-' + item.node.id]"
+               class="tl-result executive t-think-body" :style="indent(item.depth + 1)">
+            <pre class="t-code">{{ item.node.reasoning }}</pre>
+          </div>
+
           <!-- What the planner was shown. A plan that reached for the wrong
                tool and a plan never shown the right one read the same from
                outside; this is the difference. -->
@@ -470,6 +488,13 @@ const layout = computed(() => {
 function pushNode(items, n, depth, last) {
   items.push({ type: 'node', key: `n-${n.id}`, node: n, depth, last })
   const sub = depth + 1
+  // What it thought before it answered. Sits directly under the node, above
+  // what it was shown, because it is this node's own work rather than its
+  // input. Only planning nodes carry it, and only on a model that returns its
+  // reasoning — see NodeInfo.Reasoning.
+  if (n.reasoning) {
+    items.push({ type: 'thinking', key: `th-${n.id}`, node: n, depth: sub })
+  }
   // What the planner was shown, and the text it was ranked against. Only
   // planning nodes carry these — see NodeInfo.Tools.
   if (n.tools && n.tools.length) {
@@ -499,6 +524,19 @@ function pushNode(items, n, depth, last) {
   if (n.err) {
     items.push({ type: 'error', key: `e-${n.id}`, msg: n.err, errType: n.err_type, depth: sub })
   }
+}
+
+/**
+ * desc: The opening line of a block of reasoning, for the collapsed preview.
+ * @param {string} text - The reasoning as it came back.
+ * @returns {string} The first line with anything in it, shortened to fit a row.
+ */
+function firstLine(text) {
+  if (!text) return ''
+  // Leading blank lines are common — some models open with one — so the first
+  // line with anything in it is taken rather than the first line.
+  const line = text.split('\n').map(l => l.trim()).find(l => l.length > 0) || ''
+  return trunc(line, 120)
 }
 
 /**
@@ -949,6 +987,16 @@ function parseRCA(result) {
   border-color: var(--chip-lead-edge);
   background: var(--chip-lead-bg);
 }
+/* The reasoning preview. Given the room a peek line can have and no more: it
+   is one line of prose and must not push the expander off the row. */
+.t-think-peek {
+  color: var(--text-muted); font-size: 10px; opacity: 0.75; font-style: italic;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+/* Reasoning runs long, so the open block gets more room than a result before
+   it starts scrolling. */
+.t-think-body { max-height: 340px; }
+
 .t-objective {
   margin-top: 6px; padding-top: 5px;
   border-top: 1px solid var(--border-subtle, rgba(127,127,127,0.2));

@@ -867,7 +867,20 @@ var executivePlanSchemaTemplate = `{
 		"intent": %s,
 		"steps": {
 			"type": "array",
-			"items": {
+			"items": %s
+		}
+	},
+	"required": ["steps"]
+}`
+
+// executivePlanStepOpen is steps.items when the tools cannot be described: one
+// object whose params accepts anything.
+//
+// The fallback, not the intent. Every model tested filled it with something
+// invented — qwen with ps, readlink and cat as tool names carrying step_number
+// as a parameter; Anthropic by honouring it literally, declaring no properties
+// because none were given, and calling process_info() with empty params.
+var executivePlanStepOpen = `{
 				"type": "object",
 				"required": ["tool", "params", "tag"],
 				"properties": {
@@ -878,10 +891,7 @@ var executivePlanSchemaTemplate = `{
 					"tag":        {"type": "string", "description": "This step's name, unique within the plan: letters, digits, _ or - with no spaces. Other steps reference this step by it."}
 				}
 			}
-		}
-	},
-	"required": ["steps"]
-}`
+		`
 
 /*
  * executivePlanSchema returns the shape a plan takes.
@@ -894,7 +904,7 @@ var executivePlanSchemaTemplate = `{
  *       an operator added is a value the model may return.
  * return: the schema, in the shape the provider takes.
  */
-func (a *Agent) executivePlanSchema() llm.ToolDef {
+func (a *Agent) executivePlanSchema(shown ...[]string) llm.ToolDef {
 	// Build the intent enum from the registry, and leave the enum OUT when there
 	// is none — Go has no knowledge of specific intent names to fall back on.
 	//
@@ -920,7 +930,16 @@ func (a *Agent) executivePlanSchema() llm.ToolDef {
 				string(enumJSON))
 		}
 	}
-	schema := json.RawMessage(fmt.Sprintf(executivePlanSchemaTemplate, intentProp))
+	// A step is described per tool when the tools are known, and left open when
+	// they are not — see planStepBranches. Passed variadically so a caller with
+	// nothing to say needs no list.
+	step := json.RawMessage(executivePlanStepOpen)
+	if len(shown) > 0 {
+		if described, ok := planStepBranches(shown[0], a.registry); ok {
+			step = described
+		}
+	}
+	schema := json.RawMessage(fmt.Sprintf(executivePlanSchemaTemplate, intentProp, string(step)))
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
@@ -1737,7 +1756,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	})
 	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
 		Messages: messages,
-		Tools:    []llm.ToolDef{a.executivePlanSchema()},
+		Tools:    []llm.ToolDef{a.executivePlanSchema(relevant)},
 		// PIN the model to `plan` — not just "call some tool". A weak reasoning
 		// model, seeing web_search/web_fetch named all over the guidance, otherwise
 		// emits a direct tool call instead of wrapping it in a plan; that hard-fails
@@ -1816,7 +1835,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		})
 		retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_shorter"), &llm.ChatRequest{
 			Messages:    shorter,
-			Tools:       []llm.ToolDef{a.executivePlanSchema()},
+			Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 			ToolChoice:  llm.ForceToolChoice("plan"),
 			Temperature: a.cfg.Temperature,
 			MaxTokens:   a.planMaxTokens(ctx),
@@ -1864,7 +1883,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			})
 			retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_wrap"), &llm.ChatRequest{
 				Messages:    again,
-				Tools:       []llm.ToolDef{a.executivePlanSchema()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: a.cfg.Temperature,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -1894,7 +1913,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			)
 			retryResp, retryErr := a.completeHeavyChecked(retracing(ctx, "plan_reparse"), &llm.ChatRequest{
 				Messages:    retryMessages,
-				Tools:       []llm.ToolDef{a.executivePlanSchema()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -1967,7 +1986,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			)
 			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
 				Messages:    replanMessages,
-				Tools:       []llm.ToolDef{a.executivePlanSchema()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.planMaxTokens(ctx),
@@ -2090,7 +2109,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			)
 			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
 				Messages:    replanMessages,
-				Tools:       []llm.ToolDef{a.executivePlanSchema()},
+				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
 				ToolChoice:  llm.ForceToolChoice("plan"),
 				Temperature: 0.1,
 				MaxTokens:   a.planMaxTokens(ctx),

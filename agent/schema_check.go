@@ -42,7 +42,16 @@ type StageSchema struct {
  */
 func (a *Agent) StageSchemas() []StageSchema {
 	defs := map[string]llm.ToolDef{
-		"plan":         a.executivePlanSchema(),
+		// The tools the registry holds, because the plan schema describes a step
+		// per tool and the shape depends on which. Called with no list it built
+		// the open fallback — a document production never sends — so the check
+		// reported on a shape that does not exist and left the one that does
+		// unexamined.
+		//
+		// A run is shown a NARROWER list than this, so what the check reads is
+		// the widest form of the document. A narrower one is a subset of these
+		// branches: if every tool here can be carried, so can any selection.
+		"plan":         a.executivePlanSchema(a.registryToolNames()),
 		"route":        routeSchema(),
 		"preflight":    preflightSchema(),
 		"reflector":    reflectorSchema(),
@@ -121,4 +130,17 @@ func (a *Agent) LogStageSchemas() int {
 			"their shape. Nothing is sent claiming enforcement it would not get.", unenforceable)
 	}
 	return unenforceable
+}
+
+// registryToolNames is every tool this build has, for the boot check.
+//
+// Not what any run is shown — relevantTools narrows that per run — but the
+// superset, so the check reads the widest form of the plan schema. Empty when
+// no registry has been built, which leaves executivePlanSchema on its open
+// fallback and the check reporting on that.
+func (a *Agent) registryToolNames() []string {
+	if a.registry == nil {
+		return nil
+	}
+	return a.registry.List()
 }

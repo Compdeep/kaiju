@@ -161,6 +161,28 @@
       ]
     },
     {
+      "id": "bytedance-seed/seed-2-1-turbo",
+      "name": "Seed 2.1 Turbo",
+      "family": "seed",
+      "version": "2.1",
+      "context": "262K",
+      "context_tokens": 262144,
+      "max_output_tokens": 235929,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": true,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
       "id": "deepseek/deepseek-v3.2",
       "name": "DeepSeek V3.2",
       "family": "deepseek",
@@ -340,221 +362,6 @@
       ]
     },
     {
-      "id": "z-ai/glm-4.7-flash",
-      "name": "GLM-4.7 Flash",
-      "family": "glm",
-      "version": "4.7",
-      "context": "202K",
-      "context_tokens": 202752,
-      "max_output_tokens": 16384,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": true,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": false,
-      "chat": false,
-      "roles": [
-        "executor",
-        "router",
-        "answer"
-      ]
-    },
-    {
-      "id": "z-ai/glm-5.1",
-      "name": "GLM-5.1",
-      "family": "glm",
-      "version": "5.1",
-      "context": "204K",
-      "context_tokens": 204800,
-      "max_output_tokens": 128000,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": true,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": false,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner"
-      ]
-    },
-    {
-      "id": "z-ai/glm-5.2",
-      "name": "GLM-5.2",
-      "family": "glm",
-      "version": "5.2",
-      "context": "1M",
-      "context_tokens": 1048576,
-      "max_output_tokens": 131072,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": true,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": false,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner"
-      ],
-      "reasoning_efforts": [
-        "high",
-        "xhigh"
-      ]
-    },
-    {
-      "id": "z-ai/glm-5.3",
-      "name": "GLM-5.3",
-      "family": "glm",
-      "version": "5.3",
-      "context": "1.3M",
-      "context_tokens": 1310720,
-      "max_output_tokens": 262144,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": false,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": false,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner"
-      ],
-      "reasoning_efforts": [
-        "low",
-        "high",
-        "max"
-      ]
-    },
-    {
-      "id": "z-ai/glm-5.3-flash",
-      "name": "GLM-5.3 Flash",
-      "family": "glm",
-      "version": "5.3",
-      "context": "1.3M",
-      "context_tokens": 1310720,
-      "max_output_tokens": 131072,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": false,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": true,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner",
-        "executor",
-        "router"
-      ]
-    },
-    {
-      "id": "openai/gpt-4.1",
-      "name": "GPT-4.1",
-      "family": "gpt-4.1",
-      "context": "1M",
-      "context_tokens": 1047576,
-      "max_output_tokens": 32768,
-      "provider": "openrouter",
-      "thinking": false,
-      "reasoning_optional": false,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": true,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner",
-        "vision"
-      ]
-    },
-    {
-      "id": "openai/gpt-4.1-mini",
-      "name": "GPT-4.1 Mini",
-      "family": "gpt-4.1",
-      "context": "1M",
-      "context_tokens": 1047576,
-      "max_output_tokens": 32768,
-      "provider": "openrouter",
-      "thinking": false,
-      "reasoning_optional": false,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": true,
-      "vision": true,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner",
-        "executor",
-        "router",
-        "vision"
-      ]
-    },
-    {
-      "id": "openai/gpt-oss-120b",
-      "name": "GPT-OSS 120B",
-      "family": "gpt-oss",
-      "params": "120B",
-      "context": "131K",
-      "context_tokens": 131072,
-      "max_output_tokens": 117964,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": false,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": false,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner",
-        "executor"
-      ],
-      "reasoning_efforts": [
-        "low",
-        "medium",
-        "high"
-      ]
-    },
-    {
-      "id": "openai/gpt-oss-20b",
-      "name": "GPT-OSS 20B",
-      "family": "gpt-oss",
-      "params": "20B",
-      "context": "131K",
-      "context_tokens": 131072,
-      "max_output_tokens": 117964,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": false,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": false,
-      "chat": false,
-      "roles": [
-        "executor",
-        "router",
-        "answer"
-      ],
-      "reasoning_efforts": [
-        "low",
-        "medium",
-        "high"
-      ]
-    },
-    {
       "id": "ibm-granite/granite-4.2-8b",
       "name": "Granite 4.2 8B",
       "family": "granite",
@@ -581,16 +388,81 @@
       ]
     },
     {
-      "id": "thinkingmachines/inkling-small",
-      "name": "Inkling Small",
-      "family": "inkling",
-      "version": "small",
-      "context": "1M",
-      "context_tokens": 1048576,
+      "id": "inclusionai/ling-3.0-flash",
+      "name": "Ling 3.0 Flash",
+      "family": "ling",
+      "version": "3.0",
+      "context": "262K",
+      "context_tokens": 262144,
+      "max_output_tokens": 32768,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": true,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "inclusionai/ling-3.0-flash-fin",
+      "name": "Ling 3.0 Flash",
+      "family": "ling",
+      "version": "3.0",
+      "context": "262K",
+      "context_tokens": 262144,
+      "max_output_tokens": 235929,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "meituan/longcat-2.0",
+      "name": "LongCat 2.0",
+      "family": "longcat",
+      "version": "2.0",
+      "context": "1.05M",
+      "context_tokens": 1048756,
       "max_output_tokens": 262144,
       "provider": "openrouter",
       "thinking": true,
       "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": true,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "meta-llama/llama-4-maverick",
+      "name": "Llama 4 Maverick",
+      "family": "llama",
+      "params": "400B-A17B",
+      "version": "4",
+      "context": "1.05M",
+      "context_tokens": 1048576,
+      "max_output_tokens": 115200,
+      "provider": "openrouter",
+      "thinking": false,
+      "reasoning_optional": false,
       "tools": true,
       "tool_call_ok": true,
       "verified": false,
@@ -600,6 +472,57 @@
         "answer",
         "planner",
         "executor"
+      ]
+    },
+    {
+      "id": "meta-llama/llama-4-scout",
+      "name": "Llama 4 Scout",
+      "family": "llama",
+      "params": "109B-A17B",
+      "version": "4",
+      "context": "1.31M",
+      "context_tokens": 1310720,
+      "max_output_tokens": 16384,
+      "provider": "openrouter",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": true,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "meta/muse-glimmer-30b",
+      "name": "Muse Glimmer 30B",
+      "family": "muse",
+      "params": "30B",
+      "context": "131K",
+      "context_tokens": 131072,
+      "max_output_tokens": 117964,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "executor"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
       ]
     },
     {
@@ -693,144 +616,6 @@
       ]
     },
     {
-      "id": "inclusionai/ling-3.0-flash",
-      "name": "Ling 3.0 Flash",
-      "family": "ling",
-      "version": "3.0",
-      "context": "262K",
-      "context_tokens": 262144,
-      "max_output_tokens": 32768,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": true,
-      "tools": true,
-      "tool_call_ok": false,
-      "verified": true,
-      "vision": false,
-      "chat": false,
-      "roles": [
-        "executor",
-        "router"
-      ]
-    },
-    {
-      "id": "inclusionai/ling-3.0-flash-fin",
-      "name": "Ling 3.0 Flash",
-      "family": "ling",
-      "version": "3.0",
-      "context": "262K",
-      "context_tokens": 262144,
-      "max_output_tokens": 235929,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": true,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": false,
-      "chat": false,
-      "roles": [
-        "executor",
-        "router"
-      ]
-    },
-    {
-      "id": "meta-llama/llama-4-maverick",
-      "name": "Llama 4 Maverick",
-      "family": "llama",
-      "params": "400B-A17B",
-      "version": "4",
-      "context": "1.05M",
-      "context_tokens": 1048576,
-      "max_output_tokens": 115200,
-      "provider": "openrouter",
-      "thinking": false,
-      "reasoning_optional": false,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": true,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner",
-        "executor"
-      ]
-    },
-    {
-      "id": "meta-llama/llama-4-scout",
-      "name": "Llama 4 Scout",
-      "family": "llama",
-      "params": "109B-A17B",
-      "version": "4",
-      "context": "1.31M",
-      "context_tokens": 1310720,
-      "max_output_tokens": 16384,
-      "provider": "openrouter",
-      "thinking": false,
-      "reasoning_optional": false,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": true,
-      "vision": true,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner",
-        "executor",
-        "router"
-      ]
-    },
-    {
-      "id": "meituan/longcat-2.0",
-      "name": "LongCat 2.0",
-      "family": "longcat",
-      "version": "2.0",
-      "context": "1.05M",
-      "context_tokens": 1048756,
-      "max_output_tokens": 262144,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": true,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": true,
-      "vision": false,
-      "chat": false,
-      "roles": [
-        "answer",
-        "planner",
-        "executor"
-      ]
-    },
-    {
-      "id": "meta/muse-glimmer-30b",
-      "name": "Muse Glimmer 30B",
-      "family": "muse",
-      "params": "30B",
-      "context": "131K",
-      "context_tokens": 131072,
-      "max_output_tokens": 117964,
-      "provider": "openrouter",
-      "thinking": true,
-      "reasoning_optional": false,
-      "tools": true,
-      "tool_call_ok": true,
-      "verified": false,
-      "vision": true,
-      "chat": false,
-      "roles": [
-        "answer",
-        "executor"
-      ],
-      "reasoning_efforts": [
-        "low",
-        "medium",
-        "high",
-        "xhigh"
-      ]
-    },
-    {
       "id": "nvidia/nemotron-3-nano-30b-a3b",
       "name": "Nemotron 3 Nano 30B A3B",
       "family": "nemotron",
@@ -894,6 +679,210 @@
       "roles": [
         "executor",
         "router"
+      ]
+    },
+    {
+      "id": "openai/gpt-4.1",
+      "name": "GPT-4.1",
+      "family": "gpt-4.1",
+      "context": "1M",
+      "context_tokens": 1047576,
+      "max_output_tokens": 32768,
+      "provider": "openrouter",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "vision"
+      ]
+    },
+    {
+      "id": "openai/gpt-4.1-mini",
+      "name": "GPT-4.1 Mini",
+      "family": "gpt-4.1",
+      "context": "1M",
+      "context_tokens": 1047576,
+      "max_output_tokens": 32768,
+      "provider": "openrouter",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": true,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router",
+        "vision"
+      ]
+    },
+    {
+      "id": "openai/gpt-5",
+      "name": "GPT-5",
+      "family": "gpt-5",
+      "context": "400K",
+      "context_tokens": 400000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": true,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "openai/gpt-5-mini",
+      "name": "GPT-5 Mini",
+      "family": "gpt-5",
+      "context": "400K",
+      "context_tokens": 400000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": true,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "openai/gpt-5-nano",
+      "name": "GPT-5 Nano",
+      "family": "gpt-5",
+      "context": "400K",
+      "context_tokens": 400000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": true,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.1",
+      "name": "GPT-5.1",
+      "family": "gpt-5",
+      "context": "400K",
+      "context_tokens": 400000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": true,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "openai/gpt-5.5",
+      "name": "GPT-5.5",
+      "family": "gpt-5",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": true,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "openai/gpt-oss-120b",
+      "name": "GPT-OSS 120B",
+      "family": "gpt-oss",
+      "params": "120B",
+      "context": "131K",
+      "context_tokens": 131072,
+      "max_output_tokens": 117964,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "id": "openai/gpt-oss-20b",
+      "name": "GPT-OSS 20B",
+      "family": "gpt-oss",
+      "params": "20B",
+      "context": "131K",
+      "context_tokens": 131072,
+      "max_output_tokens": 117964,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "executor",
+        "router",
+        "answer"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
       ]
     },
     {
@@ -1170,19 +1159,19 @@
       "reasoning_budget": true
     },
     {
-      "id": "bytedance-seed/seed-2-1-turbo",
-      "name": "Seed 2.1 Turbo",
-      "family": "seed",
-      "version": "2.1",
-      "context": "262K",
-      "context_tokens": 262144,
-      "max_output_tokens": 235929,
+      "id": "thinkingmachines/inkling-small",
+      "name": "Inkling Small",
+      "family": "inkling",
+      "version": "small",
+      "context": "1M",
+      "context_tokens": 1048576,
+      "max_output_tokens": 262144,
       "provider": "openrouter",
       "thinking": true,
       "reasoning_optional": true,
       "tools": true,
       "tool_call_ok": true,
-      "verified": true,
+      "verified": false,
       "vision": true,
       "chat": false,
       "roles": [
@@ -1211,6 +1200,123 @@
         "executor",
         "router",
         "answer"
+      ]
+    },
+    {
+      "id": "z-ai/glm-4.7-flash",
+      "name": "GLM-4.7 Flash",
+      "family": "glm",
+      "version": "4.7",
+      "context": "202K",
+      "context_tokens": 202752,
+      "max_output_tokens": 16384,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "executor",
+        "router",
+        "answer"
+      ]
+    },
+    {
+      "id": "z-ai/glm-5.1",
+      "name": "GLM-5.1",
+      "family": "glm",
+      "version": "5.1",
+      "context": "204K",
+      "context_tokens": 204800,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "z-ai/glm-5.2",
+      "name": "GLM-5.2",
+      "family": "glm",
+      "version": "5.2",
+      "context": "1M",
+      "context_tokens": 1048576,
+      "max_output_tokens": 131072,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ],
+      "reasoning_efforts": [
+        "high",
+        "xhigh"
+      ]
+    },
+    {
+      "id": "z-ai/glm-5.3",
+      "name": "GLM-5.3",
+      "family": "glm",
+      "version": "5.3",
+      "context": "1.3M",
+      "context_tokens": 1310720,
+      "max_output_tokens": 262144,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "z-ai/glm-5.3-flash",
+      "name": "GLM-5.3 Flash",
+      "family": "glm",
+      "version": "5.3",
+      "context": "1.3M",
+      "context_tokens": 1310720,
+      "max_output_tokens": 131072,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
       ]
     }
   ]

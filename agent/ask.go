@@ -110,10 +110,29 @@ func (a *Agent) applyReasoningBudget(ctx context.Context, req *llm.ChatRequest, 
 		return
 	}
 	effort, budget := a.reasoningFor(ctx)
+	allowed, takesBudget := a.cfg.Reasoning(model)
+
+	// Nobody set a thinking budget, so one is taken out of the request's own
+	// allowance — for every lane, here, rather than at each call site. Wiring it
+	// per lane is how the planner ended up with a guard the chat lane did not.
+	//
+	// max_tokens bounds the whole completion, and a reasoning model's hidden
+	// tokens come out of it. Left undivided, a model that thinks hard exhausts
+	// the budget and the answer never starts: glm-5.3 was billed 4,096 output
+	// tokens on a chat turn and returned zero characters. Dividing it leaves
+	// room the answer cannot be robbed of.
+	//
+	// Only where the catalog says the model honours a budget. Everywhere else
+	// this is silent and recoverDeadThought is what saves the reply.
+	if budget <= 0 && takesBudget {
+		if share, _ := splitBudget(req.MaxTokens); share > 0 {
+			budget = share
+		}
+	}
+
 	if effort == "" && budget <= 0 {
 		return
 	}
-	allowed, takesBudget := a.cfg.Reasoning(model)
 	if effort != "" && !slices.Contains(allowed, effort) {
 		effort = ""
 	}

@@ -147,7 +147,13 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		Model:       t.Model,
 		Messages:    messages,
 		Temperature: 0.7,
-		MaxTokens:   a.replyBudget(replyBriefBudget),
+		// replyDecisionBudget, not replyBriefBudget. This lane writes the answer a
+		// person reads; brief bounds "one stage's judgement, in a sentence or
+		// two" — an observer deciding whether a step is worth acting on. It was
+		// the smallest user-facing cap in the engine, on the one lane where the
+		// cap IS the answer, and its 4,096 ceiling is exactly what glm-5.3 spent
+		// thinking before returning nothing.
+		MaxTokens: a.replyBudget(replyDecisionBudget),
 	}
 
 	// A clock on the call, for the same reason the planner has one: max_tokens

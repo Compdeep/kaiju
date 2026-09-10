@@ -247,6 +247,67 @@ func (a *Agent) replyBudget(s budgetSpec) int {
 }
 
 /*
+ * Thinking and answering are one budget on the wire, and two here.
+ *
+ * max_tokens bounds the whole completion. A reasoning model's hidden tokens are
+ * completion tokens, so they are spent from the same number the answer comes
+ * out of — and the model does not divide it. It thinks until it is done, and if
+ * that exhausts the budget the generation stops before the answer begins. The
+ * reader gets nothing, not a shorter reply.
+ *
+ * That is not hypothetical: glm-5.3 on the chat lane was billed 4,096 output
+ * tokens and returned zero characters, after 112 seconds.
+ *
+ * So a lane asks for both. reasoning.max_tokens stops the thinking, max_tokens
+ * is the sum, and the difference is room the answer cannot be robbed of.
+ */
+
+// How a lane's allowance divides between thinking and answering.
+//
+// Measured on the real planner prompt across 52 models. Visible answers ran to
+// a median of 263 tokens and a largest of 1,704, so 2,048 clears every answer
+// observed with room to spare. Thinking is where the variance is: gpt-5 wanted
+// 4,288, glm-5.3 5,170, nemotron-3-nano 6,492, gpt-5-nano 7,424.
+//
+// At this division, 49 of the 52 finish their thinking and NONE loses its
+// answer — which is the property worth buying. The three that are cut are the
+// ones that today return nothing at all.
+const (
+	thinkingShare  = 6144
+	answeringShare = 2048
+)
+
+/*
+ * splitBudget divides a lane's allowance into thinking and answering.
+ * desc: Returned as a pair because the two go to different fields of the same
+ *       request, and sending one without the other is what leaves an answer
+ *       with no room.
+ *
+ *       Scaled to whatever the lane's own cap resolves to, so a lane bounding
+ *       one sentence does not get the same allowance as the one writing a
+ *       reply to a person. The proportion is what is fixed, not the numbers.
+ * param: total - the lane's whole allowance, from replyBudget.
+ * return: tokens for thinking, and the total to send as max_tokens.
+ */
+func splitBudget(total int) (thinking, maxTokens int) {
+	const whole = thinkingShare + answeringShare
+	if total <= 0 {
+		// No allowance to divide. Inventing one would send a thinking budget on
+		// a request whose reply length nobody bounded, which is a number from
+		// nowhere.
+		return 0, 0
+	}
+	thinking = total * thinkingShare / whole
+	answering := total - thinking
+	// An allowance too small to divide usefully is left whole: a thinking cap
+	// of a few dozen tokens buys a truncated thought and no better answer.
+	if thinking < 256 || answering < 256 {
+		return 0, total
+	}
+	return thinking, total
+}
+
+/*
  * promptScale is how far this deployment narrows the caps that carry content.
  * desc: 1 means the numbers in the table above, which is what every deployment
  *       had before the setting existed — so an application that sets nothing is

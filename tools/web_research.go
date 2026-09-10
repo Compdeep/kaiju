@@ -36,10 +36,28 @@ func NewWebResearch(cfg SearchConfig, executor *llm.Client) *WebResearch {
 	}
 }
 
+// How many search results web_research reads for itself.
+//
+// A source is not fetched, it is READ: WebFetch.formatExtract sends the page to
+// a model, in passes, one after another. This defaulted to four and allowed
+// six, while a plan shows one step either way.
+//
+// One live run planned three web_research calls in a single round — twelve
+// whole pages read by a model — and showed no activity at all for the ten
+// minutes it took, because none of those calls reach a run's trace.
+//
+// A planner that genuinely needs several sources can still have them, and
+// visibly: web_search names the results and web_fetch reads the ones it picks.
+// That path costs what it looks like it costs. This one did not.
+const (
+	defaultResearchSources = 1
+	maxResearchSources     = 2
+)
+
 func (w *WebResearch) Name() string { return "web_research" }
 
 func (w *WebResearch) Description() string {
-	return "Search the web AND read the top results in ONE step. Runs a search, then fetches and extracts the actual text of the top result pages and returns their content. Every source is grounded — the URLs come from the search and are read for you — so no URL is invented and no answer stops at a snippet. Use it for a single research angle where reading the top results is enough. Where you need to choose the sources yourself, or follow one result into the next, plan web_search and read the ones you pick with web_fetch. Params: query (required); optional max_sources (top results to read, default 4, max 6), recency_days, focus (the facts to extract)."
+	return "Search the web AND read the top results in ONE step. Runs a search, then fetches and extracts the actual text of the top result pages and returns their content. Every source is grounded — the URLs come from the search and are read for you — so no URL is invented and no answer stops at a snippet. Use it for a single research angle where reading the top results is enough. Where you need to choose the sources yourself, or follow one result into the next, plan web_search and read the ones you pick with web_fetch. Params: query (required); optional max_sources (top results to read, default 1, max 2 — each is READ by a model, so a second source costs a second reading), recency_days, focus (the facts to extract)."
 }
 
 func (w *WebResearch) Impact(map[string]any) int { return toolapi.ImpactObserve }
@@ -49,7 +67,7 @@ func (w *WebResearch) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"query": {"type": "string", "description": "Search query — plain keywords, not stacked search operators."},
-			"max_sources": {"type": "integer", "description": "How many of the top results to fetch and read (default 4, max 6)."},
+			"max_sources": {"type": "integer", "description": "How many of the top results to fetch and read (default 1, max 2). Each one is READ by a model, not merely fetched, so a second source costs a second reading. Where you need several sources, plan web_search and read the ones you choose with web_fetch."},
 			"recency_days": {"type": "integer", "description": "Optional: bias to results from roughly the last N days."},
 			"focus": {"type": "string", "description": "Optional: the specific facts/figures to extract from each page."},
 			"exclude_domains": {"type": "array", "items": {"type": "string"}, "description": "Optional: domains to drop from the results (e.g. aggregators like statista.com, fortunebusinessinsights.com)."}
@@ -99,12 +117,12 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 	if query == "" {
 		return toolapi.ToolMessage{}, fmt.Errorf("web_research: query is required")
 	}
-	maxSources := 4
+	maxSources := defaultResearchSources
 	if v, ok := toolapi.ParamNum(params, "max_sources"); ok && int(v) > 0 {
 		maxSources = int(v)
 	}
-	if maxSources > 6 {
-		maxSources = 6
+	if maxSources > maxResearchSources {
+		maxSources = maxResearchSources
 	}
 	focus, _ := params["focus"].(string)
 

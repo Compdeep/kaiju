@@ -58,3 +58,53 @@ func TestTheHTTPCeilingCoversTheLongestDeadline(t *testing.T) {
 	}
 	_ = time.Second
 }
+
+// A model measured slow waits longer, on top of whichever deadline it was
+// already getting.
+//
+// The two clocks read the same measurement — this one and the engine's round
+// deadline — because widening one alone means the run is cut by the other and
+// the error names the wrong clock.
+func TestASlowModelWaitsLonger(t *testing.T) {
+	c := NewClient("http://127.0.0.1:1", "", "plain").
+		Thinks(func(m string) bool { return m == "thinker" }).
+		Pace(func(m string) float64 {
+			if m == "thinker" || m == "plain" {
+				return 1.5
+			}
+			return 1
+		})
+
+	if got := c.timeoutFor(&ChatRequest{Model: "plain"}); got != requestTimeout*3/2 {
+		t.Errorf("slow non-thinking model = %s, want half again %s", got, requestTimeout)
+	}
+	if got := c.timeoutFor(&ChatRequest{Model: "thinker"}); got != thinkingRequestTimeout*3/2 {
+		t.Errorf("slow thinking model = %s, want half again %s", got, thinkingRequestTimeout)
+	}
+	if got := c.timeoutFor(&ChatRequest{Model: "brisk"}); got != requestTimeout {
+		t.Errorf("ordinary model = %s, want the ordinary %s", got, requestTimeout)
+	}
+}
+
+// The pace only ever adds. A lookup answering below 1 changes nothing: a
+// deadline shortened by a measurement is a run cut off by an average.
+func TestAPaceNeverShortensADeadline(t *testing.T) {
+	c := NewClient("http://127.0.0.1:1", "", "quick").Pace(func(string) float64 { return 0.1 })
+	if got := c.timeoutFor(&ChatRequest{Model: "quick"}); got != requestTimeout {
+		t.Errorf("deadline = %s, want the ordinary %s", got, requestTimeout)
+	}
+}
+
+// The connection ceiling has to sit above the longest deadline a pace can
+// produce, or the scaling is undone by the thing meant to be a backstop.
+func TestTheConnectionCeilingClearsTheLongestDeadline(t *testing.T) {
+	c := NewClient("http://127.0.0.1:1", "", "thinker").
+		Thinks(func(string) bool { return true }).
+		Pace(func(string) float64 { return 2 })
+
+	longest := c.timeoutFor(&ChatRequest{Model: "thinker"})
+	if connectionCeiling < longest {
+		t.Errorf("the ceiling is %s and the deadline can reach %s, so the ceiling cuts first",
+			connectionCeiling, longest)
+	}
+}

@@ -10,22 +10,24 @@
     GET /api/v1/models for which values the configured models act on. Selecting
     one PATCHes llm.reasoning_effort.
 
-    Not rendered at all when no configured model has been measured to act on an
-    effort. Every provider accepts the parameter and none errors on it, so a
-    control shown regardless would save a value, show it back, and change
-    nothing.
+    Always rendered, because the effort now sets two things and only one of them
+    depends on the model. The deadline for a round is ours and is enforced by a
+    clock, on every model, measured or not — so "fast" and "normal" always do
+    something. The provider values below them are still offered only where a
+    configured model has been MEASURED to act on them: every provider accepts
+    the parameter and none errors on it, so one shown regardless would save a
+    value, show it back, and change nothing.
 
     Same shape as IntentSelector and ModelSelector beside it: a compact trigger
     opening a panel teleported to <body>, so it cannot be clipped by the header.
   -->
   <button
-    v-if="options.length"
     ref="triggerEl"
     type="button"
     class="es-trigger"
     :class="{ open }"
     :disabled="loading"
-    title="Effort — how hard to think, where the model acts on it"
+    title="Effort — how long a round may think, and how hard where the model acts on it"
     aria-haspopup="listbox"
     :aria-expanded="open"
     @click.stop="toggle"
@@ -56,7 +58,7 @@
       >
         <div class="es-head">
           <span class="es-head-label">Effort</span>
-          <span class="es-head-note">how hard to think, when thinking</span>
+          <span class="es-head-note">how long a round may spend thinking</span>
         </div>
 
         <div class="es-list">
@@ -72,7 +74,14 @@
           >
             <span class="es-check">{{ o.value === current ? '●' : '' }}</span>
             <span class="es-row-name">{{ o.label }}</span>
+            <span class="es-row-time">{{ effortTime(o.value) }}</span>
           </button>
+        </div>
+
+        <div class="es-foot">
+          the time one round is allowed to spend thinking. a model still
+          thinking when it runs out is asked again with thinking off, and one
+          measured slow is given longer than the time shown
         </div>
 
         <!-- Said here because the switch that governs it is in another panel:
@@ -96,11 +105,10 @@
  */
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import api from '../api/client'
-import { effortOptions } from '../services/reasoning'
+import { effortRows, effortTime } from '../services/reasoning'
 
 const loading = ref(true)
 const current = ref('')      // the live effort, "" for none asked
-const options = ref([])      // accepted values for the configured models
 const reasoningOff = ref(false)
 
 const open = ref(false)
@@ -109,16 +117,14 @@ const panelRef = ref(null)
 const panelPos = ref({ top: 0, left: 0, width: 240 })
 const PANEL_W = 240
 
-// "" is a real choice, not the absence of one, so it gets a row of its own.
-const rows = computed(() => [
-  { value: '', label: 'default' },
-  ...options.value.map(v => ({ value: v, label: v })),
-])
+// "" is a real choice, not the absence of one: it is the ordinary two minutes,
+// so it reads as "normal" rather than as "default" — see effortRows.
+const rows = ref([])
 
-/** desc: Trigger text — the effort, or "effort" when none is asked for. */
+/** desc: Trigger text — the effort, and "normal" for the ordinary setting. */
 const triggerLabel = computed(() => {
   if (loading.value) return 'loading…'
-  return current.value || 'effort'
+  return current.value || 'normal'
 })
 
 /**
@@ -134,10 +140,12 @@ async function load() {
     ])
     current.value = cfg?.llm?.reasoning_effort || ''
     reasoningOff.value = cfg?.llm?.reasoning === 'off'
-    options.value = effortOptions(cfg, models)
+    rows.value = effortRows(cfg, models)
   } catch (e) {
     console.error('[effort-selector] load failed:', e)
-    options.value = []
+    // Fast and normal still work: they are this engine's own deadline and do
+    // not depend on the catalog the failed call would have carried.
+    rows.value = effortRows(null, null)
   }
   loading.value = false
 }
@@ -296,6 +304,10 @@ defineExpose({ reload: load })
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .es-row.sel .es-row-name { color: var(--accent); font-weight: 600; }
+.es-row-time {
+  flex-shrink: 0; font-family: var(--mono); font-size: 11px;
+  color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
 
 .es-foot {
   padding: 8px 12px; border-top: 1px solid var(--border-subtle);

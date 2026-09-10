@@ -1797,7 +1797,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.planMaxTokens(ctx),
 	}
-	planCtx, cancelPlan := context.WithTimeout(ctx, a.roundBudget(trigger))
+	planCtx, cancelPlan := context.WithTimeout(ctx, a.roundBudget(ctx, Heavy, trigger))
 	defer cancelPlan()
 
 	// Streamed, so the thinking is collected as it arrives rather than read off
@@ -1828,7 +1828,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		// thinking were paid for and thrown away, and the second attempt started
 		// from the same blank page as the first.
 		log.Printf("[dag] executive plan passed its %s deadline — re-asking with thinking off, carrying %d chars of reasoning",
-			a.roundBudget(trigger), len(thought))
+			a.roundBudget(ctx, Heavy, trigger), len(thought))
 		recovered, rerr := a.recoverDeadThought(retracing(ctx, "plan_recover_deadline"), Heavy, planReq, cutThought(thought))
 		if rerr == nil && len(recovered.Choices) > 0 {
 			resp, err = recovered, nil

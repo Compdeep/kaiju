@@ -566,7 +566,8 @@
       "roles": [
         "answer",
         "planner"
-      ]
+      ],
+      "pace": "slow"
     },
     {
       "id": "moonshotai/kimi-k2.7-code",
@@ -952,7 +953,8 @@
       "roles": [
         "answer",
         "planner"
-      ]
+      ],
+      "pace": "very slow"
     },
     {
       "id": "qwen/qwen3-coder-next",

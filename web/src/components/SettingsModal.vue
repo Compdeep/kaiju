@@ -57,22 +57,31 @@
                           @click="setReasoning('')">default</button>
                 </div>
               </div>
-              <!-- How hard, and how much of it — a different question from the
-                   switch above, which is whether to think at all. Both are one
-                   value for every lane, not this lane's, and both are shown
-                   only where a configured model has been MEASURED to act on
-                   them: every provider accepts the parameters and none errors
-                   on either, so a control offered regardless would save, show
-                   back, and change nothing. -->
-              <div v-if="effortOpts.length" class="reasoning-switch">
+              <!-- How long a round may think, and how hard — a different
+                   question from the switch above, which is whether to think at
+                   all. One value for every lane, not this lane's.
+
+                   "fast" and "normal" are always offered: they set a deadline
+                   this engine enforces itself, on every model. The provider
+                   values beside them are offered only where a configured model
+                   has been MEASURED to act on them, because every provider
+                   accepts the parameter and none errors on it, so one offered
+                   regardless would save, show back, and change nothing. -->
+              <div class="reasoning-switch">
                 <span class="reasoning-switch-label">effort</span>
                 <div class="seg">
-                  <button v-for="e in effortOpts" :key="e" class="seg-btn"
-                          :class="{ active: cfg.llm.reasoning_effort === e }"
-                          @click="setReasoningEffort(e)">{{ e }}</button>
-                  <button class="seg-btn" :class="{ active: !cfg.llm.reasoning_effort }"
-                          @click="setReasoningEffort('')">default</button>
+                  <button v-for="e in effortRowsHere" :key="e.value" class="seg-btn"
+                          :class="{ active: (cfg.llm.reasoning_effort || '') === e.value }"
+                          @click="setReasoningEffort(e.value)">{{ e.label }}</button>
                 </div>
+              </div>
+              <div class="reasoning-switch">
+                <span class="reasoning-switch-label"></span>
+                <span class="reasoning-note">
+                  the time one round may spend thinking — {{ effortTimeLine }}. a
+                  model still thinking when it runs out is asked again with
+                  thinking off, and one measured slow is given longer
+                </span>
               </div>
               <div v-if="budgetIsHonoured" class="reasoning-switch">
                 <span class="reasoning-switch-label">max tokens</span>
@@ -322,7 +331,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import api from '../api/client'
-import { effortOptions, budgetHonoured } from '../services/reasoning'
+import { effortRows, effortTime, budgetHonoured } from '../services/reasoning'
 
 defineEmits(['close'])
 const settings = useSettingsStore()
@@ -401,7 +410,13 @@ function setReasoning(v) {
 // honoured as one. The rule is in services/reasoning.js because the chat
 // header asks it too, and a rule re-derived per picker is the fault
 // fits_small_call already demonstrated here.
-const effortOpts = computed(() => effortOptions(cfg.value, allModels.value))
+const effortRowsHere = computed(() => effortRows(cfg.value, allModels.value))
+// The allowance each offered value buys, as one line: "fast 1 min, normal 2 min…".
+const effortTimeLine = computed(() =>
+  effortRowsHere.value
+    .filter(r => r.seconds)
+    .map(r => `${r.label} ${effortTime(r.value)}`)
+    .join(', '))
 const budgetIsHonoured = computed(() => budgetHonoured(cfg.value, allModels.value))
 
 /**

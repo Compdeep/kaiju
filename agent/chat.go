@@ -165,7 +165,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// it is answered below rather than reported. Reporting it hands the reader a
 	// context error in place of an answer, which is the outcome the deadline
 	// exists to avoid.
-	chatCtx, cancelChat := context.WithTimeout(ctx, a.roundBudget(t.Base))
+	chatCtx, cancelChat := context.WithTimeout(ctx, a.roundBudget(ctx, Answer, t.Base))
 	defer cancelChat()
 
 	// One completion, streamed token-by-token to the frontend as outcome events
@@ -179,7 +179,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// the same problem arriving as an error rather than as an empty reply.
 	if err != nil && chatCtx.Err() != nil && ctx.Err() == nil {
 		log.Printf("[chat] %s passed its %s deadline — re-asking with thinking off",
-			t.Model, a.roundBudget(t.Base))
+			t.Model, a.roundBudget(ctx, Answer, t.Base))
 		recovered, rerr := a.recoverDeadThought(retracing(ctx, "chat_recover_deadline"), Answer, req, nil)
 		if rerr == nil && len(recovered.Choices) > 0 {
 			res.LLMCalls++

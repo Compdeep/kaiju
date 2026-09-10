@@ -80,6 +80,10 @@ type stubReply struct {
 	// provider says the reply stopped at the token cap rather than because the
 	// model had finished.
 	Cut bool
+	// Reasoning is what the model thinks before it answers, sent as reasoning
+	// deltas on a streamed call. A stage that keeps the thinking off a cancelled
+	// call can only be tested against a model that streams some.
+	Reasoning string
 	// RawArgs is the arguments verbatim, for a reply that is not valid JSON.
 	//
 	// Args goes through json.Marshal, which cannot carry a document that does
@@ -181,30 +185,63 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 		reply, scripted = stubReply{Args: map[string]any{"mode": "agent"}}, true
 	}
 
-	// The aggregator streams its answer, so that path has to be answered as
-	// server-sent events rather than one body.
+	args := "{}"
+	if reply.RawArgs != "" {
+		args = reply.RawArgs
+	} else if reply.Args != nil {
+		b, _ := json.Marshal(reply.Args)
+		args = string(b)
+	}
+
+	// A streamed call is answered as server-sent events. It used to answer prose
+	// whatever was asked, because the aggregator was the only stage that
+	// streamed; the planner streams now — to keep the reasoning off a call that
+	// may be cut — and a stub that replies "stub answer" to a request for a plan
+	// makes every test of a planned run fail on a fault the engine does not
+	// have. So a stream carries the same reply the one-body path would, in the
+	// shape the wire uses for it.
 	if req.Stream {
-		content := reply.Content
-		if !scripted || content == "" {
-			content = "stub answer"
-		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		// A cut stream carries the reason in its final frame, which is the only
-		// place a caller learns the reply stopped at the cap rather than because
-		// the model had finished. Without it a stream could only be scripted as
-		// complete, and the case that matters — cut with nothing written, which
-		// is a model that spent its budget reasoning — could not be expressed at
-		// all.
-		if reply.Cut && reply.Content == "" && scripted {
-			content = "" // nothing was written before the cut
+		frame := func(delta string) {
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":%s}]}\n\n", delta)
 		}
-		if content != "" {
-			fmt.Fprintf(w, "data: %s\n\n", fmt.Sprintf(
-				`{"choices":[{"delta":{"content":%s}}]}`, mustJSON(content)))
+		if reply.Reasoning != "" {
+			frame(fmt.Sprintf(`{"reasoning":%s}`, mustJSON(reply.Reasoning)))
+		}
+		switch {
+		case fn == "" || schema:
+			// Prose, or a schema reply, which arrives as message content either way.
+			content := reply.Content
+			if fn == "" && (!scripted || content == "") {
+				content = "stub answer"
+			}
+			if schema {
+				content = args
+			}
+			// A cut stream carries the reason in its final frame, which is the
+			// only place a caller learns the reply stopped at the cap rather
+			// than because the model had finished. Without it a stream could
+			// only be scripted as complete, and the case that matters — cut with
+			// nothing written, which is a model that spent its budget
+			// reasoning — could not be expressed at all.
+			if reply.Cut && reply.Content == "" && scripted && !schema {
+				content = "" // nothing was written before the cut
+			}
+			if content != "" {
+				frame(fmt.Sprintf(`{"content":%s}`, mustJSON(content)))
+			}
+		default:
+			// Tool calls stream as indexed deltas: the name once, then the
+			// arguments. Sent whole here — the client assembles fragments, and a
+			// test does not need to prove it can.
+			frame(fmt.Sprintf(
+				`{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":%s,"arguments":%s}}]}`,
+				mustJSON(fn), mustJSON(args)))
 		}
 		fmt.Fprintf(w, "data: %s\n\n", fmt.Sprintf(
-			`{"choices":[{"delta":{},"finish_reason":%s}]}`, mustJSON(finishReason(reply, "stop"))))
+			`{"choices":[{"delta":{},"finish_reason":%s}]}`,
+			mustJSON(finishReason(reply, streamedOrdinaryFinish(fn, schema)))))
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -226,13 +263,6 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 			mustJSON(content), mustJSON(finishReason(reply, "stop")))
 		return
 	}
-	args := "{}"
-	if reply.RawArgs != "" {
-		args = reply.RawArgs
-	} else if reply.Args != nil {
-		b, _ := json.Marshal(reply.Args)
-		args = string(b)
-	}
 	// A schema request is answered the way a provider answers one: the object as
 	// message content, and finish_reason "stop", because no tool was offered so
 	// no tool was called. llm.asToolReply is what turns that back into the shape
@@ -250,6 +280,16 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"c1","type":"function","function":{"name":%s,"arguments":%s}}]},"finish_reason":%s}]}`,
 		mustJSON(fn), mustJSON(args), mustJSON(finishReason(reply, "tool_calls")))
+}
+
+// streamedOrdinaryFinish is what a provider reports for an uncut stream: the
+// same reason the one-body path gives, which is "tool_calls" only when a tool
+// was actually called.
+func streamedOrdinaryFinish(fn string, schema bool) string {
+	if fn == "" || schema {
+		return "stop"
+	}
+	return "tool_calls"
 }
 
 // finishReason is "length" for a scripted-truncated reply and the stage's

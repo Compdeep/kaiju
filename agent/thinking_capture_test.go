@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,11 +22,51 @@ import (
 // anything read off the reply is read off nothing.
 func thinkingThenHanging(t *testing.T, thoughts ...string) *stubModel {
 	t.Helper()
+	return &stubModel{Server: hangingModel(t, thoughts...).Server}
+}
+
+// hangingModel is that server with what it was sent kept, and answering from
+// the second call on — so a test can read what the retry was asked for.
+type hangingRig struct {
+	*httptest.Server
+	mu    sync.Mutex
+	sent  []string
+	calls int
+}
+
+// asked is the body of the nth request (from 1), or "" if it was never made.
+func (h *hangingRig) asked(nth int) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if nth < 1 || nth > len(h.sent) {
+		return ""
+	}
+	return h.sent[nth-1]
+}
+
+func hangingModel(t *testing.T, thoughts ...string) *hangingRig {
+	t.Helper()
+	rig := &hangingRig{}
 	// Closed when the test ends, so a handler still hanging is released rather
 	// than holding the server open — a connection the client walked away from
 	// stays active until somebody lets go of it.
 	over := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rig.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		rig.mu.Lock()
+		rig.sent = append(rig.sent, string(body))
+		rig.calls++
+		first := rig.calls == 1
+		rig.mu.Unlock()
+
+		// Only the first call hangs. A retry that hung too would prove nothing
+		// and end the test with a stopped clock rather than an answer.
+		if !first {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"the March invoice"},"finish_reason":"stop"}]}`)
+			return
+		}
+
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		flush := func() {
@@ -42,9 +84,9 @@ func thinkingThenHanging(t *testing.T, thoughts ...string) *stubModel {
 		case <-over:
 		}
 	}))
-	t.Cleanup(srv.Close)
+	t.Cleanup(rig.Close)
 	t.Cleanup(func() { close(over) }) // runs first: cleanups are undone in reverse
-	return &stubModel{Server: srv, reply: map[string]stubReply{}, byNth: map[string][]stubReply{}}
+	return rig
 }
 
 // The thinking is kept as it arrives, not read off the reply.
@@ -186,5 +228,48 @@ func TestLongThinkingKeepsBothEnds(t *testing.T) {
 	}
 	if kept := shownThinking("short enough"); kept != "short enough" {
 		t.Errorf("thinking that fits was disturbed: %q", kept)
+	}
+}
+
+// The chat lane's retry is given the thinking too.
+//
+// The lane a person actually sits in front of had the same hole the planner
+// did: its deadline cancels the call, a cancelled call returns no reply, and
+// the reasoning went with it — so the retry began from nothing while the reader
+// had already watched two minutes of thinking stream past.
+//
+// Driven through the real lane rather than the seam, because the two guards
+// have to be wired to each other and not merely present: the deadline branch is
+// what carries the buffer, and it is reached only by the lane's own clock.
+func TestTheChatRetryStartsFromWhatWasAlreadyThought(t *testing.T) {
+	const thought = "they are asking about the invoice from March, not the contract"
+
+	// A model that thinks aloud and then stops answering, so the lane's own
+	// deadline is what ends the call. The allowance is shortened for the test:
+	// "fast" is the one effort permitted below the floor, and the floor is two
+	// minutes.
+	rig := hangingModel(t, thought)
+	restore := effortBudget[EffortFast]
+	effortBudget[EffortFast] = 300 * time.Millisecond
+	defer func() { effortBudget[EffortFast] = restore }()
+
+	a := agentOnStub(t, &stubModel{Server: rig.Server})
+	res, err := a.Converse(context.Background(), ChatTurn{
+		Query: "which one did we settle on?",
+		Base:  Trigger{ReasoningEffort: EffortFast},
+	})
+	if err != nil {
+		t.Fatalf("the turn failed outright rather than recovering: %v", err)
+	}
+	if res.Content == "" {
+		t.Error("the deadline produced no answer, so the recovery did not reach the reader")
+	}
+
+	asked := rig.asked(2)
+	if asked == "" {
+		t.Fatal("no second call was made, so the deadline was reported rather than recovered")
+	}
+	if !strings.Contains(asked, thought) {
+		t.Errorf("the chat retry was not shown the thinking the first attempt paid for:\n%s", asked)
 	}
 }

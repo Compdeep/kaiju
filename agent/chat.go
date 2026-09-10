@@ -143,6 +143,19 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		a.broadcastDAGEvent(nil, DAGEvent{Type: evType, Text: chunk, SessionID: t.SessionID})
 	}
 
+	// What it thinks, kept as it arrives.
+	//
+	// Broadcasting a reasoning chunk is not keeping it: the frontend has it and
+	// this process does not. A call stopped by the deadline below returns an
+	// error and no reply, so the thinking was gone at exactly the moment the
+	// retry needed it, and that retry started from the same blank page as the
+	// attempt that had just spent two minutes.
+	var thinking thinkingCapture
+	send := func(chunk, kind string) {
+		thinking.onChunk(chunk, kind)
+		stream(chunk, kind)
+	}
+
 	req := &llm.ChatRequest{
 		Model:       t.Model,
 		Messages:    messages,
@@ -172,15 +185,16 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// (the same channel the agent lane streams on). With no tools in play, no
 	// tool-call JSON can ever reach the stream.
 	res := ChatResult{LLMCalls: 1}
-	resp, err := a.askStreamResp(chatCtx, Answer, req, stream)
+	resp, err := a.askStreamResp(chatCtx, Answer, req, send)
 
 	// Our own clock ran out. Ask again with thinking off, under the run's
 	// remaining time — the same answer an exhausted budget gets, because it is
 	// the same problem arriving as an error rather than as an empty reply.
 	if err != nil && chatCtx.Err() != nil && ctx.Err() == nil {
-		log.Printf("[chat] %s passed its %s deadline — re-asking with thinking off",
-			t.Model, a.roundBudget(ctx, Answer, t.Base))
-		recovered, rerr := a.recoverDeadThought(retracing(ctx, "chat_recover_deadline"), Answer, req, nil)
+		thought := thinking.text()
+		log.Printf("[chat] %s passed its %s deadline — re-asking with thinking off, carrying %d chars of reasoning",
+			t.Model, a.roundBudget(ctx, Answer, t.Base), len(thought))
+		recovered, rerr := a.recoverDeadThought(retracing(ctx, "chat_recover_deadline"), Answer, req, cutThought(thought))
 		if rerr == nil && len(recovered.Choices) > 0 {
 			res.LLMCalls++
 			res.Tokens += recovered.Usage.TotalTokens

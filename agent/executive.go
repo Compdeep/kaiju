@@ -1770,14 +1770,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// thinking model spends the token budget on reasoning and the wait is
 	// whatever that takes; a rig that ignores the budget is unbounded. Measured
 	// across 52 models, this fits every one anybody would ordinarily plan with.
-	//
-	// The deadline being reached is not a failure to report and stop on: what
-	// comes back is a cut-off reply, which the branch below reads and recovers
-	// from. Cancelling here would throw away the thinking already paid for.
-	planCtx, cancelPlan := context.WithTimeout(ctx, a.roundBudget(trigger))
-	defer cancelPlan()
-
-	resp, err := a.completeHeavy(planCtx, &llm.ChatRequest{
+	planReq := &llm.ChatRequest{
 		Messages: messages,
 		Tools:    []llm.ToolDef{a.executivePlanSchema(relevant)},
 		// PIN the model to `plan` — not just "call some tool". A weak reasoning
@@ -1787,7 +1780,33 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		ToolChoice:  llm.ForceToolChoice("plan"),
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.planMaxTokens(ctx),
-	})
+	}
+	planCtx, cancelPlan := context.WithTimeout(ctx, a.roundBudget(trigger))
+	defer cancelPlan()
+
+	resp, err := a.completeHeavy(planCtx, planReq)
+
+	// The deadline expiring is not the same as the run being abandoned, and it
+	// must not be reported as a failure.
+	//
+	// This was written as though a deadline produced a cut-off reply that the
+	// branch below could read. It does not: cancelling the context returns an
+	// ERROR and no reply at all, so the recovery was never reached and the
+	// planner failed outright. One live run lost its second replan to
+	// "planner LLM call (native): read response: context deadline exceeded",
+	// which is a worse outcome than the slow call it replaced.
+	//
+	// So a deadline of ours is answered the way an exhausted budget is: ask
+	// again with thinking off, under the run's own remaining time. A model that
+	// cannot think has nothing to spend the wait on but the answer.
+	if err != nil && planCtx.Err() != nil && ctx.Err() == nil {
+		log.Printf("[dag] executive plan passed its %s deadline — re-asking with thinking off",
+			a.roundBudget(trigger))
+		recovered, rerr := a.recoverDeadThought(retracing(ctx, "plan_recover_deadline"), Heavy, planReq, nil)
+		if rerr == nil && len(recovered.Choices) > 0 {
+			resp, err = recovered, nil
+		}
+	}
 
 	// The planner is not a node, so it records itself — see debugrecord.go. The
 	// plan it produced is filled in at the bottom, once it has parsed; a call

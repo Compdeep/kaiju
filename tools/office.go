@@ -101,6 +101,15 @@ func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (
 
 	zr, err := zip.OpenReader(path)
 	if err != nil {
+		// A file that is not a ZIP fails HERE, at the open — not below in
+		// extractOOXML, which is where the sentence explaining that lived. So a
+		// PDF handed to this tool produced "zip: not a valid zip file", naming a
+		// container format the caller never mentioned, and a reader was told
+		// their pitch decks were "corrupted, password-protected, or not actually
+		// PDFs". The files were fine. The wrong tool opened them.
+		if strings.Contains(err.Error(), "not a valid zip file") {
+			return toolapi.ToolFail("text", notOOXML(path), nil), nil
+		}
 		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: open %s: %w", filepath.Base(path), err)
 	}
 	defer zr.Close()
@@ -112,9 +121,7 @@ func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (
 		// are zip archives underneath; the caller does not need to know that to
 		// understand that this file is not one.
 		if strings.Contains(err.Error(), "not a valid zip file") {
-			return toolapi.ToolFail("text",
-				filepath.Base(path)+" is not an Office document or PDF: nothing here can read it. "+
-					"Use file_read for text files", nil), nil
+			return toolapi.ToolFail("text", notOOXML(path), nil), nil
 		}
 		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: %s: %w", filepath.Base(path), err)
 	}
@@ -457,4 +464,34 @@ func (t *OfficeExtract) resolve(p string) (string, error) {
 		return "", fmt.Errorf("office_extract: path escapes workspace: %s", p)
 	}
 	return abs, nil
+}
+
+/*
+ * notOOXML says why this tool cannot read a file, and which one can.
+ * desc: This tool reads Office Open XML — .docx, .pptx, .xlsx — which are ZIP
+ *       archives underneath. Anything else fails on the ZIP, and the caller
+ *       does not need to know about ZIPs to understand that.
+ *
+ *       Naming the right tool matters more than naming the wrong format. A
+ *       planner that has just been told "not a valid zip file" has no reason to
+ *       reach for pdf_extract, and a reader is left believing their file is
+ *       broken: one live run reported two pitch decks as "corrupted,
+ *       password-protected, or not actually PDFs" when both were fine.
+ * param: path - the file that would not open.
+ * return: the message, naming the file and the tool for it.
+ */
+func notOOXML(path string) string {
+	name := filepath.Base(path)
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".pdf":
+		return name + " is a PDF. office_extract reads Word, PowerPoint and Excel; " +
+			"read this with pdf_extract instead. If pdf_extract is not among the tools " +
+			"you were shown, this build has no PDF reader and the file cannot be read here."
+	case ".doc", ".ppt", ".xls":
+		return name + " is a legacy Office format, not Open XML. Save it as .docx, " +
+			".pptx or .xlsx and try again."
+	default:
+		return name + " is not an Office document: it is not a ZIP archive, which " +
+			".docx, .pptx and .xlsx all are. Use file_read for text, pdf_extract for a PDF."
+	}
 }

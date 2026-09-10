@@ -1754,7 +1754,18 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			"intent":   intent,
 		},
 	})
-	resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
+	// A clock on the call itself, because max_tokens does not bound time. A
+	// thinking model spends the token budget on reasoning and the wait is
+	// whatever that takes; a rig that ignores the budget is unbounded. Measured
+	// across 52 models, this fits every one anybody would ordinarily plan with.
+	//
+	// The deadline being reached is not a failure to report and stop on: what
+	// comes back is a cut-off reply, which the branch below reads and recovers
+	// from. Cancelling here would throw away the thinking already paid for.
+	planCtx, cancelPlan := context.WithTimeout(ctx, a.roundBudget(trigger))
+	defer cancelPlan()
+
+	resp, err := a.completeHeavy(planCtx, &llm.ChatRequest{
 		Messages: messages,
 		Tools:    []llm.ToolDef{a.executivePlanSchema(relevant)},
 		// PIN the model to `plan` — not just "call some tool". A weak reasoning
@@ -1826,6 +1837,29 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	if choice.FinishReason == "length" && salvageTruncatedPlan(planArguments(choice)) != "" {
 		log.Printf("[dag] executive plan cut off at %d tokens — salvaging the steps that finished",
 			a.planMaxTokens(ctx))
+	} else if choice.FinishReason == "length" && nothingVisible(choice) {
+		// Nothing was cut off, because nothing was written: the budget went on
+		// reasoning and the reply never started. Asking for a SHORTER plan
+		// answers a question this call was not asked — it did not write too
+		// much, it wrote nothing — and re-asks under the same budget with
+		// thinking still on, which is how one live run spent 59.6 seconds on an
+		// empty string and needed two further calls to recover.
+		//
+		// Reaching here means both bounds were ignored: max_tokens was spent on
+		// reasoning, and the deadline did not stop it first. That is a model
+		// that loops, or a rig behind the model id that honoured neither.
+		log.Printf("[dag] executive plan returned nothing — the reply budget of %d went on reasoning; re-asking with thinking off",
+			a.planMaxTokens(ctx))
+		recovered, rerr := a.recoverDeadThought(retracing(ctx, "plan_recover_thought"), Heavy, &llm.ChatRequest{
+			Messages:    messages,
+			Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
+			ToolChoice:  llm.ForceToolChoice("plan"),
+			Temperature: a.cfg.Temperature,
+			MaxTokens:   a.planMaxTokens(ctx),
+		}, resp)
+		if rerr == nil && len(recovered.Choices) > 0 {
+			choice = recovered.Choices[0]
+		}
 	} else if choice.FinishReason == "length" {
 		log.Printf("[dag] executive plan cut off at %d tokens with nothing to salvage — asking for a shorter plan", a.planMaxTokens(ctx))
 		shorter := append(append([]llm.Message{}, messages...), llm.Message{

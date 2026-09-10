@@ -33,7 +33,23 @@ func Default() *Config {
 			Endpoint:    "https://openrouter.ai/api/v1",
 			Model:       "qwen/qwen3.5-397b-a17b",
 			Temperature: 0.3,
-			MaxTokens:   4096,
+			// The whole completion, reasoning included — a thinking model writes
+			// its hidden tokens into this same budget, so the reply is what is
+			// left after it has thought.
+			//
+			// It was 4,096, which was set when a lane meant one non-reasoning
+			// model. Measured on the real planner prompt across 52 models, five
+			// need more than that before writing a single step of the plan:
+			// gpt-5-nano spends 7,804 (7,424 of it thinking), nemotron-3-nano
+			// 6,597, glm-5.3 5,623, qwen3.8-2.4t 4,735, gpt-5 about 4,470. Under
+			// 4,096 each of those returns a plan cut off mid-JSON, or nothing at
+			// all.
+			//
+			// 16,384 is about twice the largest measured. Raising the ASK is safe
+			// on its own: llm.Client.Limits trims it to whatever the model's own
+			// published ceiling allows before sending, and never raises it. What
+			// bounds the TIME is the deadline, not this — see roundBudget.
+			MaxTokens: 16384,
 		},
 		// The executor: qwen3.6-35b-a3b, 3B active per token. It is a thinking
 		// model, but this lane forces reasoning off (agent/ask.go, prepare) —

@@ -238,7 +238,7 @@
   .diarrow{display:flex;align-items:center;justify-content:center;background:var(--bg2);color:var(--orange);font-size:22px}
   @media(max-width:720px){.di{grid-template-columns:1fr}.diarrow{padding:8px;transform:rotate(90deg)}.dibox.out{border-left:0;border-top:1px solid var(--line)}}
 
-  /* ── §08 memory boundary wall ── */
+  /* ── §09 memory boundary wall ── */
   .wall{display:grid;grid-template-columns:1fr 46px 1fr;align-items:stretch;margin:22px 0 8px;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
   .wcol{padding:16px 19px;background:var(--card)}
   .wcol h5{margin:0 0 7px;font-size:14.5px;color:#fff;display:flex;gap:9px;align-items:center}
@@ -324,11 +324,12 @@
     <a class="centry" href="#di"><span class="cnum">03</span><span><span class="ctit">Dependency injection</span><span class="cdesc">How <code>${step.N}</code> edges carry data</span></span></a>
     <a class="centry" href="#igx"><span class="cnum">04</span><span><span class="ctit">Intent-Gate Execution</span><span class="cdesc">impact ≤ min(intent, clearance, scope)</span></span></a>
     <a class="centry" href="#tools"><span class="cnum">05</span><span><span class="ctit">Tools &amp; the registry</span><span class="cdesc">The built-in catalogue, ranked by impact</span></span></a>
-    <a class="centry" href="#plugins"><span class="cnum">06</span><span><span class="ctit">Plugins</span><span class="cdesc">Compiled in-process, or a supervised host</span></span></a>
-    <a class="centry" href="#routing"><span class="cnum">07</span><span><span class="ctit">Model routing</span><span class="cdesc">Heavy · light · answer · vision lanes</span></span></a>
-    <a class="centry" href="#memory"><span class="cnum">08</span><span><span class="ctit">Memory &amp; sessions</span><span class="cdesc">The full memory structure, walled off</span></span></a>
-    <a class="centry" href="#lifecycle"><span class="cnum">09</span><span><span class="ctit">Run lifecycle</span><span class="cdesc">Stop, interject, preempt, reconcile</span></span></a>
-    <a class="centry" href="#topology"><span class="cnum">10</span><span><span class="ctit">What runs where</span><span class="cdesc">The process topology &amp; ports</span></span></a>
+    <a class="centry" href="#schemas"><span class="cnum">06</span><span><span class="ctit">Binding a stage to a shape</span><span class="cdesc">Enforced schemas, and falling back</span></span></a>
+    <a class="centry" href="#plugins"><span class="cnum">07</span><span><span class="ctit">Plugins</span><span class="cdesc">Compiled in-process, or a supervised host</span></span></a>
+    <a class="centry" href="#routing"><span class="cnum">08</span><span><span class="ctit">Model routing</span><span class="cdesc">Heavy · light · answer · vision lanes</span></span></a>
+    <a class="centry" href="#memory"><span class="cnum">09</span><span><span class="ctit">Memory &amp; sessions</span><span class="cdesc">The full memory structure, walled off</span></span></a>
+    <a class="centry" href="#lifecycle"><span class="cnum">10</span><span><span class="ctit">Run lifecycle</span><span class="cdesc">Stop, interject, preempt, reconcile</span></span></a>
+    <a class="centry" href="#topology"><span class="cnum">11</span><span><span class="ctit">What runs where</span><span class="cdesc">The process topology &amp; ports</span></span></a>
   </nav>
 
   <!-- ═══ 01 Life of a request ═══ -->
@@ -337,8 +338,8 @@
     <p class="sub">Follow one request from arrival to answer. The numbered spine is the journey; each card is one stop. Nothing with a side effect runs until it clears the gate at step&nbsp;5.</p>
     <div class="spine">
       <div class="snode"><div class="scard op"><div class="sk">Caller</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg> Request arrives</div><div class="sp">A query or alert reaches the single gateway on <code>:8090</code> over an authenticated session. A JWT identifies the principal and carries its <b>tool allowlist</b> and an <b>intent ceiling</b> — deny by default: a tool absent from the scope is invisible.</div></div><div class="snum">1</div></div>
-      <div class="snode"><div class="scard"><div class="sk">Preflight</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Classify &amp; scope</div><div class="sp">One light-model call decides <b>chat</b>, <b>meta</b>, or <b>investigate</b>. Chat short-circuits to a direct reply. Investigate also picks the few relevant guidance skills (capped) and the intent the plan will need.</div></div><div class="snum">2</div></div>
-      <div class="snode"><div class="scard agent"><div class="sk">Executive</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="8.5" y="14" width="7" height="7" rx="1"/><path d="M6.5 10v2.5h11V10M12 12.5V14"/></svg> Plan the DAG</div><div class="sp">The executive makes <b>one</b> call to emit a plan: a DAG of tool steps, each step wired to earlier ones by <code>${step.N}</code> references. Broken wiring — a self-reference, a missing producer — is rejected and re-planned before anything runs. <a href="#dag">See §02.</a></div></div><div class="snum">3</div></div>
+      <div class="snode"><div class="scard"><div class="sk">Preflight</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Classify &amp; scope</div><div class="sp">One light-model call decides <b>chat</b> or <b>agent</b>. Chat short-circuits to a direct reply. Agent also picks the few relevant guidance skills (capped) and the intent the plan will need. A request may skip the decision by naming <code>execution_mode</code> itself &mdash; <b>chat</b>, <b>auto</b> or <b>agent</b>.</div></div><div class="snum">2</div></div>
+      <div class="snode"><div class="scard agent"><div class="sk">Executive</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="8.5" y="14" width="7" height="7" rx="1"/><path d="M6.5 10v2.5h11V10M12 12.5V14"/></svg> Plan the DAG</div><div class="sp">The executive makes <b>one</b> call to emit a plan: a DAG of tool steps, each step wired to earlier ones by <code>${step.N}</code> references, bound to a schema the provider enforces as it decodes. Broken wiring — a self-reference, a missing producer — is rejected and re-planned before anything runs. <a href="#dag">See §02.</a></div></div><div class="snum">3</div></div>
       <div class="snode"><div class="scard"><div class="sk">Scheduler</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H13a2 2 0 0 1 2 2v2M8.5 18H13a2 2 0 0 0 2-2v-2"/></svg> Fire node batches</div><div class="sp">Every step whose dependencies are done fires at once, as its own goroutine. Independent steps run concurrently; a step's typed output feeds its dependents through the <code>${step}</code> wiring. This is the parallelism spine.</div></div><div class="snum">4</div></div>
       <div class="snode"><div class="scard gate"><div class="sk">IGX gate</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 8 11 8 11s8-6 8-11V5z"/><path d="M9 12l2 2 4-4"/></svg> Gate every action</div><div class="sp">Before a tool runs, the triad gate checks <b>impact ≤ min(intent, clearance, scope)</b>. A read-only step (impact&nbsp;0) always passes; anything that writes, kills, or controls must clear on all three. A block is audited, never silent. <a href="#igx">See §04.</a></div></div><div class="snum">5</div></div>
       <div class="snode"><div class="scard"><div class="sk">Execute</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M12 19h8"/></svg> Run the tool</div><div class="sp">The tool runs — <code>bash</code>, <code>file_*</code>, <code>web_*</code>, <code>compute</code>, <code>service</code>, or a plugin — sandboxed to the workspace. Its result is a typed envelope (ok / empty / error), and <code>empty</code> is first-class, so absence is never mistaken for content.</div></div><div class="snum">6</div></div>
@@ -347,7 +348,7 @@
       <div class="snode"><div class="scard op"><div class="sk">Return</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v3"/></svg> Stream &amp; record</div><div class="sp">The answer streams back token-by-token over SSE, filtered per-principal so one caller never sees another's events. The run is recorded, and its full DAG trace is snapshotted server-side for the frontend.</div></div><div class="snum">9</div></div>
       <div class="snode"><div class="scard gate"><div class="sk">Audit</div><div class="st"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg> Audit the decisions</div><div class="sp">Along the way every gate decision was written to the audit log: the tool, its impact, the intent and clearance in force, and allow or block. That trail — not the model's word — is the record of what the system was permitted to do.</div></div><div class="snum">10</div></div>
     </div>
-    <p class="note">This is the interactive path, end to end, and it runs today. The same engine also serves a planner-less <b>chat</b> lane (a direct reply, no tools) and a <b>ReAct</b> loop, selected per request. The rest of this document opens up each stage: the DAG engine (§02), the gate (§03), the tools (§04), and the plugin, routing, memory, and lifecycle machinery around them.</p>
+    <p class="note">This is the interactive path, end to end, and it runs today. The same engine also serves a planner-less <b>chat</b> lane (a direct reply, no tools) and a <b>ReAct</b> loop, selected per request. The rest of this document opens up each stage: the DAG engine (§02), the wiring between steps (§03), the gate (§04), the tools (§05), the shapes a stage is bound to (§06), and the plugin, routing, memory, and lifecycle machinery around them.</p>
   </section>
 
   <!-- ═══ 02 The DAG engine ═══ -->
@@ -551,11 +552,34 @@ url = <span class="val">"https://acme.io/status"</span></pre></div>
       <div class="row re"><div class="rn">Control · 200</div><div class="rd"><code>process_kill</code>, and any <code>bash</code> / <code>git</code> whose command is classified destructive (a workspace-scoped destructive command downgrades to Affect)</div><div class="rw">elevation<br>required</div></div>
     </div>
     <p class="note"><b>compute</b> is the deep one: when precision or a library is needed, an LLM writes a real program, kaiju runs it sandboxed, and its stdout flows back into the graph — so the agent is not limited to what a language model can do in its head. Tools may also declare an <b>output schema</b>, which is what makes the <code>${step.N.field}</code> wiring (<a href="#di">§03</a>) checkable before a run, and a <b>display</b> hint, which pushes a result panel to the frontend. Full catalogue in the <a href="tools.md">tools reference</a>.</p>
+
+    <h3>Which tools a plan is shown</h3>
+    <p class="sub">The registry is not the prompt. A plan is shown a subset, chosen per run, and the narrowing is recorded so a plan that never reached for a tool can be told apart from one that was never offered it.</p>
+    <div class="rows">
+      <div class="row vi"><div class="rn">Scope</div><div class="rd">The signed token's allowlist. A tool absent from it is invisible &mdash; not refused later, never shown. This is the security boundary and it is applied first.</div><div class="rw">deny by default</div></div>
+      <div class="row bl"><div class="rn">Categories</div><div class="rd">Preflight may name the categories the work needs. When it names none, or names ones that match nothing, this step does nothing &mdash; and says so in the trace rather than silently passing everything through.</div><div class="rw">scopeToWork</div></div>
+      <div class="row or"><div class="rn">Ranking</div><div class="rd">What survives is ranked against the step's own words and cut to a floor. Word matching, not vectors: measured over 70 real plans, words picked the tool the plan actually used 21 times against the vectors' 11.</div><div class="rw">toolfind</div></div>
+      <div class="row gr"><div class="rn">Floor</div><div class="rd">Thirty. Measured, not chosen: at a floor of twelve, 59 of those 70 plans would have lost a tool they went on to call.</div><div class="rw">scopeFloor</div></div>
+    </div>
+    <p class="note">Each step's narrowing is written into the run's trace with its counts and the reason it did or did not fire, and the <b>PRE</b> node in the trace opens onto it. A tool the plan could not have called looks identical, from the outside, to one it chose not to &mdash; which is why the record exists.</p>
+  </section>
+
+  <!-- ═══ Structured output ═══ -->
+  <section id="schemas">
+    <div class="kick">06</div><h2>Binding a stage to a shape</h2>
+    <p class="sub">A stage that must return a particular shape does not ask for one and hope. Where the provider can enforce a schema as it decodes, the request is rewritten to do that, and rewritten back on the way out.</p>
+    <div class="rows">
+      <div class="row vi"><div class="rn">Forced tool call</div><div class="rd">The original form, and still the fallback: the model is given one tool and told to call it. Works everywhere; nothing checks the arguments before they arrive.</div><div class="rw">tool_choice</div></div>
+      <div class="row bl"><div class="rn">Enforced schema</div><div class="rd">Where it is supported, the same call travels as <code>response_format: json_schema</code> with <code>strict</code>, and the reply is turned back into a tool call so nothing downstream knows the difference. A shape that cannot be violated needs no correction loop.</div><div class="rw">strict: true</div></div>
+      <div class="row or"><div class="rn">Per-tool params</div><div class="rd">A plan step's <code>params</code> is not a free object. Each branch of the union pins <code>tool</code> to one name and carries that tool's own parameter schema beside it, so a step cannot be emitted with arguments the tool does not take.</div><div class="rw">anyOf</div></div>
+      <div class="row gr"><div class="rn">Falling back</div><div class="rd">A provider that refuses the schema answers 400, and the client reads that as a missing capability and reverts to the forced call for that model. A provider that quietly ignores it is caught by the reply not matching, and the prose is read as a refusal.</div><div class="rw">rejectsSchemas</div></div>
+    </div>
+    <p class="note">A stage that asks for enforcement it is not getting is reported at startup rather than discovered in a run — a schema whose <code>additionalProperties</code> stays open is not strict, whatever the request says, and on a provider that checks, each one is a 400 the client reads as a missing capability.</p>
   </section>
 
   <!-- ═══ 05 Plugins ═══ -->
   <section id="plugins">
-    <div class="kick">06</div><h2>Plugins</h2>
+    <div class="kick">07</div><h2>Plugins</h2>
     <p class="sub">The core stays small on purpose. Anything heavy — a PDF parser, a headless browser — is opt-in and lives outside the default binary. There are two ways in, and both land in the same tool registry, so the planner never has to care which is which.</p>
     <div class="plugs">
       <div class="plug comp"><span class="ptag">compiled · in-process</span><div class="pt">pdf</div><div class="pd">a Go build-tag plugin; adds <code>pdf_extract</code> and teaches <code>web_fetch</code> to read PDFs</div></div>
@@ -578,7 +602,7 @@ url = <span class="val">"https://acme.io/status"</span></pre></div>
 
   <!-- ═══ 06 Model routing ═══ -->
   <section id="routing">
-    <div class="kick">07</div><h2>Model routing</h2>
+    <div class="kick">08</div><h2>Model routing</h2>
     <p class="sub">One request touches several models, each on the job it does best. A request carries a model <b>selection</b>, never a key — keys live only in config — and an unselected lane falls through to the engine default, so routing is invisible until you use it.</p>
     <div class="rows">
       <div class="row vi"><div class="rn">Heavy</div><div class="rd">The reasoning lane: the executive planner, the aggregator, validators, root-cause analysis. Where thinking happens.</div><div class="rw">a.llm</div></div>
@@ -586,12 +610,22 @@ url = <span class="val">"https://acme.io/status"</span></pre></div>
       <div class="row or"><div class="rn">Answer</div><div class="rd">Kept separate so a user's <b>thinking</b> answer-model writes the final reply without ever being handed the planner's forced tool calls.</div><div class="rw">answer lane</div></div>
       <div class="row gr"><div class="rn">Vision</div><div class="rd">A direct image lane, plus an <code>image_read</code> tool; a request's images attach only to a model that can actually see.</div><div class="rw">vision lane</div></div>
     </div>
-    <p class="note">Providers speak two wire protocols — OpenAI-compatible (which covers OpenRouter and any self-hosted endpoint) and Anthropic. An org or user chooses which models are enabled and the defaults per lane; a user may override the reasoning model only. Every non-streamed call passes one token-accounting chokepoint, so spend is metered. A raw <code>/oneshot</code> completion bypasses the whole agent — the passthrough a compliance host uses for its own model stage.</p>
+    <p class="note">Providers speak two wire protocols — OpenAI-compatible (which covers OpenRouter and any self-hosted endpoint) and Anthropic. An org or user chooses which models are enabled and the defaults per lane; a user's per-chat pick drives the <b>answer</b> lane, deliberately not the planner, so a thinking model cannot break the planner's forced tool calls. Every non-streamed call passes one token-accounting chokepoint, so spend is metered. A raw <code>/oneshot</code> completion bypasses the whole agent — the passthrough a compliance host uses for its own model stage.</p>
+
+    <h3>How hard to think</h3>
+    <p class="sub">Three separate questions, asked of three different places. Whether to think is the deployment's; how hard, and how much, may be one run's.</p>
+    <div class="rows">
+      <div class="row vi"><div class="rn">Whether</div><div class="rd">The heavy lane alone asks. The router and the executor force a small call and always send reasoning <b>off</b> — there is no deployment in which hidden reasoning helps a 96-token routing decision. Answer and chat take the model's own default.</div><div class="rw">llm.reasoning</div></div>
+      <div class="row bl"><div class="rn">How hard</div><div class="rd">An effort: <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>. Six because the vocabulary is the providers' and no model takes all of it — glm-5.2 takes neither low nor medium.</div><div class="rw">reasoning_effort</div></div>
+      <div class="row or"><div class="rn">How much</div><div class="rd">A thinking allowance in tokens. It bounds the reasoning, not the reply — what stops a reply is <code>max_tokens</code> and the run's own clock.</div><div class="rw">reasoning_max_tokens</div></div>
+      <div class="row gr"><div class="rn">Set where</div><div class="rd">Both may be set on the node (<code>PATCH /api/v1/config</code>) or on one run (<code>POST /api/v1/execute</code>), and the run wins. A host that picks the model per request needs the second: one node serves every organisation, so a config change would set it for all of them at once.</div><div class="rw">config · request</div></div>
+    </div>
+    <p class="note"><b>Neither is sent unless the model was measured to act on it.</b> Every provider accepts both parameters and none errors on either, so a value sent blindly is a setting that appears to work — it saves, it reads back, and the run is unchanged. The catalogue (<code>models.json</code>) records which efforts each model actually responds to and whether a budget is honoured, and the call seam drops anything outside that. Of 44 models that can reason, 17 act on an effort and 2 honour a budget; two more respond <em>backwards</em>, reasoning longer at <code>low</code> than at <code>high</code>, and are recorded as taking neither. See <a href="/docs/reasoning-effort-bench.md">the measurement</a>.</p>
   </section>
 
   <!-- ═══ 07 Memory & sessions ═══ -->
   <section id="memory">
-    <div class="kick">08</div><h2>Memory &amp; sessions</h2>
+    <div class="kick">09</div><h2>Memory &amp; sessions</h2>
     <p class="sub">Memory is deliberately walled off. It is reachable <b>only at the chat boundary</b> — where a human is talking to the system — and <b>never</b> from inside the execution layer. A tool result cannot read or write memory, which shuts the door on prompt-injection carried in gathered content. This is the single most important property of the subsystem, so the wall is drawn first.</p>
 
     <div class="wall">
@@ -625,12 +659,12 @@ url = <span class="val">"https://acme.io/status"</span></pre></div>
       <div class="row or"><div class="rn">Long-term</div><div class="rd">A bounded set (~20 semantic + 10 episodic) is folded into the system prompt as a "Your Memory" block — at the chat boundary only.</div><div class="rw">InjectLongTermContext</div></div>
       <div class="row vi"><div class="rn">Compaction</div><div class="rd">Past a threshold (~30 turns), all but the last ~10 are summarized by the model and replaced with a "[Conversation summary]" so the window stays bounded.</div><div class="rw">Compact</div></div>
     </div>
-    <p class="note">Two safety properties fall out. <b>Tenant isolation:</b> the memory manager is constructed per-request and scoped to the caller, so one principal's history and memory are never visible to another. <b>Restart resilience:</b> a run killed mid-flight leaves a question with no answer, which the UI reads as "still running" forever — so on boot, kaiju reconciles those dangling turns with a terminal note (<a href="#lifecycle">§09</a>). Full detail in the <a href="memory.md">memory reference</a>.</p>
+    <p class="note">Two safety properties fall out. <b>Tenant isolation:</b> the memory manager is constructed per-request and scoped to the caller, so one principal's history and memory are never visible to another. <b>Restart resilience:</b> a run killed mid-flight leaves a question with no answer, which the UI reads as "still running" forever — so on boot, kaiju reconciles those dangling turns with a terminal note (<a href="#lifecycle">§10</a>). Full detail in the <a href="memory.md">memory reference</a>.</p>
   </section>
 
   <!-- ═══ 08 Run lifecycle ═══ -->
   <section id="lifecycle">
-    <div class="kick">09</div><h2>Run lifecycle</h2>
+    <div class="kick">10</div><h2>Run lifecycle</h2>
     <p class="sub">A long run is not a black box. It can be steered while it runs, stopped for real, or quietly superseded by a newer message — each with a distinct, deliberate mechanism.</p>
     <div class="rows">
       <div class="row or"><div class="rn">Stop</div><div class="rd">The Stop button cancels the <b>job's context</b>, which unwinds the DAG — pending nodes drop, the aggregator is skipped. This is a real teardown: a client simply disconnecting only stops the caller waiting, while the worker keeps running. Stop cancels the work itself.</div><div class="rw">/stop → job.cancel()</div></div>
@@ -642,7 +676,7 @@ url = <span class="val">"https://acme.io/status"</span></pre></div>
 
   <!-- ═══ 09 What runs where ═══ -->
   <section id="topology">
-    <div class="kick">10</div><h2>What runs where</h2>
+    <div class="kick">11</div><h2>What runs where</h2>
     <p class="sub">A small footprint. The engine is one Go process; the only other moving part is the optional plugin host, which kaiju supervises itself. Model providers are the only thing outside the perimeter, and they hold no keys of their own.</p>
     <div class="topo">
       <div class="tnode"><span class="peri">core</span><div class="tp">Kaiju</div><div class="tport">:8090 · Go</div><div class="tdesc">The single gateway and the whole engine — auth, the DAG scheduler, the IGX gate, the tools, memory, SSE, and the embedded web UI.</div></div>

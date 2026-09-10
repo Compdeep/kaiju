@@ -71,11 +71,24 @@ type ProviderCreds struct {
 	APIKey   string
 }
 
-// laneSelection is the per-request model choice for the lanes.
+// laneSelection is the per-request model choice for the lanes, and how hard the
+// chosen model is asked to think.
+//
+// The reasoning fields ride here rather than beside the config's because they
+// are the same kind of thing as the model ids around them: one run's choice,
+// set once at the API boundary, read at the call seam. A host that picks the
+// model per request — makeen picks one per chat, for one organisation among
+// many — cannot use the node-wide setting for this without changing it for
+// everybody.
 type laneSelection struct {
 	heavyProvider, heavyModel   string
 	lightProvider, lightModel   string
 	answerProvider, answerModel string
+	// effort and budget override Config.LLMReasoningEffort and
+	// LLMReasoningBudget for this run. Empty and zero mean "say nothing here",
+	// which leaves the node's setting in force — NOT "ask for nothing".
+	effort string
+	budget int
 }
 
 type laneSelKey struct{}
@@ -98,7 +111,30 @@ func laneSelectionFromTrigger(t Trigger) laneSelection {
 		lightModel:     t.ExecutorModel,
 		answerProvider: t.AnswerProvider,
 		answerModel:    t.AnswerModel,
+		effort:         t.ReasoningEffort,
+		budget:         t.ReasoningMaxTokens,
 	}
+}
+
+/*
+ * reasoningFor reports how hard to think on this run, and how much.
+ * desc: The run's own choice where it made one, the node's setting otherwise.
+ *       Read at the call seam rather than resolved at the boundary, for the
+ *       reason the model ids beside it are: a run is not the only thing that
+ *       reaches this code, and a background run carries no selection at all.
+ * param: ctx - the run context.
+ * return: the effort and the budget to ask for, before the catalog narrows them.
+ */
+func (a *Agent) reasoningFor(ctx context.Context) (string, int) {
+	sel := laneSelFrom(ctx)
+	effort, budget := a.cfg.LLMReasoningEffort, a.cfg.LLMReasoningBudget
+	if sel.effort != "" {
+		effort = sel.effort
+	}
+	if sel.budget > 0 {
+		budget = sel.budget
+	}
+	return effort, budget
 }
 
 func laneSelFrom(ctx context.Context) laneSelection {

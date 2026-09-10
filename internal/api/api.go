@@ -286,6 +286,30 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	} else if req.ChatMode {
 		trigger.ExecutionMode = agent.ExecutionChat
 	}
+
+	// How hard to think on this turn, refused rather than corrected for the same
+	// reason as the mode above: a value the caller meant and we silently changed
+	// is worse than a 400 saying which values there are.
+	//
+	// Whether the chosen MODEL acts on either of these is not decided here. The
+	// catalog decides it at the call seam, so a caller may send an effort a
+	// given model ignores and get a run rather than an error — see
+	// agent.applyReasoningBudget.
+	if req.ReasoningEffort != "" {
+		effort, ok := agent.ParseReasoningEffort(req.ReasoningEffort)
+		if !ok {
+			jsonError(w, fmt.Sprintf("reasoning_effort %q is not one of %v",
+				req.ReasoningEffort, agent.ReasoningEfforts()), http.StatusBadRequest)
+			return
+		}
+		trigger.ReasoningEffort = effort
+	}
+	if req.ReasoningMaxTokens < 0 {
+		jsonError(w, fmt.Sprintf("reasoning_max_tokens %d is negative",
+			req.ReasoningMaxTokens), http.StatusBadRequest)
+		return
+	}
+	trigger.ReasoningMaxTokens = req.ReasoningMaxTokens
 	// One answer for the rest of this handler, so no later branch re-derives it
 	// from chat_mode and drifts.
 	chatLane := trigger.ExecutionMode == agent.ExecutionChat

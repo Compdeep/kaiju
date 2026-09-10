@@ -45,6 +45,7 @@ func TestEveryPublishedValueIsAccepted(t *testing.T) {
 		"llm.reasoning_effort": agent.ParseReasoningEffort,
 		"execution_mode":       agent.ParseExecutionMode,
 		"mode":                 agent.ParseDAGMode,
+		"reasoning_effort":     agent.ParseReasoningEffort,
 	}
 	for _, s := range capabilities(t).Settings {
 		parse, ok := parsers[s.Key]

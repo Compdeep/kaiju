@@ -21,6 +21,18 @@ type ExecuteRequest struct {
 	AnswerModel      string `json:"answer_model,omitempty"`      // answer-lane model id
 	// Vision lane: the model that answers questions about attached images
 	// directly (no planner/tools). Empty ⇒ the configured default vision model.
+	// How hard the chosen model is asked to think on THIS run, and how much of
+	// it. The per-request form of llm.reasoning_effort and
+	// llm.reasoning_max_tokens; empty and zero leave the node's setting in
+	// force rather than asking for nothing.
+	//
+	// Here rather than only in the config because a host that picks the model
+	// per request picks this per request too: makeen chooses one per chat, for
+	// one organisation among many on the same node, and a PATCH to the config
+	// would change it for all of them.
+	ReasoningEffort    string `json:"reasoning_effort,omitempty"`
+	ReasoningMaxTokens int    `json:"reasoning_max_tokens,omitempty"`
+
 	VisionProvider string `json:"vision_provider,omitempty"`
 	VisionModel    string `json:"vision_model,omitempty"`
 	// ChatMode is the older spelling of ExecutionMode "chat", kept so clients

@@ -68,6 +68,14 @@ type Trigger struct {
 	AnswerProvider     string `json:"answer_provider,omitempty"`
 	AnswerModel        string `json:"answer_model,omitempty"`
 	HeartbeatThreshold int    `json:"heartbeat_threshold,omitempty"` // consecutive stuck ticks before kernel interjects (0 = default 3; raise for long-running work like downloads)
+	// How hard to think on this run, and how much of it — the per-request form
+	// of llm.reasoning_effort and llm.reasoning_max_tokens. Empty and zero leave
+	// the node's configured setting in force rather than asking for nothing.
+	//
+	// Sent only where the catalog says the chosen model acts on the value, the
+	// same as the configured pair: see applyReasoningBudget.
+	ReasoningEffort    string `json:"reasoning_effort,omitempty"`
+	ReasoningMaxTokens int    `json:"reasoning_max_tokens,omitempty"`
 
 	// Cause carries whatever the application knows about what prompted this
 	// run — a monitoring event, a sensor reading, a support ticket. It is

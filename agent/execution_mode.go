@@ -1,5 +1,7 @@
 package agent
 
+import "slices"
+
 // How a turn is handled: whether it is answered directly, planned, or routed
 // between the two.
 //
@@ -165,13 +167,27 @@ func ReasoningModes() []string {
 
 // How hard to think when thinking. A different question from whether to think,
 // which is what ReasoningOn and ReasoningOff answer.
+//
+// Six values rather than the three a scale usually has, because the vocabulary
+// is the providers' and not ours, and they use all six. No model takes them
+// all: glm-5.2 takes "xhigh" and "high" and neither "low" nor "medium", so an
+// enum of low/medium/high could not ask that model for anything it accepts.
+// Which of these a given model acts on is a per-model measurement, held in the
+// catalog and read through Config.Reasoning — see agent.applyReasoningBudget.
 const (
-	EffortLow    = "low"
-	EffortMedium = "medium"
-	EffortHigh   = "high"
+	EffortMinimal = "minimal"
+	EffortLow     = "low"
+	EffortMedium  = "medium"
+	EffortHigh    = "high"
+	EffortXHigh   = "xhigh"
+	EffortMax     = "max"
 	// EffortDefault says nothing, and is what every deployment says today.
 	EffortDefault = ""
 )
+
+// efforts is the vocabulary, weakest first. Ordered so that a picker built from
+// it reads as a scale; nothing in the engine compares two efforts.
+var efforts = []string{EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}
 
 /*
  * ParseReasoningEffort reports whether s names an effort.
@@ -186,16 +202,18 @@ const (
  * return: the effort, and whether it was one.
  */
 func ParseReasoningEffort(s string) (string, bool) {
-	switch s {
-	case EffortDefault, EffortLow, EffortMedium, EffortHigh:
+	if s == EffortDefault || slices.Contains(efforts, s) {
 		return s, true
-	default:
-		return "", false
 	}
+	return "", false
 }
 
-// ReasoningEfforts lists the efforts that ask for something. As with
-// ReasoningModes, the default is not among them.
+// ReasoningEfforts lists the efforts that ask for something, weakest first. As
+// with ReasoningModes, the default is not among them.
+//
+// Every one of these is a value SOME model takes, and none is a value every
+// model takes. A picker should narrow this by the catalog rather than offer it
+// whole: see the reasoning_efforts field on a models.Info.
 func ReasoningEfforts() []string {
-	return []string{EffortLow, EffortMedium, EffortHigh}
+	return slices.Clone(efforts)
 }

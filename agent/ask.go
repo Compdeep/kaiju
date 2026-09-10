@@ -101,14 +101,15 @@ func (a *Agent) lane(ctx context.Context, l Lane) (*llm.Client, string) {
  *
  *       Never turns thinking ON. A request that said nothing about it keeps
  *       saying nothing, and one that turned it off is left alone by the caller.
+ * param: ctx - the run context, which may carry this run's own choice.
  * param: req - the request, modified in place.
  * param: model - the model this lane will send to.
  */
-func (a *Agent) applyReasoningBudget(req *llm.ChatRequest, model string) {
+func (a *Agent) applyReasoningBudget(ctx context.Context, req *llm.ChatRequest, model string) {
 	if req == nil || a.cfg.Reasoning == nil || model == "" {
 		return
 	}
-	effort, budget := a.cfg.LLMReasoningEffort, a.cfg.LLMReasoningBudget
+	effort, budget := a.reasoningFor(ctx)
 	if effort == "" && budget <= 0 {
 		return
 	}
@@ -315,7 +316,7 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 	// default and 1,548 at "low". A control that does nothing is worse than one
 	// that is not offered.
 	if req.Reasoning == nil || req.Reasoning.On() {
-		a.applyReasoningBudget(req, model)
+		a.applyReasoningBudget(ctx, req, model)
 	}
 
 	// Fix the cap here rather than leaving it to the send, so the number stated

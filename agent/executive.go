@@ -864,11 +864,7 @@ var executivePlanSchemaTemplate = `{
 			"type": "string",
 			"description": "Write \"\" unless steps is empty. It is only filled when the message genuinely requires no operation — see Planning completeness."
 		},
-		"intent": {
-			"type": "string",
-			"enum": %s,
-			"description": "Inferred intent level for this plan"
-		},
+		"intent": %s,
 		"steps": {
 			"type": "array",
 			"items": {
@@ -899,15 +895,32 @@ var executivePlanSchemaTemplate = `{
  * return: the schema, in the shape the provider takes.
  */
 func (a *Agent) executivePlanSchema() llm.ToolDef {
-	// Build the intent enum dynamically from the registry. If the registry
-	// hasn't been loaded the enum is omitted entirely — Go has no knowledge
-	// of specific intent names to fall back on.
+	// Build the intent enum from the registry, and leave the enum OUT when there
+	// is none — Go has no knowledge of specific intent names to fall back on.
+	//
+	// Omitted, not emptied. The comment here has always said the enum is left
+	// out and the code has never done it: an unloaded registry gives a nil
+	// slice, which marshals to `"enum": null`, and Anthropic answers 400 to
+	// that. Sending `[]` instead trades one fault for a quieter one — an empty
+	// enum parses and offers the model no legal value for the field, which the
+	// strict checker reports as exactly that.
+	//
+	// A property with no enum is a plain string, which is what "we do not know
+	// the intent names" actually means.
 	var names []string
 	if a.intentRegistry != nil {
 		names = a.intentRegistry.AllowedNames(-1)
 	}
-	enumJSON, _ := json.Marshal(names)
-	schema := json.RawMessage(fmt.Sprintf(executivePlanSchemaTemplate, string(enumJSON)))
+	intentProp := `{"type": "string", "description": "Inferred intent level for this plan"}`
+	if len(names) > 0 {
+		enumJSON, err := json.Marshal(names)
+		if err == nil {
+			intentProp = fmt.Sprintf(
+				`{"type": "string", "enum": %s, "description": "Inferred intent level for this plan"}`,
+				string(enumJSON))
+		}
+	}
+	schema := json.RawMessage(fmt.Sprintf(executivePlanSchemaTemplate, intentProp))
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{

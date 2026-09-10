@@ -199,8 +199,14 @@ func TestStrictProblems_LooksInsideBranchesAndOpenMaps(t *testing.T) {
 }
 
 // newSchemaTestAgent builds an agent whose intent registry is populated, because
-// the plan schema's intent enum is read from it — an empty registry produces an
-// empty enum and a problem the real request would never carry.
+// the plan schema's intent enum is read from it and these tests are about the
+// schema a loaded node sends.
+//
+// It no longer has to be populated to avoid a false problem. An unloaded
+// registry used to put `"enum": null` in the document — which Anthropic answers
+// 400 to — and this helper existed partly to step around that. The schema now
+// omits the enum when there are no names, which is what "we do not know the
+// intent names" means; see TestPlanSchema_OmitsTheIntentEnumWhenThereAreNoNames.
 func newSchemaTestAgent(t *testing.T) *Agent {
 	t.Helper()
 	a := &Agent{intentRegistry: NewIntentRegistry()}

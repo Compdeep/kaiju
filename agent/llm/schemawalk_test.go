@@ -164,3 +164,57 @@ func TestCloserAndChecker_AgreeOnTheSameDocument(t *testing.T) {
 		}
 	}
 }
+
+// A document deeper than the cap is refused, not sent half-closed.
+//
+// The cap is shared by the closer and the checker, so anything it hides is
+// hidden from both — and the guard in asSchemaRequest, which asks the checker
+// whether the closed document is acceptable, would have been told yes on the
+// strength of the shallow half alone. That is the exact shape of the fault this
+// walk exists to prevent, arriving through the walk itself.
+func TestEachSchemaNode_ReportsWhenItGivesUp(t *testing.T) {
+	var b strings.Builder
+	depth := maxSchemaDepth + 10
+	for i := 0; i < depth; i++ {
+		b.WriteString(`{"type":"object","properties":{"n":`)
+	}
+	b.WriteString(`{"type":"object","properties":{"deep":{"type":"string"}}}`)
+	for i := 0; i < depth; i++ {
+		b.WriteString(`}}`)
+	}
+	doc := b.String()
+
+	var root any
+	if err := json.Unmarshal([]byte(doc), &root); err != nil {
+		t.Fatalf("test document is not JSON: %v", err)
+	}
+	if !eachSchemaNode(root, "", func(string, map[string]any) {}) {
+		t.Fatal("the walk stopped at the cap and did not say so")
+	}
+
+	closed := closedSchema(json.RawMessage(doc))
+	if closed == nil {
+		return // refused earlier, which is also safe
+	}
+	if len(StrictProblems(closed)) == 0 {
+		t.Error("a document the walk could not finish was reported as strict-clean")
+	}
+
+	req := &ChatRequest{
+		Tools:      []ToolDef{{Type: "function", Function: FunctionDef{Name: "deep", Parameters: json.RawMessage(doc)}}},
+		ToolChoice: ForceToolChoice("deep"),
+	}
+	if asSchemaRequest(req, ProviderOpenAI, "gpt-4o") != nil {
+		t.Error("a partly-closed document was sent claiming strict")
+	}
+}
+
+// A document within the cap is unaffected: the guard must refuse what it cannot
+// examine, not everything.
+func TestEachSchemaNode_DoesNotReportOnAnOrdinaryDocument(t *testing.T) {
+	var root any
+	_ = json.Unmarshal([]byte(`{"type":"object","properties":{"a":{"type":"object","properties":{"b":{"type":"string"}}}}}`), &root)
+	if eachSchemaNode(root, "", func(string, map[string]any) {}) {
+		t.Error("a three-level document was reported as too deep")
+	}
+}

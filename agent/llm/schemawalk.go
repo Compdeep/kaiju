@@ -52,36 +52,44 @@ const maxSchemaDepth = 64
  * param: node - the document, or any node within it.
  * param: path - where this node sits, for a caller that reports positions.
  * param: visit - called once per map node, before its children.
+ * return: whether the walk stopped early at the depth cap, leaving part of the
+ *         document unvisited. The checker turns that into a refusal: the cap is
+ *         shared with the closer, so anything it hides is hidden from BOTH, and
+ *         a document whose deep nodes were neither closed nor checked would
+ *         otherwise pass the guard and go out claiming strict.
  */
-func eachSchemaNode(node any, path string, visit func(path string, m map[string]any)) {
-	walkSchema(node, path, visit, 0)
+func eachSchemaNode(node any, path string, visit func(path string, m map[string]any)) (truncated bool) {
+	return walkSchema(node, path, visit, 0)
 }
 
-func walkSchema(node any, path string, visit func(string, map[string]any), depth int) {
+func walkSchema(node any, path string, visit func(string, map[string]any), depth int) (truncated bool) {
 	m, ok := node.(map[string]any)
-	if !ok || depth > maxSchemaDepth {
-		return
+	if !ok {
+		return false
+	}
+	if depth > maxSchemaDepth {
+		return true
 	}
 	visit(path, m)
 
 	if props, ok := m["properties"].(map[string]any); ok {
 		for k, v := range props {
-			walkSchema(v, path+"."+k, visit, depth+1)
+			truncated = walkSchema(v, path+"."+k, visit, depth+1) || truncated
 		}
 	}
 	// items is one shape for every element. The array form is JSON Schema's
 	// older tuple syntax; both are followed so neither hides a node.
 	switch items := m["items"].(type) {
 	case map[string]any:
-		walkSchema(items, path+"[]", visit, depth+1)
+		truncated = walkSchema(items, path+"[]", visit, depth+1) || truncated
 	case []any:
 		for i, it := range items {
-			walkSchema(it, fmt.Sprintf("%s[%d]", path, i), visit, depth+1)
+			truncated = walkSchema(it, fmt.Sprintf("%s[%d]", path, i), visit, depth+1) || truncated
 		}
 	}
 	if pre, ok := m["prefixItems"].([]any); ok {
 		for i, it := range pre {
-			walkSchema(it, fmt.Sprintf("%s[%d]", path, i), visit, depth+1)
+			truncated = walkSchema(it, fmt.Sprintf("%s[%d]", path, i), visit, depth+1) || truncated
 		}
 	}
 	for _, kind := range []string{"anyOf", "oneOf", "allOf"} {
@@ -90,11 +98,11 @@ func walkSchema(node any, path string, visit func(string, map[string]any), depth
 			continue
 		}
 		for i, b := range branches {
-			walkSchema(b, fmt.Sprintf("%s.%s[%d]", path, kind, i), visit, depth+1)
+			truncated = walkSchema(b, fmt.Sprintf("%s.%s[%d]", path, kind, i), visit, depth+1) || truncated
 		}
 	}
 	if n, ok := m["not"].(map[string]any); ok {
-		walkSchema(n, path+".not", visit, depth+1)
+		truncated = walkSchema(n, path+".not", visit, depth+1) || truncated
 	}
 	for _, kind := range []string{"$defs", "definitions"} {
 		defs, ok := m[kind].(map[string]any)
@@ -102,14 +110,15 @@ func walkSchema(node any, path string, visit func(string, map[string]any), depth
 			continue
 		}
 		for name, d := range defs {
-			walkSchema(d, fmt.Sprintf("%s.%s.%s", path, kind, name), visit, depth+1)
+			truncated = walkSchema(d, fmt.Sprintf("%s.%s.%s", path, kind, name), visit, depth+1) || truncated
 		}
 	}
 	// A map whose keys nobody declared is a node in its own right: strict cannot
 	// express one, and the checker has to be able to say so.
 	if ap, ok := m["additionalProperties"].(map[string]any); ok {
-		walkSchema(ap, path+".<key>", visit, depth+1)
+		truncated = walkSchema(ap, path+".<key>", visit, depth+1) || truncated
 	}
+	return truncated
 }
 
 // declaresProperties reports whether a node lists the keys it permits.

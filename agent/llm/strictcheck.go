@@ -58,9 +58,18 @@ func StrictProblems(schema json.RawMessage) []StrictProblem {
 		return []StrictProblem{{Why: "not valid JSON: " + err.Error()}}
 	}
 	var out []StrictProblem
-	eachSchemaNode(root, "", func(path string, m map[string]any) {
+	truncated := eachSchemaNode(root, "", func(path string, m map[string]any) {
 		checkOne(path, m, &out)
 	})
+	// The walk gave up before the bottom. The closer shares this walk and gave
+	// up in the same place, so the nodes below were neither closed nor seen —
+	// and a document whose deep half is unexamined must not be called strict on
+	// the strength of its shallow half being clean.
+	if truncated {
+		out = append(out, StrictProblem{"", fmt.Sprintf(
+			"nests deeper than %d levels, so the part below that is neither closed nor checked",
+			maxSchemaDepth)})
+	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Path != out[j].Path {
 			return out[i].Path < out[j].Path

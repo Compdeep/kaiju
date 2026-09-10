@@ -547,12 +547,24 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("## Required Tool Categories\n")
 		sb.WriteString(fmt.Sprintf("This query needs tools from: %s. Your plan MUST include at least one tool from each of these categories.\n",
 			strings.Join(graph.Preflight.RequiredCategories, ", ")))
+		// bash appears under network as well as process, because a shell running
+		// curl reaches the network — and listing it only under process made this
+		// block contradict a skill.
+		//
+		// The weather skill names the tool and the URL: bash, curl wttr.in, and
+		// "don't use web_search for weather". Preflight categorised a weather
+		// question as network. bash was not a network tool here, so a plan of
+		// five curl calls satisfied the skill and named no network tool, which
+		// this block forbids in the one line of the prompt that says MUST. The
+		// planner obeyed the MUST: five web_search calls, twenty-five results,
+		// not one temperature among them, and three planning rounds to arrive
+		// where the skill had pointed in the first.
 		sb.WriteString("Category → common tools:\n")
-		sb.WriteString("- network: web_fetch, web_search\n")
-		sb.WriteString("- filesystem: file_read, file_write, file_list\n")
+		sb.WriteString("- network: web_fetch, web_search, bash (curl, wget)\n")
+		sb.WriteString("- filesystem: file_read, file_write, file_list, bash\n")
 		sb.WriteString("- compute: compute\n")
 		sb.WriteString("- process: process_list, process_kill, bash\n")
-		sb.WriteString("- info: sysinfo, env_list, disk_usage, net_info\n\n")
+		sb.WriteString("- info: sysinfo, env_list, disk_usage, net_info, bash\n\n")
 	}
 
 	// The identity and the persistence litany, AFTER the planning contract

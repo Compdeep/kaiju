@@ -106,16 +106,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// The answer lane falls back to the heavy lane, which defaults to a.llm —
 	// the same client clientFor returns for an empty provider — so a turn that
 	// names nothing reaches what it always did.
-	//
-	// The reasoning half comes off Base rather than being named here, because
-	// this lane overrides only the MODEL. Built as a literal it silently dropped
-	// everything else the request had said: a per-request effort travelled on
-	// every other lane and vanished on the one a person actually talks to,
-	// because that is the one path that does not go through
-	// laneSelectionFromTrigger.
-	sel := laneSelection{answerProvider: t.Provider, answerModel: t.Model}
-	sel.effort, sel.budget = t.Base.ReasoningEffort, t.Base.ReasoningMaxTokens
-	ctx = withLaneSelection(ctx, sel)
+	ctx = withLaneSelection(ctx, laneSelection{answerProvider: t.Provider, answerModel: t.Model})
 
 	system := ComposeSystemPrompt(a.soulPrompt, prompt.Chat)
 	var messages []llm.Message

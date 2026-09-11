@@ -320,6 +320,24 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// Details carries the split inside CompletionTokens. Reasoning is billed as
+	// completion, so without this "what did the thinking cost" has no answer —
+	// and it is the first question anybody asks when a bill moves.
+	Details *UsageDetails `json:"completion_tokens_details,omitempty"`
+}
+
+// UsageDetails is the provider's breakdown of the completion.
+type UsageDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+}
+
+// ReasoningTokens is what the hidden thinking cost, and 0 where the provider
+// did not say. Part of CompletionTokens, not additional to it.
+func (u Usage) ReasoningTokens() int {
+	if u.Details == nil {
+		return 0
+	}
+	return u.Details.ReasoningTokens
 }
 
 // Provider constants.
@@ -740,7 +758,29 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 		return &chatResp, fmt.Errorf("provider returned no choices with HTTP 200: %s", truncate(string(data), 400))
 	}
 
+	// A model that writes its thinking into the answer, rather than into the
+	// reasoning field, has it lifted out here — the streamed path already did
+	// this, so the same model's thinking ended up in Reasoning when streamed and
+	// left in the middle of the answer when not. Message.Reasoning is the one
+	// place a caller reads it, whichever way the reply arrived.
+	for i := range chatResp.Choices {
+		liftThinkingInto(&chatResp.Choices[i].Message)
+	}
 	return &chatResp, nil
+}
+
+// liftThinkingInto moves <think>…</think> out of a message's content and onto
+// its Reasoning, joining whatever the provider already put there.
+func liftThinkingInto(m *Message) {
+	clean, think := extractThink(m.Content)
+	if think == "" {
+		return
+	}
+	m.Content = clean
+	if m.Reasoning != "" {
+		m.Reasoning += "\n"
+	}
+	m.Reasoning += think
 }
 
 // CompleteStream streams a chat completion and calls onChunk for each text

@@ -67,6 +67,19 @@ type LLMTrace struct {
 	TokensIn  int    // 0 if unknown
 	TokensOut int    // 0 if unknown
 	LatencyMS int64
+
+	// What this call asked of the model's thinking, what was actually sent, and
+	// what the thinking cost.
+	//
+	// The failure mode of that layer is silence: somebody sets an effort, the
+	// model was never measured to act on it so nothing is sent, and the run is
+	// unchanged with nothing saying why. Asked and Sent differ exactly when
+	// that happens, which is the one place a reader can see it.
+	//
+	// TokensThought is part of TokensOut, not additional to it.
+	Asked         string // "off", "on high", "" — the instruction as the stage meant it
+	Sent          string // the same, as it reached the wire
+	TokensThought int
 }
 
 // debugLogMu serializes appends so concurrent goroutines (e.g. parallel

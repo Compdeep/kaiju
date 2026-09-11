@@ -197,6 +197,109 @@ The planner makes four calls — the plan, then asking for a shorter one, one
 that parses, and one that names real tools — and entries that read the same are
 entries nobody can tell apart. Each retry is re-tagged with why it ran.
 
+## Reasoning
+
+Thinking is not a mode, it is generation. Its tokens come out of the same
+completion allowance as the answer and its time out of the same clock, so a call
+that thinks is a call whose size and deadline are different.
+
+Three questions travel together and are easy to confuse — whether to think, how
+hard, and how much of the reply it may use. A model may answer one and ignore
+the others, so each is decided separately and each is asked for only where the
+catalog says this model acts on it.
+
+### What a caller says
+
+`ChatRequest.Think` carries the intent, in terms that do not depend on the
+provider:
+
+```go
+req.Think = &llm.Reasoning{Want: llm.WantOn, Effort: llm.EffortHigh}
+```
+
+`WantAuto` is the zero value and means **say nothing**, which is not `WantOff`.
+Reading silence as off lets a caller that never considered the question change
+how every answer it touches is written.
+
+`ChatRequest.Reasoning` is the OpenAI-shaped parameter that goes out. It is set
+by the client and never by a caller: what travels depends on what the catalog
+says the model acts on, and a caller does not know that.
+
+### What decides
+
+Four steps, in `agent/llm/resolve.go`, and the order is the design.
+
+1. **A request that forces ONE shape does not think unless it says so.** Its
+   reply is bounded by a schema and its thinking is not: over 257 calls on a
+   trivial prompt, reasoning ran to a median of 139 tokens and a maximum of
+   16,002 — see [reasoning-effort-bench.md](reasoning-effort-bench.md). No
+   comparison against the reply cap survives that tail, so this is decided by
+   what the call *is*. The planner forces one shape and says `WantOn`.
+2. **Then what the caller asked.**
+3. **Then what the model can do.** An `Off` to a model whose reasoning is
+   mandatory is not sent — it reads as success and changes nothing. An effort
+   outside the measured set is not sent. A budget to a model that does not
+   honour one is not sent. A model the catalog cannot answer for is sent
+   nothing at all.
+4. **Then the clock.** The ordinary deadline, doubled when the reply will carry
+   reasoning, multiplied by the model's measured pace.
+
+The **effort ladder does not scale this deadline**. It answers "has the provider
+stopped answering", which is the same question at any effort — and widening it
+would loosen the connection ceiling, which is the only bound a streamed call
+has. How long a piece of *work* may take is the round deadline, above this
+package.
+
+### Who chooses
+
+Above the client, `agent.thinkingFor` states the precedence once: the lane's own
+rule, then the run's choice, then the operator's, then nothing.
+
+| level | where | wins over |
+|---|---|---|
+| the lane | `Light` and `Route` refuse thinking | everything |
+| the run | `Trigger.ReasoningEffort`, from `reasoning_effort` on the request | the node |
+| the node | `llm.reasoning` and `llm.reasoning_effort` in the config | nothing |
+
+`Light` and `Route` are wider than the client's rule on purpose: not every call
+on those lanes forces a shape, and a 256-token repair suggestion cannot afford
+to think either.
+
+### What an embedding application has to supply
+
+One lookup. Without it every request goes exactly as its caller wrote it — the
+same contract `Limits` has always had, and what the tests in
+`agent/llm/inert_test.go` hold to.
+
+```go
+client.Catalog(func(model string) (llm.ModelFacts, bool) { … })
+```
+
+`ModelFacts.Thinking` is five measurements, not capabilities a provider
+advertises: whether it reasons by default, whether that can be switched off,
+which efforts it acts on, whether it honours a token budget, and how much longer
+it takes than the baseline. Every provider accepts every reasoning parameter and
+none errors on any of them, so a model that ignores one answers exactly like a
+model that acts on it — asking the provider tells you nothing. kaiju's own
+implementation is `configapi.Facts`.
+
+### What comes back
+
+`Message.Reasoning` is the one place a caller reads the thinking, whichever of
+the three ways the model delivered it: a reasoning field, reasoning chunks on a
+stream, or `<think>` written into the answer, which is lifted out on both paths.
+
+`Usage.ReasoningTokens()` is what it cost. Reasoning is billed inside
+`CompletionTokens`, so without the breakdown it cannot be told apart from the
+answer. A provider that does not send one reports nothing rather than zero.
+
+### Seeing it
+
+`LLMTrace.Asked` and `LLMTrace.Sent` are the same instruction as the stage meant
+it and as it reached the wire. They differ exactly when the catalog narrowed
+something, which is the only way a reader can tell "the setting did nothing"
+from "the setting did nothing and here is why".
+
 ## What is not here
 
 **The prompt's own size.** Trimming evidence to fit a budget happens before the

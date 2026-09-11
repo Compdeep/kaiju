@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -152,6 +153,65 @@ func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 		}
 		tr.TokensIn = resp.Usage.PromptTokens
 		tr.TokensOut = resp.Usage.CompletionTokens
+		tr.TokensThought = resp.Usage.ReasoningTokens()
 	}
+	tr.Asked, tr.Sent = describeThinking(req.Think), describeSent(req.Reasoning)
 	WriteLLMTrace(tr)
+}
+
+/*
+ * describeThinking is what a stage asked of the model's thinking, in a phrase.
+ * desc: For the trace, where the question a reader has is whether what was
+ *       asked for is what went out — see LLMTrace.Asked.
+ * param: r - the intent, possibly nil.
+ * return: the phrase, or "" when nothing was asked.
+ */
+func describeThinking(r *llm.Reasoning) string {
+	if r == nil {
+		return ""
+	}
+	out := ""
+	switch r.Want {
+	case llm.WantOff:
+		out = "off"
+	case llm.WantOn:
+		out = "on"
+	}
+	if e := r.Effort.String(); e != "" {
+		if out != "" {
+			out += " "
+		}
+		out += e
+	}
+	if r.Budget > 0 {
+		out += fmt.Sprintf(" (%d tokens)", r.Budget)
+	}
+	return out
+}
+
+// describeSent is the same phrase for what actually reached the wire. It is ""
+// when nothing did, which is the answer that differs from Asked when the
+// catalog says the model would not have acted on it.
+func describeSent(c *llm.ReasoningControl) string {
+	if c == nil {
+		return ""
+	}
+	out := ""
+	if c.Enabled != nil {
+		if *c.Enabled {
+			out = "on"
+		} else {
+			out = "off"
+		}
+	}
+	if c.Effort != "" {
+		if out != "" {
+			out += " "
+		}
+		out += c.Effort
+	}
+	if c.MaxTokens > 0 {
+		out += fmt.Sprintf(" (%d tokens)", c.MaxTokens)
+	}
+	return out
 }

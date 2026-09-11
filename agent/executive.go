@@ -819,17 +819,6 @@ type PlanResult struct {
 	// ToolNarrowing is how the registry became Tools — one entry per step,
 	// recorded whether or not the step changed anything. See NodeInfo.
 	ToolNarrowing []string
-
-	// Reasoning is what the model thought on the way to this plan.
-	//
-	// It was collected already, to hand to the retry when a call is cut off, and
-	// then dropped on every call that was not. A reader of a run could see the
-	// plan and not one word of why it was that plan — which of two tools it
-	// weighed, what it took the question to mean, what it decided not to do.
-	//
-	// Shortened for the wire by shownThinking. Empty for a model that returns no
-	// reasoning, which is most of them.
-	Reasoning string
 }
 
 /*
@@ -1673,16 +1662,11 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// one, could not be given one, and concluded the work impossible.
 	objective := a.objective(trigger, graph, replanFrame...)
 	relevant, narrowing := a.relevantTools(ctx, graph, trigger, objective)
-	// What the planning call thought, filled in when that call returns. Declared
-	// here because the record below is written on every exit, including the ones
-	// that never reach the call.
-	var thought string
 	// Recorded on whatever plan this call produces — see PlanResult.Tools.
 	defer func() {
 		if planOut != nil {
 			planOut.Tools, planOut.Objective = relevant, objective
 			planOut.ToolNarrowing = narrowing
-			planOut.Reasoning = shownThinking(thought)
 		}
 	}()
 	log.Printf("[dag] executive (native) sees %d tools: %v", len(relevant), relevant)
@@ -1804,9 +1788,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// a reply that a cancelled call never produces. Nothing is broadcast — the
 	// planner's reasoning is not an outcome for a reader; it goes to the trace,
 	// and to the retry when this call is cut.
-	var resp *llm.ChatResponse
-	var err error
-	resp, thought, err = a.completeHeavyStreaming(planCtx, planReq)
+	resp, thought, err := a.completeHeavyStreaming(planCtx, planReq)
 
 	// The deadline expiring is not the same as the run being abandoned, and it
 	// must not be reported as a failure.

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -78,32 +77,4 @@ func (a *Agent) completeHeavyStreaming(ctx context.Context, req *llm.ChatRequest
 	var cap thinkingCapture
 	resp, err := a.askStreamResp(ctx, Heavy, req, cap.onChunk)
 	return resp, cap.text(), err
-}
-
-// The most thinking worth putting on the wire for a reader.
-//
-// A planning call can reason for tens of thousands of characters, and every
-// node event is sent to every open trace. What a reader wants is the shape of
-// it — where it started, what it settled on — so both ends are kept and the
-// middle is dropped, with the count of what went.
-const maxShownThinking = 8000
-
-/*
- * shownThinking is the reasoning as a reader receives it.
- * desc: Kept from both ends, unlike the copy handed to a retry, which keeps only
- *       the tail. A retry needs the conclusion it was about to reach; a person
- *       reading the trace sees the opening line first and needs it to be the
- *       model's opening line.
- * param: reasoning - what was thought, at whatever length.
- * return: the whole thing when it fits, and both ends when it does not.
- */
-func shownThinking(reasoning string) string {
-	if len(reasoning) <= maxShownThinking {
-		return reasoning
-	}
-	half := maxShownThinking / 2
-	dropped := len(reasoning) - maxShownThinking
-	return reasoning[:half] +
-		fmt.Sprintf("\n\n… %d characters of thinking not shown …\n\n", dropped) +
-		reasoning[len(reasoning)-half:]
 }

@@ -344,16 +344,6 @@ type NodeInfo struct {
 	// the step changed anything, because a step that changed nothing IS the
 	// answer most of the time.
 	ToolNarrowing []string `json:"tool_narrowing,omitempty"`
-	// Reasoning is what a planning node thought before it answered.
-	//
-	// Set on executive nodes, and only for a model that returns its reasoning.
-	// A reader could see the plan and nothing of why it was that plan; the
-	// thinking was already being collected for the retry that recovers a cut
-	// call, and thrown away on every call that finished.
-	//
-	// Shortened at both ends by shownThinking — a whole reasoning trace can run
-	// to tens of thousands of characters, and this is sent to every open trace.
-	Reasoning string `json:"reasoning,omitempty"`
 	// Decided is what a classifying node settled, as "<label>: <value>" lines.
 	//
 	// Set on preflight nodes. Its one-line summary says the lane, the rank and

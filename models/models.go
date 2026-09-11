@@ -74,6 +74,26 @@ type Info struct {
 	//
 	// A model with no reasoning phase at all has both false: nothing to switch.
 	ReasoningOptional bool `json:"reasoning_optional"`
+	// ReasoningEfforts are the effort values this model was MEASURED to act on.
+	//
+	// Every provider accepts reasoning.effort and none errors on it, so a model
+	// that does nothing with the value answers exactly like one that acts on it.
+	// Asking the provider tells you nothing; docs/reasoning-effort-bench.md is
+	// how these were obtained. Empty means nothing measured, and nothing is
+	// asked of it — a control that changes nothing is worse than one not
+	// offered, because somebody will trust it.
+	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+	// ReasoningBudget reports whether a thinking budget in tokens is honoured AS
+	// a budget. Two entries in the catalog are: they return exactly what they
+	// are allowed. Measured the same way, and false by default for the same
+	// reason.
+	ReasoningBudget bool `json:"reasoning_budget,omitempty"`
+	// Pace is how this model's speed compares with the rest, as a word an
+	// operator can read. Read it through DeadlineMultiple.
+	//
+	// A median cannot answer this — what marks a model is its tail. Empty is the
+	// ordinary deadlines. See docs/model-pace.md.
+	Pace string `json:"pace,omitempty"`
 	// Tools reports whether the model can call tools at all.
 	Tools bool `json:"tools"`
 	// ToolCallOK reports whether the model reliably emits a SMALL forced tool call
@@ -141,6 +161,15 @@ func load() []Info {
 				"an entry that omits it would read as a model that does not reason before answering, "+
 				"which is the answer that gets it offered for a forced tool call", m.ID)
 			continue
+		}
+		if _, ok := paceMultiple[m.Pace]; m.Pace != "" && !ok {
+			// Not dropped: the entry is usable and only its allowance is in
+			// question, and the value it falls back to is the SHORT one. A typo
+			// costs a deadline that was already the default, rather than a model
+			// that vanishes from every picker.
+			log.Printf("[models] catalog: %q says pace %q, which is not %q or %q — "+
+				"it is given the ordinary deadlines", m.ID, m.Pace, PaceSlow, PaceVerySlow)
+			m.Pace = ""
 		}
 		m.FitsSmallCall = m.FitsForcedSmallCall()
 		out = append(out, m)
@@ -215,6 +244,31 @@ func (i Info) Thinks() bool { return i.Thinking != nil && *i.Thinking }
  * return: true when no request can stop this model reasoning.
  */
 func (i Info) ReasoningLocked() bool { return i.Thinks() && !i.ReasoningOptional }
+
+// The pace values, and what each is worth in time. Ours, not a provider's.
+const (
+	PaceSlow     = "slow"      // half again as long
+	PaceVerySlow = "very slow" // twice as long
+)
+
+var paceMultiple = map[string]float64{
+	PaceSlow:     1.5,
+	PaceVerySlow: 2,
+}
+
+/*
+ * DeadlineMultiple is what this model's deadlines are multiplied by.
+ * desc: 1 for a model whose pace nobody has measured, which is most of them.
+ *       Never below 1: this lengthens a deadline and never shortens one, so a
+ *       wrong entry costs waiting rather than an answer.
+ * return: the multiplier, 1 or greater.
+ */
+func (i Info) DeadlineMultiple() float64 {
+	if m, ok := paceMultiple[i.Pace]; ok {
+		return m
+	}
+	return 1
+}
 
 /*
  * FitsForcedSmallCall reports whether a lane that pins one tool inside a small

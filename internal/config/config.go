@@ -112,26 +112,6 @@ type LLMConfig struct {
 	// the feature does not exist from one absent because it is at its default.
 	// Empty IS the default, and saying so is the point.
 	Reasoning string `json:"reasoning"`
-	// ReasoningEffort is how hard to think when thinking: "low", "medium",
-	// "high", or empty to say nothing. A different question from Reasoning
-	// above, which is whether to think at all.
-	//
-	// Sent only where the catalog says the model acts on that value. Every
-	// provider accepts the parameter and none errors on it, so one sent blindly
-	// is a setting that appears to work: measured on one prompt,
-	// deepseek-v4-pro reasoned 916 tokens by default and 571 at "low", while
-	// qwen3.6-35b-a3b returned 1,498 and 1,548.
-	//
-	// Never omitempty, for the reason Reasoning is not.
-	ReasoningEffort string `json:"reasoning_effort"`
-	// ReasoningMaxTokens is the thinking allowance in tokens, or zero to say
-	// nothing. Sent only where a budget is honoured as one, which today means
-	// Anthropic and its native budget_tokens.
-	//
-	// It does not bound a reply by itself: the models measured on the
-	// OpenAI-compatible wire spent 648 and 1,160 tokens when asked for 512. What
-	// stops a reply is max_tokens above and the run's own clock.
-	ReasoningMaxTokens int `json:"reasoning_max_tokens"`
 }
 
 /*

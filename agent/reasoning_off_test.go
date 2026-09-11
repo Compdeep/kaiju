@@ -20,7 +20,7 @@ func TestTheSmallForcedCallLanesTurnReasoningOff(t *testing.T) {
 			t.Errorf("%s lane left reasoning at the provider's default, which is ON", l)
 			continue
 		}
-		if req.Reasoning.On() {
+		if req.Reasoning.Enabled {
 			t.Errorf("%s lane asked for reasoning ON", l)
 		}
 	}

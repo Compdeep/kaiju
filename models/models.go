@@ -103,24 +103,6 @@ type Info struct {
 	// Roles lists the lanes this model is suitable for: answer, planner, executor,
 	// router, chat, vision. The UI filters each lane's picker by role.
 	Roles []string `json:"roles,omitempty"`
-	// ReasoningEfforts are the effort values this model actually acts on, and it
-	// is a MEASUREMENT rather than a capability the provider advertises.
-	//
-	// Every provider accepts the parameter; not every model does anything with
-	// it. On one prompt, deepseek-v4-pro reasoned for 916 tokens by default and
-	// 571 at "low" — it listens. qwen3.6-35b-a3b returned 1,498 and 1,548 —
-	// it does not. Neither errored, so asking the provider tells you nothing.
-	//
-	// Empty is the safe default and the honest one: no control is offered for a
-	// model nobody has measured, rather than one that appears to do something.
-	// Nothing here is inferred from the family — see Verified for why that was
-	// abandoned for ToolCallOK.
-	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
-	// ReasoningBudget reports whether a reasoning budget in tokens is honoured
-	// as a budget. Anthropic takes one natively (budget_tokens). The models
-	// measured on the OpenAI-compatible wire did not: 512 asked, 648 and 1,160
-	// spent. False is the default for the same reason as above.
-	ReasoningBudget bool `json:"reasoning_budget,omitempty"`
 }
 
 // catalog is the on-disk shape of models.json.

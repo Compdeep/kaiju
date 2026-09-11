@@ -42,7 +42,6 @@ func TestEveryPublishedValueIsAccepted(t *testing.T) {
 		"agent.execution_mode": agent.ParseExecutionMode,
 		"agent.dag_mode":       agent.ParseDAGMode,
 		"llm.reasoning":        agent.ParseReasoning,
-		"llm.reasoning_effort": agent.ParseReasoningEffort,
 		"execution_mode":       agent.ParseExecutionMode,
 		"mode":                 agent.ParseDAGMode,
 	}

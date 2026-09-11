@@ -1268,53 +1268,6 @@ func (a *Agent) SetReasoning(mode string) bool {
 }
 
 /*
- * SetReasoningEffort sets how hard the model is asked to think when it thinks.
- * desc: Read at run time by applyReasoningBudget, on every send, so a change
- *       reaches the next call rather than the next restart — the fault
- *       SetReasoning's own note records. It writes LLMReasoningEffort.
- *
- *       Setting one does not make it happen: the value is asked for only where
- *       the catalog says the model acts on it, so a deployment can hold an
- *       effort a given model ignores and nothing is sent. That is deliberate,
- *       because a request the model does nothing with is a setting that appears
- *       to work.
- * param: effort - "low", "medium", "high", or "" to ask nothing.
- * return: whether the value was recognised and applied.
- */
-func (a *Agent) SetReasoningEffort(effort string) bool {
-	parsed, ok := ParseReasoningEffort(effort)
-	if !ok {
-		return false
-	}
-	a.cfg.LLMReasoningEffort = parsed
-	return true
-}
-
-/*
- * SetReasoningBudget sets the thinking allowance in tokens.
- * desc: Read at run time by applyReasoningBudget, on every send, so a change
- *       reaches the next call. It writes LLMReasoningBudget.
- *
- *       Zero asks nothing, which is the default. Negative is refused rather
- *       than clamped: it means the caller computed it, and a computed negative
- *       is a bug the caller should hear about.
- *
- *       Sent only where a budget is honoured as one — Anthropic's native
- *       budget_tokens today. It does not bound a reply by itself: the models
- *       measured on the OpenAI-compatible wire spent 648 and 1,160 tokens when
- *       asked for 512.
- * param: budget - tokens, or 0 to ask nothing.
- * return: whether the value was accepted.
- */
-func (a *Agent) SetReasoningBudget(budget int) bool {
-	if budget < 0 {
-		return false
-	}
-	a.cfg.LLMReasoningBudget = budget
-	return true
-}
-
-/*
  * SetPlanLimits sets how many times a run may investigate and re-plan.
  * desc: Both are read at run time by the scheduler, each time it decides whether
  *       to open another investigation or ask for another plan. Grouped because they are patched together and were orphaned together:

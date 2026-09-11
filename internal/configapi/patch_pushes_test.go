@@ -72,24 +72,17 @@ func TestEveryPatchedAgentFieldIsPushedToTheAgent(t *testing.T) {
 	}
 }
 
-// The reasoning settings are on the llm block rather than the agent one, so the
-// check above does not reach them — and the switch had this exact fault when it
-// shipped.
-func TestThePatchedReasoningSettingsArePushedToTheLane(t *testing.T) {
+// The reasoning switch is on the llm block rather than the agent one, and had
+// this exact fault when it shipped.
+func TestThePatchedReasoningSwitchIsPushedToTheLane(t *testing.T) {
 	src, err := os.ReadFile("configapi.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := handlerBody(t, src)
-	for field, setter := range map[string]string{
-		"llm.reasoning":            "SetReasoning",
-		"llm.reasoning_effort":     "SetReasoningEffort",
-		"llm.reasoning_max_tokens": "SetReasoningBudget",
-	} {
-		if !strings.Contains(body, "c.agent."+setter+"(") {
-			t.Errorf("%s is stored but %s is never called, so the setting persists "+
-				"while the running lane keeps its previous answer", field, setter)
-		}
+	if !strings.Contains(body, "c.agent.SetReasoning(") {
+		t.Error("llm.reasoning is stored but SetReasoning is never called, so the " +
+			"switch persists while the running lane keeps its previous answer")
 	}
 }
 

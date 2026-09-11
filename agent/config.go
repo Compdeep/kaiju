@@ -71,23 +71,6 @@ type ModelConfig struct {
 	// Set at run time: SetReasoning.
 	LLMReasoning string
 
-	// LLMReasoningEffort is "low", "medium", "high", or empty to say nothing.
-	// Set at run time: SetReasoningEffort.
-	//
-	// Sent only when the catalog says the model acts on that value — see
-	// Reasoning. A model that ignores it gets nothing, so a deployment cannot
-	// set a control that appears to work and does not.
-	LLMReasoningEffort string
-
-	// LLMReasoningBudget is the reasoning allowance in tokens, or zero to say
-	// nothing. Set at run time: SetReasoningBudget. Sent only where the catalog says a budget is honoured as one,
-	// which today is Anthropic and its native budget_tokens.
-	//
-	// It does not bound a reply on its own. The measured models on the
-	// OpenAI-compatible wire spent 648 and 1,160 tokens when asked for 512, so
-	// what actually stops a reply is the completion cap and the run's clock.
-	LLMReasoningBudget int
-
 	// Providers is the credential catalog for per-request model routing,
 	// keyed by provider name (openai, anthropic, openrouter, selfhosted, …).
 	// Built into one llm.Client per provider at boot; a request selects a
@@ -138,12 +121,6 @@ type ModelConfig struct {
 	// think, which is the safe answer rather than the generous one.
 	Thinks ModelThinks
 
-	// Reasoning reports what a model does with a reasoning instruction — see
-	// llm.ModelReasoning. Nil, or a model the catalog does not carry, means
-	// nothing is asked: an effort a model ignores is a setting that appears to
-	// work and does not, which is worse than one that is absent.
-	Reasoning ModelReasoning
-
 	// PromptScale narrows every cap that carries content into a prompt, from 0
 	// to 1. Unset — or any value outside that range — means 1, which is the
 	// caps exactly as budgets.go states them, so a deployment that says nothing
@@ -183,9 +160,6 @@ type ModelLimits = llm.ModelLimits
 
 // ModelThinks reports whether a model reasons before it answers.
 type ModelThinks = llm.ModelThinks
-
-// ModelReasoning reports what a model does with a reasoning instruction.
-type ModelReasoning = llm.ModelReasoning
 
 // PathConfig is where the agent reads and writes.
 type PathConfig struct {

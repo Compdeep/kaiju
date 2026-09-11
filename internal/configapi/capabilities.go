@@ -98,22 +98,6 @@ func (c *API) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 					"reasoning off whatever is configured, and answer and chat take the model's default",
 			},
 			{
-				Key:        "llm.reasoning_effort",
-				Where:      whereConfig,
-				Values:     agent.ReasoningEfforts(),
-				EmptyMeans: "nothing is asked, and the model thinks as it would anyway",
-				Applies: "only where the catalog says the model acts on it — every provider " +
-					"accepts the parameter and none errors on it, so a value set against a model " +
-					"that ignores it is not sent at all",
-			},
-			{
-				Key:        "llm.reasoning_max_tokens",
-				Where:      whereConfig,
-				EmptyMeans: "no allowance is asked for",
-				Applies: "only where a budget is honoured as one, which today means Anthropic " +
-					"and its native budget_tokens; it does not bound a reply by itself",
-			},
-			{
 				Key:        "agent.dag_mode",
 				Where:      whereConfig,
 				Values:     agent.DAGModes(),

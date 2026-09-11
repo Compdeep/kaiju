@@ -1011,8 +1011,7 @@
         "planner",
         "executor",
         "router"
-      ],
-      "reasoning_budget": true
+      ]
     },
     {
       "id": "qwen/qwen3.8-2.4t-a95b",
@@ -1077,8 +1076,7 @@
         "planner",
         "executor",
         "router"
-      ],
-      "reasoning_budget": true
+      ]
     },
     {
       "id": "thinkingmachines/inkling-small",

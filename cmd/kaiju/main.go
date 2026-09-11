@@ -355,20 +355,14 @@ func createAgent(cfg *config.Config) *agent.Agent {
 			LLMModel:    cfg.LLM.Model,
 			// "on", "off", or empty for the model's default. Reasoning lane only.
 			LLMReasoning: cfg.LLM.Reasoning,
-			// How hard to think when thinking, and how much of it. Both are
-			// asked for only where the catalog says the model acts on them —
-			// see agent.applyReasoningBudget.
-			LLMReasoningEffort: cfg.LLM.ReasoningEffort,
-			LLMReasoningBudget: cfg.LLM.ReasoningMaxTokens,
-			Providers:          buildProviderCreds(cfg.Providers),
-			Temperature:        cfg.LLM.Temperature,
-			MaxTokens:          cfg.LLM.MaxTokens,
-			RateLimit:          cfg.Agent.RateLimit,
+			Providers:    buildProviderCreds(cfg.Providers),
+			Temperature:  cfg.LLM.Temperature,
+			MaxTokens:    cfg.LLM.MaxTokens,
+			RateLimit:    cfg.Agent.RateLimit,
 			// The model catalog is the application's, so the engine asks for the
 			// limits rather than carrying a copy of them.
-			Limits:    configapi.ModelLimits,
-			Thinks:    configapi.ModelThinks,
-			Reasoning: configapi.ModelReasoning,
+			Limits: configapi.ModelLimits,
+			Thinks: configapi.ModelThinks,
 		},
 		PathConfig: agent.PathConfig{
 			DataDir:     cfg.Agent.DataDir,

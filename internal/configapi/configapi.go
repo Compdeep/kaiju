@@ -133,11 +133,6 @@ type configPatch struct {
 		MaxTokens   *int     `json:"max_tokens,omitempty"`
 		// "on", "off", or "" for the model's own default.
 		Reasoning *string `json:"reasoning,omitempty"`
-		// "low", "medium", "high", or "" to ask nothing. A different question
-		// from Reasoning: whether to think, then how hard.
-		ReasoningEffort *string `json:"reasoning_effort,omitempty"`
-		// Thinking allowance in tokens, 0 to ask nothing.
-		ReasoningMaxTokens *int `json:"reasoning_max_tokens,omitempty"`
 	} `json:"llm,omitempty"`
 	Executor *struct {
 		Provider *string `json:"provider,omitempty"`
@@ -216,26 +211,6 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			c.cfg.LLM.Reasoning, _ = agent.ParseReasoning(*patch.LLM.Reasoning)
-		}
-		if patch.LLM.ReasoningEffort != nil {
-			// "" is a real value, as with Reasoning above: it is how the picker
-			// stops asking for an effort. Pushed as well as stored, for the same
-			// reason — a setting the file holds and the running lane does not is
-			// the file disagreeing with the behaviour.
-			if !c.agent.SetReasoningEffort(*patch.LLM.ReasoningEffort) {
-				jsonError(w, fmt.Sprintf("llm.reasoning_effort %q is not one of %v or empty",
-					*patch.LLM.ReasoningEffort, agent.ReasoningEfforts()), http.StatusBadRequest)
-				return
-			}
-			c.cfg.LLM.ReasoningEffort, _ = agent.ParseReasoningEffort(*patch.LLM.ReasoningEffort)
-		}
-		if patch.LLM.ReasoningMaxTokens != nil {
-			if !c.agent.SetReasoningBudget(*patch.LLM.ReasoningMaxTokens) {
-				jsonError(w, fmt.Sprintf("llm.reasoning_max_tokens %d is negative",
-					*patch.LLM.ReasoningMaxTokens), http.StatusBadRequest)
-				return
-			}
-			c.cfg.LLM.ReasoningMaxTokens = *patch.LLM.ReasoningMaxTokens
 		}
 	}
 
@@ -457,25 +432,6 @@ func ModelLimits(id string) (contextTokens, maxOutputTokens int) {
 func ModelThinks(id string) bool {
 	m, ok := models.Find(id)
 	return ok && m.Thinks()
-}
-
-/*
- * ModelReasoning reports what a model does with a reasoning instruction.
- * desc: The engine asks rather than carrying a copy of the catalog, the same
- *       way it asks for limits and for whether a model thinks.
- *
- *       A model the catalog does not carry answers "nothing measured", which is
- *       what an unknown model gets everywhere else here — and the safe answer,
- *       since an effort a model ignores is a setting that appears to work.
- * param: id - the model.
- * return: the effort values it acts on, and whether a token budget is honoured.
- */
-func ModelReasoning(id string) ([]string, bool) {
-	m, ok := models.Find(id)
-	if !ok {
-		return nil, false
-	}
-	return m.ReasoningEfforts, m.ReasoningBudget
 }
 
 /*

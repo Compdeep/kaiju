@@ -161,10 +161,9 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// spend an unbounded amount of time doing it, and this is the lane where a
 	// person is sitting and waiting.
 	//
-	// A deadline of ours returns an ERROR and no reply — not a cut-off one — so
-	// it is answered below rather than reported. Reporting it hands the reader a
-	// context error in place of an answer, which is the outcome the deadline
-	// exists to avoid.
+	// The deadline is not a failure to report. What comes back is a cut-off
+	// reply, and the recovery below reads it — cancelling would throw away the
+	// thinking already paid for.
 	chatCtx, cancelChat := context.WithTimeout(ctx, a.roundBudget(t.Base))
 	defer cancelChat()
 
@@ -173,22 +172,6 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// tool-call JSON can ever reach the stream.
 	res := ChatResult{LLMCalls: 1}
 	resp, err := a.askStreamResp(chatCtx, Answer, req, stream)
-
-	// Our own clock ran out. Ask again with thinking off, under the run's
-	// remaining time — the same answer an exhausted budget gets, because it is
-	// the same problem arriving as an error rather than as an empty reply.
-	if err != nil && chatCtx.Err() != nil && ctx.Err() == nil {
-		log.Printf("[chat] %s passed its %s deadline — re-asking with thinking off",
-			t.Model, a.roundBudget(t.Base))
-		recovered, rerr := a.recoverDeadThought(retracing(ctx, "chat_recover_deadline"), Answer, req, nil)
-		if rerr == nil && len(recovered.Choices) > 0 {
-			res.LLMCalls++
-			res.Tokens += recovered.Usage.TotalTokens
-			res.Content = recovered.Choices[0].Message.Content
-			stream(res.Content, "outcome")
-			return res, nil
-		}
-	}
 	if err != nil {
 		return res, err
 	}

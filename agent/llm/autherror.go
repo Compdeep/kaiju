@@ -1,7 +1,5 @@
 package llm
 
-import "strings"
-
 // IsAuthFailure reports whether an error from a provider reflects a credential
 // problem rather than a transient fault: a missing or wrong key, a model the
 // key cannot reach, or an exhausted quota.
@@ -12,26 +10,10 @@ import "strings"
 // and reports the last failure rather than the real one. Callers use this to
 // stop early and say what is actually wrong.
 //
-// Matching is on the message text because providers disagree on everything
-// else — status codes, error shapes, field names — and this package speaks to
-// several. That makes it a heuristic, so it is deliberately narrow: every term
-// here means a credential or entitlement problem in ordinary provider wording,
-// and none of them appears in a transient failure.
+// Takes the message rather than the error because its one caller has only a
+// message by the time it asks. A caller holding the error should ask Classify,
+// which answers from the type where this package built it and falls back to the
+// same terms where it did not — see failure.go.
 func IsAuthFailure(errMsg string) bool {
-	lower := strings.ToLower(errMsg)
-	for _, term := range []string{
-		"http 401",
-		"http 403",
-		"unauthorized",
-		"forbidden",
-		"invalid api key",
-		"insufficient_quota",
-		"insufficient credits",
-		"authentication",
-	} {
-		if strings.Contains(lower, term) {
-			return true
-		}
-	}
-	return false
+	return classifyText(errMsg) == KindCredentials
 }

@@ -1,12 +1,10 @@
 package llm
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -116,35 +114,26 @@ func (b *breaker) failed(reason string) {
  * return: whether it was upstream, and a short reason.
  */
 func upstreamFailure(err error) (bool, string) {
-	if err == nil {
+	kind := Classify(err)
+	switch kind {
+	case KindTransport, KindRateLimited, KindUpstream, KindTimeout:
+		// The request never reached a working model. A reply that arrived and
+		// was not what we wanted — truncated, unparseable, refused — is an
+		// answer, and a run of bad answers must not stop every caller asking.
+	default:
 		return false, ""
 	}
-	// Our own cancellation is not the provider's fault.
-	if errors.Is(err, context.Canceled) {
-		return false, ""
-	}
-	// A reply that arrived and was not what we wanted.
-	if errors.Is(err, ErrReplyTruncated) {
-		return false, ""
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true, "timed out"
-	}
-	msg := err.Error()
-	switch {
-	case strings.Contains(msg, "provider returned an error with HTTP 200"),
-		strings.Contains(msg, "provider returned no choices"):
-		return true, "200 with no reply"
-	case strings.Contains(msg, "context deadline exceeded"):
-		return true, "timed out"
-	case strings.Contains(msg, fmt.Sprintf("HTTP %d", http.StatusTooManyRequests)):
-		return true, "rate limited"
-	}
-	// Any 5xx: the request never reached a working model.
-	for code := 500; code <= 599; code++ {
-		if strings.Contains(msg, fmt.Sprintf("HTTP %d", code)) {
-			return true, fmt.Sprintf("HTTP %d", code)
+	// The reason is what an operator reads when the breaker opens, so it names
+	// the status where there was one. A 200 is the case worth spelling out: the
+	// call looked like a success and carried no reply.
+	var ce *CallError
+	if errors.As(err, &ce) {
+		switch {
+		case ce.Status == http.StatusOK:
+			return true, "200 with no reply"
+		case ce.Status != 0:
+			return true, fmt.Sprintf("HTTP %d", ce.Status)
 		}
 	}
-	return false, ""
+	return true, kind.String()
 }

@@ -2982,13 +2982,20 @@ func classifyRetryTier(errMsg string) string {
 		}
 	}
 
-	// Tier 2: blind — transient errors, just rerun
+	// Tier 2: blind — transient errors, just rerun.
+	//
+	// The host asking to be left alone is the same question the model client
+	// asks of its own failures, so it is asked once rather than listed here
+	// again — this list carried "rate limit", "http 429" and "http 503", which
+	// were three of a fourth copy of that search.
+	if _, busy := llm.Backoff(errors.New(lower)); busy {
+		return "blind"
+	}
 	blindPatterns := []string{
 		"connection refused", "econnrefused", "econnreset",
 		"etimedout",     // network timeout (not command timeout)
 		"exit status 7", // curl: couldn't connect
 		"npm err! network", "fetch failed",
-		"rate limit", "http 429", "http 503",
 	}
 	for _, p := range blindPatterns {
 		if strings.Contains(lower, p) {
@@ -3019,11 +3026,16 @@ func classifyRetryTier(errMsg string) string {
  * return: how long to wait, or zero to rerun at once.
  */
 func retryBackoff(errMsg string) time.Duration {
-	lower := strings.ToLower(errMsg)
-	for _, p := range []string{"rate limit", "http 429", "http 503", "too many requests"} {
-		if strings.Contains(lower, p) {
-			return 5 * time.Second
+	// The same question the model client asks of its own failures, asked once —
+	// this was a fourth list of terms, disagreeing quietly with the three in
+	// llm. A tool's failure arrives here as a sentence, so the text is all
+	// there is; llm.Backoff reads it the same way and answers from the type
+	// wherever one survived.
+	if d, wait := llm.Backoff(errors.New(errMsg)); wait {
+		if d < 5*time.Second {
+			d = 5 * time.Second
 		}
+		return d
 	}
 	return 0
 }

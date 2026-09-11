@@ -727,17 +727,17 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
+		return nil, transportFailure(err)
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return nil, &CallError{Kind: KindTransport, Err: fmt.Errorf("read response: %w", err)}
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(data), 300))
+		return nil, httpFailure(resp.StatusCode, resp.Header, truncate(string(data), 300))
 	}
 
 	var chatResp ChatResponse
@@ -749,13 +749,15 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 	// is, so the caller and the trace both say what the provider said, rather
 	// than a caller seeing an empty reply and inventing its own account of it.
 	if chatResp.Error != nil && len(chatResp.Choices) == 0 {
-		return &chatResp, fmt.Errorf("provider returned an error with HTTP 200: %s", chatResp.Error.String())
+		return &chatResp, upstreamFailureAt(chatResp.Error.String(),
+			fmt.Errorf("provider returned an error with HTTP 200: %s", chatResp.Error.String()))
 	}
 	// No choices and nothing saying why. The body is the only evidence, so a
 	// bounded amount of it travels with the error — without it this arrives as
 	// "no choices" and the reason is unrecoverable after the fact.
 	if len(chatResp.Choices) == 0 {
-		return &chatResp, fmt.Errorf("provider returned no choices with HTTP 200: %s", truncate(string(data), 400))
+		return &chatResp, upstreamFailureAt(truncate(string(data), 400),
+			fmt.Errorf("provider returned no choices with HTTP 200: %s", truncate(string(data), 400)))
 	}
 
 	// A model that writes its thinking into the answer, rather than into the
@@ -849,13 +851,13 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
+		return nil, transportFailure(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(data), 300))
+		return nil, httpFailure(resp.StatusCode, resp.Header, truncate(string(data), 300))
 	}
 
 	var content strings.Builder

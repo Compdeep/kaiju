@@ -369,9 +369,6 @@ func createAgent(cfg *config.Config) *agent.Agent {
 			Limits:    configapi.ModelLimits,
 			Thinks:    configapi.ModelThinks,
 			Reasoning: configapi.ModelReasoning,
-			// How long this model takes compared with the rest. Both clocks
-			// read it — the round deadline and the request deadline.
-			Pace: configapi.ModelPace,
 		},
 		PathConfig: agent.PathConfig{
 			DataDir:     cfg.Agent.DataDir,

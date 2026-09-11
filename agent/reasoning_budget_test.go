@@ -236,33 +236,13 @@ func TestReasoningEfforts_CarryTheWholeVocabulary(t *testing.T) {
 	if _, ok := ParseReasoningEffort("hard"); ok {
 		t.Error(`"hard" was accepted, so the vocabulary is not closed`)
 	}
-	// "fast" is ours and is listed first: it asks for less TIME rather than less
-	// thinking, and it is the one value here no provider publishes.
-	if _, ok := ParseReasoningEffort("fast"); !ok {
-		t.Error(`"fast" is refused, but it is what halves the round deadline`)
-	}
-	if got, want := ReasoningEfforts(), []string{"fast", "minimal", "low", "medium", "high", "xhigh", "max"}; !slices.Equal(got, want) {
+	if got, want := ReasoningEfforts(), []string{"minimal", "low", "medium", "high", "xhigh", "max"}; !slices.Equal(got, want) {
 		t.Errorf("efforts = %v, want %v weakest first so a picker reads as a scale", got, want)
 	}
 	// A copy, so a caller building a picker cannot reorder the engine's own list.
 	ReasoningEfforts()[0] = "clobbered"
-	if ReasoningEfforts()[0] != "fast" {
+	if ReasoningEfforts()[0] != "minimal" {
 		t.Error("the caller's slice shares the engine's array")
-	}
-}
-
-// Fast is the only value that buys less time, and the floor does not undo it.
-//
-// Every other weak effort lands on the floor on purpose: asking a model to
-// think less is a different thing from giving the call less time. Fast asks for
-// the second one, so a floor that overrode it would leave a control that saves,
-// shows itself set, and changes no deadline.
-func TestFastIsHalfTheOrdinaryDeadline(t *testing.T) {
-	a := &Agent{}
-	ordinary := a.roundBudget(context.Background(), Heavy, Trigger{})
-	fast := a.roundBudget(context.Background(), Heavy, Trigger{ReasoningEffort: EffortFast})
-	if fast != ordinary/2 {
-		t.Errorf("fast = %s, want half of %s", fast, ordinary)
 	}
 }
 

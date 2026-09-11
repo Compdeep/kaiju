@@ -1,11 +1,6 @@
 package agent
 
-import (
-	"context"
-	"time"
-
-	"github.com/Compdeep/kaiju/agent/llm"
-)
+import "time"
 
 /*
  * How long one planning round may take.
@@ -29,16 +24,9 @@ import (
  * seconds — five times the baseline — and no allowance worth giving would fit
  * it either.
  *
- * A per-model allowance was measured for and rejected on those numbers, because
- * on that prompt only qwen3-32b needed one. Live traffic then disagreed: over
- * 2,577 calls on one deployment, kimi-k2.6 passed 115 seconds on 5 of its 25
- * calls while qwen3.6-35b-a3b did so on 4 of 711. A median close to the
- * baseline and a long tail past the deadline are the same model, and only the
- * tail is cut off.
- *
- * So the allowance is per model after all, held in the catalog as a pace and
- * read here — see models.Info.Pace and docs/model-pace.md. It lengthens this
- * deadline and never shortens it.
+ * That is why there is no per-model scaling here. It was measured for, and the
+ * measurement said it changes the outcome for one pathological model, from cut
+ * off to cut off.
  */
 
 // minRoundBudget is the least a round gets, whatever the effort.
@@ -58,12 +46,7 @@ const minRoundBudget = 120 * time.Second
 // "low" and "minimal" land on the floor: asking a model to think LESS is a
 // different thing from giving the call less time, and two minutes is the least
 // a planner call needs on any model measured.
-//
-// "fast" is the exception, and the only value that goes below the floor. It is
-// ours and it says the opposite thing — take less time — so a floor written to
-// protect a deadline nobody chose has no business overriding one somebody did.
 var effortBudget = map[string]time.Duration{
-	EffortFast:    60 * time.Second,
 	EffortMinimal: 60 * time.Second,
 	EffortLow:     60 * time.Second,
 	EffortDefault: 120 * time.Second,
@@ -74,20 +57,17 @@ var effortBudget = map[string]time.Duration{
 }
 
 /*
- * roundBudget is how long one round on this lane may take on this run.
+ * roundBudget is how long one planning round may take on this run.
  * desc: The run's own effort where it named one, the node's setting otherwise —
- *       the precedence reasoningFor applies at the call seam — lengthened by
- *       whatever the catalog says this lane's model needs.
+ *       the precedence reasoningFor applies at the call seam.
  *
  *       Floored, never ceilinged. What stops a long run is the operator's own
  *       wall clock, which is a number somebody chose rather than the product of
  *       five others.
- * param: ctx - the run context, which carries the lane selection.
- * param: l - the lane about to be called, whose model sets the allowance.
  * param: t - the run's trigger, which carries this run's effort where it chose one.
  * return: the budget for one round, never below minRoundBudget.
  */
-func (a *Agent) roundBudget(ctx context.Context, l Lane, t Trigger) time.Duration {
+func (a *Agent) roundBudget(t Trigger) time.Duration {
 	effort := t.ReasoningEffort
 	if effort == "" {
 		effort = a.cfg.LLMReasoningEffort
@@ -96,24 +76,8 @@ func (a *Agent) roundBudget(ctx context.Context, l Lane, t Trigger) time.Duratio
 	if !ok {
 		d = effortBudget[EffortDefault]
 	}
-	// The floor protects a deadline nobody chose. Fast is chosen, and choosing
-	// it is asking for the shorter one.
-	if d < minRoundBudget && effort != EffortFast {
-		d = minRoundBudget
+	if d < minRoundBudget {
+		return minRoundBudget
 	}
-	// The floor is applied first, so a slow model's allowance is multiplied
-	// against the deadline it would actually have been given.
-	return llm.ScaleByPace(d, a.cfg.Pace, a.laneModel(ctx, l))
-}
-
-// laneModel is the model a lane will send to: the per-run selection where the
-// run made one, and the client's own model otherwise — the same order prepare
-// resolves them in. Empty when no client is configured for the lane, which is
-// what a test agent with no model has.
-func (a *Agent) laneModel(ctx context.Context, l Lane) string {
-	c, model := a.lane(ctx, l)
-	if model != "" {
-		return model
-	}
-	return c.Model()
+	return d
 }

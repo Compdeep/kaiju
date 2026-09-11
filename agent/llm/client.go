@@ -351,7 +351,6 @@ type Client struct {
 	http     *http.Client
 	limits   ModelLimits
 	thinks   ModelThinks
-	pace     ModelPace
 }
 
 // ModelLimits reports what a model can take in and give back, in tokens. Zero
@@ -373,12 +372,6 @@ type ModelThinks func(model string) bool
 // qwen3.6-35b-a3b returned 1,498 and 1,548. An empty list and a false mean the
 // model has not been measured, so nothing is asked of it that it may ignore.
 type ModelReasoning func(model string) (efforts []string, budget bool)
-
-// ModelPace reports how long a model takes compared with the rest, as the
-// number its deadlines are multiplied by. 1 — or a nil lookup — is the ordinary
-// pace, and nothing below 1 is honoured: this lengthens a deadline and never
-// shortens one, so an unknown model waits exactly as long as it does today.
-type ModelPace func(model string) float64
 
 /*
  * Thinks tells a client which of its models reason before answering.
@@ -418,17 +411,6 @@ func (c *Client) timeoutFor(req *ChatRequest) time.Duration {
 	if c == nil || req == nil {
 		return requestTimeout
 	}
-	model := req.Model
-	if model == "" {
-		model = c.model
-	}
-	return ScaleByPace(c.baseTimeoutFor(req, model), c.pace, model)
-}
-
-// baseTimeoutFor is the deadline before the model's own pace is allowed to
-// lengthen it: the ordinary one, or the longer one when the reply will contain
-// reasoning.
-func (c *Client) baseTimeoutFor(req *ChatRequest, model string) time.Duration {
 	if req.Reasoning != nil && req.Reasoning.Enabled != nil {
 		if req.Reasoning.On() {
 			return thinkingRequestTimeout
@@ -438,50 +420,14 @@ func (c *Client) baseTimeoutFor(req *ChatRequest, model string) time.Duration {
 	if c.thinks == nil {
 		return requestTimeout
 	}
+	model := req.Model
+	if model == "" {
+		model = c.model
+	}
 	if model != "" && c.thinks(model) {
 		return thinkingRequestTimeout
 	}
 	return requestTimeout
-}
-
-/*
- * Pace tells a client which of its models answer slower than the rest.
- * desc: Every deadline this client sets is multiplied by it, so a model
- *       measured slow is not cut off by a number chosen for the others.
- *
- *       Set beside Limits and Thinks, and for the same reason: a per-call
- *       decision is a decision somebody forgets to make.
- * param: fn - the lookup, or nil to give every model the ordinary deadlines.
- * return: the client, so this reads as part of construction.
- */
-func (c *Client) Pace(fn ModelPace) *Client {
-	c.pace = fn
-	return c
-}
-
-/*
- * ScaleByPace lengthens a deadline by what the lookup says the model needs.
- * desc: Unchanged for a nil lookup, an unnamed model, or a multiple at or below
- *       1 — this exists to give a slow model longer, never to give any model
- *       less.
- *
- *       Exported because two clocks scale, and they have to scale the same way:
- *       this client's request deadline and the engine's round deadline. Written
- *       twice they would drift, and a run cut off by the one that was not
- *       widened reports the wrong clock.
- * param: d - the deadline before the model's pace is considered.
- * param: pace - the lookup, or nil.
- * param: model - the model that will answer.
- * return: the deadline, lengthened where the model is measured slow.
- */
-func ScaleByPace(d time.Duration, pace ModelPace, model string) time.Duration {
-	if pace == nil || model == "" {
-		return d
-	}
-	if m := pace(model); m > 1 {
-		return time.Duration(float64(d) * m)
-	}
-	return d
 }
 
 /*
@@ -577,16 +523,6 @@ const requestTimeout = 300 * time.Second
 // and a stuck provider should be abandoned at 300s as before.
 const thinkingRequestTimeout = 600 * time.Second
 
-// connectionCeiling is the longest any single request may hold a connection.
-//
-// Not a deadline — each request sets its own with a context, see timeoutFor.
-// This only stops a connection outliving that context if one is ever missing,
-// so it has to sit above the longest deadline timeoutFor can produce: the
-// thinking deadline lengthened by the slowest pace the catalog defines, which
-// is twice. A lookup returning more than twice is cut off here, which is the
-// one place a pace does not fully apply.
-const connectionCeiling = 2 * thinkingRequestTimeout
-
 // NewClient creates a Client targeting an OpenAI-compatible endpoint.
 func NewClient(endpoint, apiKey, model string) *Client {
 	return NewClientWithProvider(ProviderOpenAI, endpoint, apiKey, model)
@@ -606,7 +542,7 @@ func NewClientWithProvider(provider, endpoint, apiKey, model string) *Client {
 		// context — see timeoutFor — and this stops a connection outliving the
 		// longest of them if that context is ever missing.
 		http: &http.Client{
-			Timeout: connectionCeiling,
+			Timeout: thinkingRequestTimeout,
 		},
 	}
 }

@@ -74,15 +74,8 @@ func (a *Agent) applyHandlers(cfg Config) {
  * param: cfg - the configuration New was given.
  */
 func (a *Agent) applyModels(cfg Config) {
-	// Thinks and Pace are set here as well as in New, because this replaces the
-	// client New built. Without them the two clocks that read the catalog were
-	// wired onto a client that was then thrown away for any application that
-	// names a model — which is every one of them — so a thinking model was
-	// given the ordinary 300-second request deadline it was measured to need
-	// 600 for.
 	if cfg.LLMEndpoint != "" || cfg.LLMAPIKey != "" || cfg.LLMModel != "" {
-		a.llm = llm.NewClientWithProvider(cfg.LLMProvider, cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).
-			Limits(cfg.Limits).Thinks(cfg.Thinks).Pace(cfg.Pace).Transport(cfg.LLMTransport)
+		a.llm = llm.NewClientWithProvider(cfg.LLMProvider, cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits).Transport(cfg.LLMTransport)
 	}
 
 	if cfg.ExecutorEndpoint != "" || cfg.ExecutorAPIKey != "" || cfg.ExecutorModel != "" {
@@ -90,8 +83,7 @@ func (a *Agent) applyModels(cfg Config) {
 		apiKey := firstNonEmpty(cfg.ExecutorAPIKey, cfg.LLMAPIKey)
 		model := firstNonEmpty(cfg.ExecutorModel, cfg.LLMModel)
 		provider := firstNonEmpty(cfg.ExecutorProvider, cfg.LLMProvider)
-		a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).
-			Limits(cfg.Limits).Thinks(cfg.Thinks).Pace(cfg.Pace).Transport(cfg.LLMTransport)
+		a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(cfg.Limits).Transport(cfg.LLMTransport)
 	}
 
 	if cfg.LLMReasoning != "" {

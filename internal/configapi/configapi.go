@@ -479,22 +479,6 @@ func ModelReasoning(id string) ([]string, bool) {
 }
 
 /*
- * ModelPace reports the number a model's deadlines are multiplied by.
- * desc: The catalog's own answer, as agent.Config.Pace. 1 for an id the catalog
- *       does not carry, which is the ordinary deadlines — the same safe
- *       direction ModelThinks takes for an unknown model.
- * param: id - the model id as configured for a lane.
- * return: the multiplier, 1 or greater.
- */
-func ModelPace(id string) float64 {
-	m, ok := models.Find(id)
-	if !ok {
-		return 1
-	}
-	return m.DeadlineMultiple()
-}
-
-/*
  * jsonResponse writes a value as JSON with the given status.
  * desc: A copy of the helper this file used while it lived in package api.
  *       Copying six lines is cheaper than exporting a helper from one package

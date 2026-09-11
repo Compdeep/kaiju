@@ -140,52 +140,6 @@ type Info struct {
 	// that is the wire these values describe. A deployment pointed at
 	// api.anthropic.com is a different one, and unmeasured.
 	ReasoningBudget bool `json:"reasoning_budget,omitempty"`
-	// Pace is how long this model takes to answer compared with the rest, and
-	// it lengthens the deadlines rather than describing them: "slow" is given
-	// half again as long and "very slow" twice as long. Absent is ordinary,
-	// which is what every entry says unless it has been measured otherwise.
-	//
-	// A deadline is one number for every model, and a model materially slower
-	// than the rest is cut off by it while it is working. That costs a second
-	// call to recover and produces a worse answer than waiting would have.
-	//
-	// Measured, per model, and only where the evidence is a model's own pace
-	// rather than one slow afternoon at a provider. What each entry was set
-	// from is in docs/model-pace.md, with the two benches it was read out of.
-	//
-	// A median cannot answer this. kimi-k2.6 answers in 22 seconds half the
-	// time and passed the 120-second deadline on 5 of its 26 live calls, so
-	// what marks a model is its tail.
-	//
-	// The word describes the model's speed and not its size: a large model can
-	// answer quickly and a small reasoning model can take four minutes.
-	Pace string `json:"pace,omitempty"`
-}
-
-// The pace values, and what each is worth in time. Ours, not a provider's.
-const (
-	PaceSlow     = "slow"      // half again as long
-	PaceVerySlow = "very slow" // twice as long
-)
-
-// paceMultiple is what each pace is worth. A value not in here is ordinary.
-var paceMultiple = map[string]float64{
-	PaceSlow:     1.5,
-	PaceVerySlow: 2,
-}
-
-/*
- * DeadlineMultiple is what this model's deadlines are multiplied by.
- * desc: 1 for a model whose pace has not been measured, which is every entry
- *       that says nothing. Never below 1: this lengthens a deadline and never
- *       shortens one, so a wrong entry costs waiting rather than an answer.
- * return: the multiplier, 1 or greater.
- */
-func (i Info) DeadlineMultiple() float64 {
-	if m, ok := paceMultiple[i.Pace]; ok {
-		return m
-	}
-	return 1
 }
 
 // catalog is the on-disk shape of models.json.
@@ -224,15 +178,6 @@ func load() []Info {
 				"an entry that omits it would read as a model that does not reason before answering, "+
 				"which is the answer that gets it offered for a forced tool call", m.ID)
 			continue
-		}
-		if _, ok := paceMultiple[m.Pace]; m.Pace != "" && !ok {
-			// Not dropped: the entry is usable and only its allowance is in
-			// question, and the value it falls back to is the SHORT one. A typo
-			// here costs a deadline that was already the default rather than a
-			// model that vanishes from every picker.
-			log.Printf("[models] catalog: %q says pace %q, which is not one of %q or %q — "+
-				"it is given the ordinary deadlines", m.ID, m.Pace, PaceSlow, PaceVerySlow)
-			m.Pace = ""
 		}
 		m.FitsSmallCall = m.FitsForcedSmallCall()
 		out = append(out, m)

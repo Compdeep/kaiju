@@ -144,16 +144,6 @@ type ModelConfig struct {
 	// work and does not, which is worse than one that is absent.
 	Reasoning ModelReasoning
 
-	// Pace reports how long a model takes compared with the rest, as the number
-	// its deadlines are multiplied by — see llm.ModelPace. Nil, or a model the
-	// catalog does not carry, means the ordinary deadlines.
-	//
-	// Both clocks read it, and they have to move together for the same reason
-	// Thinks gives: the round deadline in round_budget.go and the request
-	// deadline in llm.timeoutFor. Widening one alone means the run is cut by
-	// whichever was left, and the error then names the wrong clock.
-	Pace ModelPace
-
 	// PromptScale narrows every cap that carries content into a prompt, from 0
 	// to 1. Unset — or any value outside that range — means 1, which is the
 	// caps exactly as budgets.go states them, so a deployment that says nothing
@@ -196,9 +186,6 @@ type ModelThinks = llm.ModelThinks
 
 // ModelReasoning reports what a model does with a reasoning instruction.
 type ModelReasoning = llm.ModelReasoning
-
-// ModelPace reports the number a model's deadlines are multiplied by.
-type ModelPace = llm.ModelPace
 
 // PathConfig is where the agent reads and writes.
 type PathConfig struct {

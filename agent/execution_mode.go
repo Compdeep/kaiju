@@ -181,22 +181,13 @@ const (
 	EffortHigh    = "high"
 	EffortXHigh   = "xhigh"
 	EffortMax     = "max"
-	// EffortFast is the one value here that is ours rather than a provider's,
-	// and it asks for less TIME rather than less thinking: half the round
-	// deadline, and the only value allowed below the floor — see round_budget.go.
-	//
-	// It never reaches a provider. What travels is decided by the catalog's
-	// per-model measurement, and no model is measured to act on a word no
-	// provider publishes, so this is dropped at the seam like any other value
-	// the model does not take.
-	EffortFast = "fast"
 	// EffortDefault says nothing, and is what every deployment says today.
 	EffortDefault = ""
 )
 
 // efforts is the vocabulary, weakest first. Ordered so that a picker built from
 // it reads as a scale; nothing in the engine compares two efforts.
-var efforts = []string{EffortFast, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}
+var efforts = []string{EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}
 
 /*
  * ParseReasoningEffort reports whether s names an effort.

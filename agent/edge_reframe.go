@@ -291,7 +291,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		Messages: BuildMessagesWithResults(
 			edge.Prompt, material, nil, graph.Arcs()),
 		Temperature: 0.2,
-		MaxTokens:   a.replyBudget(replyEdgeBudget),
+		MaxTokens:   a.replyBudget(ctx, Light, replyEdgeBudget),
 	})
 	// An edge carries; this is what it carried. Recorded whether the model
 	// answered or not, because a reframe that fell back to passing the material

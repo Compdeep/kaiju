@@ -524,7 +524,7 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 		// told to quote every URL, path and selector verbatim. The cap is
 		// stated to the model (see stateBudget), so it is not only a limit but
 		// a length the reply is planned against.
-		MaxTokens: a.replyBudget(replyStructuredBudget),
+		MaxTokens: a.replyBudget(ctx, Light, replyStructuredBudget),
 	})
 	if err != nil {
 		log.Printf("[dag] preflight failed, using defaults: %v", err)

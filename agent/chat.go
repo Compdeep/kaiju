@@ -129,7 +129,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		Model:       t.Model,
 		Messages:    messages,
 		Temperature: 0.7,
-		MaxTokens:   a.replyBudget(replyBriefBudget),
+		MaxTokens:   a.replyBudget(ctx, Answer, replyBriefBudget),
 	}, func(chunk, kind string) {
 		if t.SessionID != "" {
 			evType := "outcome"

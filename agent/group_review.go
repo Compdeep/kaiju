@@ -144,7 +144,7 @@ func (a *Agent) fireGroupReview(ctx context.Context, group []*Node,
 		Tools:       []llm.ToolDef{groupReviewSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(replyDecisionBudget),
+		MaxTokens:   a.replyBudget(ctx, Light, replyDecisionBudget),
 	})
 	if err != nil {
 		log.Printf("[dag] group review of %s failed: %v", toolName, err)

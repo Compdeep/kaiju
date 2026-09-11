@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -68,7 +69,7 @@ func TestBudgets_TheTable(t *testing.T) {
 	for _, s := range replies {
 		sb.WriteString(pad(s.name, 18))
 		for _, w := range windows {
-			sb.WriteString(pad(commas(agentWithWindow(w).replyBudget(s.spec)), 10))
+			sb.WriteString(pad(commas(agentWithWindow(w).replyBudget(context.Background(), Heavy, s.spec)), 10))
 		}
 		sb.WriteString("  " + s.spec.Bounds + "\n")
 	}

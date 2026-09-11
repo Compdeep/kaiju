@@ -1,6 +1,10 @@
 package agent
 
-import "github.com/Compdeep/kaiju/agent/toolapi"
+import (
+	"context"
+
+	"github.com/Compdeep/kaiju/agent/toolapi"
+)
 
 // Every cap on how much text reaches a model, in one place.
 //
@@ -235,15 +239,68 @@ var (
  * param: s - which cap.
  * return: the cap, in tokens.
  */
-func (a *Agent) replyBudget(s budgetSpec) int {
+func (a *Agent) replyBudget(ctx context.Context, l Lane, s budgetSpec) int {
 	if a == nil {
 		return s.Base
 	}
-	window := a.smallestKnownWindow()
+	window := a.laneWindow(ctx, l)
 	if window <= 0 {
 		return s.Base
 	}
 	return s.resolve(window/s.Share, a.promptScale())
+}
+
+/*
+ * laneWindow is the context window of the model this lane will actually reach.
+ * desc: Room for a reply is a property of the model that writes it, so the cap
+ *       has to come from that model and from no other.
+ *
+ *       This read smallestKnownWindow: the smaller of the configured reasoning
+ *       and executor models, handed to every stage whichever lane it was on.
+ *       That was right for a number computed once and used for both, and
+ *       stopped being right when lanes began resolving per call — the door
+ *       knows which model is about to answer, and this asked nobody. On one
+ *       deployment it sized a person's answer against an executor with a fifth
+ *       of the answering model's window, and made the executor's model id
+ *       silently shorten every reply on every other lane.
+ *
+ *       The PROMPT side keeps the smaller-window rule, in budget below: one
+ *       prompt is built and may be sent to either lane, so there the smaller
+ *       model is the one that has to fit.
+ * param: ctx - the run context, carrying any per-request lane selection.
+ * param: l - the lane about to be called.
+ * return: the window in tokens, or 0 when nothing is known about the model.
+ */
+func (a *Agent) laneWindow(ctx context.Context, l Lane) int {
+	if a == nil {
+		return 0
+	}
+	c, laneModel := a.lane(ctx, l)
+	return a.modelWindow(resolvedModel(laneModel, c))
+}
+
+/*
+ * modelWindow is what the application's catalog says one model can hold.
+ * desc: The catalog where one is set, the older narrow lookup otherwise, and 0
+ *       where neither answers — which leaves every cap at its Base, the size
+ *       this engine is known to work at.
+ * param: model - the model id, possibly empty.
+ * return: the context window in tokens, or 0.
+ */
+func (a *Agent) modelWindow(model string) int {
+	if a == nil || model == "" {
+		return 0
+	}
+	if a.cfg.Catalog != nil {
+		if f, ok := a.cfg.Catalog(model); ok {
+			return f.ContextTokens
+		}
+	}
+	if a.cfg.Limits == nil {
+		return 0
+	}
+	window, _ := a.cfg.Limits(model)
+	return window
 }
 
 /*

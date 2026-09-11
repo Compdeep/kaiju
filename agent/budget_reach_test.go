@@ -44,18 +44,21 @@ func TestEveryDeclaredBudgetIsRead(t *testing.T) {
 						}
 					}
 				case *ast.CallExpr:
-					// a.budget(x) — whatever a is called.
+					// a.budget(spec) and a.replyBudget(ctx, lane, spec) —
+					// whatever a is called. The spec is the last argument in
+					// both, which is what this reads: replyBudget gained the
+					// lane when a reply stopped being sized against whichever
+					// configured model happened to be smaller, and a guard
+					// keyed on the argument COUNT would have reported every
+					// reply cap as dead from that moment.
 					sel, ok := x.Fun.(*ast.SelectorExpr)
-					if !ok || len(x.Args) != 1 {
+					if !ok || len(x.Args) == 0 {
 						return true
 					}
-					// Both resolvers. replyBudget was added later, for the caps
-					// on what a stage WRITES, and a guard that only knew about
-					// budget would report every one of those as dead.
 					if sel.Sel.Name != "budget" && sel.Sel.Name != "replyBudget" {
 						return true
 					}
-					id, ok := x.Args[0].(*ast.Ident)
+					id, ok := x.Args[len(x.Args)-1].(*ast.Ident)
 					if ok && !strings.HasSuffix(path, "budgets.go") {
 						read[id.Name] = true
 					}

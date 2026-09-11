@@ -161,7 +161,7 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 		Tools:       []llm.ToolDef{reflectorSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(replyDecisionBudget),
+		MaxTokens:   a.replyBudget(ctx, Light, replyDecisionBudget),
 	})
 
 	if err != nil {
@@ -338,7 +338,7 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 		Tools:       []llm.ToolDef{reflectorSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(replyDecisionBudget),
+		MaxTokens:   a.replyBudget(ctx, Light, replyDecisionBudget),
 	})
 
 	if err != nil {

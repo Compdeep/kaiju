@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // A deployment that sets nothing gets the table exactly as written.
 func TestPromptScaleUnsetChangesNothing(t *testing.T) {
@@ -52,7 +55,7 @@ func TestPromptScaleMovesBulkAndExemptsTheRest(t *testing.T) {
 		replyDecisionBudget, replyBriefBudget, replyEdgeBudget,
 		replyAnalysisBudget, replyCodeBudget, replyStructuredBudget,
 	} {
-		if got, want := half.replyBudget(s), full.replyBudget(s); got != want {
+		if got, want := half.replyBudget(context.Background(), Heavy, s), full.replyBudget(context.Background(), Heavy, s); got != want {
 			t.Errorf("%q moved with the scale: %d, want %d", s.Bounds, got, want)
 		}
 	}

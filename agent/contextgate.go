@@ -632,7 +632,7 @@ func (g *ContextGate) runCurator(ctx context.Context, query string, sources map[
 		Tools:       []llm.ToolDef{curatorSchema()},
 		ToolChoice:  "required",
 		Temperature: 0.0,
-		MaxTokens:   g.agent.replyBudget(replyStructuredBudget),
+		MaxTokens:   g.agent.replyBudget(ctx, Light, replyStructuredBudget),
 	})
 	if err != nil {
 		return "", fmt.Errorf("curator LLM: %w", err)

@@ -443,7 +443,7 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 		Tools:       []llm.ToolDef{holmesSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(replyAnalysisBudget),
+		MaxTokens:   a.replyBudget(ctx, Heavy, replyAnalysisBudget),
 	})
 
 	if llmErr != nil {

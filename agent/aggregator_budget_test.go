@@ -15,8 +15,13 @@ import (
 //
 // A PARTIAL reply is still not failed: the text has already been shown to
 // whoever asked, and there is nothing to gain by throwing it away.
-func TestAskStream_CutWithNothingWrittenSaysSo(t *testing.T) {
-	model := newStubModel(t, nil)
+//
+// A reply with NOTHING in it is no longer reported at all on the first attempt.
+// The door asks again with thinking off before the caller ever sees it, which is
+// the whole remedy this fault has: the budget went on reasoning, so a model that
+// cannot reason has nothing to spend it on but the answer.
+func TestAskStream_CutWithNothingWrittenIsAskedAgain(t *testing.T) {
+	model := newStubModel(t, map[string]stubReply{"": {Content: "the answer, second time"}})
 	model.answerNth("", stubReply{Content: "", Cut: true})
 	a := agentOnStub(t, model)
 
@@ -24,8 +29,33 @@ func TestAskStream_CutWithNothingWrittenSaysSo(t *testing.T) {
 		&llm.ChatRequest{Messages: []llm.Message{{Role: "user", Content: "summarise"}}, MaxTokens: 64},
 		func(string, string) {})
 
+	if err != nil {
+		t.Fatalf("a reply that produced nothing was reported rather than re-asked: %v", err)
+	}
+	if !strings.Contains(text, "second time") {
+		t.Errorf("the recovered answer did not reach the caller: %q", text)
+	}
+}
+
+// And when the second attempt produces nothing either, what comes back still
+// reads as a reply that ran out of budget.
+//
+// ErrNoReply wraps llm.ErrReplyTruncated on purpose: the stages that already
+// tell "ran out of budget" from "the provider failed" — the aggregator is one —
+// keep working without learning a second name for the same thing.
+func TestAskStream_NothingTwiceStillReadsAsTruncation(t *testing.T) {
+	model := newStubModel(t, map[string]stubReply{"": {Content: "", Cut: true}})
+	a := agentOnStub(t, model)
+
+	text, err := a.askStream(context.Background(), Answer,
+		&llm.ChatRequest{Messages: []llm.Message{{Role: "user", Content: "summarise"}}, MaxTokens: 64},
+		func(string, string) {})
+
 	if !errors.Is(err, llm.ErrReplyTruncated) {
-		t.Fatalf("err = %v, want ErrReplyTruncated", err)
+		t.Fatalf("err = %v, want it to read as ErrReplyTruncated", err)
+	}
+	if !errors.Is(err, ErrNoReply) {
+		t.Errorf("err = %v, want ErrNoReply — it says which of the two this was", err)
 	}
 	if text != "" {
 		t.Errorf("text = %q, want empty", text)

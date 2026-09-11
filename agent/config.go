@@ -144,6 +144,20 @@ type ModelConfig struct {
 	// work and does not, which is worse than one that is absent.
 	Reasoning ModelReasoning
 
+	// ReasoningLocked reports whether a model's thinking can be switched off at
+	// all. Nil, or a model the catalog does not carry, means it can.
+	//
+	// The second attempt reads it. A call whose whole reply budget went on
+	// reasoning is re-asked with thinking OFF, and for a model that cannot stop
+	// that retry is the same call again: it spends the budget the same way and
+	// returns nothing twice. Such a model is given a larger cap instead, so the
+	// thinking it is going to do anyway has somewhere to finish.
+	//
+	// False is the safe default. Asking a model that was already going to obey
+	// not to think costs nothing; wrongly believing a model locked would spend a
+	// larger budget on every recovery.
+	ReasoningLocked ModelReasoningLocked
+
 	// Pace reports how long a model takes compared with the rest, as the number
 	// its deadlines are multiplied by — see llm.ModelPace. Nil, or a model the
 	// catalog does not carry, means the ordinary deadlines.
@@ -204,6 +218,11 @@ type ModelThinks = llm.ModelThinks
 
 // ModelReasoning reports what a model does with a reasoning instruction.
 type ModelReasoning = llm.ModelReasoning
+
+// ModelReasoningLocked reports whether a model reasons no matter what it is
+// asked. Local to this package: only the second attempt reads it, and the
+// clients have no use for it.
+type ModelReasoningLocked func(model string) bool
 
 // ModelPace reports the number a model's deadlines are multiplied by.
 type ModelPace = llm.ModelPace

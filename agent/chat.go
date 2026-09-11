@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"log"
-	"strings"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
@@ -158,34 +156,18 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		a.broadcastDAGEvent(nil, DAGEvent{Type: evType, Text: chunk, SessionID: t.SessionID})
 	}
 
-	// What it thinks, kept as it arrives.
-	//
-	// Broadcasting a reasoning chunk is not keeping it: the frontend has it and
-	// this process does not. A call stopped by the deadline below returns an
-	// error and no reply, so the thinking was gone at exactly the moment the
-	// retry needed it, and that retry started from the same blank page as the
-	// attempt that had just spent two minutes.
-	var thinking thinkingCapture
-	send := func(chunk, kind string) {
-		thinking.onChunk(chunk, kind)
-		stream(chunk, kind)
-	}
-
 	req := &llm.ChatRequest{
 		Model:       t.Model,
 		Messages:    messages,
 		Temperature: 0.7,
-		// replyDecisionBudget, not replyBriefBudget. This lane writes the answer a
-		// person reads; brief bounds "one stage's judgement, in a sentence or
-		// two" — an observer deciding whether a step is worth acting on. It was
-		// the smallest user-facing cap in the engine, on the one lane where the
-		// cap IS the answer, and its 4,096 ceiling is exactly what glm-5.3 spent
-		// thinking before returning nothing.
-		MaxTokens: a.replyBudget(replyDecisionBudget),
 	}
 
 	// What this turn was judged to need. Empty leaves the model alone, which is
 	// what every turn got before this and what a failed decision gets now.
+	//
+	// Set here rather than in the door because it is the one thing about this
+	// call the door cannot know: whether a conversational turn needs reasoning
+	// is a property of the message, and the router decided it one call earlier.
 	switch t.Thinking {
 	case ReasoningOn:
 		llm.WithReasoning(req)
@@ -193,74 +175,30 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		llm.WithoutReasoning(req)
 	}
 
-	// A deadline on the call, for the same reason the planner has one: max_tokens
-	// bounds the reply, not the wait. A model that reasons before answering can
-	// spend an unbounded amount of time doing it, and this is the lane where a
-	// person is sitting and waiting.
-	//
-	// A deadline of ours returns an ERROR and no reply — not a cut-off one — so
-	// it is answered below rather than reported. Reporting it hands the reader a
-	// context error in place of an answer, which is the outcome the deadline
-	// exists to avoid.
-	chatCtx, cancelChat := context.WithTimeout(ctx, a.roundBudget(ctx, Answer, t.Base))
-	defer cancelChat()
-
 	// One completion, streamed token-by-token to the frontend as outcome events
 	// (the same channel the agent lane streams on). With no tools in play, no
 	// tool-call JSON can ever reach the stream.
+	//
+	// replyDecisionBudget, not replyBriefBudget. This lane writes the answer a
+	// person reads; brief bounds "one stage's judgement, in a sentence or two" —
+	// an observer deciding whether a step is worth acting on. It was the
+	// smallest user-facing cap in the engine, on the one lane where the cap IS
+	// the answer.
+	//
+	// The deadline, the captured reasoning and the second attempt were all
+	// written out here and are now the door's — see call.go. The retry streams
+	// on this same callback, so an answer that only the second attempt produced
+	// reaches the reader as it is written rather than arriving whole at the end.
 	res := ChatResult{LLMCalls: 1}
-	resp, err := a.askStreamResp(chatCtx, Answer, req, send)
-
-	// Our own deadline expired. Ask again with thinking off, under the run's
-	// remaining time — the same answer an exhausted budget gets, because it is
-	// the same problem arriving as an error rather than as an empty reply.
-	if err != nil && chatCtx.Err() != nil && ctx.Err() == nil {
-		// The reply first, the capture second — the order thinkingOf explains.
-		// A deadline leaves no reply, so here it is almost always the capture;
-		// almost, because a call can fail after one arrives.
-		thought := thinkingOf(resp, &thinking)
-		log.Printf("[chat] %s passed its %s deadline — re-asking with thinking off, carrying %d chars of reasoning",
-			t.Model, a.roundBudget(ctx, Answer, t.Base), len(thought))
-		recovered, rerr := a.recoverDeadThought(retracing(ctx, "chat_recover_deadline"), Answer, req, cutThought(thought))
-		if rerr == nil && len(recovered.Choices) > 0 {
-			res.LLMCalls++
-			res.Tokens += recovered.Usage.TotalTokens
-			res.Content = recovered.Choices[0].Message.Content
-			stream(res.Content, "outcome")
-			return res, nil
-		}
-	}
+	resp, err := a.send(ctx, modelCall{
+		Lane: Answer, Stage: replyDecisionBudget, Req: req, OnChunk: stream,
+	})
 	if err != nil {
 		return res, err
 	}
 	res.Tokens += resp.Usage.TotalTokens
 	if len(resp.Choices) > 0 {
 		res.Content = resp.Choices[0].Message.Content
-	}
-
-	// The whole budget went on reasoning and the reply never started.
-	//
-	// This lane had no answer for that. It returned the empty string, and the
-	// caller turned it into "the request finished but produced no answer —
-	// nothing usable was gathered", which describes a failure to gather and
-	// tells the reader to rephrase. Neither was true: one live turn spent 112
-	// seconds and all 4,096 tokens thinking, and rephrasing would not have
-	// helped.
-	//
-	// So the same recovery the planner has: re-ask with thinking off, handing
-	// back the reasoning already produced. A model that cannot think has
-	// nothing to spend the budget on but the answer.
-	if len(resp.Choices) > 0 && strings.TrimSpace(res.Content) == "" && nothingVisible(resp.Choices[0]) {
-		log.Printf("[chat] %s returned nothing — the reply budget went on reasoning; re-asking with thinking off", t.Model)
-		recovered, rerr := a.recoverDeadThought(retracing(ctx, "chat_recover_thought"), Answer, req, resp)
-		if rerr == nil && len(recovered.Choices) > 0 {
-			res.LLMCalls++
-			res.Tokens += recovered.Usage.TotalTokens
-			res.Content = recovered.Choices[0].Message.Content
-			// The first attempt streamed nothing a reader could use, so the
-			// recovered answer has to reach them the way the first would have.
-			stream(res.Content, "outcome")
-		}
 	}
 	return res, nil
 }

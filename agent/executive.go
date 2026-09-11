@@ -1661,6 +1661,39 @@ func planRetryAdvice(err error, raw string) string {
 	return fmt.Sprintf(opening, err, "Return the same plan with the JSON corrected.")
 }
 
+/*
+ * planRetry asks the planner again, under the plan's own bounds.
+ * desc: Five places ask a second time — for a shorter plan, to wrap a bare tool
+ *       call, to re-emit one that did not parse, and twice to use tools that
+ *       exist. Each wrote the same request out, so a bound added to one was a
+ *       bound the other four did not get: that is how the plan's reply cap came
+ *       to be resolved five times and its deadline none.
+ * param: ctx - the run context.
+ * param: tag - what to call this attempt in the trace.
+ * param: messages - the conversation, with whatever correction was added to it.
+ * param: relevant - the tools the plan schema offers.
+ * param: temperature - lower for a correction than for a first attempt.
+ * param: parsed - whether a reply that hit the cap is an error here. False
+ *        where the caller does something better with it than reporting it.
+ * return: the reply.
+ */
+func (a *Agent) planRetry(ctx context.Context, tag string, messages []llm.Message,
+	relevant []string, temperature float64, parsed bool) (*llm.ChatResponse, error) {
+
+	return a.send(retracing(ctx, tag), modelCall{
+		Lane:     Heavy,
+		Stage:    replyPlanBudget,
+		MinReply: a.planFloor(),
+		Parsed:   parsed,
+		Req: &llm.ChatRequest{
+			Messages:    messages,
+			Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
+			ToolChoice:  llm.ForceToolChoice("plan"),
+			Temperature: temperature,
+		},
+	})
+}
+
 func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *Graph, replanFrame ...string) (planOut *PlanResult, errOut error) {
 	// The objective is built before the tools are chosen, and it is the same
 	// text the planner is about to read. That order is the point.
@@ -1795,56 +1828,37 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		// with "planner called unexpected tool" and there's no retry for it.
 		ToolChoice:  llm.ForceToolChoice("plan"),
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.planMaxTokens(ctx),
 	}
 	// A plan is always reasoned about. Every other lane takes the model's own
 	// default, and on current models that is thinking — but it is a default
 	// rather than a guarantee, and this is the one call where the difference
 	// between a good plan and a bad one is the thinking.
 	//
-	// What bounds it is the round deadline below and the thinking budget, not
-	// the absence of the instruction. And an operator who switched reasoning off
-	// still wins: prepare applies the node's setting after this, at the seam
-	// every lane passes through.
+	// What bounds it is the deadline and the thinking budget, not the absence of
+	// the instruction. And an operator who switched reasoning off still wins:
+	// decideThinking applies the node's setting after this, at the seam every
+	// lane passes through.
 	llm.WithReasoning(planReq)
 
-	planCtx, cancelPlan := context.WithTimeout(ctx, a.roundBudget(ctx, Heavy, trigger))
-	defer cancelPlan()
-
-	// Streamed, so the thinking is collected as it arrives rather than read off
-	// a reply that a cancelled call never produces. Nothing is broadcast — the
-	// planner's reasoning is not an outcome for a reader; it goes to the trace,
-	// and to the retry when this call is cut.
-	var resp *llm.ChatResponse
-	var err error
-	resp, thought, err = a.completeHeavyStreaming(planCtx, planReq)
-
-	// The deadline expiring is not the same as the run being abandoned, and it
-	// must not be reported as a failure.
+	// Streamed into this stage's own capture, so the reasoning is collected as
+	// it arrives rather than read off a reply that a cancelled call never
+	// produces. Nothing is broadcast — the planner's reasoning is not an outcome
+	// for a reader; it goes to the trace, and to the second attempt when the
+	// call is cut.
 	//
-	// This was written as though a deadline produced a cut-off reply that the
-	// branch below could read. It does not: cancelling the context returns an
-	// ERROR and no reply at all, so the recovery was never reached and the
-	// planner failed outright. One live run lost its second replan to
-	// "planner LLM call (native): read response: context deadline exceeded",
-	// which is a worse outcome than the slow call it replaced.
-	//
-	// So a deadline of ours is answered the way an exhausted budget is: ask
-	// again with thinking off, under the run's own remaining time. A model that
-	// cannot think has nothing to spend the wait on but the answer.
-	if err != nil && planCtx.Err() != nil && ctx.Err() == nil {
-		// What it managed to think before the deadline expired goes with the retry.
-		// This used to hand over nothing, because a cancelled call returns no
-		// reply and the reasoning was read off the reply — so two minutes of
-		// thinking were paid for and thrown away, and the second attempt started
-		// from the same blank page as the first.
-		log.Printf("[dag] executive plan passed its %s deadline — re-asking with thinking off, carrying %d chars of reasoning",
-			a.roundBudget(ctx, Heavy, trigger), len(thought))
-		recovered, rerr := a.recoverDeadThought(retracing(ctx, "plan_recover_deadline"), Heavy, planReq, cutThought(thought))
-		if rerr == nil && len(recovered.Choices) > 0 {
-			resp, err = recovered, nil
-		}
-	}
+	// The deadline, the second attempt and the division of the budget between
+	// thinking and answering were all written out here. They are the door's now,
+	// which is what let the chat lane and the compute lane have them too — see
+	// call.go.
+	var think thinkingCapture
+	resp, err := a.send(ctx, modelCall{
+		Lane:     Heavy,
+		Stage:    replyPlanBudget,
+		MinReply: a.planFloor(),
+		Req:      planReq,
+		OnChunk:  think.onChunk,
+	})
+	thought = thinkingOf(resp, &think)
 
 	// The planner is not a node, so it records itself — see debugrecord.go. The
 	// plan it produced is filled in at the bottom, once it has parsed; a call
@@ -1903,46 +1917,24 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// it. The steps that closed before the cut are whole and already paid for,
 	// and re-asking re-derives them at seventeen thousand input tokens a time —
 	// see salvageTruncatedPlan, which the parser applies below.
+	//
+	// A reply that produced NOTHING is not here any more. That is the other way
+	// a cut reply arrives — the budget went on reasoning and the answer never
+	// started — and asking for a shorter plan answers a question this call was
+	// not asked: it did not write too much, it wrote nothing. The door asks
+	// again with thinking off, or at a larger cap for a model that cannot be
+	// asked to stop, before this stage ever sees the reply. See call.go.
 	if choice.FinishReason == "length" && salvageTruncatedPlan(planArguments(choice)) != "" {
 		log.Printf("[dag] executive plan cut off at %d tokens — salvaging the steps that finished",
-			a.planMaxTokens(ctx))
-	} else if choice.FinishReason == "length" && nothingVisible(choice) {
-		// Nothing was cut off, because nothing was written: the budget went on
-		// reasoning and the reply never started. Asking for a SHORTER plan
-		// answers a question this call was not asked — it did not write too
-		// much, it wrote nothing — and re-asks under the same budget with
-		// thinking still on, which is how one live run spent 59.6 seconds on an
-		// empty string and needed two further calls to recover.
-		//
-		// Reaching here means both bounds were ignored: max_tokens was spent on
-		// reasoning, and the deadline did not stop it first. That is a model
-		// that loops, or a rig behind the model id that honoured neither.
-		log.Printf("[dag] executive plan returned nothing — the reply budget of %d went on reasoning; re-asking with thinking off",
-			a.planMaxTokens(ctx))
-		recovered, rerr := a.recoverDeadThought(retracing(ctx, "plan_recover_thought"), Heavy, &llm.ChatRequest{
-			Messages:    messages,
-			Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
-			ToolChoice:  llm.ForceToolChoice("plan"),
-			Temperature: a.cfg.Temperature,
-			MaxTokens:   a.planMaxTokens(ctx),
-		}, resp)
-		if rerr == nil && len(recovered.Choices) > 0 {
-			choice = recovered.Choices[0]
-		}
+			planReq.MaxTokens)
 	} else if choice.FinishReason == "length" {
-		log.Printf("[dag] executive plan cut off at %d tokens with nothing to salvage — asking for a shorter plan", a.planMaxTokens(ctx))
+		log.Printf("[dag] executive plan cut off at %d tokens with nothing to salvage — asking for a shorter plan", planReq.MaxTokens)
 		shorter := append(append([]llm.Message{}, messages...), llm.Message{
 			Role: "user",
 			Content: "Your previous plan was cut off before it finished — it ran past the reply limit. " +
 				"Call plan() again with fewer, larger steps, and shorter parameter values.",
 		})
-		retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_shorter"), &llm.ChatRequest{
-			Messages:    shorter,
-			Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
-			ToolChoice:  llm.ForceToolChoice("plan"),
-			Temperature: a.cfg.Temperature,
-			MaxTokens:   a.planMaxTokens(ctx),
-		})
+		retryResp, retryErr := a.planRetry(ctx, "plan_shorter", shorter, relevant, a.cfg.Temperature, false)
 		if retryErr == nil && len(retryResp.Choices) > 0 {
 			choice = retryResp.Choices[0]
 		}
@@ -1984,13 +1976,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 					"call available is plan(), and %q is a tool for a STEP INSIDE a plan. "+
 					"Call plan() and put that tool in a step.", tc.Function.Name, tc.Function.Name),
 			})
-			retryResp, retryErr := a.completeHeavy(retracing(ctx, "plan_wrap"), &llm.ChatRequest{
-				Messages:    again,
-				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
-				ToolChoice:  llm.ForceToolChoice("plan"),
-				Temperature: a.cfg.Temperature,
-				MaxTokens:   a.planMaxTokens(ctx),
-			})
+			retryResp, retryErr := a.planRetry(ctx, "plan_wrap", again, relevant, a.cfg.Temperature, false)
 			if retryErr != nil || len(retryResp.Choices) == 0 ||
 				len(retryResp.Choices[0].Message.ToolCalls) == 0 ||
 				retryResp.Choices[0].Message.ToolCalls[0].Function.Name != "plan" {
@@ -2014,13 +2000,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
 				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: planRetryAdvice(err, fixedRaw)},
 			)
-			retryResp, retryErr := a.completeHeavyChecked(retracing(ctx, "plan_reparse"), &llm.ChatRequest{
-				Messages:    retryMessages,
-				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
-				ToolChoice:  llm.ForceToolChoice("plan"),
-				Temperature: 0.1,
-				MaxTokens:   a.planMaxTokens(ctx),
-			})
+			retryResp, retryErr := a.planRetry(ctx, "plan_reparse", retryMessages, relevant, 0.1, true)
 			if retryErr != nil {
 				return nil, fmt.Errorf("parse plan() arguments (retry failed): %w", err)
 			}
@@ -2087,13 +2067,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
 				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: correction},
 			)
-			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
-				Messages:    replanMessages,
-				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
-				ToolChoice:  llm.ForceToolChoice("plan"),
-				Temperature: 0.1,
-				MaxTokens:   a.planMaxTokens(ctx),
-			})
+			replanResp, replanErr := a.planRetry(ctx, "plan_real_tools", replanMessages, relevant, 0.1, true)
 			if replanErr == nil && len(replanResp.Choices) > 0 && len(replanResp.Choices[0].Message.ToolCalls) > 0 {
 				rtc := replanResp.Choices[0].Message.ToolCalls[0]
 				var replanned executiveCallPayload
@@ -2210,13 +2184,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 				llm.Message{Role: "assistant", Content: "", ToolCalls: curToolCalls},
 				llm.Message{Role: "tool", ToolCallID: curToolCallID, Name: "plan", Content: correction},
 			)
-			replanResp, replanErr := a.completeHeavyChecked(retracing(ctx, "plan_real_tools"), &llm.ChatRequest{
-				Messages:    replanMessages,
-				Tools:       []llm.ToolDef{a.executivePlanSchema(relevant)},
-				ToolChoice:  llm.ForceToolChoice("plan"),
-				Temperature: 0.1,
-				MaxTokens:   a.planMaxTokens(ctx),
-			})
+			replanResp, replanErr := a.planRetry(ctx, "plan_real_tools", replanMessages, relevant, 0.1, true)
 			// A failed re-plan call (LLM error, or no usable steps) leaves `steps`
 			// unchanged; the loop re-validates the same plan next pass and burns a
 			// correction, so a persistently failing re-plan still hard-fails at the cap.

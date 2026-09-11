@@ -136,13 +136,12 @@ func (a *Agent) fireObserver(ctx context.Context, completedNode *Node,
 			"completed_tool":     completedNode.ToolName,
 		},
 	})
-	resp, err := a.completeLight(ctx, &llm.ChatRequest{
+	resp, err := a.send(ctx, modelCall{Lane: Light, Stage: replyBriefBudget, Req: &llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{observerSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(replyBriefBudget),
-	})
+	}})
 
 	if err != nil {
 		log.Printf("[dag] observer failed for %s: %v", completedNode.Tag, err)

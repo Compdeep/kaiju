@@ -479,6 +479,28 @@ func ModelReasoning(id string) ([]string, bool) {
 }
 
 /*
+ * ModelReasoningLocked reports whether a model's thinking can be switched off.
+ * desc: The question the second attempt has to ask. A call whose whole reply
+ *       budget went on reasoning is re-asked with thinking off, and for a model
+ *       that cannot stop, that retry is the same call again — it spends the
+ *       budget the same way and returns nothing twice.
+ *
+ *       The catalog has known this all along, in reasoning_optional, and nothing
+ *       on the recovery path read it.
+ *
+ *       An unknown model answers false, which sends it down the ordinary retry.
+ *       That is the safe direction: asking a model that was already going to
+ *       obey not to think costs nothing, where wrongly believing a model locked
+ *       would spend a larger budget on every recovery.
+ * param: id - the model.
+ * return: true when no request can stop this model reasoning.
+ */
+func ModelReasoningLocked(id string) bool {
+	m, ok := models.Find(id)
+	return ok && m.ReasoningLocked()
+}
+
+/*
  * ModelPace reports the number a model's deadlines are multiplied by.
  * desc: The catalog's own answer, as agent.Config.Pace. 1 for an id the catalog
  *       does not carry, which is the ordinary deadlines — the same safe

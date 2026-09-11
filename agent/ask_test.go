@@ -115,6 +115,32 @@ func TestAskLeavesARequestAloneWhenTheModelIsUnknown(t *testing.T) {
 	a := agentOnStub(t, model)
 	a.executor.Limits(func(string) (int, int) { return 0, 0 })
 
+	// Below the agent's own max_tokens, so this is about the CATALOG and not the
+	// operator's ceiling — that is a separate narrowing and has its own test.
+	req := &llm.ChatRequest{
+		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 1024,
+	}
+	if _, err := a.ask(context.Background(), Light, req); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if req.MaxTokens != 1024 {
+		t.Errorf("MaxTokens = %d; a model the catalog does not carry must be left "+
+			"exactly as the caller asked", req.MaxTokens)
+	}
+}
+
+// The operator's max_tokens is a ceiling over a caller's own ask.
+//
+// It used to be the literal number at four call sites and invisible to the
+// twenty stages that read the budget table. One number, meaning one thing,
+// reaching every stage is the point of the resolver — so a caller asking for
+// more than the deployment allows gets the deployment's answer.
+func TestAskNarrowsToTheOperatorsCeiling(t *testing.T) {
+	model := newStubModel(t, map[string]stubReply{"": {Content: "an answer"}})
+	a := agentOnStub(t, model) // built with MaxTokens 2048
+	a.executor.Limits(func(string) (int, int) { return 0, 0 })
+
 	req := &llm.ChatRequest{
 		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
 		MaxTokens: 8192,
@@ -122,9 +148,8 @@ func TestAskLeavesARequestAloneWhenTheModelIsUnknown(t *testing.T) {
 	if _, err := a.ask(context.Background(), Light, req); err != nil {
 		t.Fatalf("ask: %v", err)
 	}
-	if req.MaxTokens != 8192 {
-		t.Errorf("MaxTokens = %d; a model the catalog does not carry must be left "+
-			"exactly as the caller asked", req.MaxTokens)
+	if req.MaxTokens != 2048 {
+		t.Errorf("MaxTokens = %d, want the configured ceiling 2048", req.MaxTokens)
 	}
 }
 

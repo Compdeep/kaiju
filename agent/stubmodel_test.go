@@ -57,6 +57,13 @@ type stubCall struct {
 	// lane asked for thinking is a decision with no other visible trace — the
 	// reply of a model that thought and one that did not look the same.
 	Reasoning string
+	// MaxTokens is the reply cap the request carried.
+	//
+	// Recorded because the cap is a resolved decision now rather than a number
+	// the stage typed: the catalog proposes it, the table shapes it, the
+	// operator's ceiling narrows it, and a second attempt may raise it. What
+	// went on the wire is the only place any of that is observable.
+	MaxTokens int
 	// Messages is every message the request carried, in order.
 	//
 	// System and User are the two a test usually wants and are kept for the
@@ -144,6 +151,7 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 		Reasoning *struct {
 			Enabled *bool `json:"enabled"`
 		} `json:"reasoning"`
+		MaxTokens int `json:"max_tokens"`
 	}
 	body, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(body, &req)
@@ -177,6 +185,7 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 		call.System = req.Messages[0].Content
 		call.User = req.Messages[len(req.Messages)-1].Content
 	}
+	call.MaxTokens = req.MaxTokens
 
 	s.mu.Lock()
 	nth := 0
@@ -278,6 +287,13 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 		content := reply.Content
 		if !scripted || content == "" {
 			content = "stub answer"
+		}
+		// Cut with nothing written, which the streamed branch above can already
+		// express and this one could not. It matters here now: a call that comes
+		// back empty is asked AGAIN, as one document, and a stub that answers
+		// that retry with prose can only ever show the recovery succeeding.
+		if reply.Cut && reply.Content == "" && scripted {
+			content = ""
 		}
 		fmt.Fprintf(w, `{"choices":[{"message":{"content":%s},"finish_reason":%s}]}`,
 			mustJSON(content), mustJSON(finishReason(reply, "stop")))

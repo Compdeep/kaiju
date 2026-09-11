@@ -54,13 +54,33 @@ func TestPlanMaxTokens_SmallBudgetKeepsTheConfiguredCap(t *testing.T) {
 	}
 }
 
-func TestPlanMaxTokens_RaisesForAModelThatCanTakeIt(t *testing.T) {
-	// 100 steps is what the prompt tells the planner it may write, and 4096 is
-	// not enough to write them.
+// The operator's cap is a ceiling, including over what the planner says it needs.
+//
+// This used to go the other way: the configured value was a starting point and
+// the step count raised it. That made max_tokens mean one thing at this call
+// site and another at the twenty that read the table, which is the split the one
+// resolver exists to close — so the ceiling wins, and boundsFor logs the fact
+// that a setting is cutting a stage below its stated minimum, because that is
+// the one thing the operator cannot infer.
+func TestPlanMaxTokens_TheOperatorsCeilingWinsOverTheStepCount(t *testing.T) {
+	// 100 steps needs 5000; the operator allows 4096.
 	a := planAgent(100, 4096, limitsOf(200000, 64000))
-	want := 100*stepTokens + planOverhead
+	if got := a.planMaxTokens(context.Background()); got != 4096 {
+		t.Fatalf("want the configured ceiling 4096, got %d", got)
+	}
+}
+
+// With headroom, the step count is what raises the plan above the table.
+func TestPlanMaxTokens_TheStepCountRaisesTheTable(t *testing.T) {
+	// A window so small the table proposes its Base, a step count larger than it,
+	// and an operator's ceiling well clear of both.
+	a := planAgent(400, 65536, limitsOf(8000, 64000))
+	want := 400*stepTokens + planOverhead
+	if want <= replyPlanBudget.Base {
+		t.Fatalf("test is not exercising the floor: %d <= %d", want, replyPlanBudget.Base)
+	}
 	if got := a.planMaxTokens(context.Background()); got != want {
-		t.Fatalf("want %d, got %d", want, got)
+		t.Fatalf("want the stated minimum %d, got %d", want, got)
 	}
 }
 
@@ -127,7 +147,12 @@ func TestCompleteHeavy_CapsAgainstTheModel(t *testing.T) {
 		cfg: Config{ModelConfig: ModelConfig{Limits: limits}},
 	}
 
-	_, err := a.completeHeavy(context.Background(), reqOf(64000, 400))
+	// The plan's stage, whose share of a 200K window (8,333) is larger than what
+	// this model will write — so the model's published ceiling is what the wire
+	// has to show, which is this test's subject.
+	_, err := a.send(context.Background(), modelCall{
+		Lane: Heavy, Stage: replyPlanBudget, Req: reqOf(64000, 400),
+	})
 	if err != nil {
 		t.Fatalf("call failed: %v", err)
 	}

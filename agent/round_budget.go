@@ -1,10 +1,7 @@
 package agent
 
 import (
-	"context"
 	"time"
-
-	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 /*
@@ -73,47 +70,8 @@ var effortBudget = map[string]time.Duration{
 	EffortMax:     960 * time.Second,
 }
 
-/*
- * roundBudget is how long one round on this lane may take on this run.
- * desc: The run's own effort where it named one, the node's setting otherwise —
- *       the precedence reasoningFor applies at the call seam — lengthened by
- *       whatever the catalog says this lane's model needs.
- *
- *       Floored, never ceilinged. What stops a long run is the operator's own
- *       wall clock, which is a number somebody chose rather than the product of
- *       five others.
- * param: ctx - the run context, which carries the lane selection.
- * param: l - the lane about to be called, whose model sets the allowance.
- * param: t - the run's trigger, which carries this run's effort where it chose one.
- * return: the budget for one round, never below minRoundBudget.
- */
-func (a *Agent) roundBudget(ctx context.Context, l Lane, t Trigger) time.Duration {
-	effort := t.ReasoningEffort
-	if effort == "" {
-		effort = a.cfg.LLMReasoningEffort
-	}
-	d, ok := effortBudget[effort]
-	if !ok {
-		d = effortBudget[EffortDefault]
-	}
-	// The floor protects a deadline nobody chose. Fast is chosen, and choosing
-	// it is asking for the shorter one.
-	if d < minRoundBudget && effort != EffortFast {
-		d = minRoundBudget
-	}
-	// The floor is applied first, so a slow model's allowance is multiplied
-	// against the deadline it would actually have been given.
-	return llm.ScaleByPace(d, a.cfg.Pace, a.laneModel(ctx, l))
-}
-
-// laneModel is the model a lane will send to: the per-run selection where the
-// run made one, and the client's own model otherwise — the same order prepare
-// resolves them in. Empty when no client is configured for the lane, which is
-// what a test agent with no model has.
-func (a *Agent) laneModel(ctx context.Context, l Lane) string {
-	c, model := a.lane(ctx, l)
-	if model != "" {
-		return model
-	}
-	return c.Model()
-}
+// Both functions that stood here — roundBudget, which resolved this ladder
+// against a Trigger, and laneModel, which named the model to scale it by — are
+// in bounds.go now, as deadlineFor. The move is the point: roundBudget's Trigger
+// parameter is why the deadline could only be set by a caller holding a Graph,
+// and why three lanes had one and thirteen did not.

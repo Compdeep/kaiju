@@ -92,13 +92,14 @@ func (a *Agent) fireMicroPlanner(ctx context.Context, mpNode *Node, graph *Graph
 	}
 	ctx = withTrace(ctx, id)
 
-	resp, err := a.completeHeavyChecked(ctx, &llm.ChatRequest{
-		Messages:    messages,
-		Tools:       []llm.ToolDef{debuggerSchema()},
-		ToolChoice:  "required",
-		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(replyAnalysisBudget),
-	})
+	resp, err := a.send(ctx, modelCall{
+		Lane: Heavy, Stage: replyAnalysisBudget, Parsed: true,
+		Req: &llm.ChatRequest{
+			Messages:    messages,
+			Tools:       []llm.ToolDef{debuggerSchema()},
+			ToolChoice:  "required",
+			Temperature: a.cfg.Temperature,
+		}})
 
 	if err != nil {
 		ch <- nodeCompletion{NodeID: mpNode.ID, Err: fmt.Errorf("debugger LLM: %w", err)}

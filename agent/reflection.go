@@ -156,13 +156,14 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	if gateCtx != nil {
 		reflectID.GateReturned = gateCtx.Sources
 	}
-	resp, err := a.completeLightChecked(withTrace(ctx, reflectID), &llm.ChatRequest{
-		Messages:    messages,
-		Tools:       []llm.ToolDef{reflectorSchema()},
-		ToolChoice:  "required",
-		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(replyDecisionBudget),
-	})
+	resp, err := a.send(withTrace(ctx, reflectID), modelCall{
+		Lane: Light, Stage: replyDecisionBudget, Parsed: true,
+		Req: &llm.ChatRequest{
+			Messages:    messages,
+			Tools:       []llm.ToolDef{reflectorSchema()},
+			ToolChoice:  "required",
+			Temperature: a.cfg.Temperature,
+		}})
 
 	if err != nil {
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: rNode.ID, Node: &NodeInfo{
@@ -333,13 +334,14 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	if gateCtx != nil {
 		interjectID.GateReturned = gateCtx.Sources
 	}
-	resp, err := a.completeLightChecked(withTrace(ctx, interjectID), &llm.ChatRequest{
-		Messages:    messages,
-		Tools:       []llm.ToolDef{reflectorSchema()},
-		ToolChoice:  "required",
-		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(replyDecisionBudget),
-	})
+	resp, err := a.send(withTrace(ctx, interjectID), modelCall{
+		Lane: Light, Stage: replyDecisionBudget, Parsed: true,
+		Req: &llm.ChatRequest{
+			Messages:    messages,
+			Tools:       []llm.ToolDef{reflectorSchema()},
+			ToolChoice:  "required",
+			Temperature: a.cfg.Temperature,
+		}})
 
 	if err != nil {
 		ch <- nodeCompletion{NodeID: rNode.ID, Err: fmt.Errorf("interjection reflection LLM: %w", err)}

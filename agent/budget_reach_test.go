@@ -44,18 +44,28 @@ func TestEveryDeclaredBudgetIsRead(t *testing.T) {
 						}
 					}
 				case *ast.CallExpr:
-					// a.budget(x) — whatever a is called.
+					// a.budget(x) — whatever a is called. The prompt side still
+					// resolves by call; the reply side names its stage instead.
 					sel, ok := x.Fun.(*ast.SelectorExpr)
-					if !ok || len(x.Args) != 1 {
-						return true
-					}
-					// Both resolvers. replyBudget was added later, for the caps
-					// on what a stage WRITES, and a guard that only knew about
-					// budget would report every one of those as dead.
-					if sel.Sel.Name != "budget" && sel.Sel.Name != "replyBudget" {
+					if !ok || len(x.Args) != 1 || sel.Sel.Name != "budget" {
 						return true
 					}
 					id, ok := x.Args[0].(*ast.Ident)
+					if ok && !strings.HasSuffix(path, "budgets.go") {
+						read[id.Name] = true
+					}
+				case *ast.KeyValueExpr:
+					// Stage: x — a call naming which cap bounds its reply.
+					//
+					// replyBudget used to resolve these and a guard that knew
+					// only about calls would now report every reply cap as dead.
+					// The property is unchanged: a budget in the table that
+					// nothing names is a number telling a reader something false.
+					key, ok := x.Key.(*ast.Ident)
+					if !ok || key.Name != "Stage" {
+						return true
+					}
+					id, ok := x.Value.(*ast.Ident)
 					if ok && !strings.HasSuffix(path, "budgets.go") {
 						read[id.Name] = true
 					}

@@ -330,6 +330,7 @@ type Client struct {
 	http     *http.Client
 	limits   ModelLimits
 	thinks   ModelThinks
+	catalog  Catalog
 }
 
 // ModelLimits reports what a model can take in and give back, in tokens. Zero

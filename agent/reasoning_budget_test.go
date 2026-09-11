@@ -78,52 +78,14 @@ func TestApplyReasoningBudget_BudgetOnlyWhereItIsHonoured(t *testing.T) {
 	}
 }
 
-// Nothing configured means the budget is DIVIDED, not omitted.
-//
-// This test used to require the opposite — that a deployment saying nothing
-// sent nothing — and that was the fault. max_tokens bounds the whole
-// completion, and a reasoning model's hidden tokens come out of it, so an
-// undivided budget lets the thinking consume the answer's room. glm-5.3 was
-// billed 4,096 output tokens on a live chat turn and returned zero characters.
-//
-// Sending nothing is only right where the model would ignore a budget anyway.
-func TestApplyReasoningBudget_DividesTheRequestsOwnAllowance(t *testing.T) {
+// Nothing configured, nothing sent — a deployment that says nothing is
+// unchanged.
+func TestApplyReasoningBudget_SaysNothingWhenUnset(t *testing.T) {
 	a := reasoningAgent("", 0, func(string) ([]string, bool) { return []string{"low"}, true })
-	req := &llm.ChatRequest{MaxTokens: 8192}
-	a.applyReasoningBudget(context.Background(), req, "m")
-
-	if req.Reasoning == nil || req.Reasoning.MaxTokens <= 0 {
-		t.Fatalf("no thinking budget was taken from an 8192-token allowance: %+v", req.Reasoning)
-	}
-	if req.Reasoning.MaxTokens >= req.MaxTokens {
-		t.Errorf("thinking got %d of a %d allowance, leaving the answer nothing",
-			req.Reasoning.MaxTokens, req.MaxTokens)
-	}
-	if left := req.MaxTokens - req.Reasoning.MaxTokens; left < 1704 {
-		t.Errorf("the answer is left %d tokens; the largest answer measured over 52 "+
-			"models was 1704", left)
-	}
-}
-
-// A model the catalog says ignores a budget is sent none. Dividing an allowance
-// it will not honour changes nothing and hides what is happening.
-func TestApplyReasoningBudget_SendsNoShareToAModelThatIgnoresIt(t *testing.T) {
-	a := reasoningAgent("", 0, func(string) ([]string, bool) { return nil, false })
-	req := &llm.ChatRequest{MaxTokens: 8192}
+	req := &llm.ChatRequest{}
 	a.applyReasoningBudget(context.Background(), req, "m")
 	if req.Reasoning != nil {
-		t.Errorf("a budget was sent to a model that ignores one: %+v", req.Reasoning)
-	}
-}
-
-// An allowance too small to divide is left whole. A thinking cap of a few dozen
-// tokens buys a truncated thought and no better answer.
-func TestApplyReasoningBudget_LeavesASmallAllowanceWhole(t *testing.T) {
-	a := reasoningAgent("", 0, func(string) ([]string, bool) { return nil, true })
-	req := &llm.ChatRequest{MaxTokens: 400}
-	a.applyReasoningBudget(context.Background(), req, "m")
-	if req.Reasoning != nil {
-		t.Errorf("a 400-token allowance was divided: %+v", req.Reasoning)
+		t.Errorf("an unset deployment sent something: %+v", req.Reasoning)
 	}
 }
 
@@ -159,7 +121,6 @@ func TestSetReasoningEffort_ReachesTheNextRequest(t *testing.T) {
 		return []string{"low", "medium", "high"}, true
 	})
 
-	// No allowance on the request, so there is nothing to divide either.
 	req := &llm.ChatRequest{}
 	a.applyReasoningBudget(context.Background(), req, "m")
 	if req.Reasoning != nil {

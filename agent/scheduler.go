@@ -315,6 +315,26 @@ func preflightDecided(pf *PreflightResult) []string {
 	if len(pf.LackingContext) > 0 {
 		add("lacking context", strings.Join(pf.LackingContext, ", "))
 	}
+	// Whether this turn was judged to need thinking.
+	//
+	// It was decided here and shown nowhere. When a chat turn spent its whole
+	// reply budget reasoning and returned nothing, the trace of that turn could
+	// not say whether anything had asked it to reason — which is the first
+	// question anybody looking at it has.
+	//
+	// Only on the lane it applies to: a planned run always reasons, so a line
+	// saying so on every agent trace would be noise around the one place the
+	// answer varies.
+	if pf.Mode == "chat" {
+		switch pf.Thinking {
+		case ReasoningOn:
+			add("thinking", "yes")
+		case ReasoningOff:
+			add("thinking", "no")
+		default:
+			add("thinking", "not decided — the model's own default")
+		}
+	}
 	return out
 }
 

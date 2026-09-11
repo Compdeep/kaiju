@@ -825,14 +825,18 @@ func (w *WebFetch) formatExtract(ctx context.Context, status, rawURL string, bod
 	pieces := make([]string, 0, readable)
 	var lastErr error
 	for i := 0; i < readable; i++ {
-		resp, err := w.executor.Complete(ctx, &llm.ChatRequest{
+		// Thinking off, for the reason agent's Light lane switches it off: this
+		// reads a page chunk and writes a few hundred tokens about it, and a
+		// model that reasons first spends the cap doing that and returns
+		// nothing. The executor is commonly a thinking model.
+		resp, err := w.executor.Complete(ctx, llm.WithoutReasoning(&llm.ChatRequest{
 			Messages: []llm.Message{
 				{Role: "system", Content: prompt},
 				{Role: "user", Content: chunks[i]},
 			},
 			Temperature: 0.2,
 			MaxTokens:   replyTokens,
-		})
+		}))
 		if err != nil {
 			lastErr = err
 			break
@@ -925,14 +929,14 @@ func (w *WebFetch) formatExtract(ctx context.Context, status, rawURL string, bod
 // narrow focus didn't match. Returns "" if the model still finds nothing usable
 // (the sentinel, a refusal, or empty) — the caller then reports "no content".
 func (w *WebFetch) generalSummary(ctx context.Context, content, sentinel string) string {
-	resp, err := w.executor.Complete(ctx, &llm.ChatRequest{
+	resp, err := w.executor.Complete(ctx, llm.WithoutReasoning(&llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: "Summarize the key facts, figures, and findings on this web page. Use ONLY what is present in the user message; do not draw on outside knowledge. Reply with " + sentinel + " only if the page has no substantive content at all."}, // foreign-word-ok: model-facing text; what a model is asked for is not reworded to satisfy a vocabulary check
 			{Role: "user", Content: content},
 		},
 		Temperature: 0.2,
 		MaxTokens:   1024,
-	})
+	}))
 	if err != nil || len(resp.Choices) == 0 {
 		return ""
 	}

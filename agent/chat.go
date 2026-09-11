@@ -129,7 +129,11 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		Model:       t.Model,
 		Messages:    messages,
 		Temperature: 0.7,
-		MaxTokens:   a.replyBudget(ctx, Answer, replyBriefBudget),
+		// replyDecisionBudget, not replyBriefBudget. Brief bounds "one stage's
+		// judgement, in a sentence or two" — an observer deciding whether a step
+		// is worth acting on. This lane writes the answer a person reads, where
+		// the cap IS the answer.
+		MaxTokens: a.replyBudget(ctx, Answer, replyDecisionBudget),
 	}, func(chunk, kind string) {
 		if t.SessionID != "" {
 			evType := "outcome"

@@ -276,6 +276,15 @@ type ChatResponse struct {
 	// and the trace recorded an empty response with no error against it. Measured at
 	// 6.9% of one deployment's planning calls, each one abandoning a run.
 	Error *ProviderError `json:"error,omitempty"`
+
+	// Recovered names what the FIRST attempt did wrong, when this reply came
+	// from a second one. KindNone means it came from the first.
+	//
+	// On the response rather than beside it because how a reply was obtained is
+	// a property of the reply. Without it a retried answer and a first-attempt
+	// answer are indistinguishable, and the cost of the layer that produced the
+	// difference cannot be seen at all.
+	Recovered Kind `json:"-"`
 }
 
 // ProviderError is the error object an OpenAI-compatible provider returns.
@@ -639,9 +648,13 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 	resp, err := c.completeOnce(ctx, req)
 	retry, wait, ok := c.recoverable(req, resp, err)
 	if ok {
+		why := kindOf(err, resp)
 		log.Printf("[llm] %s: %s", modelOf(req, c), describeRetry(err, resp, wait))
 		if waitBefore(ctx, wait) {
 			resp, err = c.completeOnce(ctx, retry)
+			if resp != nil {
+				resp.Recovered = why
+			}
 		}
 	}
 	judge(err)
@@ -849,12 +862,16 @@ func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChu
 	resp, err := c.streamOnce(ctx, req, onChunk)
 	retry, wait, ok := c.recoverable(req, resp, err)
 	if ok {
+		why := kindOf(err, resp)
 		log.Printf("[llm] %s: %s (streamed)", modelOf(req, c), describeRetry(err, resp, wait))
 		if waitBefore(ctx, wait) {
 			// The retry streams too. A first attempt that produced nothing
 			// showed the reader nothing, so an answer only the second attempt
 			// manages has to reach them the way the first would have.
 			resp, err = c.streamOnce(ctx, retry, onChunk)
+			if resp != nil {
+				resp.Recovered = why
+			}
 		}
 	}
 	judge(err)

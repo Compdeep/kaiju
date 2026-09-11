@@ -170,6 +170,69 @@ Only the provider's own failures count toward it. A truncated reply, an answer
 that will not parse, a model that ignored the schema — those are answers, and a
 run of bad ones must not stop every caller from asking.
 
+## When a call comes back without an answer
+
+A call ends one of eight ways, and `llm.Classify` names which. The name is the
+point: this was four substring searches over the error's English — one asking
+whether a key is bad, one whether the provider is down, two whether the other
+end asked to be left alone — and they matched different terms, so they disagreed
+about the same failure.
+
+`CallError` carries the kind, the status, the provider's own `Retry-After` and a
+bounded slice of the body. `Error()` is unchanged: the text is what an operator
+reads in a log, so the kind travels beside it rather than rewriting it, and
+`Classify` falls back to reading the text for an error this package did not
+build — a tool's own HTTP client, an application's transport, a provider SDK.
+
+### The remedies
+
+A retry that sends the same request gets the same answer, so each ending is
+asked a different question.
+
+| ending | what a second attempt does |
+|---|---|
+| `KindCredentials` | nothing — a key does not improve on the second try |
+| `KindTruncated` | nothing — it is an answer, and what to do with it is the caller's |
+| `KindTransport` | the same request |
+| `KindUpstream` | the same request |
+| `KindRateLimited` | the same request, after the wait the provider asked for |
+| `KindTimeout` | a **different** request |
+| `KindEmpty` | a **different** request |
+
+"Different" means the request is what went wrong: it asked for something this
+model could not fit in what it was given. Thinking off where
+`ModelFacts.Thinking.Optional` says that is possible; a larger cap where it is
+not; and no retry at all where neither is, because there is then no second
+question to ask. Whatever the first attempt managed to think goes with it, as a
+user turn telling the model its own reasoning was cut off.
+
+### What bounds it
+
+**Exactly one retry.** A third attempt under bounds that have not changed is the
+second one again.
+
+**The breaker judges the call, not each attempt.** Counting a retry as a second
+failure would halve its tolerance without anybody choosing that.
+
+**A same-request retry happens only from a healthy breaker.** A retry is for a
+blip; during an outage it doubles the traffic to a provider that is already
+answering nothing. So the first failure after a healthy period gets a second
+chance and the rest do not — across the ten calls it takes to open the breaker,
+one extra request rather than ten.
+
+**Nothing is retried for a model the catalog cannot answer for.** Changing a
+request needs to know what the model would do differently, and without facts
+there is nothing to change with any confidence.
+
+### What this does not do
+
+**Asking a different question.** A shorter plan, a real tool name, a reframed
+prompt — these need to know what the stage wanted, so they stay at the call
+site. `executive.go` keeps its four.
+
+**The DAG's node retry.** It covers tools, which do not go through this client.
+It asks `llm.Backoff` for the one question they shared and is otherwise its own.
+
 ## The trace
 
 The door writes one `LLMTrace` per send. It already holds seven of the fields —
@@ -191,6 +254,11 @@ reply — a forced tool call that carried no arguments, or arguments that would
 not parse. It writes a short second entry naming the same node, landing under
 the call it is about. The log is a file, appended to and never rewritten, so
 amending the first entry is not open to us.
+
+**`Recovered` names what the first attempt did wrong**, when an answer came
+from a second one — and is empty when the first produced it. Without it a
+retried answer and a first-attempt answer read the same, and what the recovery
+cost and bought cannot be seen.
 
 **`retracing(ctx, tag)` is for a stage that calls the model more than once.**
 The planner makes four calls — the plan, then asking for a shorter one, one

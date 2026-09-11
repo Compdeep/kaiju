@@ -55,12 +55,7 @@ func (c *Client) recoverable(req *ChatRequest, resp *ChatResponse, err error) (*
 	if req == nil {
 		return nil, 0, false
 	}
-	kind := Classify(err)
-	if err == nil && emptyReply(resp) {
-		kind = KindEmpty
-	}
-
-	switch kind {
+	switch kindOf(err, resp) {
 	case KindCredentials, KindTruncated, KindNone:
 		// Nothing to gain. A run that retries an invalid key spends its whole
 		// budget failing identically; a reply that was cut short is an answer,
@@ -230,13 +225,19 @@ func waitBefore(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+// kindOf is what an attempt ended as, counting a successful call that produced
+// nothing as the empty reply it is.
+func kindOf(err error, resp *ChatResponse) Kind {
+	if err == nil && emptyReply(resp) {
+		return KindEmpty
+	}
+	return Classify(err)
+}
+
 // describeRetry is the log line for a second attempt: what went wrong, and what
 // is being done differently.
 func describeRetry(err error, resp *ChatResponse, wait time.Duration) string {
-	kind := Classify(err)
-	if err == nil && emptyReply(resp) {
-		kind = KindEmpty
-	}
+	kind := kindOf(err, resp)
 	if wait > 0 {
 		return fmt.Sprintf("%s — asking again in %s", kind, wait)
 	}

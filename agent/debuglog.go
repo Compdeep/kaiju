@@ -80,6 +80,14 @@ type LLMTrace struct {
 	Asked         string // "off", "on high", "" — the instruction as the stage meant it
 	Sent          string // the same, as it reached the wire
 	TokensThought int
+
+	// Recovered names what the first attempt did wrong, when this answer came
+	// from a second one — "empty reply", "rate limited", and so on. Empty when
+	// the first attempt produced it.
+	//
+	// Without it a retried answer and a first-attempt answer read the same, and
+	// what the recovery cost and bought cannot be seen at all.
+	Recovered string
 }
 
 // debugLogMu serializes appends so concurrent goroutines (e.g. parallel

@@ -134,7 +134,10 @@ func reflectorSchema() llm.ToolDef {
 //
 // params carries the whole parameter object, not the changed keys. A patch
 // would have to say how it merges, and the two sides would eventually disagree
-// about a key that was dropped rather than left alone.
+// about a key that was dropped rather than left alone. It is required, with {}
+// as the value for retry and give_up: strict cannot reach this stage, so an
+// entry saying correct with no params would otherwise re-run the call unchanged
+// and the reviewer's correction would be lost.
 func groupReviewSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
@@ -162,7 +165,8 @@ func groupReviewSchema() llm.ToolDef {
 								},
 								"params": {"type": "object", "additionalProperties": true, "description": "Only when action is correct: the COMPLETE parameter object for the new call, e.g. {\"first\": \"a\", \"second\": 2}. Carry every parameter through, changing only what was wrong. Write {} for retry and give_up."},
 								"why": {"type": "string", "description": "What is wrong with this reply, in a few words."}
-							}
+							},
+							"required": ["tag", "action", "params"]
 						}
 					}
 				},
@@ -172,6 +176,10 @@ func groupReviewSchema() llm.ToolDef {
 	}
 }
 
+// A step's required list is written out here. These five stages cannot be
+// carried by strict — params is a map whose keys are whatever the named tool
+// takes — so nothing outside this file makes a property mandatory, and a step
+// arriving without params is dispatched with none and rejected by the tool.
 func observerSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
@@ -196,7 +204,8 @@ func observerSchema() llm.ToolDef {
 								"params": {"type": "object", "additionalProperties": true, "description": "The tool's parameters, as an object whose keys are the parameter names in that tool's signature, e.g. {\"path\": \"project/app/server.js\"}. Write {} for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: {\"url\": \"${step.find_docs.results.0.url}\"}."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
-							}
+							},
+							"required": ["tool", "params"]
 						}
 					},
 					"cancel": {
@@ -269,6 +278,11 @@ func holmesSchema() llm.ToolDef {
 							"suggested_strategy": {
 								"type": "string",
 								"description": "One paragraph for the fix planner: what kind of change is needed (architectural direction), not the exact code."
+							},
+							"affected_files": {
+								"type": "array",
+								"items": {"type": "string"},
+								"description": "Every file you believe carries the same pattern as the root cause, so the fix planner can fan one plan across all of them. Empty when the fault is in one file."
 							}
 						}
 					}
@@ -279,6 +293,10 @@ func holmesSchema() llm.ToolDef {
 	}
 }
 
+// A step's required list is written out here. These five stages cannot be
+// carried by strict — params is a map whose keys are whatever the named tool
+// takes — so nothing outside this file makes a property mandatory, and a step
+// arriving without params is dispatched with none and rejected by the tool.
 func debuggerSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
@@ -302,7 +320,8 @@ func debuggerSchema() llm.ToolDef {
 								"params": {"type": "object", "additionalProperties": true, "description": "The tool's parameters, as an object whose keys are the parameter names in that tool's signature, e.g. {\"path\": \"project/app/server.js\"}. Write {} for a tool that takes none. A value may be a reference to an earlier step, written ${step.<that step's tag>.<dot-path into its output>}: {\"url\": \"${step.find_docs.results.0.url}\"}."},
 								"depends_on": {"type": "array", "items": {"type": "integer"}},
 								"tag": {"type": "string"}
-							}
+							},
+							"required": ["tool", "params"]
 						}
 					}
 				},

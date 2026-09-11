@@ -495,6 +495,22 @@ func ModelPace(id string) float64 {
 }
 
 /*
+ * ModelParameters reports what else a model is to be sent.
+ * desc: The catalog entry's own parameters, as agent.Config.Parameters. Nil for
+ *       a model the catalog does not carry, which sends the request exactly as
+ *       the stage wrote it.
+ * param: id - the model id as configured for a lane.
+ * return: the parameters, or nil.
+ */
+func ModelParameters(id string) map[string]any {
+	m, ok := models.Find(id)
+	if !ok {
+		return nil
+	}
+	return m.Parameters
+}
+
+/*
  * jsonResponse writes a value as JSON with the given status.
  * desc: A copy of the helper this file used while it lived in package api.
  *       Copying six lines is cheaper than exporting a helper from one package

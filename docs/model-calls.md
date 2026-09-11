@@ -223,3 +223,53 @@ the catalog lived on `agent.Config`: `web_fetch`'s two summarisers, upload
 extraction, and memory compaction each hold a bare `*llm.Client` and no
 `*Agent`. Moving the cap onto the client gave it to them without their changing
 a line — they take their client from `ag.ExecutorClient()`.
+
+## Parameters a model needs that the engine has no field for
+
+The controls for reasoning are not one vocabulary. `thinking_budget`,
+`enable_thinking`, `reasoning_effort` and `budget_tokens` are the same few ideas
+under different names, and which of them a call reaches depends on the host that
+answers it as much as on the model. A field in `llm.ChatRequest` for each would
+be a release and a rebuild every time a provider adds one.
+
+So a catalogue entry may carry its own:
+
+```json
+{
+  "id": "moonshotai/kimi-k2.6",
+  "parameters": { "reasoning": { "max_tokens": 6144 } }
+}
+```
+
+Whatever is written there is relayed verbatim into the request body, at the top
+level, on every call to that model — see `llm.ChatRequest.Extra`. It is
+free-form and unvalidated by design: what a host does with a parameter it does
+not know is the host's business.
+
+**Three rules govern it.**
+
+- A key the engine set for the call wins. The lanes that force a small tool call
+  switch thinking off on every one of them, measured, and a file must not switch
+  it back on.
+- A key the engine sets on *every* call is therefore inert — `max_tokens`,
+  `model`, `messages`, `tools`, `tool_choice`, `stream`. `models.load()` names
+  any it finds rather than leaving somebody to discover it in a trace.
+- On OpenRouter, a request carrying any parameter also asks to be routed to a
+  host that supports them (`provider.require_parameters`). Without that the
+  parameter is accepted by whichever host answers, dropped by the ones that do
+  not understand it, and the call proceeds as though nothing had been asked —
+  which is the fault the entry was written to fix. It narrows the choice of
+  hosts, so it applies only where an entry actually asks for something.
+
+**What is prepopulated, and why 6144.** Three models that have been watched
+spending an entire reply budget on reasoning — kimi-k2.6, glm-5.3 and qwen3-32b
+— carry a thinking budget of 6144, which is `thinkingShare` in
+`agent/budgets.go`, the same split the engine asks for where a model is measured
+to honour it. The number is written out rather than computed, so a deployment
+that raises `max_tokens` should revisit it.
+
+**What does not belong here.** Anything the engine already has a field for and
+sets itself: the reply cap, the tools, the reasoning effort where the catalogue
+says the model acts on one. Those are decided per call, against the lane and the
+model's measured behaviour; a static value would either be overridden or would
+override a measurement.

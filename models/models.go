@@ -160,6 +160,40 @@ type Info struct {
 	// The word describes the model's speed and not its size: a large model can
 	// answer quickly and a small reasoning model can take four minutes.
 	Pace string `json:"pace,omitempty"`
+	// Parameters is whatever else this model is to be sent, relayed verbatim
+	// into the request body at the top level.
+	//
+	// The controls for reasoning are not one vocabulary. thinking_budget,
+	// enable_thinking, reasoning_effort and budget_tokens all exist, under
+	// different names, at different hosts, for the same model — and which of
+	// them a call reaches depends on the host that answers rather than on the
+	// model. A field here for each would be a release and a rebuild every time a
+	// provider adds one.
+	//
+	// So this is free-form and unvalidated by design. Whatever is written here
+	// is sent, and what a host does with a parameter it does not know is the
+	// host's business. On OpenRouter a request carrying any of these also asks
+	// to be routed to a host that supports them, because the alternative is a
+	// parameter accepted, dropped, and answered as though nothing was asked.
+	//
+	// Two things it cannot do. A key the engine sets for the call wins — a lane
+	// that switched thinking off for a 96-token routing decision measured that,
+	// and a file must not switch it back on. And a key the engine ALWAYS sets,
+	// max_tokens among them, is therefore inert here; load() says so rather
+	// than leaving somebody to find out.
+	Parameters map[string]any `json:"parameters,omitempty"`
+}
+
+// engineOwned are the request fields the engine fills on every call, so a
+// catalog entry naming one is overwritten and does nothing. Listed to be
+// reported at load rather than discovered in a trace.
+var engineOwned = map[string]string{
+	"model":       "the lane chooses the model",
+	"messages":    "the stage writes the prompt",
+	"max_tokens":  "the reply cap is resolved per call from the model's window",
+	"stream":      "whether a call streams is the stage's decision",
+	"tools":       "the stage declares its own",
+	"tool_choice": "the stage declares its own",
 }
 
 // The pace values, and what each is worth in time. Ours, not a provider's.
@@ -233,6 +267,11 @@ func load() []Info {
 			log.Printf("[models] catalog: %q says pace %q, which is not one of %q or %q — "+
 				"it is given the ordinary deadlines", m.ID, m.Pace, PaceSlow, PaceVerySlow)
 			m.Pace = ""
+		}
+		for k := range m.Parameters {
+			if why, owned := engineOwned[k]; owned {
+				log.Printf("[models] catalog: %q sets parameter %q, which is ignored — %s", m.ID, k, why)
+			}
 		}
 		m.FitsSmallCall = m.FitsForcedSmallCall()
 		out = append(out, m)

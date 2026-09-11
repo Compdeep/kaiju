@@ -567,7 +567,12 @@
         "answer",
         "planner"
       ],
-      "pace": "slow"
+      "pace": "slow",
+      "parameters": {
+        "reasoning": {
+          "max_tokens": 6144
+        }
+      }
     },
     {
       "id": "moonshotai/kimi-k2.7-code",
@@ -954,7 +959,12 @@
         "answer",
         "planner"
       ],
-      "pace": "very slow"
+      "pace": "very slow",
+      "parameters": {
+        "reasoning": {
+          "max_tokens": 6144
+        }
+      }
     },
     {
       "id": "qwen/qwen3-coder-next",
@@ -1296,7 +1306,12 @@
         "low",
         "high",
         "max"
-      ]
+      ],
+      "parameters": {
+        "reasoning": {
+          "max_tokens": 6144
+        }
+      }
     },
     {
       "id": "z-ai/glm-5.3-flash",

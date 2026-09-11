@@ -61,7 +61,7 @@ func TestCallObserverFiresOnSuccess(t *testing.T) {
 	got.mu.Lock()
 	defer got.mu.Unlock()
 	if got.calls != 1 {
-		t.Fatalf("observer fired %d times, want 1", got.calls)
+		t.Fatalf("observer fired %d times, want 1 — a call that succeeded is not retried", got.calls)
 	}
 	if got.err != nil {
 		t.Errorf("err = %v, want nil", got.err)
@@ -77,7 +77,10 @@ func TestCallObserverFiresOnSuccess(t *testing.T) {
 	}
 }
 
-// A failed call is usually the one worth logging, so the observer must see it.
+// A failed call is usually the one worth logging, so the observer must see it —
+// and it sees every ATTEMPT, because "call" here means one request and response
+// pair. A 500 from a healthy provider earns one retry, so this fires twice, and
+// an application recording calls records both.
 func TestCallObserverFiresOnFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "upstream exploded", http.StatusInternalServerError)
@@ -92,8 +95,8 @@ func TestCallObserverFiresOnFailure(t *testing.T) {
 
 	got.mu.Lock()
 	defer got.mu.Unlock()
-	if got.calls != 1 {
-		t.Fatalf("observer fired %d times, want 1", got.calls)
+	if got.calls != 2 {
+		t.Fatalf("observer fired %d times, want 2 — the attempt and its retry", got.calls)
 	}
 	if got.err == nil {
 		t.Error("observer received a nil error for a failed call")

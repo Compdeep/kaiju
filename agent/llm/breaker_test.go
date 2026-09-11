@@ -44,8 +44,14 @@ func TestTheBreakerOpensAfterTenUpstreamFailures(t *testing.T) {
 			t.Fatalf("call %d: want an error", i)
 		}
 	}
-	if sent != breakerThreshold {
-		t.Fatalf("%d requests reached the provider, want %d", sent, breakerThreshold)
+	// One more than the calls made, and exactly one: the FIRST failure comes
+	// from a healthy breaker and earns a second attempt, and every failure after
+	// it does not. That is what bounds a retry's cost during an outage — a
+	// retry is for a blip, and doubling the traffic to a provider that is
+	// already answering nothing is the wrong thing twice over.
+	if sent != breakerThreshold+1 {
+		t.Fatalf("%d requests reached the provider, want %d — the first failure retries once, "+
+			"the rest do not", sent, breakerThreshold+1)
 	}
 	// The next one is refused without going to the wire — nothing sent, nothing
 	// billed, and the caller can tell it apart from a failure of its own.
@@ -53,7 +59,7 @@ func TestTheBreakerOpensAfterTenUpstreamFailures(t *testing.T) {
 	if !errors.Is(err, ErrProviderUnavailable) {
 		t.Fatalf("err = %v, want ErrProviderUnavailable", err)
 	}
-	if sent != breakerThreshold {
+	if sent != breakerThreshold+1 {
 		t.Errorf("a request was sent while the breaker was open: %d", sent)
 	}
 	if !strings.Contains(err.Error(), "aborted") && !strings.Contains(err.Error(), "200 with no reply") {

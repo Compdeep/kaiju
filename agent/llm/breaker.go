@@ -56,6 +56,21 @@ type breaker struct {
 var providerBreaker = &breaker{}
 
 /*
+ * healthy reports whether the last call this breaker saw succeeded.
+ * desc: Asked before a same-request retry. A retry is for a blip — one failure
+ *       in an otherwise working stream — and it is exactly the wrong thing
+ *       during an outage, where it doubles the traffic to a provider that is
+ *       already answering nothing. So the first failure after a healthy period
+ *       gets a second chance and a run of them does not.
+ * return: true when no failure has been recorded since the last success.
+ */
+func (b *breaker) healthy() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.consecutive == 0
+}
+
+/*
  * allow reports whether a request may be sent.
  *
  * A breaker past its cooldown closes here rather than on the next success, so

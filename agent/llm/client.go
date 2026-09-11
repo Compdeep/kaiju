@@ -624,9 +624,33 @@ func (c *Client) routeProviders(req *ChatRequest) {
 	req.Provider = &ProviderRouting{Only: only, Ignore: ignore}
 }
 
-// Complete sends a chat completion request and returns the response.
-// Routes to the appropriate provider backend.
+/*
+ * Complete sends a chat completion request and returns the response.
+ * desc: One send, and one more where asking again can help — see recover.go for
+ *       which endings those are and what is done differently. Never more than
+ *       one: a third attempt under bounds that have not changed is the second
+ *       one again.
+ * param: ctx - the caller's context; a backoff is served against it, so a
+ *        caller that gives up is not held.
+ * param: req - the request. Its Model, MaxTokens and Reasoning are set in place.
+ * return: the reply, or what went wrong after both attempts.
+ */
 func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
+	resp, err := c.completeOnce(ctx, req)
+	retry, wait, ok := c.recoverable(req, resp, err)
+	if ok {
+		log.Printf("[llm] %s: %s", modelOf(req, c), describeRetry(err, resp, wait))
+		if waitBefore(ctx, wait) {
+			resp, err = c.completeOnce(ctx, retry)
+		}
+	}
+	judge(err)
+	return resp, err
+}
+
+// completeOnce is one attempt: the breaker, the preparation, the wire, and the
+// accounting. Routes to the appropriate provider backend.
+func (c *Client) completeOnce(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	// Nothing is sent while the provider is failing every request. An upstream
 	// failure is billed for whatever the model generated before it was
 	// abandoned, and the caller's retry sends the same work again — see
@@ -687,18 +711,31 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 		asToolReply(resp, replaced)
 		tokens.AddSplit(ctx, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	}
-	// A reply that arrived says the provider is answering, whatever the model
-	// put in it; only the provider's own failures count against it.
+	// The same chokepoint, for observation rather than accounting. Fires on
+	// failure too, so an embedding application logging calls sees the ones that
+	// errored — usually the interesting ones. Once per attempt, because a retry
+	// is a second request and response pair and an application recording calls
+	// is recording those.
+	emitCall(ctx, req, resp, err)
+	return resp, err
+}
+
+/*
+ * judge records what one CALL says about the provider.
+ * desc: One verdict per call, not per attempt. A retry is this package trying
+ *       harder on the caller's behalf; counting it twice would halve the
+ *       breaker's tolerance without anybody choosing that.
+ *
+ *       A reply that arrived says the provider is answering, whatever the model
+ *       put in it — only the provider's own failures count.
+ * param: err - what the call ended with, after any retry.
+ */
+func judge(err error) {
 	if upstream, reason := upstreamFailure(err); upstream {
 		providerBreaker.failed(reason)
 	} else if err == nil {
 		providerBreaker.succeeded()
 	}
-	// The same chokepoint, for observation rather than accounting. Fires on
-	// failure too, so an embedding application logging calls sees the ones
-	// that errored — usually the interesting ones.
-	emitCall(ctx, req, resp, err)
-	return resp, err
 }
 
 // completeOpenAI sends a request to an OpenAI-compatible /v1/chat/completions endpoint.
@@ -809,6 +846,24 @@ func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk f
 // shaped exactly like Complete's, so callers can treat streamed and non-streamed
 // turns identically.
 func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (*ChatResponse, error) {
+	resp, err := c.streamOnce(ctx, req, onChunk)
+	retry, wait, ok := c.recoverable(req, resp, err)
+	if ok {
+		log.Printf("[llm] %s: %s (streamed)", modelOf(req, c), describeRetry(err, resp, wait))
+		if waitBefore(ctx, wait) {
+			// The retry streams too. A first attempt that produced nothing
+			// showed the reader nothing, so an answer only the second attempt
+			// manages has to reach them the way the first would have.
+			resp, err = c.streamOnce(ctx, retry, onChunk)
+		}
+	}
+	judge(err)
+	return resp, err
+}
+
+// streamOnce is one streamed attempt: the preparation, the wire, and the
+// observation.
+func (c *Client) streamOnce(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (*ChatResponse, error) {
 	c.capReply(req)
 	// The same settlement Complete makes. Without it a streamed call is the one
 	// kind whose thinking nobody decided.
@@ -944,8 +999,42 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 			acc.Function.Arguments += tc.Function.Arguments
 		}
 	}
+	// What arrived, arrived.
+	//
+	// A stream that is cut — by our deadline, or by the connection going away —
+	// has already been paid for up to that point, and everything it carried was
+	// in these builders and then thrown away with a bare `return nil, err`. The
+	// caller lost a partial answer it had already shown to somebody, and a
+	// second attempt lost the reasoning it could have started from.
+	assembled := func() *ChatResponse {
+		var toolCalls []ToolCall
+		for _, idx := range order {
+			toolCalls = append(toolCalls, *toolsByIndex[idx])
+		}
+		finalContent := content.String()
+		reasonStr := reasoning.String()
+		// Some models stream reasoning inline as <think>…</think> in the content
+		// (rather than a reasoning field). Lift it out so content stays clean and
+		// the thinking is captured either way.
+		if clean, think := extractThink(finalContent); think != "" {
+			finalContent = clean
+			if reasonStr != "" {
+				reasonStr += "\n"
+			}
+			reasonStr += think
+		}
+		return &ChatResponse{
+			Choices: []Choice{{
+				Index:        0,
+				Message:      Message{Role: "assistant", Content: finalContent, Reasoning: reasonStr, ToolCalls: toolCalls},
+				FinishReason: finish,
+			}},
+			Usage: usage,
+		}
+	}
+
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return assembled(), err
 	}
 
 	// Bill the streamed call through the same counter as non-streamed ones, so
@@ -953,31 +1042,7 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 	if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
 		tokens.AddSplit(ctx, usage.PromptTokens, usage.CompletionTokens)
 	}
-
-	var toolCalls []ToolCall
-	for _, idx := range order {
-		toolCalls = append(toolCalls, *toolsByIndex[idx])
-	}
-	finalContent := content.String()
-	reasonStr := reasoning.String()
-	// Some models stream reasoning inline as <think>…</think> in the content
-	// (rather than a reasoning field). Lift it out so content stays clean and the
-	// thinking is captured either way.
-	if clean, think := extractThink(finalContent); think != "" {
-		finalContent = clean
-		if reasonStr != "" {
-			reasonStr += "\n"
-		}
-		reasonStr += think
-	}
-	return &ChatResponse{
-		Choices: []Choice{{
-			Index:        0,
-			Message:      Message{Role: "assistant", Content: finalContent, Reasoning: reasonStr, ToolCalls: toolCalls},
-			FinishReason: finish,
-		}},
-		Usage: usage,
-	}, nil
+	return assembled(), nil
 }
 
 // extractThink lifts <think>…</think> blocks out of s, returning the cleaned text

@@ -69,12 +69,69 @@ func TestEveryStageThatAnswersAPersonStreams(t *testing.T) {
 // nothing has ever sent, so no chunk arrived and the reply appeared in one piece
 // when the POST returned — the same symptom as not streaming at all, from the
 // other end.
+//
+// Tested on the mapping rather than on the source. It was a grep for one line
+// in three files, which is what a mapping written out three times leaves you
+// with; there is one now, so the behaviour itself can be checked.
 func TestStreamedChunksAreBroadcastAsOutcome(t *testing.T) {
-	for _, file := range []string{"chat_node.go", "aggregator.go", "chat.go"} {
-		src := readSource(t, file)
-		if !strings.Contains(src, `evType := "outcome"`) {
-			t.Errorf("%s does not broadcast its chunks as \"outcome\" — the client listens "+
-				"for that name and will show nothing until the call returns", file)
+	a := &Agent{dagSubs: map[int]chan DAGEvent{}}
+	ch, unsub := a.SubscribeDAG()
+	defer unsub()
+
+	send := a.streamTo(nil, "sess")
+	send("the answer", "content")
+	send("thinking about it", "reasoning")
+
+	for _, want := range []struct{ typ, text string }{
+		{"outcome", "the answer"},
+		{"reasoning", "thinking about it"},
+	} {
+		select {
+		case got := <-ch:
+			if got.Type != want.typ || got.Text != want.text {
+				t.Errorf("chunk arrived as %q/%q, want %q/%q", got.Type, got.Text, want.typ, want.text)
+			}
+			if got.SessionID != "sess" {
+				t.Errorf("chunk carried session %q, want the one it was streamed for", got.SessionID)
+			}
+		default:
+			t.Fatalf("no %q event was broadcast", want.typ)
+		}
+	}
+}
+
+// A lane with nowhere to send them does not send them. Converse answers a turn
+// with no session when a caller asks for one directly, and a broadcast with no
+// destination is an event every open trace receives for a run it is not
+// watching.
+func TestChunksWithNowhereToGoAreNotBroadcast(t *testing.T) {
+	a := &Agent{dagSubs: map[int]chan DAGEvent{}}
+	ch, unsub := a.SubscribeDAG()
+	defer unsub()
+
+	a.streamTo(nil, "")("something", "content")
+	select {
+	case got := <-ch:
+		t.Errorf("a chunk with no graph and no session was broadcast: %+v", got)
+	default:
+	}
+}
+
+// Every stage that answers a person goes through the one that streams.
+//
+// The mapping being in one place is only worth anything if the lanes reach it.
+// This is the half a behavioural test cannot see: a lane could stream correctly
+// and still pick its own cap, which is the drift writeProse exists to close.
+func TestEveryAnsweringStageGoesThroughWriteProse(t *testing.T) {
+	for _, c := range []struct{ file, why string }{
+		{"chat.go", "the standalone chat lane"},
+		{"chat_node.go", "the conversational turn, and the reply that supersedes it"},
+		{"aggregator.go", "the synthesised answer"},
+	} {
+		if src := readSource(t, c.file); !strings.Contains(src, "writeProse(") {
+			t.Errorf("%s (%s) does not go through writeProse, so it picks its own reply cap "+
+				"and its own streaming — which is how three of these came to disagree about "+
+				"how long an answer may be", c.file, c.why)
 		}
 	}
 }

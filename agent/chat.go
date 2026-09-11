@@ -124,31 +124,24 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// One completion, streamed token-by-token to the frontend as outcome events
 	// (the same channel the agent lane streams on). With no tools in play, no
 	// tool-call JSON can ever reach the stream.
+	//
+	// replyDecisionBudget, not replyBriefBudget. Brief bounds "one stage's
+	// judgement, in a sentence or two" — an observer deciding whether a step is
+	// worth acting on. This lane writes the answer a person reads, where the cap
+	// IS the answer.
 	res := ChatResult{LLMCalls: 1}
-	resp, err := a.askStreamResp(ctx, Answer, &llm.ChatRequest{
-		Model:       t.Model,
+	resp, err := a.writeProse(ctx, proseTurn{
+		Lane:        Answer,
 		Messages:    messages,
+		Reply:       replyDecisionBudget,
 		Temperature: 0.7,
-		// replyDecisionBudget, not replyBriefBudget. Brief bounds "one stage's
-		// judgement, in a sentence or two" — an observer deciding whether a step
-		// is worth acting on. This lane writes the answer a person reads, where
-		// the cap IS the answer.
-		MaxTokens: a.replyBudget(ctx, Answer, replyDecisionBudget),
-	}, func(chunk, kind string) {
-		if t.SessionID != "" {
-			evType := "outcome"
-			if kind == "reasoning" {
-				evType = "reasoning"
-			}
-			a.broadcastDAGEvent(nil, DAGEvent{Type: evType, Text: chunk, SessionID: t.SessionID})
-		}
+		Model:       t.Model,
+		SessionID:   t.SessionID,
 	})
 	if err != nil {
 		return res, err
 	}
 	res.Tokens += resp.Usage.TotalTokens
-	if len(resp.Choices) > 0 {
-		res.Content = resp.Choices[0].Message.Content
-	}
+	res.Content = proseOf(resp)
 	return res, nil
 }

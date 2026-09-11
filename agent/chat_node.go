@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-
-	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 /*
@@ -60,28 +58,21 @@ func (a *Agent) runChatNode(ctx context.Context, trigger Trigger, graph *Graph, 
 	// arrived at once. The other chat entry point (chat.go) already streamed on
 	// the same channel; this path, the one the graph takes, did not.
 	ctx = withTrace(ctx, TraceID{NodeID: id, NodeType: "chat", Tag: chatNodeTag})
-	resp, err := a.askStreamResp(ctx, Answer, &llm.ChatRequest{
+	resp, err := a.writeProse(ctx, proseTurn{
+		Lane:        Answer,
 		Messages:    BuildMessagesWithHistory(prompt, query, trigger.History),
+		Reply:       replyDecisionBudget,
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.cfg.MaxTokens,
-	}, func(chunk, kind string) {
-		evType := "outcome"
-		if kind == "reasoning" {
-			evType = "reasoning"
-		}
-		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
+		Graph:       graph,
 	})
-	if err != nil || len(resp.Choices) == 0 {
-		if err == nil {
-			err = errNoChatChoices
-		}
+	if err != nil {
 		node.Error = err
 		graph.SetState(id, StateFailed)
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: id, Node: graph.SnapshotNode(id)})
 		return "", id, err
 	}
 
-	answer := resp.Choices[0].Message.Content
+	answer := proseOf(resp)
 	graph.SetResult(id, answer)
 	return answer, id, nil
 }
@@ -188,24 +179,17 @@ typed.`
 	// Streamed for the same reason the first reply is: this REPLACES what the
 	// user was reading, so arriving whole means the screen sits still and then
 	// jumps.
-	resp, err := a.askStreamResp(ctx, Answer, &llm.ChatRequest{
+	resp, err := a.writeProse(ctx, proseTurn{
+		Lane:        Answer,
 		Messages:    BuildMessagesWithHistory(sys, user, trigger.History),
+		Reply:       replyDecisionBudget,
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.cfg.MaxTokens,
-	}, func(chunk, kind string) {
-		evType := "outcome"
-		if kind == "reasoning" {
-			evType = "reasoning"
-		}
-		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
+		Graph:       graph,
 	})
 	if err != nil {
 		return "", err
 	}
-	if len(resp.Choices) == 0 {
-		return "", errNoChatChoices
-	}
-	return resp.Choices[0].Message.Content, nil
+	return proseOf(resp), nil
 }
 
 // resolvedChatIntent is the intent a chat turn runs at. Kept as a named function

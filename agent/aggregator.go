@@ -62,13 +62,6 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 		graph.Arcs(),
 	)
 
-	// Stream the aggregator response, broadcasting each chunk for live display.
-	// Use 2x configured MaxTokens — the aggregator synthesizes all evidence
-	// into a full response and needs more output room than individual tool calls.
-	aggMaxTokens := a.cfg.MaxTokens * 2
-	if aggMaxTokens < 8192 {
-		aggMaxTokens = 8192
-	}
 	aggID := TraceID{
 		NodeID:   "aggregator",
 		NodeType: "aggregator",
@@ -78,17 +71,19 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 	if gateCtx != nil {
 		aggID.GateReturned = gateCtx.Sources
 	}
-	raw, err := a.askStream(withTrace(ctx, aggID), l, &llm.ChatRequest{
+	// replyAnalysisBudget: this stage reads every step and writes the whole
+	// reply, so it is bounded like an investigation rather than like a
+	// judgement. It computed its own — twice the configured cap, floored at
+	// 8,192 — which was a third answer to a question three other lanes were also
+	// answering for themselves.
+	resp, err := a.writeProse(withTrace(ctx, aggID), proseTurn{
+		Lane:        l,
 		Messages:    messages,
+		Reply:       replyAnalysisBudget,
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   aggMaxTokens,
-	}, func(chunk, kind string) {
-		evType := "outcome"
-		if kind == "reasoning" {
-			evType = "reasoning"
-		}
-		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
+		Graph:       graph,
 	})
+	raw := proseOf(resp)
 
 	// The stage that writes the answer a person reads, recorded like any other —
 	// see debugrecord.go. It is not a node, so it records itself.

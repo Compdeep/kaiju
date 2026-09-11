@@ -19,9 +19,9 @@ One number cannot fit every model. Marking the ones that need longer is
 `models.Info.Pace`: `slow` is given half again as long, `very slow` twice as
 long. Absent is ordinary, which is what every other entry says.
 
-Both clocks read it and they move together — the round deadline here and the
+Both deadlines read it and they move together — the round deadline here and the
 request deadline in `agent/llm/client.go`. Widening one alone means the call is
-cut by whichever was left, and the error then names the wrong clock.
+cut by whichever was left, and the error then names the wrong one.
 
 ## What the bench said, and why it was not enough
 

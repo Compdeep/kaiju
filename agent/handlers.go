@@ -75,7 +75,7 @@ func (a *Agent) applyHandlers(cfg Config) {
  */
 func (a *Agent) applyModels(cfg Config) {
 	// Thinks and Pace are set here as well as in New, because this replaces the
-	// client New built. Without them the two clocks that read the catalog were
+	// client New built. Without them the two deadlines that read the catalog were
 	// wired onto a client that was then thrown away for any application that
 	// names a model — which is every one of them — so a thinking model was
 	// given the ordinary 300-second request deadline it was measured to need

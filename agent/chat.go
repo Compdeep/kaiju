@@ -193,7 +193,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		llm.WithoutReasoning(req)
 	}
 
-	// A clock on the call, for the same reason the planner has one: max_tokens
+	// A deadline on the call, for the same reason the planner has one: max_tokens
 	// bounds the reply, not the wait. A model that reasons before answering can
 	// spend an unbounded amount of time doing it, and this is the lane where a
 	// person is sitting and waiting.
@@ -211,7 +211,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	res := ChatResult{LLMCalls: 1}
 	resp, err := a.askStreamResp(chatCtx, Answer, req, send)
 
-	// Our own clock ran out. Ask again with thinking off, under the run's
+	// Our own deadline expired. Ask again with thinking off, under the run's
 	// remaining time — the same answer an exhausted budget gets, because it is
 	// the same problem arriving as an error rather than as an empty reply.
 	if err != nil && chatCtx.Err() != nil && ctx.Err() == nil {

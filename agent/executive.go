@@ -1782,7 +1782,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			"intent":   intent,
 		},
 	})
-	// A clock on the call itself, because max_tokens does not bound time. A
+	// A deadline on the call itself, because max_tokens does not bound time. A
 	// thinking model spends the token budget on reasoning and the wait is
 	// whatever that takes; a rig that ignores the budget is unbounded. Measured
 	// across 52 models, this fits every one anybody would ordinarily plan with.
@@ -1833,7 +1833,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// again with thinking off, under the run's own remaining time. A model that
 	// cannot think has nothing to spend the wait on but the answer.
 	if err != nil && planCtx.Err() != nil && ctx.Err() == nil {
-		// What it managed to think before the clock ran out goes with the retry.
+		// What it managed to think before the deadline expired goes with the retry.
 		// This used to hand over nothing, because a cancelled call returns no
 		// reply and the reasoning was read off the reply — so two minutes of
 		// thinking were paid for and thrown away, and the second attempt started

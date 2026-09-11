@@ -85,7 +85,7 @@ type ModelConfig struct {
 	//
 	// It does not bound a reply on its own. The measured models on the
 	// OpenAI-compatible wire spent 648 and 1,160 tokens when asked for 512, so
-	// what actually stops a reply is the completion cap and the run's clock.
+	// what actually stops a reply is the completion cap and the run's own limit.
 	LLMReasoningBudget int
 
 	// Providers is the credential catalog for per-request model routing,
@@ -126,12 +126,12 @@ type ModelConfig struct {
 	// the application's catalog is safe rather than broken.
 	Limits ModelLimits
 
-	// Thinks reports whether a model reasons before it answers. Two clocks read
+	// Thinks reports whether a model reasons before it answers. Two deadlines read
 	// it, and they have to move together: a call by such a model is given twice
 	// the request deadline (see llm.thinkingRequestTimeout) and a run whose
 	// reasoning lane uses one is given twice the wall clock, because a call
 	// deadline the run cannot accommodate is not a deadline — the run is
-	// cancelled by the shorter clock and the error names neither.
+	// cancelled by the shorter of them and the error names neither.
 	//
 	// Nil, or a model the application's catalog does not carry, means the
 	// ordinary deadlines. An unknown model waits the same as one that does not
@@ -148,10 +148,10 @@ type ModelConfig struct {
 	// its deadlines are multiplied by — see llm.ModelPace. Nil, or a model the
 	// catalog does not carry, means the ordinary deadlines.
 	//
-	// Both clocks read it, and they have to move together for the same reason
+	// Both deadlines read it, and they have to move together for the same reason
 	// Thinks gives: the round deadline in round_budget.go and the request
 	// deadline in llm.timeoutFor. Widening one alone means the run is cut by
-	// whichever was left, and the error then names the wrong clock.
+	// whichever was left, and the error then names the wrong one.
 	Pace ModelPace
 
 	// Parameters reports what else a model is to be sent — the catalog entry's

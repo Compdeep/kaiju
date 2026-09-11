@@ -231,6 +231,12 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 			if content != "" {
 				frame(fmt.Sprintf(`{"content":%s}`, mustJSON(content)))
 			}
+		case reply.Cut && scripted && reply.Args == nil && reply.RawArgs == "":
+			// Cut before the tool call started: finish_reason "length" and
+			// nothing else. This is what a model that spends its whole budget
+			// reasoning returns, and the case a forced-tool stage has no answer
+			// for — it cannot be scripted any other way, because a tool request
+			// otherwise always carries a tool call back.
 		default:
 			// Tool calls stream as indexed deltas: the name once, then the
 			// arguments. Sent whole here — the client assembles fragments, and a

@@ -1,6 +1,11 @@
 package llm
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -106,5 +111,50 @@ func TestTheConnectionCeilingClearsTheLongestDeadline(t *testing.T) {
 	if connectionCeiling < longest {
 		t.Errorf("the ceiling is %s and the deadline can reach %s, so the ceiling cuts first",
 			connectionCeiling, longest)
+	}
+}
+
+// A request that was streamed once must not ask to be streamed again.
+//
+// completeStreamResp sets Stream on the CALLER'S request, which outlives the
+// call, so every retry built from a streamed request asked the provider to
+// stream and then read the reply as one document: "parse response: invalid
+// character 'd' looking for beginning of value" — the 'd' beginning "data:".
+// That is every recovery after a streamed call, on three lanes.
+func TestANonStreamedSendClearsTheStreamingFlag(t *testing.T) {
+	var asked struct {
+		stream bool
+		opts   bool
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Stream        bool `json:"stream"`
+			StreamOptions *struct {
+				IncludeUsage bool `json:"include_usage"`
+			} `json:"stream_options"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		asked.stream, asked.opts = body.Stream, body.StreamOptions != nil
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "k", "m")
+	// As a caller's request looks after it has been streamed once.
+	req := &ChatRequest{
+		Messages:      []Message{{Role: "user", Content: "again"}},
+		Stream:        true,
+		StreamOptions: &StreamOptions{IncludeUsage: true},
+	}
+	if _, err := c.Complete(context.Background(), req); err != nil {
+		t.Fatalf("the retry failed: %v", err)
+	}
+	if asked.stream || asked.opts {
+		t.Errorf("the provider was asked to stream on a non-streamed send (stream=%v, options=%v)",
+			asked.stream, asked.opts)
+	}
+	if req.Stream {
+		t.Error("the request still says stream, so the next caller to read it is misled")
 	}
 }

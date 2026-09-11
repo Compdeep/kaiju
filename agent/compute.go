@@ -389,7 +389,11 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 			"query": query,
 		},
 	})
-	resp, err := a.completeHeavyChecked(ctx, &llm.ChatRequest{
+	// Under the round deadline, with both recoveries — see heavyRound. This was
+	// a plain checked call: nothing bounded the wait, and a reply that spent its
+	// whole budget thinking failed the step with "empty content and no tool
+	// calls" rather than being asked again.
+	resp, err := a.heavyRound(ctx, graph, &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
@@ -737,12 +741,16 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		Temperature: 0.2,
 		MaxTokens:   a.replyBudget(replyCodeBudget),
 	}
-	// Checked, like the architect above. A coder reply cut off at MaxTokens is a
+	// Truncation is still reported, and is now one of three things this call can
+	// come back as — see heavyRound. A coder reply cut off at MaxTokens is a
 	// half-written program, and plain ask does not notice: the fragment was
-	// written to disk, run, and failed — and three Holmes iterations went into
+	// written to disk, run, and failed, and three Holmes iterations went into
 	// working out that the script had been truncated rather than being wrong.
-	// finish_reason says so at the point it happens.
-	resp, err := a.askParsed(ctx, Heavy, coderReq)
+	//
+	// The other two are the ones this stage had no answer for. One live call ran
+	// 239 seconds, spent 14,276 tokens, and returned neither code nor a tool
+	// call — the budget went on reasoning — and the step simply failed.
+	resp, err := a.heavyRound(ctx, graph, coderReq)
 
 	if err != nil {
 		return "", fmt.Errorf("compute code LLM: %w", err)

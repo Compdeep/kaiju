@@ -695,6 +695,18 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 	c.capReply(req)
 	c.routeProviders(req)
 
+	// This door does not stream, and says so on the request rather than relying
+	// on the field being unset.
+	//
+	// completeStreamResp sets Stream on the CALLER'S request, which outlives the
+	// call. Every retry built from a request that was streamed once therefore
+	// asked the provider to stream and then read the reply as one document —
+	// "parse response: invalid character 'd' looking for beginning of value",
+	// the 'd' being the first letter of "data:". That is every recovery after a
+	// streamed call: the planner's, the chat lane's, and the compute lane's.
+	req.Stream = false
+	req.StreamOptions = nil
+
 	// A stage asking for one shape gets the wire that enforces it, and gets its
 	// reply back in the shape it asked for. Nothing above this knows — see
 	// structured.go for what this buys and what it was measured against.

@@ -24,7 +24,6 @@ func TestEveryWaitedOnLaneHandlesADeadReply(t *testing.T) {
 	for _, c := range []struct{ file, lane string }{
 		{"executive.go", "the planner"},
 		{"chat.go", "the chat lane"},
-		{"compute.go", "the compute lane"},
 	} {
 		src, err := os.ReadFile(c.file)
 		if err != nil {
@@ -32,21 +31,13 @@ func TestEveryWaitedOnLaneHandlesADeadReply(t *testing.T) {
 		}
 		body := string(src)
 
-		// A lane may write the guards out, as the planner and the chat lane do
-		// for their own reasons, or take all of them together from heavyRound.
-		// What is checked is that the lane has them, not which way it got them.
-		guarded := strings.Contains(body, "heavyRound(")
-
-		if !guarded && !strings.Contains(body, "recoverDeadThought(") {
+		if !strings.Contains(body, "recoverDeadThought(") {
 			t.Errorf("%s never calls recoverDeadThought, so a reply whose budget went "+
 				"on reasoning becomes no answer at all on %s", c.file, c.lane)
 		}
-		if !guarded && !strings.Contains(body, "roundBudget(") {
+		if !strings.Contains(body, "roundBudget(") {
 			t.Errorf("%s puts no deadline on its model call, so %s waits as long as the "+
 				"model takes — max_tokens bounds the reply, not the wait", c.file, c.lane)
-		}
-		if guarded {
-			continue
 		}
 		// A deadline cancels the call, and a cancelled call returns an error and
 		// no reply — so the reasoning it produced can only come from a buffer

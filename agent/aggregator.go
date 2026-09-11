@@ -63,16 +63,39 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 		graph.Arcs(),
 	)
 
-	// replyAnalysisBudget: this stage reads every step and writes the whole
-	// reply, so it is bounded like an investigation rather than like a judgement.
+	// Stream the aggregator response, broadcasting each chunk for live display.
+	// Use 2x configured MaxTokens — the aggregator synthesizes all evidence
+	// into a full response and needs more output room than individual tool calls.
+	aggMaxTokens := a.cfg.MaxTokens * 2
+	if aggMaxTokens < 8192 {
+		aggMaxTokens = 8192
+	}
+
+	// Doubled again when the model reasons, because the reasoning is spent from
+	// this same budget and the answer is what is left.
 	//
-	// It used to compute its own: twice cfg.MaxTokens, floored at 8,192, doubled
-	// again when the model reasons — three numbers in three places, none of
-	// which knew the window of the model that would answer. A reasoning model
-	// was given a non-reasoning model's budget, spent all 8,192 of it thinking,
-	// and returned nothing; the run failed with "empty response" seventeen
-	// minutes in, describing the symptom. The division between thinking and
-	// answering is the door's now, and so is the second attempt.
+	// The doubling above is for the work: an aggregator reads every step and
+	// writes the whole reply, so it needs more room than a tool call. It is the
+	// same number for every model, which is the fault — a reasoning model was
+	// given a non-reasoning model's budget, spent all 8,192 of it thinking, and
+	// returned nothing. The run then failed with "empty response", seventeen
+	// minutes in, describing the symptom.
+	//
+	// planMaxTokens already asks this question, and wallClock already widens the
+	// clock on the same grounds. This is the third place that has to know, and
+	// the last one that did not.
+	//
+	// Raising the ASK is safe on its own: capReply lowers it again to whatever
+	// the model's window and published reply ceiling allow, and never raises it.
+	// So a model that cannot take this gets what it can, rather than a request
+	// it must refuse.
+	c, model := a.lane(ctx, l)
+	if model == "" && c != nil {
+		model = c.Model()
+	}
+	if a.heavyThinks(model) {
+		aggMaxTokens *= 2
+	}
 	aggID := TraceID{
 		NodeID:   "aggregator",
 		NodeType: "aggregator",
@@ -82,20 +105,17 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 	if gateCtx != nil {
 		aggID.GateReturned = gateCtx.Sources
 	}
-	resp, err := a.send(withTrace(ctx, aggID), modelCall{
-		Lane: l, Stage: replyAnalysisBudget,
-		Req: &llm.ChatRequest{
-			Messages:    messages,
-			Temperature: a.cfg.Temperature,
-		},
-		OnChunk: func(chunk, kind string) {
-			evType := "outcome"
-			if kind == "reasoning" {
-				evType = "reasoning"
-			}
-			a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
-		}})
-	raw := streamedText(resp)
+	raw, err := a.askStream(withTrace(ctx, aggID), l, &llm.ChatRequest{
+		Messages:    messages,
+		Temperature: a.cfg.Temperature,
+		MaxTokens:   aggMaxTokens,
+	}, func(chunk, kind string) {
+		evType := "outcome"
+		if kind == "reasoning" {
+			evType = "reasoning"
+		}
+		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
+	})
 
 	// The stage that writes the answer a person reads, recorded like any other —
 	// see debugrecord.go. It is not a node, so it records itself.
@@ -109,14 +129,13 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 	if err != nil {
 		rec.Err = err.Error()
 		graph.recordStage(rec)
-		// A reply with nothing in it is the budget, not the provider, and saying
-		// which is the difference between a person changing a setting and a
-		// person retrying the same run. Reported only once the second attempt
-		// has also failed — a partial answer is still an answer, and a first
-		// attempt that produced nothing is re-asked rather than reported.
+		// A cut reply with nothing in it is the budget, not the provider, and
+		// saying which is the difference between a person changing a setting and
+		// a person retrying the same run. askStream reports it only when there
+		// was nothing to keep — a partial answer is still an answer.
 		if errors.Is(err, llm.ErrReplyTruncated) {
-			return "", nil, fmt.Errorf("aggregator ran out of reply budget with nothing written — "+
-				"the model spent it reasoning: %w", err)
+			return "", nil, fmt.Errorf("aggregator ran out of reply budget at %d tokens with nothing written — "+
+				"the model spent it reasoning: %w", aggMaxTokens, err)
 		}
 		return "", nil, fmt.Errorf("aggregator LLM call: %w", err)
 	}

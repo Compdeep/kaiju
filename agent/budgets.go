@@ -216,28 +216,6 @@ var (
 		Weight: 0,
 	}
 
-	// replyPlanBudget bounds a plan: one step for every node the run may create,
-	// and the intent and framing around them.
-	//
-	// The one cap with a stated count behind it. Every other stage picks a size
-	// for how much prose it wants; this one is TOLD it may write up to MaxNodes
-	// steps, so the stage states its own minimum (modelCall.MinReply) and the
-	// resolver honours it above the table.
-	//
-	// It replaces planMaxTokens, which reached the same number a different way:
-	// the configured cap, doubled when the model reasons. That doubling was the
-	// right instinct and the wrong mechanism — the reasoning is now divided out
-	// of this budget explicitly rather than paid for by making the whole thing
-	// twice as big and hoping.
-	replyPlanBudget = budgetSpec{
-		Base: 8192, Share: 24, Ceiling: 32768,
-		Bounds: "one plan, and a step for every node it may create",
-		// A plan cut off is not a shorter plan — the last step has no closing
-		// brace and nothing parses. The steps that DID close are salvaged, and
-		// re-deriving the rest costs seventeen thousand input tokens a time.
-		Weight: 0,
-	}
-
 	// replyStructuredBudget bounds a stage filling a declared shape rather than
 	// writing prose — preflight's classification, the curator's selection.
 	replyStructuredBudget = budgetSpec{
@@ -248,11 +226,25 @@ var (
 	}
 )
 
-// replyBudget stood here and resolved one of these against smallestKnownWindow —
-// the tightest window among the CONFIGURED lanes, which is not the model that
-// answers. On a deployment whose executor is smaller than its answer model, that
-// sized a person's reply against the executor. boundsFor resolves these now,
-// against the model the door has already chosen. See bounds.go.
+/*
+ * replyBudget resolves how much a stage may write, against the model's window.
+ * desc: budget's sibling for the return leg. It does NOT multiply by
+ *       charsPerToken: a reply cap is counted in tokens, which is what the
+ *       window is counted in, so the conversion budget applies would give a cap
+ *       four times too large.
+ * param: s - which cap.
+ * return: the cap, in tokens.
+ */
+func (a *Agent) replyBudget(s budgetSpec) int {
+	if a == nil {
+		return s.Base
+	}
+	window := a.smallestKnownWindow()
+	if window <= 0 {
+		return s.Base
+	}
+	return s.resolve(window/s.Share, a.promptScale())
+}
 
 /*
  * Thinking and answering are one budget on the wire, and two here.

@@ -555,12 +555,18 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 	log.Printf("[dag] preflight: query=%q, history=%d turns (last assistant injected as context)", query, len(history))
 
 	ctx = withTrace(ctx, TraceID{NodeType: "preflight", Tag: "classify"})
-	resp, err := a.send(ctx, modelCall{Lane: Light, Stage: replyStructuredBudget, Req: &llm.ChatRequest{
+	resp, err := a.completeLight(ctx, &llm.ChatRequest{
 		Messages:    msgs,
 		Tools:       []llm.ToolDef{preflightSchema()},
 		ToolChoice:  "required",
 		Temperature: 0.0,
-	}})
+		// Eight fields share this, and two of them are open-ended: context is
+		// Seven fields share this, and one of them is open-ended: context is
+		// told to quote every URL, path and selector verbatim. The cap is
+		// stated to the model (see stateBudget), so it is not only a limit but
+		// a length the reply is planned against.
+		MaxTokens: a.replyBudget(replyStructuredBudget),
+	})
 	if err != nil {
 		log.Printf("[dag] preflight failed, using defaults: %v", err)
 		return defaultPreflight()

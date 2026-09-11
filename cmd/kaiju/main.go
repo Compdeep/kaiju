@@ -369,10 +369,6 @@ func createAgent(cfg *config.Config) *agent.Agent {
 			Limits:    configapi.ModelLimits,
 			Thinks:    configapi.ModelThinks,
 			Reasoning: configapi.ModelReasoning,
-			// Whether that model can be asked to stop reasoning at all. The
-			// second attempt reads it: a model that cannot stop is given a
-			// larger cap rather than an instruction it will ignore.
-			ReasoningLocked: configapi.ModelReasoningLocked,
 			// How long this model takes compared with the rest. Both clocks
 			// read it — the round deadline and the request deadline.
 			Pace: configapi.ModelPace,

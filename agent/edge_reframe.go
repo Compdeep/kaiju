@@ -273,11 +273,11 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 	// ask, not askParsed. This writes prose, and a paragraph that ran into the
 	// cap is short rather than unusable — reporting that as an error would throw
 	// away a good paragraph and fall back to the bare material.
-	resp, err := a.send(withTrace(ctx, TraceID{
+	resp, err := a.ask(withTrace(ctx, TraceID{
 		NodeType: "reframe",
 		Tag:      "reframe:" + edge.Name,
 		Input:    map[string]string{"edge": edge.Name},
-	}), modelCall{Lane: Light, Stage: replyEdgeBudget, Req: &llm.ChatRequest{
+	}), Light, &llm.ChatRequest{
 		// The arcs, not only the prose about them. This stage carries: it takes
 		// what the nodes produced and forms it for the next one to read, and its
 		// paragraph is placed FIRST in that stage's prompt. Given prose alone it
@@ -291,7 +291,8 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		Messages: BuildMessagesWithResults(
 			edge.Prompt, material, nil, graph.Arcs()),
 		Temperature: 0.2,
-	}})
+		MaxTokens:   a.replyBudget(replyEdgeBudget),
+	})
 	// An edge carries; this is what it carried. Recorded whether the model
 	// answered or not, because a reframe that fell back to passing the material
 	// through is exactly the case a reader of these records wants to see — see

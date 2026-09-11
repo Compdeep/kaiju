@@ -101,14 +101,12 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 			toolChoice = "required"
 		}
 
-		resp, err := a.send(ctx, modelCall{
-			Lane: Heavy, Stage: replyAnalysisBudget,
-			Req: &llm.ChatRequest{
-				Messages:    messages,
-				Tools:       toolDefs,
-				ToolChoice:  toolChoice,
-				Temperature: a.cfg.Temperature,
-			},
+		resp, err := a.completeHeavy(ctx, &llm.ChatRequest{
+			Messages:    messages,
+			Tools:       toolDefs,
+			ToolChoice:  toolChoice,
+			Temperature: a.cfg.Temperature,
+			MaxTokens:   a.cfg.MaxTokens,
 		})
 		if err != nil {
 			a.recordRun(trigger, startTime, nil, nil, intent, Conclusion{

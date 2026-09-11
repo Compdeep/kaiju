@@ -624,17 +624,16 @@ func (g *ContextGate) runCurator(ctx context.Context, query string, sources map[
 		sb.WriteString("\n\n")
 	}
 
-	resp, err := g.agent.send(ctx, modelCall{
-		Lane: Light, Stage: replyStructuredBudget, Parsed: true,
-		Req: &llm.ChatRequest{
-			Messages: []llm.Message{
-				{Role: "system", Content: prompt.Curator},
-				{Role: "user", Content: sb.String()},
-			},
-			Tools:       []llm.ToolDef{curatorSchema()},
-			ToolChoice:  "required",
-			Temperature: 0.0,
-		}})
+	resp, err := g.agent.completeLightChecked(ctx, &llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: "system", Content: prompt.Curator},
+			{Role: "user", Content: sb.String()},
+		},
+		Tools:       []llm.ToolDef{curatorSchema()},
+		ToolChoice:  "required",
+		Temperature: 0.0,
+		MaxTokens:   g.agent.replyBudget(replyStructuredBudget),
+	})
 	if err != nil {
 		return "", fmt.Errorf("curator LLM: %w", err)
 	}

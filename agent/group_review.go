@@ -139,14 +139,13 @@ func (a *Agent) fireGroupReview(ctx context.Context, group []*Node,
 		Tag:      revNode.Tag,
 		Input:    map[string]string{"tool": toolName, "siblings": fmt.Sprint(len(group))},
 	})
-	resp, err := a.send(ctx, modelCall{
-		Lane: Light, Stage: replyDecisionBudget, Parsed: true,
-		Req: &llm.ChatRequest{
-			Messages:    BuildMessagesWithResults(sysPrompt, user, nil, graph.Arcs()),
-			Tools:       []llm.ToolDef{groupReviewSchema()},
-			ToolChoice:  "required",
-			Temperature: a.cfg.Temperature,
-		}})
+	resp, err := a.completeLightChecked(ctx, &llm.ChatRequest{
+		Messages:    BuildMessagesWithResults(sysPrompt, user, nil, graph.Arcs()),
+		Tools:       []llm.ToolDef{groupReviewSchema()},
+		ToolChoice:  "required",
+		Temperature: a.cfg.Temperature,
+		MaxTokens:   a.replyBudget(replyDecisionBudget),
+	})
 	if err != nil {
 		log.Printf("[dag] group review of %s failed: %v", toolName, err)
 		graph.SetResult(revID, "group review error: "+err.Error())

@@ -3,25 +3,26 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 )
 
-// The verbs in front of the model.
+// One door in front of the model.
 //
 // A call to a model is never just a call. Which model answers depends on the
 // lane; how big a reply may be depends on that model's published limits and on
-// how much of its window the prompt already took; how long it may take depends
-// on what the model has been measured at; whether a reply that came back empty
-// is a failure or a retry depends on whether the model can be asked to stop
-// thinking. Each of those was applied at the call site, so each was applied
-// differently or not at all.
+// how much of its window the prompt already took; whether a truncated reply is
+// a failure depends on whether the caller parses what comes back.
 //
-// All of it is in call.go now, behind send. What is left here is the four ways
-// a stage can ask — one document or streamed, parsed or prose — and the Lane
-// they ask on. Each is one line, on purpose: a verb with a body is where the
-// next divergence starts.
+// Each of those was applied at the call site, so each was applied differently
+// or not at all: nine calls sized their reply against the model and nine did
+// not, including the one that asks for the largest reply this engine ever makes.
+// Anything added later had to be added everywhere, and was not.
+//
+// So there is one function that sends, and it takes the lane as an argument.
 
 // Lane names which model answers a call.
 //
@@ -92,14 +93,86 @@ func (a *Agent) lane(ctx context.Context, l Lane) (*llm.Client, string) {
 }
 
 /*
+ * applyReasoningBudget asks for as much thinking as the deployment wants and
+ * the model will act on.
+ * desc: Two settings, each sent only where the catalog says it lands. An effort
+ *       the model ignores and a budget it overruns are the same fault — an
+ *       operator sets something, nothing changes, and nothing says why.
+ *
+ *       Never turns thinking ON. A request that said nothing about it keeps
+ *       saying nothing, and one that turned it off is left alone by the caller.
+ * param: ctx - the run context, which may carry this run's own choice.
+ * param: req - the request, modified in place.
+ * param: model - the model this lane will send to.
+ */
+func (a *Agent) applyReasoningBudget(ctx context.Context, req *llm.ChatRequest, model string) {
+	if req == nil || a.cfg.Reasoning == nil || model == "" {
+		return
+	}
+	effort, budget := a.reasoningFor(ctx)
+	allowed, takesBudget := a.cfg.Reasoning(model)
+
+	// Nobody set a thinking budget, so one is taken out of the request's own
+	// allowance — for every lane, here, rather than at each call site. Wiring it
+	// per lane is how the planner ended up with a guard the chat lane did not.
+	//
+	// max_tokens bounds the whole completion, and a reasoning model's hidden
+	// tokens come out of it. Left undivided, a model that thinks hard exhausts
+	// the budget and the answer never starts: glm-5.3 was billed 4,096 output
+	// tokens on a chat turn and returned zero characters. Dividing it leaves
+	// room the answer cannot be robbed of.
+	//
+	// Only where the catalog says the model honours a budget. Everywhere else
+	// this is silent and recoverDeadThought is what saves the reply.
+	if budget <= 0 && takesBudget {
+		if share, _ := splitBudget(req.MaxTokens); share > 0 {
+			budget = share
+		}
+	}
+
+	if effort == "" && budget <= 0 {
+		return
+	}
+	if effort != "" && !slices.Contains(allowed, effort) {
+		effort = ""
+	}
+	if budget > 0 && !takesBudget {
+		budget = 0
+	}
+	if effort == "" && budget <= 0 {
+		return
+	}
+	if req.Reasoning == nil {
+		req.Reasoning = &llm.ReasoningControl{}
+	}
+	if effort != "" {
+		req.Reasoning.Effort = effort
+	}
+	if budget > 0 {
+		req.Reasoning.MaxTokens = budget
+	}
+}
+
+/*
  * ask sends one completion through a lane.
+ * desc: Resolve the lane, stamp its model on the request, send. The client
+ *       sizes the reply against that model as it sends, which is why the model
+ *       has to be stamped first.
+ *
+ *       Everything that applies to every model call belongs here. That is the
+ *       point of it: a step added here is added for every stage at once, which
+ *       is what the three near-identical doors this replaces could not do.
  * param: ctx - the run's context, carrying the lane selection.
  * param: l - which model answers.
- * param: req - the request. Its Model, MaxTokens and Reasoning are set in place.
+ * param: req - the request. Its Model and MaxTokens are set in place.
  * return: the provider's response.
  */
 func (a *Agent) ask(ctx context.Context, l Lane, req *llm.ChatRequest) (*llm.ChatResponse, error) {
-	return a.send(ctx, modelCall{Lane: l, Req: req})
+	c := a.prepare(ctx, l, req)
+	started := time.Now()
+	resp, err := c.Complete(ctx, req)
+	a.writeTrace(ctx, req, resp, err, started)
+	return resp, err
 }
 
 /*
@@ -116,12 +189,20 @@ func (a *Agent) ask(ctx context.Context, l Lane, req *llm.ChatRequest) (*llm.Cha
  * return: the response, and ErrReplyTruncated when the reply hit the cap.
  */
 func (a *Agent) askParsed(ctx context.Context, l Lane, req *llm.ChatRequest) (*llm.ChatResponse, error) {
-	return a.send(ctx, modelCall{Lane: l, Req: req, Parsed: true})
+	resp, err := a.ask(ctx, l, req)
+	if err != nil {
+		return resp, err
+	}
+	if llm.Truncated(resp) {
+		return resp, llm.TruncationError(req.MaxTokens)
+	}
+	return resp, nil
 }
 
 /*
  * askStream sends one completion through a lane and streams the reply.
- * desc: The chunks arrive through onChunk as they come; the assembled text is
+ * desc: The same four steps as ask, and the same reason for their order. The
+ *       chunks arrive through onChunk as they come; the assembled text is
  *       returned at the end.
  *
  *       A PARTIAL reply is never failed. finish_reason arrives in the final
@@ -130,16 +211,42 @@ func (a *Agent) askParsed(ctx context.Context, l Lane, req *llm.ChatRequest) (*l
  *       read, and there is nothing to fail.
  *
  *       An EMPTY one is different, and used to be reported as though it were
- *       the same. Nothing was shown, so nothing was read. send now asks again
- *       rather than reporting it, and only what survives that reaches here.
+ *       the same. Nothing was shown, so nothing was read, and the caller fails
+ *       regardless — the only question is what it says. A reasoning model that
+ *       spends its whole budget thinking returns exactly this, and the
+ *       aggregator called it "empty response": true, and no help at all, on a
+ *       run that had taken seventeen minutes to get there.
+ *
+ *       So the cut is reported only when there is nothing to keep.
  * param: as ask, plus onChunk, called for each chunk with its kind.
  * return: the assembled reply.
  */
 func (a *Agent) askStream(ctx context.Context, l Lane, req *llm.ChatRequest,
 	onChunk func(chunk, kind string)) (string, error) {
 
-	resp, err := a.send(ctx, modelCall{Lane: l, Req: req, OnChunk: onChunk})
-	return streamedText(resp), err
+	c := a.prepare(ctx, l, req)
+	started := time.Now()
+	resp, err := c.CompleteStreamResp(ctx, req, onChunk)
+	text := streamedText(resp)
+	// The response is recorded rather than a reconstruction of it: it carries
+	// the finish reason and whatever counts the provider sent.
+	a.writeTrace(ctx, req, resp, err, started)
+	if err != nil {
+		return text, err
+	}
+	if text == "" && llm.Truncated(resp) {
+		return "", llm.TruncationError(req.MaxTokens)
+	}
+	return text, nil
+}
+
+// streamedText is the assembled reply from a streamed response, and "" when
+// there is none — a nil response, no choice, or a choice with no content.
+func streamedText(resp *llm.ChatResponse) string {
+	if resp == nil || len(resp.Choices) == 0 {
+		return ""
+	}
+	return resp.Choices[0].Message.Content
 }
 
 /*
@@ -152,16 +259,103 @@ func (a *Agent) askStream(ctx context.Context, l Lane, req *llm.ChatRequest,
 func (a *Agent) askStreamResp(ctx context.Context, l Lane, req *llm.ChatRequest,
 	onChunk func(chunk, kind string)) (*llm.ChatResponse, error) {
 
-	return a.send(ctx, modelCall{Lane: l, Req: req, OnChunk: onChunk})
+	c := a.prepare(ctx, l, req)
+	started := time.Now()
+	resp, err := c.CompleteStreamResp(ctx, req, onChunk)
+	a.writeTrace(ctx, req, resp, err, started)
+	return resp, err
 }
 
-// streamedText is the assembled reply from a streamed response, and "" when
-// there is none — a nil response, no choice, or a choice with no content.
-func streamedText(resp *llm.ChatResponse) string {
-	if resp == nil || len(resp.Choices) == 0 {
-		return ""
+/*
+ * prepare is everything the door does to a request before it is sent.
+ * desc: Split out because four ways of sending share it — completion,
+ *       completion-that-parses, and the two streaming forms — and a step added
+ *       to one of them by hand is a step three of them do not get. That is the
+ *       fault this whole door exists to remove, so it must not be reintroduced
+ *       inside it.
+ *
+ *       Sizing the reply is not here: it is the client's, applied on every send
+ *       whoever makes it, so a tool holding a bare client gets it too.
+ * param: ctx, l, req - as ask.
+ * return: the client to send with.
+ */
+func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.Client {
+	c, model := a.lane(ctx, l)
+	if model != "" {
+		req.Model = model
 	}
-	return resp.Choices[0].Message.Content
+
+	// The two lanes that force a SMALL call get the model's thinking turned off,
+	// whatever model that is.
+	//
+	// Not a default and not a setting: there is no deployment in which hidden
+	// reasoning helps a 96-token routing decision or a preflight classification,
+	// so there is nothing for an operator to decide. Measured on the real
+	// preflight schema — with thinking on, three current models ran to the cap
+	// and returned unparseable JSON; with it off, all three answered in 157 to
+	// 292 tokens.
+	//
+	// Heavy and Answer are deliberately absent. Heavy forces a call too, but it
+	// has the budget for the thinking and the thinking earns it: on one planner
+	// prompt a thinking model returned complete plans three times of three where
+	// a non-thinking one ran the cap out three times of three. What that costs is
+	// time, and the clocks are widened for it rather than the thinking removed.
+	// Answer writes prose, where thinking is simply better.
+	//
+	// The picker also stops offering thinking models for these lanes. Two doors,
+	// because a config file reaches a lane without passing a picker — which is
+	// how a thinking model drove one deployment's executor for seven days.
+	if l == Light || l == Route {
+		llm.WithoutReasoning(req)
+	}
+
+	// Heavy is the one lane that asks. Reasoning helps the planning and costs
+	// time, and which of those a deployment wants is not something the engine
+	// can know — so the operator says, and an unset setting keeps the model's
+	// own default, which is what every config file did before this existed.
+	if l == Heavy {
+		switch a.llmReasoning {
+		case "on":
+			llm.WithReasoning(req)
+		case "off":
+			llm.WithoutReasoning(req)
+		}
+	}
+
+	// How much thinking, for the lanes that are having any.
+	//
+	// Separate from the switch above because it is a different question: that
+	// one is whether to think, this is how hard. It applies to every lane the
+	// switch has not turned off, since a lane that forces a small call has
+	// nothing to narrow.
+	//
+	// Asked only where the catalog says the model acts on it. Every provider
+	// accepts the parameter and none errors on it, so sending one blindly gives
+	// a setting that appears to work: qwen3.6-35b-a3b reasoned 1,498 tokens by
+	// default and 1,548 at "low". A control that does nothing is worse than one
+	// that is not offered.
+	if req.Reasoning == nil || req.Reasoning.On() {
+		a.applyReasoningBudget(ctx, req, model)
+	}
+
+	// Fix the cap here rather than leaving it to the send, so the number stated
+	// below is the number the provider stops at. capReply then finds nothing
+	// left to lower.
+	if cap := c.ReplyCap(req); cap >= budgetFloor {
+		req.MaxTokens = cap
+		stateBudget(req, cap)
+	}
+
+	// Images ride the context so they re-attach on every heavy call this turn,
+	// staying visible across follow-ups. Heavy only, as before: the model check
+	// would make this safe on any lane, but widening it is a behaviour change
+	// and belongs with the stage that moves the remaining callers here.
+	if l == Heavy {
+		if imgs := visionImagesFrom(ctx); len(imgs) > 0 && IsVisionModel(req.Model) {
+			llm.AttachImages(req.Messages, imgs)
+		}
+	}
+	return c
 }
 
 // Telling the model its budget.
@@ -173,9 +367,9 @@ func streamedText(resp *llm.ChatResponse) string {
 // input for an answer that was simply too long.
 //
 // The only channel to the model is the prompt, and the only moment the number
-// is final is after the lane is resolved and the cap settled — which is in
-// applyBounds. A stage building its prompt cannot state it, because at that
-// point the number does not exist.
+// is final is after the lane is resolved and the cap settled — which is here.
+// A stage building its prompt cannot state it, because at that point the number
+// does not exist.
 
 // budgetMarker opens the line, and identifies it again on a retry. The planner
 // builds its second attempt from the same message slice as its first, so
@@ -217,3 +411,9 @@ func stateBudget(req *llm.ChatRequest, cap int) {
 		return
 	}
 }
+
+// streamedResponse wrapped assembled stream text as a response, so a streamed
+// call traced the same shape as any other. It is gone: askStream now keeps the
+// provider's own response, which carries the finish reason a reconstruction
+// could not — and that reason is the difference between "empty" and "cut off
+// with nothing to show".

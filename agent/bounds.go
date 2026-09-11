@@ -174,20 +174,14 @@ func (a *Agent) replyBound(k budgetAsk) int {
 	}
 	window, maxOutput := a.limitsOf(k.Model)
 
-	// The catalog's answer for the model that will actually write this.
-	//
-	// Where the catalog does not carry it there is nothing to derive from, so
-	// the caller's own number stands — an application supplying no Limits, or
-	// supplying them for one model and not the rest, is unchanged by all of
-	// this, which is the contract Config.Limits states. Only the spec's floor
-	// answers when nobody said anything at all.
+	// The catalog's answer for the model that will actually write this, or the
+	// spec's own floor where the catalog does not carry it. A deployment with no
+	// catalog is unchanged by every line below.
 	got := s.Base
-	switch {
-	case window > 0:
-		got = s.resolve(window/s.Share, a.promptScale())
-	case k.AskedFor > 0:
-		got = k.AskedFor
+	if window > 0 {
+		got = window / s.Share
 	}
+	got = s.resolve(got, a.promptScale())
 
 	// What this stage's work requires. Stated by the stage rather than inferred,
 	// because only the stage knows: the planner has a step count to write for.

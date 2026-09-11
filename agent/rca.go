@@ -438,14 +438,13 @@ func (a *Agent) fireHolmes(ctx context.Context, sNode *Node, graph *Graph,
 	if gateCtx != nil {
 		holmesID.GateReturned = gateCtx.Sources
 	}
-	resp, llmErr := a.send(withTrace(ctx, holmesID), modelCall{
-		Lane: Heavy, Stage: replyAnalysisBudget, Parsed: true,
-		Req: &llm.ChatRequest{
-			Messages:    messages,
-			Tools:       []llm.ToolDef{holmesSchema()},
-			ToolChoice:  "required",
-			Temperature: a.cfg.Temperature,
-		}})
+	resp, llmErr := a.completeHeavyChecked(withTrace(ctx, holmesID), &llm.ChatRequest{
+		Messages:    messages,
+		Tools:       []llm.ToolDef{holmesSchema()},
+		ToolChoice:  "required",
+		Temperature: a.cfg.Temperature,
+		MaxTokens:   a.replyBudget(replyAnalysisBudget),
+	})
 
 	if llmErr != nil {
 		ch <- nodeCompletion{NodeID: sNode.ID, Err: fmt.Errorf("holmes LLM: %w", llmErr)}

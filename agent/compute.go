@@ -389,24 +389,19 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 			"query": query,
 		},
 	})
-	// Streamed with nothing listening, so the reasoning survives a deadline —
-	// see captureOnly. This was a plain checked call: nothing bounded the wait,
-	// and a reply that spent its whole budget thinking failed the step with
-	// "empty content and no tool calls" rather than being asked again.
-	resp, err := a.send(ctx, modelCall{
-		Lane:  Heavy,
-		Stage: replyAnalysisBudget,
-		Req: &llm.ChatRequest{
-			Messages: []llm.Message{
-				{Role: "system", Content: systemPrompt},
-				{Role: "user", Content: userPrompt},
-			},
-			Tools:       []llm.ToolDef{architectSchema()},
-			ToolChoice:  "required",
-			Temperature: 0.3,
+	// Under the round deadline, with both recoveries — see heavyRound. This was
+	// a plain checked call: nothing bounded the wait, and a reply that spent its
+	// whole budget thinking failed the step with "empty content and no tool
+	// calls" rather than being asked again.
+	resp, err := a.heavyRound(ctx, graph, &llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
 		},
-		OnChunk: captureOnly,
-		Parsed:  true,
+		Tools:       []llm.ToolDef{architectSchema()},
+		ToolChoice:  "required",
+		Temperature: 0.3,
+		MaxTokens:   a.replyBudget(replyAnalysisBudget),
 	})
 
 	if err != nil {
@@ -744,20 +739,18 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		Tools:       []llm.ToolDef{coderSchema(editable)},
 		ToolChoice:  "required",
 		Temperature: 0.2,
+		MaxTokens:   a.replyBudget(replyCodeBudget),
 	}
-	// Truncation is still reported, and is one of three things this call can come
-	// back as — see send. A coder reply cut off at the reply cap is a
-	// half-written program, and an unchecked call does not notice: the fragment
-	// was written to disk, run, and failed, and three Holmes iterations went
-	// into working out that the script had been truncated rather than wrong.
+	// Truncation is still reported, and is now one of three things this call can
+	// come back as — see heavyRound. A coder reply cut off at MaxTokens is a
+	// half-written program, and plain ask does not notice: the fragment was
+	// written to disk, run, and failed, and three Holmes iterations went into
+	// working out that the script had been truncated rather than being wrong.
 	//
 	// The other two are the ones this stage had no answer for. One live call ran
 	// 239 seconds, spent 14,276 tokens, and returned neither code nor a tool
 	// call — the budget went on reasoning — and the step simply failed.
-	resp, err := a.send(ctx, modelCall{
-		Lane: Heavy, Stage: replyCodeBudget, Req: coderReq,
-		OnChunk: captureOnly, Parsed: true,
-	})
+	resp, err := a.heavyRound(ctx, graph, coderReq)
 
 	if err != nil {
 		return "", fmt.Errorf("compute code LLM: %w", err)

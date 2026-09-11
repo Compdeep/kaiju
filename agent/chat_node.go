@@ -63,6 +63,7 @@ func (a *Agent) runChatNode(ctx context.Context, trigger Trigger, graph *Graph, 
 	req := &llm.ChatRequest{
 		Messages:    BuildMessagesWithHistory(prompt, query, trigger.History),
 		Temperature: a.cfg.Temperature,
+		MaxTokens:   a.cfg.MaxTokens,
 	}
 	// Whether this turn needs reasoning, as the router judged it one call ago.
 	// Empty leaves the model alone, which is what a router that failed gives and
@@ -73,21 +74,13 @@ func (a *Agent) runChatNode(ctx context.Context, trigger Trigger, graph *Graph, 
 	case ReasoningOff:
 		llm.WithoutReasoning(req)
 	}
-	// replyDecisionBudget, the same cap the other chat lane writes its answer
-	// under. This read cfg.MaxTokens, which on one deployment was a stale 4,096
-	// from before the shipped default was raised — and this lane had no deadline,
-	// no captured reasoning and no second attempt, so when a model spent all
-	// 4,096 tokens reasoning and wrote nothing, the reader was told the request
-	// had produced no answer. All three now come from the door; see call.go.
-	resp, err := a.send(ctx, modelCall{
-		Lane: Answer, Stage: replyDecisionBudget, Req: req,
-		OnChunk: func(chunk, kind string) {
-			evType := "outcome"
-			if kind == "reasoning" {
-				evType = "reasoning"
-			}
-			a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
-		}})
+	resp, err := a.askStreamResp(ctx, Answer, req, func(chunk, kind string) {
+		evType := "outcome"
+		if kind == "reasoning" {
+			evType = "reasoning"
+		}
+		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
+	})
 	if err != nil || len(resp.Choices) == 0 {
 		if err == nil {
 			err = errNoChatChoices
@@ -205,19 +198,17 @@ typed.`
 	// Streamed for the same reason the first reply is: this REPLACES what the
 	// user was reading, so arriving whole means the screen sits still and then
 	// jumps.
-	resp, err := a.send(ctx, modelCall{
-		Lane: Answer, Stage: replyDecisionBudget,
-		Req: &llm.ChatRequest{
-			Messages:    BuildMessagesWithHistory(sys, user, trigger.History),
-			Temperature: a.cfg.Temperature,
-		},
-		OnChunk: func(chunk, kind string) {
-			evType := "outcome"
-			if kind == "reasoning" {
-				evType = "reasoning"
-			}
-			a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
-		}})
+	resp, err := a.askStreamResp(ctx, Answer, &llm.ChatRequest{
+		Messages:    BuildMessagesWithHistory(sys, user, trigger.History),
+		Temperature: a.cfg.Temperature,
+		MaxTokens:   a.cfg.MaxTokens,
+	}, func(chunk, kind string) {
+		evType := "outcome"
+		if kind == "reasoning" {
+			evType = "reasoning"
+		}
+		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk})
+	})
 	if err != nil {
 		return "", err
 	}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -82,6 +83,25 @@ func cutThought(reasoning string) *llm.ChatResponse {
 		FinishReason: "length",
 		Message:      llm.Message{Role: "assistant", Reasoning: reasoning},
 	}}}
+}
+
+/*
+ * completeHeavyStreaming sends a heavy-lane call and keeps the reasoning.
+ * desc: The same call completeHeavy makes, streamed, so the thinking is
+ *       collected as it arrives instead of being read off a reply that a
+ *       cancelled call never produces.
+ *
+ *       Nothing is broadcast. The planner's reasoning is not an outcome for a
+ *       reader — it goes to the trace and, when the call is cut, to the retry
+ *       that has to finish the job.
+ * param: ctx - the run context, which may carry a deadline.
+ * param: req - the request.
+ * return: the reply, whatever was thought before it ended, and any error.
+ */
+func (a *Agent) completeHeavyStreaming(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, string, error) {
+	var cap thinkingCapture
+	resp, err := a.askStreamResp(ctx, Heavy, req, cap.onChunk)
+	return resp, thinkingOf(resp, &cap), err
 }
 
 /*

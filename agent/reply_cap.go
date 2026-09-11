@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -24,27 +25,52 @@ const stepTokens = 40
 const planOverhead = 1000
 
 /*
- * planFloor is the smallest reply a plan call can be written in.
- * desc: The planner is told it may write up to MaxNodes steps, so a cap below
- *       that count invites a plan that cannot be written. Every other stage
- *       picks a size for how much prose it wants; this one has a stated count
- *       to work from, and it is the only stage that states a minimum.
+ * planMaxTokens is the reply cap for a plan call.
+ * desc: The planner is told it may write up to MaxNodes steps, so the cap has
+ *       to fit that many. Every other call site picks a number for how much
+ *       prose it wants; this one has a stated count to work from, and a cap
+ *       below that count invites a plan that cannot be written.
  *
- *       It is a FLOOR and not the cap. What the plan actually gets is
- *       replyPlanBudget resolved against the model's window, narrowed by the
- *       model's own ceiling and the operator's — see boundsFor. This raises that
- *       number when the run is allowed more nodes than the table expected, and
- *       is otherwise invisible.
- *
- *       planMaxTokens stood here and did the whole job: the configured cap,
- *       doubled when the model reasons, widened to this count when it did not
- *       fit. The doubling was the right instinct and the wrong mechanism — the
- *       reasoning is divided out of the budget explicitly now rather than paid
- *       for by making the whole thing twice as big.
- * return: the least a plan may be given, in tokens.
+ *       Raising the configured cap is only safe when the model is known to
+ *       accept the larger number — some providers reject a max_tokens above
+ *       their own maximum rather than trimming it. So a model the catalog does
+ *       not carry, or no catalog at all, keeps the configured cap and behaves
+ *       exactly as it did before this existed.
+ * param: ctx - carries the per-request lane selection, if any.
+ * return: the max_tokens to send with a plan call.
  */
-func (a *Agent) planFloor() int {
-	return a.cfg.MaxNodes*stepTokens + planOverhead
+func (a *Agent) planMaxTokens(ctx context.Context) int {
+	c, laneModel := a.heavyLane(ctx)
+	model := resolvedModel(laneModel, c)
+
+	// A model that reasons before answering writes its hidden tokens into the
+	// same cap as its visible ones, so the same plan needs roughly twice the
+	// room. Measured on one planner prompt: 1,401 completion tokens billed for
+	// 470 tokens of visible JSON — two thirds of the generation was thinking.
+	//
+	// Doubled here rather than in the configured value, so the number an
+	// operator sets stays the number a non-thinking model gets.
+	base := a.cfg.MaxTokens
+	if a.heavyThinks(model) {
+		base *= 2
+	}
+
+	need := a.cfg.MaxNodes*stepTokens + planOverhead
+	if need <= base {
+		return base
+	}
+	if a.cfg.Limits == nil {
+		return base
+	}
+	_, maxOutput := a.cfg.Limits(model)
+	switch {
+	case maxOutput == 0:
+		return base
+	case maxOutput < need:
+		return maxOutput
+	default:
+		return need
+	}
 }
 
 /*

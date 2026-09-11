@@ -113,32 +113,13 @@ type Info struct {
 	//
 	// Empty is the safe default and the honest one: no control is offered for a
 	// model nobody has measured, rather than one that appears to do something.
-	// Nothing here is inferred from the family, and the catalog now shows why:
-	// deepseek-v4-pro-0813 acts on effort while deepseek-v4-flash-0731 acts on
-	// it BACKWARDS, and glm-5.3 acts on it while glm-5.3-flash does not. See
-	// Verified for where that lesson was learned first, and
-	// docs/reasoning-effort-bench.md for what each entry here was measured at.
-	//
-	// The values are the providers' vocabulary and not ours: minimal, low,
-	// medium, high, xhigh, max. No model takes all six, and glm-5.2 takes
-	// neither low nor medium.
+	// Nothing here is inferred from the family — see Verified for why that was
+	// abandoned for ToolCallOK.
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	// ReasoningBudget reports whether a reasoning budget in tokens is honoured
-	// as a budget. Two models in the catalog do: qwen3.7-flash and qwen3.8-flash
-	// return exactly 256 and exactly 4,096 reasoning tokens when that is what
-	// they are allowed. False is the default for the same reason as above.
-	//
-	// Measuring this needs a prompt the budget BINDS on. On an easy one these
-	// models reason for about 130 tokens anyway, and a 128-token allowance
-	// cannot be told apart from their own default — which is how qwen3.8-flash
-	// was first recorded as ignoring it.
-	//
-	// This is a statement about the WIRE as much as the model. Anthropic takes a
-	// budget natively, as budget_tokens, and claude-opus-5 reached over
-	// OpenRouter ignores it completely — 113 tokens spent whether 128 or 4,096
-	// were asked for. Every entry in models.json is provider "openrouter", so
-	// that is the wire these values describe. A deployment pointed at
-	// api.anthropic.com is a different one, and unmeasured.
+	// as a budget. Anthropic takes one natively (budget_tokens). The models
+	// measured on the OpenAI-compatible wire did not: 512 asked, 648 and 1,160
+	// spent. False is the default for the same reason as above.
 	ReasoningBudget bool `json:"reasoning_budget,omitempty"`
 }
 

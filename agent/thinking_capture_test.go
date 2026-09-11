@@ -273,3 +273,58 @@ func TestTheChatRetryStartsFromWhatWasAlreadyThought(t *testing.T) {
 		t.Errorf("the chat retry was not shown the thinking the first attempt paid for:\n%s", asked)
 	}
 }
+
+// A call that finished has its thinking on the reply, and that is the copy to
+// keep.
+//
+// This is the fault that made every planning row empty while the model was
+// plainly thinking. A model delivers reasoning two ways — its own field, or
+// written into the content between <think> and </think> — and only the first
+// passes through a stream callback: the second is lifted out of the finished
+// content by the client, after the last chunk. Reading the capture instead of
+// the reply threw that away on every call that was not cut off, which is
+// almost all of them.
+func TestThinkingIsTakenFromTheReplyWhenThereIsOne(t *testing.T) {
+	const lifted = "the pitch file first, then the defence one"
+	resp := &llm.ChatResponse{Choices: []llm.Choice{{
+		Message: llm.Message{Role: "assistant", Content: "the plan", Reasoning: lifted},
+	}}}
+
+	var cap thinkingCapture // nothing streamed as reasoning, which is the case under test
+	if got := thinkingOf(resp, &cap); got != lifted {
+		t.Errorf("thinking = %q, want the reply's own %q", got, lifted)
+	}
+}
+
+// With no reply there is only the capture, which is what a cancelled call
+// leaves behind.
+func TestThinkingFallsBackToTheCaptureWithNoReply(t *testing.T) {
+	var cap thinkingCapture
+	cap.onChunk("halfway through a thought", "reasoning")
+	if got := thinkingOf(nil, &cap); got != "halfway through a thought" {
+		t.Errorf("thinking = %q, want what was captured before the call was cut", got)
+	}
+}
+
+// Thinking written into the content is thinking, and a cut-off call never
+// closes the tag.
+//
+// The capture kept only reasoning chunks, so a model that writes its thinking
+// inline streamed past it entirely — every chunk was content, and a deadline
+// then handed the retry nothing.
+func TestTheCaptureKeepsThinkingWrittenInline(t *testing.T) {
+	var cap thinkingCapture
+	cap.onChunk("<think>the two files are", "content")
+	cap.onChunk(" the same document", "content")
+
+	if got := cap.text(); got != "the two files are the same document" {
+		t.Errorf("captured %q, want the thinking out of the content", got)
+	}
+
+	// And a finished block leaves the answer behind rather than carrying it.
+	var done thinkingCapture
+	done.onChunk("<think>weighing it up</think>here is the answer", "content")
+	if got := done.text(); got != "weighing it up" {
+		t.Errorf("captured %q, want only the thinking — the answer is not thought", got)
+	}
+}

@@ -191,7 +191,10 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	// remaining time — the same answer an exhausted budget gets, because it is
 	// the same problem arriving as an error rather than as an empty reply.
 	if err != nil && chatCtx.Err() != nil && ctx.Err() == nil {
-		thought := thinking.text()
+		// The reply first, the capture second — the order thinkingOf explains.
+		// A deadline leaves no reply, so here it is almost always the capture;
+		// almost, because a call can fail after one arrives.
+		thought := thinkingOf(resp, &thinking)
 		log.Printf("[chat] %s passed its %s deadline — re-asking with thinking off, carrying %d chars of reasoning",
 			t.Model, a.roundBudget(ctx, Answer, t.Base), len(thought))
 		recovered, rerr := a.recoverDeadThought(retracing(ctx, "chat_recover_deadline"), Answer, req, cutThought(thought))

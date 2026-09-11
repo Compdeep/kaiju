@@ -71,6 +71,14 @@ type ModelConfig struct {
 	// Set at run time: SetReasoning.
 	LLMReasoning string
 
+	// LLMReasoningEffort is how hard to think when thinking: minimal, low,
+	// medium, high, xhigh or max, or empty to say nothing. A different question
+	// from LLMReasoning, which is whether to think at all — a model may answer
+	// one and ignore the other, and the catalog records which.
+	//
+	// A run may override it; see Trigger.ReasoningEffort.
+	LLMReasoningEffort string
+
 	// Providers is the credential catalog for per-request model routing,
 	// keyed by provider name (openai, anthropic, openrouter, selfhosted, …).
 	// Built into one llm.Client per provider at boot; a request selects a

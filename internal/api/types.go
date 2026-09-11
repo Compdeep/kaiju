@@ -19,6 +19,14 @@ type ExecuteRequest struct {
 	ExecutorModel    string `json:"executor_model,omitempty"`    // light-lane model id
 	AnswerProvider   string `json:"answer_provider,omitempty"`   // answer-lane provider (aggregator + chat)
 	AnswerModel      string `json:"answer_model,omitempty"`      // answer-lane model id
+	// ReasoningEffort is how hard the chosen model is asked to think on THIS
+	// run: minimal, low, medium, high, xhigh or max. Empty leaves the node's
+	// setting in force rather than asking for nothing.
+	//
+	// Here rather than only in the config because a host that picks the model
+	// per request picks this per request too — one choice per organisation, on
+	// a node serving many, where a config change would move all of them.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// Vision lane: the model that answers questions about attached images
 	// directly (no planner/tools). Empty ⇒ the configured default vision model.
 	VisionProvider string `json:"vision_provider,omitempty"`

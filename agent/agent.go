@@ -61,12 +61,20 @@ type Trigger struct {
 	// Provider is a name in cfg.Providers; Model is that provider's model id.
 	// Heavy lane = executive/aggregator/reasoning; Light lane = the executor
 	// (classify/route/reflect/observe). Keys are never carried here.
-	Provider           string `json:"provider,omitempty"`
-	Model              string `json:"model,omitempty"`
-	ExecutorProvider   string `json:"executor_provider,omitempty"`
-	ExecutorModel      string `json:"executor_model,omitempty"`
-	AnswerProvider     string `json:"answer_provider,omitempty"`
-	AnswerModel        string `json:"answer_model,omitempty"`
+	Provider         string `json:"provider,omitempty"`
+	Model            string `json:"model,omitempty"`
+	ExecutorProvider string `json:"executor_provider,omitempty"`
+	ExecutorModel    string `json:"executor_model,omitempty"`
+	AnswerProvider   string `json:"answer_provider,omitempty"`
+	AnswerModel      string `json:"answer_model,omitempty"`
+	// ReasoningEffort is how hard the chosen model is asked to think on THIS
+	// run: minimal, low, medium, high, xhigh or max. Empty leaves the node's
+	// setting in force rather than asking for nothing.
+	//
+	// Sent only where the catalog says the model was measured to act on it —
+	// every provider accepts the parameter and not every model does anything
+	// with it, so an unnarrowed effort is a setting that appears to work.
+	ReasoningEffort    string `json:"reasoning_effort,omitempty"`
 	HeartbeatThreshold int    `json:"heartbeat_threshold,omitempty"` // consecutive stuck ticks before kernel interjects (0 = default 3; raise for long-running work like downloads)
 
 	// Cause carries whatever the application knows about what prompted this

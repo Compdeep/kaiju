@@ -218,22 +218,7 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 	// The picker also stops offering thinking models for these lanes. Two doors,
 	// because a config file reaches a lane without passing a picker — which is
 	// how a thinking model drove one deployment's executor for seven days.
-	if l == Light || l == Route {
-		llm.WithoutReasoning(req)
-	}
-
-	// Heavy is the one lane that asks. Reasoning helps the planning and costs
-	// time, and which of those a deployment wants is not something the engine
-	// can know — so the operator says, and an unset setting keeps the model's
-	// own default, which is what every config file did before this existed.
-	if l == Heavy {
-		switch a.llmReasoning {
-		case "on":
-			llm.WithReasoning(req)
-		case "off":
-			llm.WithoutReasoning(req)
-		}
-	}
+	req.Think = a.thinkingFor(ctx, l)
 
 	// Fix the cap here rather than leaving it to the send, so the number stated
 	// below is the number the provider stops at. capReply then finds nothing
@@ -253,6 +238,64 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 		}
 	}
 	return c
+}
+
+/*
+ * thinkingFor is what this lane asks of the model's thinking.
+ * desc: The precedence, stated once: the lane's own rule, then the run's
+ *       choice, then the operator's, then nothing.
+ *
+ *       "Nothing" is a real answer and the common one. It leaves the model's
+ *       own default alone, which is what every deployment had before any of
+ *       this and what a stage with no opinion should not be able to change.
+ *
+ *       What this does NOT decide is whether a forced single-shape call may
+ *       think. That is a property of the call rather than of the lane — the
+ *       planner forces one shape too — and it is settled in the client, where
+ *       the callers that never reach this function are also covered.
+ * param: ctx - the run context, carrying this run's own choice.
+ * param: l - the lane.
+ * return: what to ask for, or nil to ask nothing.
+ */
+func (a *Agent) thinkingFor(ctx context.Context, l Lane) *llm.Reasoning {
+	// The two lanes that force a SMALL call get thinking turned off, whatever
+	// model is configured.
+	//
+	// Not a default and not a setting: there is no deployment in which hidden
+	// reasoning helps a 96-token routing decision or a preflight classification.
+	// Measured on the real preflight schema — with thinking on, three current
+	// models ran to the cap and returned unparseable JSON; with it off, all
+	// three answered in 157 to 292 tokens.
+	//
+	// Wider than the client's rule on purpose: not every call on these lanes
+	// forces a shape, and the ones that do not — a 256-token repair suggestion,
+	// say — cannot afford to think either.
+	if l == Light || l == Route {
+		return &llm.Reasoning{Want: llm.WantOff}
+	}
+
+	// Heavy is the one lane an operator has a view on. Reasoning helps the
+	// planning and costs time, and which of those a deployment wants is not
+	// something the engine can know.
+	want := llm.WantAuto
+	if l == Heavy {
+		switch a.llmReasoning {
+		case "on":
+			want = llm.WantOn
+		case "off":
+			want = llm.WantOff
+		}
+	}
+
+	effort := laneSelFrom(ctx).effort
+	if effort == llm.EffortUnset {
+		effort, _ = llm.ParseEffort(a.cfg.LLMReasoningEffort)
+	}
+
+	if want == llm.WantAuto && effort == llm.EffortUnset {
+		return nil
+	}
+	return &llm.Reasoning{Want: want, Effort: effort}
 }
 
 // Telling the model its budget.

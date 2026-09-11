@@ -267,6 +267,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		ExecutorModel:    req.ExecutorModel,
 		AnswerProvider:   req.AnswerProvider,
 		AnswerModel:      req.AnswerModel,
+		ReasoningEffort:  req.ReasoningEffort,
 	}
 
 	// How this turn is handled, resolved once, before anything reads it.

@@ -71,11 +71,22 @@ type ProviderCreds struct {
 	APIKey   string
 }
 
-// laneSelection is the per-request model choice for the lanes.
+// laneSelection is the per-request model choice for the lanes, and how hard the
+// chosen model is asked to think.
+//
+// The effort rides here rather than beside the operator's setting because it is
+// the same kind of thing as the model ids around it: one run's choice, set once
+// at the API boundary and read at the call seam. A host that picks the model per
+// request — one per organisation, on a node serving many — cannot use a
+// node-wide setting for this without changing it for everybody.
 type laneSelection struct {
 	heavyProvider, heavyModel   string
 	lightProvider, lightModel   string
 	answerProvider, answerModel string
+	// effort overrides Config.LLMReasoningEffort for this run. EffortUnset
+	// means "say nothing here", which leaves the node's setting in force — NOT
+	// "ask for nothing".
+	effort llm.Effort
 }
 
 type laneSelKey struct{}
@@ -98,7 +109,16 @@ func laneSelectionFromTrigger(t Trigger) laneSelection {
 		lightModel:     t.ExecutorModel,
 		answerProvider: t.AnswerProvider,
 		answerModel:    t.AnswerModel,
+		effort:         parsedEffort(t.ReasoningEffort),
 	}
+}
+
+// parsedEffort reads a run's effort off a trigger. An unrecognised word is
+// EffortUnset rather than an error: a mistyped field should leave the node's
+// setting in force, not refuse the run.
+func parsedEffort(s string) llm.Effort {
+	e, _ := llm.ParseEffort(s)
+	return e
 }
 
 func laneSelFrom(ctx context.Context) laneSelection {

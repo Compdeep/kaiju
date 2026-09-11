@@ -112,6 +112,13 @@ type LLMConfig struct {
 	// the feature does not exist from one absent because it is at its default.
 	// Empty IS the default, and saying so is the point.
 	Reasoning string `json:"reasoning"`
+	// ReasoningEffort is how hard to think WHEN thinking: minimal, low, medium,
+	// high, xhigh or max, or empty to say nothing. A different question from
+	// Reasoning, which is whether to think at all.
+	//
+	// Never omitempty, for the reason Reasoning is not: a client cannot tell a
+	// daemon too old to know the field from one where it is at its default.
+	ReasoningEffort string `json:"reasoning_effort"`
 }
 
 /*

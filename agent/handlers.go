@@ -82,7 +82,7 @@ func (a *Agent) applyModels(cfg Config) {
 	// 600 for.
 	if cfg.LLMEndpoint != "" || cfg.LLMAPIKey != "" || cfg.LLMModel != "" {
 		a.llm = llm.NewClientWithProvider(cfg.LLMProvider, cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).
-			Limits(cfg.Limits).Thinks(cfg.Thinks).Pace(cfg.Pace).Parameters(cfg.Parameters).Transport(cfg.LLMTransport)
+			Limits(cfg.Limits).Thinks(cfg.Thinks).Pace(cfg.Pace).Transport(cfg.LLMTransport)
 	}
 
 	if cfg.ExecutorEndpoint != "" || cfg.ExecutorAPIKey != "" || cfg.ExecutorModel != "" {
@@ -91,7 +91,7 @@ func (a *Agent) applyModels(cfg Config) {
 		model := firstNonEmpty(cfg.ExecutorModel, cfg.LLMModel)
 		provider := firstNonEmpty(cfg.ExecutorProvider, cfg.LLMProvider)
 		a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).
-			Limits(cfg.Limits).Thinks(cfg.Thinks).Pace(cfg.Pace).Parameters(cfg.Parameters).Transport(cfg.LLMTransport)
+			Limits(cfg.Limits).Thinks(cfg.Thinks).Pace(cfg.Pace).Transport(cfg.LLMTransport)
 	}
 
 	if cfg.LLMReasoning != "" {

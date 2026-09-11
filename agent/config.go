@@ -154,14 +154,6 @@ type ModelConfig struct {
 	// whichever was left, and the error then names the wrong clock.
 	Pace ModelPace
 
-	// Parameters reports what else a model is to be sent — the catalog entry's
-	// own parameters, relayed verbatim into the request body. Nil, or a model
-	// the catalog does not carry, means the request goes as the stage wrote it.
-	//
-	// It exists because the controls for reasoning are not one vocabulary and
-	// the engine cannot carry a field for each. See llm.ChatRequest.Extra.
-	Parameters ModelParameters
-
 	// PromptScale narrows every cap that carries content into a prompt, from 0
 	// to 1. Unset — or any value outside that range — means 1, which is the
 	// caps exactly as budgets.go states them, so a deployment that says nothing
@@ -207,9 +199,6 @@ type ModelReasoning = llm.ModelReasoning
 
 // ModelPace reports the number a model's deadlines are multiplied by.
 type ModelPace = llm.ModelPace
-
-// ModelParameters reports what else to send for a model.
-type ModelParameters = llm.ModelParameters
 
 // PathConfig is where the agent reads and writes.
 type PathConfig struct {

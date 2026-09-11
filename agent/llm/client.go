@@ -158,60 +158,6 @@ type ChatRequest struct {
 	// models/openrouter; nil on every other provider, and nil there too when
 	// both lists are empty.
 	Provider *ProviderRouting `json:"provider,omitempty"`
-
-	// Extra is whatever else this model's catalog entry says to send, relayed
-	// verbatim into the request body at the top level.
-	//
-	// The controls for reasoning are not one vocabulary. thinking_budget,
-	// enable_thinking, reasoning_effort and budget_tokens all exist, under
-	// different names, at different providers, for the same model — and which
-	// of them a call reaches depends on the host that answers it rather than on
-	// the model. Naming each as a field here means a new field, a new release
-	// and a rebuild every time a provider adds one.
-	//
-	// So the catalog carries them and this relays them. Anything the engine
-	// itself set for this call wins on a key they share: a lane that switched
-	// thinking off for a 96-token routing decision measured that, and a file
-	// must not be able to switch it back on.
-	//
-	// Merged at marshal time — see MarshalJSON. Never decoded: a request is
-	// written, not read.
-	Extra map[string]any `json:"-"`
-}
-
-/*
- * MarshalJSON writes the request, with the catalog's own parameters in it.
- * desc: The struct's fields are laid over Extra rather than beside it, so a key
- *       the engine set for this call beats the same key from a file. Everything
- *       the engine has no field for travels untouched, which is the point.
- * return: the request body.
- */
-func (r ChatRequest) MarshalJSON() ([]byte, error) {
-	// A type with no methods of its own, or this recurses forever.
-	type wire ChatRequest
-	body, err := json.Marshal(wire(r))
-	if err != nil {
-		return nil, err
-	}
-	if len(r.Extra) == 0 {
-		return body, nil
-	}
-	merged := make(map[string]json.RawMessage, len(r.Extra)+12)
-	for k, v := range r.Extra {
-		b, err := json.Marshal(v)
-		if err != nil {
-			return nil, fmt.Errorf("parameter %q cannot be sent: %w", k, err)
-		}
-		merged[k] = b
-	}
-	var own map[string]json.RawMessage
-	if err := json.Unmarshal(body, &own); err != nil {
-		return nil, err
-	}
-	for k, v := range own {
-		merged[k] = v
-	}
-	return json.Marshal(merged)
 }
 
 // ProviderRouting is OpenRouter's provider-routing object, narrowed to the two
@@ -222,14 +168,6 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 // that failed to load must not reach the wire as `[]`. Sending nothing is what
 // leaves routing alone.
 type ProviderRouting struct {
-	// RequireParameters refuses hosts that do not support the parameters this
-	// request carries, rather than routing to one that will drop them.
-	//
-	// The fault it answers: one model id is served by several hosts, and they
-	// do not accept the same controls. A thinking budget sent to the wrong one
-	// is accepted, dropped, and answered normally — so the setting appears to
-	// work and the call reasons exactly as long as it likes.
-	RequireParameters bool `json:"require_parameters,omitempty"`
 	// Only is the whitelist. Naming anything here refuses every host not named,
 	// fallback included.
 	Only []string `json:"only,omitempty"`
@@ -414,7 +352,6 @@ type Client struct {
 	limits   ModelLimits
 	thinks   ModelThinks
 	pace     ModelPace
-	params   ModelParameters
 }
 
 // ModelLimits reports what a model can take in and give back, in tokens. Zero
@@ -436,11 +373,6 @@ type ModelThinks func(model string) bool
 // qwen3.6-35b-a3b returned 1,498 and 1,548. An empty list and a false mean the
 // model has not been measured, so nothing is asked of it that it may ignore.
 type ModelReasoning func(model string) (efforts []string, budget bool)
-
-// ModelParameters reports what else to send for a model: the catalog entry's
-// own parameters, relayed verbatim into the request body. Nil, or an empty map,
-// means the request goes exactly as its caller wrote it.
-type ModelParameters func(model string) map[string]any
 
 // ModelPace reports how long a model takes compared with the rest, as the
 // number its deadlines are multiplied by. 1 — or a nil lookup — is the ordinary
@@ -525,69 +457,6 @@ func (c *Client) baseTimeoutFor(req *ChatRequest, model string) time.Duration {
 func (c *Client) Pace(fn ModelPace) *Client {
 	c.pace = fn
 	return c
-}
-
-/*
- * Parameters tells a client what else each of its models is to be sent.
- * desc: The catalog's own entries, relayed into the body — see
- *       ChatRequest.Extra for why they are not fields.
- *
- *       Set beside Limits, Thinks and Pace, and for the same reason: a per-call
- *       decision is a decision somebody forgets to make.
- * param: fn - the lookup, or nil to send every request as its caller wrote it.
- * return: the client, so this reads as part of construction.
- */
-func (c *Client) Parameters(fn ModelParameters) *Client {
-	c.params = fn
-	return c
-}
-
-/*
- * applyParameters attaches a model's catalog parameters to a request.
- * desc: Applied at the door, so every lane and every caller holding a bare
- *       client gets them. A key the caller already set is left alone — the
- *       catalog is the default for a call that said nothing.
- *
- *       On OpenRouter it also asks to be routed to a host that supports them.
- *       Without that the parameters are accepted by whichever host answers,
- *       dropped by the ones that do not understand them, and the call proceeds
- *       as though nothing had been asked — which is the fault the catalog entry
- *       was written to fix.
- * param: req - the request, given the parameters in place.
- */
-func (c *Client) applyParameters(req *ChatRequest) {
-	if c == nil || req == nil || c.params == nil {
-		return
-	}
-	model := req.Model
-	if model == "" {
-		model = c.model
-	}
-	if model == "" {
-		return
-	}
-	params := c.params(model)
-	if len(params) == 0 {
-		return
-	}
-	if req.Extra == nil {
-		req.Extra = make(map[string]any, len(params))
-	}
-	for k, v := range params {
-		if _, set := req.Extra[k]; !set {
-			req.Extra[k] = v
-		}
-	}
-	if c.provider != ProviderOpenRouter {
-		return
-	}
-	// Added to whatever routing is already in force rather than replacing it:
-	// the lists say WHERE a call may go, and this says what the host must
-	// support once it gets there.
-	if req.Provider == nil {
-		req.Provider = &ProviderRouting{}
-	}
-	req.Provider.RequireParameters = true
 }
 
 /*
@@ -825,7 +694,6 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 	}
 	c.capReply(req)
 	c.routeProviders(req)
-	c.applyParameters(req)
 
 	// This door does not stream, and says so on the request rather than relying
 	// on the field being unset.
@@ -985,8 +853,6 @@ func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk f
 // turns identically.
 func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (*ChatResponse, error) {
 	c.capReply(req)
-	c.routeProviders(req)
-	c.applyParameters(req)
 	resp, err := c.completeStreamResp(ctx, req, onChunk)
 	// One emit covering every return path in the implementation below,
 	// including the early transport and HTTP failures.

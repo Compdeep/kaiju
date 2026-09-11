@@ -372,9 +372,6 @@ func createAgent(cfg *config.Config) *agent.Agent {
 			// How long this model takes compared with the rest. Both clocks
 			// read it — the round deadline and the request deadline.
 			Pace: configapi.ModelPace,
-			// Whatever else this model's entry says to send — the reasoning
-			// controls that are named differently at every provider.
-			Parameters: configapi.ModelParameters,
 		},
 		PathConfig: agent.PathConfig{
 			DataDir:     cfg.Agent.DataDir,

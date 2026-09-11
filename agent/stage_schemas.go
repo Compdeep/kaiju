@@ -386,6 +386,10 @@ func routeSchema() llm.ToolDef {
 				"type": "object",
 				"properties": {
 					"mode": { "type": "string", "enum": ["chat", "agent"] },
+					"think": {
+						"type": "boolean",
+						"description": "Whether answering THIS message needs the model to reason before it writes. False for the ordinary conversational turn — a greeting, a fact, an opinion, a rewrite, anything you could begin answering immediately. True when the answer depends on working something out first: a calculation, a comparison across several things, a piece of code, a decision with conditions in it. Ignored when mode is agent, which always reasons."
+					},
 					"lacking_context": {
 						"type": "array",
 						"items": { "type": "string", "maxLength": 40 },
@@ -393,7 +397,7 @@ func routeSchema() llm.ToolDef {
 						"description": "Up to four short words or phrases to look up in earlier messages, when answering needs something said earlier that is not in the summary or the messages shown. Use the words the conversation itself would have used — they are matched against the earlier text as written. Leave empty when what is shown is enough."
 					}
 				},
-				"required": ["mode"]
+				"required": ["mode", "think"]
 			}`),
 		},
 	}
@@ -412,6 +416,13 @@ func routeSchema() llm.ToolDef {
 // this lane had already made.
 //
 // With no mode in the reply there is nothing for the words to starve.
+//
+// It carries a second field again — whether this turn needs thinking at all —
+// and the lesson above is why that is safe here and was not before. A mode is a
+// decision this lane had already made, so it bought nothing; this is one the
+// lane cannot make for itself. It is a boolean rather than an enum, it is
+// written after the words rather than before them, and the words are bounded to
+// four of forty characters, so it cannot be what runs out of room.
 func recallSchema() llm.ToolDef {
 	return llm.ToolDef{
 		Type: "function",
@@ -426,9 +437,13 @@ func recallSchema() llm.ToolDef {
 						"items": { "type": "string", "maxLength": 40 },
 						"maxItems": 4,
 						"description": "Up to four short words or phrases to look up in the earlier messages of this conversation. They are matched against the earlier text as written, one at a time. Empty when what is shown is enough, which is most of the time."
+					},
+					"think": {
+						"type": "boolean",
+						"description": "Whether answering THIS message needs the model to reason before it writes. False for the ordinary conversational turn — a greeting, a fact, an opinion, a rewrite, anything you could begin answering immediately. True when the answer depends on working something out first: a calculation, a comparison across several things, a piece of code, a decision with conditions in it."
 					}
 				},
-				"required": ["lacking_context"]
+				"required": ["lacking_context", "think"]
 			}`),
 		},
 	}

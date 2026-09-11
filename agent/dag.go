@@ -364,6 +364,22 @@ type NodeInfo struct {
 	Decided []string `json:"decided,omitempty"`
 }
 
+// PreflightThinking is what preflight judged this turn's thinking needs, or ""
+// when nothing has been decided — a graph built before preflight ran, or a run
+// whose router failed. Locked, because the chat node reads it while the rest of
+// the run may still be writing to the graph.
+func (g *Graph) PreflightThinking() string {
+	if g == nil {
+		return ""
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if g.Preflight == nil {
+		return ""
+	}
+	return g.Preflight.Thinking
+}
+
 /*
  * Graph is a concurrency-safe DAG of investigation nodes.
  * desc: Thread-safe container for the investigation graph. Supports observer

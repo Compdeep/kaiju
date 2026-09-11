@@ -60,11 +60,21 @@ func (a *Agent) runChatNode(ctx context.Context, trigger Trigger, graph *Graph, 
 	// arrived at once. The other chat entry point (chat.go) already streamed on
 	// the same channel; this path, the one the graph takes, did not.
 	ctx = withTrace(ctx, TraceID{NodeID: id, NodeType: "chat", Tag: chatNodeTag})
-	resp, err := a.askStreamResp(ctx, Answer, &llm.ChatRequest{
+	req := &llm.ChatRequest{
 		Messages:    BuildMessagesWithHistory(prompt, query, trigger.History),
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.cfg.MaxTokens,
-	}, func(chunk, kind string) {
+	}
+	// Whether this turn needs reasoning, as the router judged it one call ago.
+	// Empty leaves the model alone, which is what a router that failed gives and
+	// what every turn got before this existed.
+	switch graph.PreflightThinking() {
+	case ReasoningOn:
+		llm.WithReasoning(req)
+	case ReasoningOff:
+		llm.WithoutReasoning(req)
+	}
+	resp, err := a.askStreamResp(ctx, Answer, req, func(chunk, kind string) {
 		evType := "outcome"
 		if kind == "reasoning" {
 			evType = "reasoning"

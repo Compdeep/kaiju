@@ -102,10 +102,19 @@ five words, no sentences, no descriptions of what you want. Leave it out
 entirely when what you can see is enough to answer, which is most of the time.
 It is separate from the mode: fill it or leave it for either one.
 
+Also answer "think": whether the model that writes the reply needs to reason
+before it starts. False for the ordinary turn — a greeting, a fact, an opinion,
+a rewrite, anything you could begin answering immediately. True when the answer
+depends on working something out first: a calculation, a comparison across
+several things, a piece of code, a decision with conditions in it. Most turns
+are false. It only affects a turn answered as conversation; work that goes to
+the agent is reasoned about regardless.
+
 === RECALL ===
 Name what answering this turn needs from EARLIER in this conversation that is not
-in the summary or the messages shown. Nothing is being classified here and
-nothing is being planned; that is already decided.
+in the summary or the messages shown, and say whether answering it needs
+thinking. Nothing is being classified here and nothing is being planned; that is
+already decided.
 
 Fill "lacking_context" when something is missing — a decision that was reached, a
 number that was agreed, a name, a preference, a file that was chosen. Two to four
@@ -120,6 +129,13 @@ front of the model that answers, so looking for them finds nothing.
 
 Leave the list empty when what you can see is enough, which is most of the time.
 An empty list is the ordinary answer and costs nothing.
+
+Then answer "think": whether the model that writes the reply needs to reason
+before it starts. False for the ordinary turn — a greeting, a fact, an opinion,
+a rewrite, anything you could begin answering immediately. True when the answer
+depends on working something out first: a calculation, a comparison across
+several things, a piece of code, a decision with conditions in it. Most turns
+are false.
 
 === PREFLIGHT ===
 

@@ -1797,6 +1797,17 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		Temperature: a.cfg.Temperature,
 		MaxTokens:   a.planMaxTokens(ctx),
 	}
+	// A plan is always reasoned about. Every other lane takes the model's own
+	// default, and on current models that is thinking — but it is a default
+	// rather than a guarantee, and this is the one call where the difference
+	// between a good plan and a bad one is the thinking.
+	//
+	// What bounds it is the round deadline below and the thinking budget, not
+	// the absence of the instruction. And an operator who switched reasoning off
+	// still wins: prepare applies the node's setting after this, at the seam
+	// every lane passes through.
+	llm.WithReasoning(planReq)
+
 	planCtx, cancelPlan := context.WithTimeout(ctx, a.roundBudget(ctx, Heavy, trigger))
 	defer cancelPlan()
 

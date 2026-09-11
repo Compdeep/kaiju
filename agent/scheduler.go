@@ -469,10 +469,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			// discarded here — so the same question answered conversationally
 			// got the earlier conversation looked up in the chat mode and not in
 			// this one. Same question, answered worse, depending on a setting.
-			mode, lacking := a.routeQuery(ctx, trigger.ID, query, trigger.History)
+			mode, lacking, thinking := a.routeQuery(ctx, trigger.ID, query, trigger.History)
 			switch mode {
 			case "chat":
-				pf = &PreflightResult{Mode: "chat", LackingContext: lacking}
+				// Whether this turn needs thinking travels with the answer that
+				// it is a conversation. A planned run reasons regardless, so the
+				// agent branch has no use for it.
+				pf = &PreflightResult{Mode: "chat", LackingContext: lacking, Thinking: thinking}
 			default: // "agent"
 				pf = a.classifyInvestigate(ctx, trigger.ID, query, trigger.History)
 			}

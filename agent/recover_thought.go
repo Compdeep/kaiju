@@ -102,8 +102,8 @@ func reasoningOf(resp *llm.ChatResponse) string {
  */
 func recoveryPrompt(reasoning string) string {
 	var b strings.Builder
-	b.WriteString("Your previous attempt returned nothing: it was still thinking when it " +
-		"stopped. Do not think further — answer now, in the form the call asks for.\n")
+	b.WriteString("Your previous attempt spent its entire reply budget thinking and " +
+		"returned nothing. Do not think further — answer now, in the form the call asks for.\n")
 	if reasoning != "" {
 		if len(reasoning) > maxRecoveredReasoning {
 			reasoning = "…" + reasoning[len(reasoning)-maxRecoveredReasoning:]

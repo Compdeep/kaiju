@@ -1784,11 +1784,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	planCtx, cancelPlan := context.WithTimeout(ctx, a.roundBudget(trigger))
 	defer cancelPlan()
 
-	// Streamed, so the thinking is collected as it arrives rather than read off
-	// a reply that a cancelled call never produces. Nothing is broadcast — the
-	// planner's reasoning is not an outcome for a reader; it goes to the trace,
-	// and to the retry when this call is cut.
-	resp, thought, err := a.completeHeavyStreaming(planCtx, planReq)
+	resp, err := a.completeHeavy(planCtx, planReq)
 
 	// The deadline expiring is not the same as the run being abandoned, and it
 	// must not be reported as a failure.
@@ -1804,14 +1800,9 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// again with thinking off, under the run's own remaining time. A model that
 	// cannot think has nothing to spend the wait on but the answer.
 	if err != nil && planCtx.Err() != nil && ctx.Err() == nil {
-		// What it managed to think before the clock ran out goes with the retry.
-		// This used to hand over nothing, because a cancelled call returns no
-		// reply and the reasoning was read off the reply — so two minutes of
-		// thinking were paid for and thrown away, and the second attempt started
-		// from the same blank page as the first.
-		log.Printf("[dag] executive plan passed its %s deadline — re-asking with thinking off, carrying %d chars of reasoning",
-			a.roundBudget(trigger), len(thought))
-		recovered, rerr := a.recoverDeadThought(retracing(ctx, "plan_recover_deadline"), Heavy, planReq, cutThought(thought))
+		log.Printf("[dag] executive plan passed its %s deadline — re-asking with thinking off",
+			a.roundBudget(trigger))
+		recovered, rerr := a.recoverDeadThought(retracing(ctx, "plan_recover_deadline"), Heavy, planReq, nil)
 		if rerr == nil && len(recovered.Choices) > 0 {
 			resp, err = recovered, nil
 		}

@@ -249,7 +249,7 @@ type ProviderRouting struct {
 // effort=low, so it listens; qwen3.6-35b-a3b returned 1,498 and 1,548, so it
 // does not. Neither honoured max_tokens as a ceiling — 512 asked, 648 and 1,160
 // spent. So this narrows a habit, and the things that actually bound a reply
-// remain the completion cap and the run's own time limit.
+// remain the completion cap and the run's clock.
 type ReasoningControl struct {
 	Enabled *bool `json:"enabled,omitempty"`
 	// Effort is "low", "medium" or "high" where the provider takes one.
@@ -596,10 +596,10 @@ func (c *Client) applyParameters(req *ChatRequest) {
  *       1 — this exists to give a slow model longer, never to give any model
  *       less.
  *
- *       Exported because two deadlines scale, and they have to scale the same way:
+ *       Exported because two clocks scale, and they have to scale the same way:
  *       this client's request deadline and the engine's round deadline. Written
  *       twice they would drift, and a run cut off by the one that was not
- *       widened names the wrong limit.
+ *       widened reports the wrong clock.
  * param: d - the deadline before the model's pace is considered.
  * param: pace - the lookup, or nil.
  * param: model - the model that will answer.
@@ -908,7 +908,7 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 
 	// The deadline for THIS call, which depends on whether the model that will
 	// answer reasons first. Derived from the caller's context, so a run whose
-	// own deadline is shorter still wins.
+	// own clock is shorter still wins.
 	ctx, cancel := context.WithTimeout(ctx, c.timeoutFor(req))
 	defer cancel()
 

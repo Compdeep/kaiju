@@ -24,7 +24,7 @@ import (
  *
  * The two endings it handles are not the same fault:
  *
- *   The deadline. Cancelling the call returns an error and NO
+ *   The clock. Our deadline cancels the call, which returns an error and NO
  *   reply — so the reasoning it had already produced is kept as it streams and
  *   handed to the retry, which is the only reason this call streams at all.
  *
@@ -59,7 +59,7 @@ func (a *Agent) heavyRound(ctx context.Context, graph *Graph, req *llm.ChatReque
 
 	resp, thought, err := a.completeHeavyStreaming(callCtx, req)
 
-	// Our own deadline, not the caller giving up. A run that was abandoned must
+	// Our own clock, not the caller giving up. A run that was abandoned must
 	// still be abandoned.
 	if err != nil && callCtx.Err() != nil && ctx.Err() == nil {
 		log.Printf("[dag] %s passed its %s deadline — re-asking with thinking off, carrying %d chars of reasoning",

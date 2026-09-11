@@ -51,7 +51,7 @@ const minRoundBudget = 120 * time.Second
 
 // effortBudget is how long a round may take at each effort.
 //
-// The ladder is ours and is enforced here, by a deadline. That is why it applies
+// The ladder is ours and is enforced here, by a clock. That is why it applies
 // to every model, unlike reasoning_effort, which only reaches the models the
 // catalog records as acting on it.
 //

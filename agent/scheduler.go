@@ -315,6 +315,19 @@ func preflightDecided(pf *PreflightResult) []string {
 	if len(pf.LackingContext) > 0 {
 		add("lacking context", strings.Join(pf.LackingContext, ", "))
 	}
+	// What the router judged about thinking, on the lane it applies to. A
+	// planned run reasons regardless, so a line saying so on every agent trace
+	// would be noise around the one place the answer varies.
+	if pf.Mode == "chat" {
+		switch pf.Thinking {
+		case llm.WantOn:
+			add("thinking", "yes")
+		case llm.WantOff:
+			add("thinking", "no")
+		default:
+			add("thinking", "not decided — the model's own default")
+		}
+	}
 	return out
 }
 
@@ -469,10 +482,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			// discarded here — so the same question answered conversationally
 			// got the earlier conversation looked up in the chat mode and not in
 			// this one. Same question, answered worse, depending on a setting.
-			mode, lacking := a.routeQuery(ctx, trigger.ID, query, trigger.History)
+			mode, lacking, want := a.routeQuery(ctx, trigger.ID, query, trigger.History)
 			switch mode {
 			case "chat":
-				pf = &PreflightResult{Mode: "chat", LackingContext: lacking}
+				// Whether this turn is worth thinking about travels with the
+				// answer that it is a conversation. A planned run reasons
+				// regardless, so the agent branch has no use for it.
+				pf = &PreflightResult{Mode: "chat", LackingContext: lacking, Thinking: want}
 			default: // "agent"
 				pf = a.classifyInvestigate(ctx, trigger.ID, query, trigger.History)
 			}

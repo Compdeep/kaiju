@@ -391,6 +391,10 @@ func routeSchema() llm.ToolDef {
 						"items": { "type": "string", "maxLength": 40 },
 						"maxItems": 4,
 						"description": "Up to four short words or phrases to look up in earlier messages, when answering needs something said earlier that is not in the summary or the messages shown. Use the words the conversation itself would have used — they are matched against the earlier text as written. Leave empty when what is shown is enough."
+					},
+					"think": {
+						"type": "boolean",
+						"description": "Whether answering this message is worth reasoning about before replying. False for a greeting, a thank-you, a restatement, or anything answerable in a sentence or two from what is already in front of you. True when it needs comparing, weighing, working through or drafting at length. Most conversation is false."
 					}
 				},
 				"required": ["mode"]
@@ -426,6 +430,10 @@ func recallSchema() llm.ToolDef {
 						"items": { "type": "string", "maxLength": 40 },
 						"maxItems": 4,
 						"description": "Up to four short words or phrases to look up in the earlier messages of this conversation. They are matched against the earlier text as written, one at a time. Empty when what is shown is enough, which is most of the time."
+					},
+					"think": {
+						"type": "boolean",
+						"description": "Whether answering this message is worth reasoning about before replying. False for a greeting, a thank-you, a restatement, or anything answerable in a sentence or two from what is already in front of you. True when it needs comparing, weighing, working through or drafting at length. Most conversation is false."
 					}
 				},
 				"required": ["lacking_context"]

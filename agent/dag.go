@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/toolapi"
 	"slices"
 	"sort"
@@ -798,6 +799,24 @@ func (g *Graph) BeginRound() {
 /*
  * Round reports the round a graph is currently adding nodes in.
  */
+/*
+ * PreflightThinking is whether the router judged this turn worth reasoning
+ * about, or WantAuto when it had no opinion or never ran.
+ * desc: Under the lock, like every other read of a field the scheduler writes.
+ * return: the judgement.
+ */
+func (g *Graph) PreflightThinking() llm.Want {
+	if g == nil {
+		return llm.WantAuto
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if g.Preflight == nil {
+		return llm.WantAuto
+	}
+	return g.Preflight.Thinking
+}
+
 func (g *Graph) Round() int {
 	g.mu.RLock()
 	defer g.mu.RUnlock()

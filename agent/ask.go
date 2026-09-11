@@ -218,7 +218,7 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 	// The picker also stops offering thinking models for these lanes. Two doors,
 	// because a config file reaches a lane without passing a picker — which is
 	// how a thinking model drove one deployment's executor for seven days.
-	req.Think = a.thinkingFor(ctx, l)
+	req.Think = a.thinkingFor(ctx, l, req.Think)
 
 	// Fix the cap here rather than leaving it to the send, so the number stated
 	// below is the number the provider stops at. capReply then finds nothing
@@ -267,9 +267,12 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
  *       the callers that never reach this function are also covered.
  * param: ctx - the run context, carrying this run's own choice.
  * param: l - the lane.
+ * param: stated - what the caller already decided, or nil. A conversational
+ *        turn's need for reasoning is a property of the message, so the stage
+ *        that read the message wins over anything configured.
  * return: what to ask for, or nil to ask nothing.
  */
-func (a *Agent) thinkingFor(ctx context.Context, l Lane) *llm.Reasoning {
+func (a *Agent) thinkingFor(ctx context.Context, l Lane, stated *llm.Reasoning) *llm.Reasoning {
 	// The two lanes that force a SMALL call get thinking turned off, whatever
 	// model is configured.
 	//
@@ -289,8 +292,14 @@ func (a *Agent) thinkingFor(ctx context.Context, l Lane) *llm.Reasoning {
 	// Heavy is the one lane an operator has a view on. Reasoning helps the
 	// planning and costs time, and which of those a deployment wants is not
 	// something the engine can know.
+	// What the caller stated, where it stated anything. A conversational turn's
+	// need for reasoning is a property of the message, and only the stage that
+	// read the message knows it.
 	want := llm.WantAuto
-	if l == Heavy {
+	if stated != nil {
+		want = stated.Want
+	}
+	if want == llm.WantAuto && l == Heavy {
 		switch a.llmReasoning {
 		case "on":
 			want = llm.WantOn
@@ -299,7 +308,13 @@ func (a *Agent) thinkingFor(ctx context.Context, l Lane) *llm.Reasoning {
 		}
 	}
 
-	effort := laneSelFrom(ctx).effort
+	effort := llm.EffortUnset
+	if stated != nil {
+		effort = stated.Effort
+	}
+	if effort == llm.EffortUnset {
+		effort = laneSelFrom(ctx).effort
+	}
 	if effort == llm.EffortUnset {
 		effort, _ = llm.ParseEffort(a.cfg.LLMReasoningEffort)
 	}

@@ -90,8 +90,17 @@ Asking how something is done is conversation. Asking for it to be done is not.
 When uncertain, choose "agent". The cost of sending a conversation to the graph is
 one extra call. The cost of sending an action to chat is that it never happens.
 
-Do not decide how much reasoning or which tools the task needs — that belongs to
-PREFLIGHT.
+Do not decide which tools the task needs, or how hard to think — the first
+belongs to PREFLIGHT and the second is the operator's setting. WHETHER this turn
+is worth thinking about at all is "think", below.
+
+Set "think" false when the message can be answered in a sentence or two from
+what is already in front of you: a greeting, a thank-you, an acknowledgement, a
+restatement, a simple factual question. Set it true when answering means
+comparing things, weighing a decision, working something through, or drafting at
+length. Most conversation is false, and false is the cheaper and faster answer —
+a model that reasons before a greeting costs the same wait as one reasoning
+before a comparison.
 
 Also fill "lacking_context" when answering the latest message needs something
 said EARLIER in this conversation that is not in the summary or the messages
@@ -120,6 +129,11 @@ front of the model that answers, so looking for them finds nothing.
 
 Leave the list empty when what you can see is enough, which is most of the time.
 An empty list is the ordinary answer and costs nothing.
+
+Also set "think": whether answering this turn is worth reasoning about before
+replying. False for a greeting, a thank-you, an acknowledgement or anything
+answerable in a sentence or two; true when it needs comparing, weighing, working
+through or drafting at length. Most conversation is false.
 
 === PREFLIGHT ===
 

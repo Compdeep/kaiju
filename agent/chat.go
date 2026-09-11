@@ -36,6 +36,14 @@ type ChatTurn struct {
 	// RecallTerms is what those messages were found by looking for, so the model
 	// is told what the search was and can judge a match that is not relevant.
 	RecallTerms []string
+
+	// Thinking is whether this turn is worth reasoning about before it is
+	// answered: WantOn, WantOff, or WantAuto for no opinion, which leaves the
+	// model's own default alone.
+	//
+	// A caller that has decided keeps its answer; Chat asks for one when it has
+	// none. See PreflightResult.Thinking.
+	Thinking llm.Want
 }
 
 // ChatResult is the outcome of a chat turn.
@@ -82,8 +90,15 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	//
 	// This is the only way to reach back on this lane: there are no tools here,
 	// so "what did we say about X earlier" is answerable only by looking.
-	lacking := a.recallTerms(ctx, t.TriggerID, t.Query, t.History)
+	lacking, want := a.recallTerms(ctx, t.TriggerID, t.Query, t.History)
 	t.Recalled, t.RecallTerms = a.recall(ctx, t, lacking), lacking
+	// Whether this turn needs reasoning, asked in the same call as the words to
+	// look up. A turn an operator sent straight to chat never reaches the
+	// router, and would otherwise be the one kind of turn nothing decided this
+	// for. A caller that already decided keeps its answer.
+	if t.Thinking == llm.WantAuto {
+		t.Thinking = want
+	}
 	return a.Converse(ctx, t)
 }
 
@@ -135,6 +150,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		Reply:       replyDecisionBudget,
 		Temperature: 0.7,
 		Model:       t.Model,
+		Think:       t.Thinking,
 		Recalled:    recallBlock(t.Recalled, t.RecallTerms),
 		SessionID:   t.SessionID,
 	})

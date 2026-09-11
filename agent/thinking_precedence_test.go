@@ -23,7 +23,7 @@ func TestTheSmallCallLanesRefuseThinkingWhateverIsSet(t *testing.T) {
 	for _, l := range []Lane{Light, Route} {
 		for _, reasoning := range []string{"", "on", "off"} {
 			a := effortAgent("max", reasoning)
-			got := a.thinkingFor(context.Background(), l)
+			got := a.thinkingFor(context.Background(), l, nil)
 			if got == nil || !got.Off() {
 				t.Errorf("%s lane with reasoning %q asked for %+v, want thinking off", l, reasoning, got)
 			}
@@ -37,7 +37,7 @@ func TestTheOperatorsSwitchReachesTheReasoningLane(t *testing.T) {
 		setting string
 		want    llm.Want
 	}{{"on", llm.WantOn}, {"off", llm.WantOff}} {
-		got := effortAgent("", c.setting).thinkingFor(context.Background(), Heavy)
+		got := effortAgent("", c.setting).thinkingFor(context.Background(), Heavy, nil)
 		if got == nil || got.Want != c.want {
 			t.Errorf("reasoning %q gave %+v, want %v", c.setting, got, c.want)
 		}
@@ -48,7 +48,7 @@ func TestTheOperatorsSwitchReachesTheReasoningLane(t *testing.T) {
 // default alone, which a stage with no opinion must not be able to change.
 func TestNothingSetAsksNothing(t *testing.T) {
 	for _, l := range []Lane{Heavy, Answer} {
-		if got := effortAgent("", "").thinkingFor(context.Background(), l); got != nil {
+		if got := effortAgent("", "").thinkingFor(context.Background(), l, nil); got != nil {
 			t.Errorf("%s lane asked for %+v with nothing configured, want nothing said", l, got)
 		}
 	}
@@ -59,7 +59,7 @@ func TestTheRunsEffortWins(t *testing.T) {
 	a := effortAgent("low", "")
 	ctx := withLaneSelection(context.Background(), laneSelection{effort: llm.EffortHigh})
 	for _, l := range []Lane{Heavy, Answer} {
-		got := a.thinkingFor(ctx, l)
+		got := a.thinkingFor(ctx, l, nil)
 		if got == nil || got.Effort != llm.EffortHigh {
 			t.Errorf("%s lane used %+v, want the run's high over the node's low", l, got)
 		}
@@ -68,7 +68,7 @@ func TestTheRunsEffortWins(t *testing.T) {
 
 // And the node's applies when the run says nothing.
 func TestTheNodesEffortAppliesWhenTheRunSaysNothing(t *testing.T) {
-	got := effortAgent("xhigh", "").thinkingFor(context.Background(), Answer)
+	got := effortAgent("xhigh", "").thinkingFor(context.Background(), Answer, nil)
 	if got == nil || got.Effort != llm.EffortXHigh {
 		t.Errorf("got %+v, want the node's xhigh", got)
 	}
@@ -81,7 +81,7 @@ func TestTheNodesEffortAppliesWhenTheRunSaysNothing(t *testing.T) {
 
 // A mistyped setting leaves the model alone rather than refusing the run.
 func TestAnUnrecognisedEffortIsIgnored(t *testing.T) {
-	if got := effortAgent("enthusiastic", "").thinkingFor(context.Background(), Answer); got != nil {
+	if got := effortAgent("enthusiastic", "").thinkingFor(context.Background(), Answer, nil); got != nil {
 		t.Errorf("got %+v, want nothing said for a word nobody can send", got)
 	}
 }

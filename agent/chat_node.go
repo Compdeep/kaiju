@@ -65,6 +65,7 @@ func (a *Agent) runChatNode(ctx context.Context, trigger Trigger, graph *Graph, 
 		Messages:    BuildMessagesWithHistory(prompt, query, trigger.History),
 		Reply:       replyDecisionBudget,
 		Temperature: a.cfg.Temperature,
+		Think:       graph.PreflightThinking(),
 		Recalled:    recalled,
 		Graph:       graph,
 	})

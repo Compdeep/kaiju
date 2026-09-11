@@ -56,6 +56,11 @@ type proseTurn struct {
 	// the lane's own resolution alone.
 	Model string
 
+	// Think is whether this turn is worth reasoning about, as the router judged
+	// it one call earlier. WantAuto says nothing, which leaves the model's own
+	// default alone.
+	Think llm.Want
+
 	// Recalled is what was found in earlier messages for this turn, rendered.
 	// Empty for a stage with nothing to reach back to.
 	//
@@ -83,12 +88,20 @@ type proseTurn struct {
  *         by the time it reaches here has already been asked again once.
  */
 func (a *Agent) writeProse(ctx context.Context, t proseTurn) (*llm.ChatResponse, error) {
-	resp, err := a.askStreamResp(ctx, t.Lane, &llm.ChatRequest{
+	req := &llm.ChatRequest{
 		Model:       t.Model,
 		Messages:    withRecall(t.Messages, t.Recalled),
 		Temperature: t.Temperature,
 		MaxTokens:   a.replyBudget(ctx, t.Lane, t.Reply),
-	}, a.streamTo(t.Graph, t.SessionID))
+	}
+	// What this turn was judged to need. Stated here rather than left to the
+	// lane, because it is the one thing about this call the lane cannot know:
+	// whether a conversational turn needs reasoning is a property of the
+	// message, and the router read it one call ago.
+	if t.Think != llm.WantAuto {
+		req.Think = &llm.Reasoning{Want: t.Think}
+	}
+	resp, err := a.askStreamResp(ctx, t.Lane, req, a.streamTo(t.Graph, t.SessionID))
 	if err != nil {
 		return resp, err
 	}

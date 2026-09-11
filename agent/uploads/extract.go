@@ -283,17 +283,14 @@ func (p *Processor) summarise(ctx context.Context, srcAbs, dstAbs string) error 
 		"3. One sentence on what an agent would typically do with this file.\n\n" +
 		"Output as plain markdown. No preamble, no apologies. The user's own program will read your output verbatim."
 
-	// Thinking off. This asks for about ten bullet points inside 1,024 tokens,
-	// and a model that reasons first spends them on the reasoning — the same
-	// fault the agent's small-call lanes switch it off for.
-	req := llm.WithoutReasoning(&llm.ChatRequest{
+	req := &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: prompt},
 			{Role: "user", Content: body},
 		},
 		Temperature: 0.2,
 		MaxTokens:   1024,
-	})
+	}
 	resp, err := p.executor.Complete(ctx, req)
 	if err != nil {
 		return err

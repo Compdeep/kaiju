@@ -68,18 +68,14 @@ func (m *Manager) Compact(ctx context.Context, sessionID string) (string, error)
 	}
 
 	// LLM call to summarize
-	// Thinking off: a summary of old turns inside 1,024 tokens is a small call,
-	// and a model that reasons first returns nothing. A conversation whose
-	// compaction silently produced no summary loses the turns it was meant to
-	// keep.
-	resp, err := m.llm.Complete(ctx, llm.WithoutReasoning(&llm.ChatRequest{
+	resp, err := m.llm.Complete(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: compactPrompt},
 			{Role: "user", Content: formatted.String()},
 		},
 		Temperature: 0.3,
 		MaxTokens:   1024,
-	}))
+	})
 	if err != nil {
 		return "", fmt.Errorf("memory: compact LLM call: %w", err)
 	}

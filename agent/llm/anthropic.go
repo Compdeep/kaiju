@@ -52,6 +52,22 @@ const anthropicThinkingBudget = 1024
  * param: maxTokens - the reply cap this request will carry.
  * return: the thinking value, or nil when there is no room for one.
  */
+/*
+ * anthropicThinkingAt builds the enabled value for a budget somebody chose.
+ * desc: Anthropic refuses a budget below its floor and refuses one that is not
+ *       under max_tokens, so a number that cannot be honoured falls back to the
+ *       proportional rule rather than to a rejected request.
+ * param: budget - the thinking budget asked for.
+ * param: maxTokens - the reply cap this request will carry.
+ * return: the thinking value, or nil when there is no room for one.
+ */
+func anthropicThinkingAt(budget, maxTokens int) *anthropicThinking {
+	if budget < anthropicThinkingBudget || budget >= maxTokens {
+		return anthropicThinkingOn(maxTokens)
+	}
+	return &anthropicThinking{Type: "enabled", BudgetTokens: budget}
+}
+
 func anthropicThinkingOn(maxTokens int) *anthropicThinking {
 	budget := maxTokens / 2
 	if budget < anthropicThinkingBudget {
@@ -153,13 +169,20 @@ func buildAnthropicRequest(model string, req *ChatRequest) *anthropicRequest {
 	if req.Model != "" {
 		aReq.Model = req.Model
 	}
-	// Same instruction, different spelling. A caller sets Reasoning and does not
+	// Same instruction, different spelling. A caller sets Think and does not
 	// learn which provider it reached.
-	if req.Reasoning != nil {
-		if req.Reasoning.Enabled {
-			aReq.Thinking = anthropicThinkingOn(aReq.MaxTokens)
-		} else {
+	//
+	// Only where the resolved call says whether to think. Anthropic's thinking
+	// is opt-in, so sending an enabled block to carry a budget would switch on
+	// reasoning that nobody asked for — the opposite of "say nothing".
+	if req.Reasoning != nil && req.Reasoning.Enabled != nil {
+		switch {
+		case !*req.Reasoning.Enabled:
 			aReq.Thinking = anthropicThinkingOff
+		case req.Reasoning.MaxTokens > 0:
+			aReq.Thinking = anthropicThinkingAt(req.Reasoning.MaxTokens, aReq.MaxTokens)
+		default:
+			aReq.Thinking = anthropicThinkingOn(aReq.MaxTokens)
 		}
 	}
 

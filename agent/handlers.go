@@ -75,7 +75,7 @@ func (a *Agent) applyHandlers(cfg Config) {
  */
 func (a *Agent) applyModels(cfg Config) {
 	if cfg.LLMEndpoint != "" || cfg.LLMAPIKey != "" || cfg.LLMModel != "" {
-		a.llm = llm.NewClientWithProvider(cfg.LLMProvider, cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits).Transport(cfg.LLMTransport)
+		a.llm = llm.NewClientWithProvider(cfg.LLMProvider, cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits).Catalog(cfg.Catalog).Transport(cfg.LLMTransport)
 	}
 
 	if cfg.ExecutorEndpoint != "" || cfg.ExecutorAPIKey != "" || cfg.ExecutorModel != "" {
@@ -83,7 +83,7 @@ func (a *Agent) applyModels(cfg Config) {
 		apiKey := firstNonEmpty(cfg.ExecutorAPIKey, cfg.LLMAPIKey)
 		model := firstNonEmpty(cfg.ExecutorModel, cfg.LLMModel)
 		provider := firstNonEmpty(cfg.ExecutorProvider, cfg.LLMProvider)
-		a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(cfg.Limits).Transport(cfg.LLMTransport)
+		a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(cfg.Limits).Catalog(cfg.Catalog).Transport(cfg.LLMTransport)
 	}
 
 	if cfg.LLMReasoning != "" {

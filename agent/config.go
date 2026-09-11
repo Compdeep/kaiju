@@ -121,6 +121,15 @@ type ModelConfig struct {
 	// think, which is the safe answer rather than the generous one.
 	Thinks ModelThinks
 
+	// Catalog is everything about a model in one lookup — its limits, and what
+	// it does with an instruction to think. It supersedes Limits and Thinks,
+	// which are read only when it is nil.
+	//
+	// Nil, or a model it does not carry, leaves every call exactly as its caller
+	// wrote it, so an application that supplies nothing is unaffected by any of
+	// what reads this.
+	Catalog ModelCatalog
+
 	// PromptScale narrows every cap that carries content into a prompt, from 0
 	// to 1. Unset — or any value outside that range — means 1, which is the
 	// caps exactly as budgets.go states them, so a deployment that says nothing
@@ -160,6 +169,10 @@ type ModelLimits = llm.ModelLimits
 
 // ModelThinks reports whether a model reasons before it answers.
 type ModelThinks = llm.ModelThinks
+
+// ModelCatalog answers for one model: its limits and what it does with a
+// reasoning instruction.
+type ModelCatalog = llm.Catalog
 
 // PathConfig is where the agent reads and writes.
 type PathConfig struct {

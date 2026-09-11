@@ -16,12 +16,12 @@ func TestTheSmallForcedCallLanesTurnReasoningOff(t *testing.T) {
 		a := &Agent{llm: llm.NewClient("http://127.0.0.1:1", "", "m"),
 			executor: llm.NewClient("http://127.0.0.1:1", "", "m")}
 		a.prepare(t.Context(), l, req)
-		if req.Reasoning == nil {
+		if req.Think == nil {
 			t.Errorf("%s lane left reasoning at the provider's default, which is ON", l)
 			continue
 		}
-		if req.Reasoning.Enabled {
-			t.Errorf("%s lane asked for reasoning ON", l)
+		if !req.Think.Off() {
+			t.Errorf("%s lane asked for reasoning %v, want it switched off", l, req.Think.Want)
 		}
 	}
 }
@@ -35,7 +35,7 @@ func TestTheReasoningAndAnswerLanesAreLeftAlone(t *testing.T) {
 		req := &llm.ChatRequest{}
 		a := &Agent{llm: llm.NewClient("http://127.0.0.1:1", "", "m")}
 		a.prepare(t.Context(), l, req)
-		if req.Reasoning != nil {
+		if req.Think != nil {
 			t.Errorf("%s lane overrode the operator's model choice", l)
 		}
 	}

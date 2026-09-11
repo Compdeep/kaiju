@@ -363,6 +363,9 @@ func createAgent(cfg *config.Config) *agent.Agent {
 			// limits rather than carrying a copy of them.
 			Limits: configapi.ModelLimits,
 			Thinks: configapi.ModelThinks,
+			// One lookup for everything about a model, including what it does
+			// with an instruction to think. Supersedes the two above.
+			Catalog: configapi.Facts,
 		},
 		PathConfig: agent.PathConfig{
 			DataDir:     cfg.Agent.DataDir,

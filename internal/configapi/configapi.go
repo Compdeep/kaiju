@@ -16,6 +16,7 @@ import (
 	"os"
 
 	"github.com/Compdeep/kaiju/agent"
+	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/internal/config"
 	"github.com/Compdeep/kaiju/models"
 )
@@ -432,6 +433,46 @@ func ModelLimits(id string) (contextTokens, maxOutputTokens int) {
 func ModelThinks(id string) bool {
 	m, ok := models.Find(id)
 	return ok && m.Thinks()
+}
+
+/*
+ * Facts is everything this catalog knows about one model, for a client.
+ * desc: The single lookup llm.Client.Catalog takes. It supersedes ModelLimits
+ *       and ModelThinks, which remain for callers already wired to them — every
+ *       question here is answered from the same entry, so a seam per question
+ *       would be five lookups over one file.
+ *
+ *       A model the catalog does not carry answers false, which is the ordinary
+ *       case for a self-hosted endpoint and leaves every call exactly as its
+ *       caller wrote it.
+ * param: id - the model as configured for a lane.
+ * return: the facts, and whether this catalog carries the model at all.
+ */
+func Facts(id string) (llm.ModelFacts, bool) {
+	m, ok := models.Find(id)
+	if !ok {
+		return llm.ModelFacts{}, false
+	}
+	// Only the words this engine has a meaning for. A catalog entry naming an
+	// effort nobody here can send is dropped rather than passed on, so the
+	// vocabulary cannot drift apart from the one the picker offers.
+	var efforts []llm.Effort
+	for _, w := range m.ReasoningEfforts {
+		if e, known := llm.ParseEffort(w); known {
+			efforts = append(efforts, e)
+		}
+	}
+	return llm.ModelFacts{
+		ContextTokens:   m.ContextTokens,
+		MaxOutputTokens: m.MaxOutputTokens,
+		Thinking: llm.Thinking{
+			Default:  m.Thinks(),
+			Optional: m.ReasoningOptional,
+			Efforts:  efforts,
+			Budget:   m.ReasoningBudget,
+			Pace:     m.DeadlineMultiple(),
+		},
+	}, true
 }
 
 /*

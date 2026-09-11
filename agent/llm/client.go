@@ -153,6 +153,12 @@ type ChatRequest struct {
 	// 96-token routing decision, so there is nothing to configure.
 	Reasoning *ReasoningControl `json:"reasoning,omitempty"`
 
+	// Think is what the CALLER wants of the model's thinking, in terms that do
+	// not depend on the provider. Not sent: the field above is what goes out,
+	// resolved from this against what the catalog says the model does — see
+	// resolve.go. Nil asks for nothing.
+	Think *Reasoning `json:"-"`
+
 	// Provider steers OpenRouter away from hosts that answer badly, and is
 	// ignored by every other upstream. Set by Complete from the lists in
 	// models/openrouter; nil on every other provider, and nil there too when
@@ -176,19 +182,21 @@ type ProviderRouting struct {
 	Ignore []string `json:"ignore,omitempty"`
 }
 
-// ReasoningControl is the OpenAI-compatible reasoning parameter. Only the off
-// switch is modelled: the lanes that set it want thinking gone, and the lanes
-// that want it leave the field nil and take the provider's default.
+// ReasoningControl is the OpenAI-compatible reasoning parameter as it goes on
+// the wire. Set by the client from ChatRequest.Think, never by a caller: what
+// travels depends on what the catalog says this model acts on, and a caller
+// does not know that.
 type ReasoningControl struct {
-	Enabled bool `json:"enabled"`
+	// Enabled is omitted when this request says nothing about WHETHER to think
+	// and only bounds it. A bare bool cannot express that: it would emit
+	// "enabled": false and switch off the thinking it was sent to bound.
+	Enabled *bool `json:"enabled,omitempty"`
+	// Effort is the provider's word, sent only where the model was measured to
+	// act on it.
+	Effort string `json:"effort,omitempty"`
+	// MaxTokens bounds the thinking, sent only where the model honours one.
+	MaxTokens int `json:"max_tokens,omitempty"`
 }
-
-// The two values callers use. Shared pointers because nothing mutates them and
-// a fresh allocation per request would say otherwise.
-var (
-	reasoningOff = &ReasoningControl{Enabled: false}
-	reasoningOn  = &ReasoningControl{Enabled: true}
-)
 
 /*
  * WithoutReasoning turns the model's thinking off for this request.
@@ -200,7 +208,7 @@ var (
  */
 func WithoutReasoning(req *ChatRequest) *ChatRequest {
 	if req != nil {
-		req.Reasoning = reasoningOff
+		req.Think = &Reasoning{Want: WantOff}
 	}
 	return req
 }
@@ -219,7 +227,7 @@ func WithoutReasoning(req *ChatRequest) *ChatRequest {
  */
 func WithReasoning(req *ChatRequest) *ChatRequest {
 	if req != nil {
-		req.Reasoning = reasoningOn
+		req.Think = &Reasoning{Want: WantOn}
 	}
 	return req
 }
@@ -381,23 +389,28 @@ func (c *Client) timeoutFor(req *ChatRequest) time.Duration {
 	if c == nil || req == nil {
 		return requestTimeout
 	}
-	if req.Reasoning != nil {
-		if req.Reasoning.Enabled {
-			return thinkingRequestTimeout
-		}
-		return requestTimeout
-	}
-	if c.thinks == nil {
-		return requestTimeout
-	}
 	model := req.Model
 	if model == "" {
 		model = c.model
 	}
-	if model != "" && c.thinks(model) {
-		return thinkingRequestTimeout
+	f, known := c.facts(model)
+
+	// Whether the reply will carry reasoning: the instruction being sent where
+	// there is one, the model's own default otherwise.
+	thinking := known && f.Thinking.Default
+	if req.Reasoning != nil && req.Reasoning.Enabled != nil {
+		thinking = *req.Reasoning.Enabled
 	}
-	return requestTimeout
+	base := requestTimeout
+	if thinking {
+		base = thinkingRequestTimeout
+	}
+
+	wait := paceOf(f)
+	if wait <= 1 {
+		return base
+	}
+	return time.Duration(float64(base) * wait)
 }
 
 /*
@@ -511,8 +524,13 @@ func NewClientWithProvider(provider, endpoint, apiKey, model string) *Client {
 		// The ceiling, not the deadline. Each request sets its own with a
 		// context — see timeoutFor — and this stops a connection outliving the
 		// longest of them if that context is ever missing.
+		//
+		// It has to sit at or above the longest deadline timeoutFor can produce,
+		// which is the strongest effort on the slowest model. A ceiling below
+		// that would cut off a wait this package deliberately allowed, and the
+		// error would name the transport rather than the clock that ran out.
 		http: &http.Client{
-			Timeout: thinkingRequestTimeout,
+			Timeout: maxWait * thinkingRequestTimeout,
 		},
 	}
 }
@@ -600,6 +618,9 @@ func (c *Client) Complete(ctx context.Context, req *ChatRequest) (*ChatResponse,
 	}
 	c.capReply(req)
 	c.routeProviders(req)
+	// Before the schema conversion below, which removes the Tools and
+	// ToolChoice that say this request forces one shape.
+	c.applyReasoning(req)
 
 	// A stage asking for one shape gets the wire that enforces it, and gets its
 	// reply back in the shape it asked for. Nothing above this knows — see
@@ -747,6 +768,9 @@ func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk f
 // turns identically.
 func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (*ChatResponse, error) {
 	c.capReply(req)
+	// The same settlement Complete makes. Without it a streamed call is the one
+	// kind whose thinking nobody decided.
+	c.applyReasoning(req)
 	resp, err := c.completeStreamResp(ctx, req, onChunk)
 	// One emit covering every return path in the implementation below,
 	// including the early transport and HTTP failures.

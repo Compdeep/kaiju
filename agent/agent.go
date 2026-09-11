@@ -423,7 +423,7 @@ func New(cfg Config) (*Agent, error) {
 		log.Fatalf("[agent] prompt load failed: %v", err)
 	}
 
-	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits).Thinks(cfg.Thinks).Transport(cfg.LLMTransport)
+	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits).Thinks(cfg.Thinks).Catalog(cfg.Catalog).Transport(cfg.LLMTransport)
 
 	reg := toolapi.NewRegistry()
 
@@ -475,7 +475,7 @@ func New(cfg Config) (*Agent, error) {
 		if wire == "" {
 			wire = name
 		}
-		providerClients[name] = llm.NewClientWithProvider(wire, p.Endpoint, p.APIKey, "").Limits(cfg.Limits).Thinks(cfg.Thinks).Transport(cfg.LLMTransport)
+		providerClients[name] = llm.NewClientWithProvider(wire, p.Endpoint, p.APIKey, "").Limits(cfg.Limits).Thinks(cfg.Thinks).Catalog(cfg.Catalog).Transport(cfg.LLMTransport)
 	}
 	if len(providerClients) > 0 {
 		names := make([]string, 0, len(providerClients))
@@ -1488,7 +1488,7 @@ func (a *Agent) GateInfo() (rateLimit, maxTurns, clearance int, lockdown bool) {
  * already going.
  */
 func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
-	a.llm = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits).Thinks(a.cfg.Thinks).Transport(a.cfg.LLMTransport)
+	a.llm = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits).Thinks(a.cfg.Thinks).Catalog(a.cfg.Catalog).Transport(a.cfg.LLMTransport)
 	a.cfg.LLMEndpoint = endpoint
 	a.cfg.LLMAPIKey = apiKey
 	a.cfg.LLMModel = model
@@ -1506,7 +1506,7 @@ func (a *Agent) SetLLMClient(provider, endpoint, apiKey, model string) {
  * this client on every call, and dispatcher.go hands it to compute steps.
  */
 func (a *Agent) SetExecutorClient(provider, endpoint, apiKey, model string) {
-	a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits).Thinks(a.cfg.Thinks).Transport(a.cfg.LLMTransport)
+	a.executor = llm.NewClientWithProvider(provider, endpoint, apiKey, model).Limits(a.cfg.Limits).Thinks(a.cfg.Thinks).Catalog(a.cfg.Catalog).Transport(a.cfg.LLMTransport)
 }
 
 /*

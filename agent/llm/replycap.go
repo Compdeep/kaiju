@@ -98,6 +98,22 @@ func promptTokens(messages []Message) int {
 	chars := 0
 	for _, m := range messages {
 		chars += len(m.Content)
+		// A tool call's arguments are prompt. They are the LARGEST part of an
+		// aggregator's, and they were invisible here: every step's parameters
+		// travel on an assistant message whose Content is empty and whose
+		// ToolCalls carry the JSON, so a prompt of 400,000 characters estimated
+		// at five tokens. capReply then found room for a reply there was no room
+		// for, and the provider answered HTTP 400 with the run's whole context
+		// in it rather than a short answer.
+		for _, tc := range m.ToolCalls {
+			chars += len(tc.Function.Name) + len(tc.Function.Arguments)
+		}
+		// A multimodal message carries its text in Parts instead. An image is
+		// not counted: what it costs is the provider's own arithmetic and not a
+		// length this can read.
+		for _, p := range m.Parts {
+			chars += len(p.Text)
+		}
 	}
 	return chars / 4
 }

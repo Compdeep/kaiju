@@ -847,7 +847,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	var result string
 	var body NodeBody
 	var err error
-	isContextual := false
+	uncapped := false
 
 	// Build the run state once, before choosing a path, and put it on the ctx.
 	// It used to be built inside the contextual branch only, which meant a tool
@@ -891,9 +891,9 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		if msg, err = tx.ExecuteTyped(ctx, params); err == nil {
 			body = toolMessageBody{msg: msg}
 			result = msg.JSON()
-			// Exempt from the dispatch cap. Every typed tool reaches this, not
-			// only the one it was written for — see maxToolResultLen.
-			isContextual = true
+			// Exempt from the dispatch cap — the compute envelope only. See the
+			// cap below for why it is not every typed tool.
+			uncapped = toolName == computeToolName
 		}
 	} else {
 		result, err = tool.Execute(ctx, params)
@@ -944,17 +944,24 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// The second of the five caps — see maxToolResultLen for the other four
 	// and the order they apply in.
 	//
-	// isContextual is set by the typed branch above, so this skips every tool
-	// implementing TypedExecutor, not only compute. It was written for compute,
-	// whose envelope the scheduler unmarshals for graft instructions and which
-	// truncation would corrupt; it now exempts every typed tool, and the next
-	// thing to cut such a result is TruncateEvidence at synthesis.
+	// Compute is exempt, and only compute. The scheduler unmarshals its envelope
+	// for graft instructions (scheduler.go, computePayload) and shrinking a field
+	// inside one would corrupt an instruction rather than shorten a result.
 	//
-	// truncateToolResult keeps JSON envelopes valid by shrinking the longest
-	// string field inside rather than byte-splicing. Byte-splicing a web_fetch
-	// envelope used to corrupt it, so a downstream ${node.X.field} could not
-	// parse what it referenced.
-	if cap := a.budget(toolResultBudget); !isContextual && len(result) > cap {
+	// It used to exempt every tool implementing TypedExecutor, which is very
+	// nearly all of them — so this cap governed a handful of string-only tools
+	// and nothing else. The tools most able to return something enormous are
+	// exactly the typed ones that fetch: one web_fetch returned 434,493
+	// characters, which was wired into a compute step's prompt and then into
+	// every stage downstream of it. Five model calls failed in a row on the same
+	// context-length error, each paying for a round trip to discover it, and only
+	// the last reached the reader.
+	//
+	// truncateToolResult is what makes this safe for the rest: it parses the
+	// envelope and head+tails the longest STRING field, so every key survives and
+	// a downstream ${node.X.field} still resolves. It was written for exactly
+	// this and the exemption was never narrowed to match.
+	if cap := a.budget(toolResultBudget); !uncapped && len(result) > cap {
 		before := len(result)
 		result = truncateToolResult(result, cap, Text.HeadTail)
 		graph.recordCut("tool result", before, len(result))

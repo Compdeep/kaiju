@@ -329,21 +329,27 @@ func errorsIs(err, target error) bool {
 // number governed the other with nothing saying so. These hold the two facts a
 // reader needs: where it applies, and where it does not.
 
-func TestTheDispatchCapSkipsATypedResult(t *testing.T) {
+func TestTheDispatchCapAppliesToEveryToolButCompute(t *testing.T) {
 	big := `{"type":"text","status":"ok","content":"` + strings.Repeat("x", toolResultBudget.Base*2) + `"}`
 
-	// The typed branch marks a result contextual, and the cap is skipped.
 	if got := truncateToolResult(big, toolResultBudget.Base, Text.HeadTail); len(got) >= len(big) {
 		t.Fatalf("truncateToolResult returned %d bytes for %d in — the test's premise is wrong", len(got), len(big))
 	}
 
-	// And what the dispatcher does with it is the condition, not the function:
-	// a contextual result never reaches truncateToolResult at all. That is read
+	// What the dispatcher does with it is the condition, not the function. Read
 	// from the source, because the branch is inside fireNode's tail.
+	//
+	// It used to read !isContextual, which the typed branch set for every tool
+	// implementing TypedExecutor — very nearly all of them. So a cap on one
+	// step's result governed the handful of string-only tools and exempted the
+	// ones that fetch, which are the ones that return something enormous.
 	body := funcBody(t, readSource(t, "dispatcher.go"), "executeToolNode")
-	if !strings.Contains(body, "!isContextual && len(result) > cap") {
-		t.Error("the dispatch cap no longer skips contextual results, or the condition moved — " +
-			"the comment at maxToolResultLen describes this line and would now be wrong")
+	if !strings.Contains(body, "!uncapped && len(result) > cap") {
+		t.Error("the dispatch cap's condition moved — the comment beside it and at " +
+			"maxToolResultLen describe this line and would now be wrong")
+	}
+	if strings.Contains(body, "isContextual") {
+		t.Error("the exemption is keyed on typedness again, which is nearly every tool")
 	}
 }
 

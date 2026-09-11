@@ -40,9 +40,11 @@ const chatNodeTag = "chat"
  * param: graph - the run's graph; the node is added to it.
  * param: query - the user's message.
  * param: prompt - the assembled system prompt.
+ * param: recalled - what earlier messages this turn refers to, rendered; placed
+ *        by writeProse and empty when there was nothing to reach back to.
  * return: the reply, the node's id, and any error from the model call.
  */
-func (a *Agent) runChatNode(ctx context.Context, trigger Trigger, graph *Graph, query, prompt string) (string, string, error) {
+func (a *Agent) runChatNode(ctx context.Context, trigger Trigger, graph *Graph, query, prompt, recalled string) (string, string, error) {
 	node := &Node{Type: NodeChat, Tag: chatNodeTag}
 	id := graph.AddNode(node)
 
@@ -63,6 +65,7 @@ func (a *Agent) runChatNode(ctx context.Context, trigger Trigger, graph *Graph, 
 		Messages:    BuildMessagesWithHistory(prompt, query, trigger.History),
 		Reply:       replyDecisionBudget,
 		Temperature: a.cfg.Temperature,
+		Recalled:    recalled,
 		Graph:       graph,
 	})
 	if err != nil {

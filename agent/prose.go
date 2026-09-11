@@ -56,6 +56,16 @@ type proseTurn struct {
 	// the lane's own resolution alone.
 	Model string
 
+	// Recalled is what was found in earlier messages for this turn, rendered.
+	// Empty for a stage with nothing to reach back to.
+	//
+	// Placed by writeProse rather than by the caller, because WHERE it goes is
+	// the part that was got wrong: one lane inserted it immediately before the
+	// message it was recalled for, the other glued it to the end of the system
+	// prompt — where it reads as something said at the start of the
+	// conversation and long since moved past.
+	Recalled string
+
 	// Graph and SessionID say where the streamed chunks go. A graph-less lane
 	// carries a session id instead; broadcastDAGEvent takes either.
 	Graph     *Graph
@@ -75,7 +85,7 @@ type proseTurn struct {
 func (a *Agent) writeProse(ctx context.Context, t proseTurn) (*llm.ChatResponse, error) {
 	resp, err := a.askStreamResp(ctx, t.Lane, &llm.ChatRequest{
 		Model:       t.Model,
-		Messages:    t.Messages,
+		Messages:    withRecall(t.Messages, t.Recalled),
 		Temperature: t.Temperature,
 		MaxTokens:   a.replyBudget(ctx, t.Lane, t.Reply),
 	}, a.streamTo(t.Graph, t.SessionID))

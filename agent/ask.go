@@ -228,12 +228,24 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 		stateBudget(req, cap)
 	}
 
-	// Images ride the context so they re-attach on every heavy call this turn,
-	// staying visible across follow-ups. Heavy only, as before: the model check
-	// would make this safe on any lane, but widening it is a behaviour change
-	// and belongs with the stage that moves the remaining callers here.
-	if l == Heavy {
-		if imgs := visionImagesFrom(ctx); len(imgs) > 0 && IsVisionModel(req.Model) {
+	// Images ride the context so they re-attach on every call this turn that
+	// might use them, staying visible across follow-ups.
+	//
+	// Heavy AND Answer. Heavy alone was the cautious reading taken while the
+	// answering lanes each built their own request, and the lane a
+	// conversational turn actually lands on is Answer — so on a deployment with
+	// no separate vision model configured, an attached image rode the context
+	// into the run and was never shown to anything.
+	//
+	// Not Light or Route. Those classify and judge, and an image is a large
+	// payload on a call that has no use for one.
+	//
+	// Asked of the model that will ANSWER, not of what the lane happened to
+	// stamp: a lane falling back to its configured client leaves req.Model
+	// empty, and IsVisionModel("") is false, so this could not fire at all on a
+	// deployment that does not pick models per request.
+	if l == Heavy || l == Answer {
+		if imgs := visionImagesFrom(ctx); len(imgs) > 0 && IsVisionModel(resolvedModel(req.Model, c)) {
 			llm.AttachImages(req.Messages, imgs)
 		}
 	}

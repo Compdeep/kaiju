@@ -2539,19 +2539,22 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 				// chat mode did. There are no tools on this path either: the run
 				// short-circuits before the planner, so looking is the only way
 				// back.
+				// Rendered here, where the router's terms are, and PLACED by
+				// writeProse — immediately before the message it was recalled
+				// for. Appending it to the system prompt put it at the top,
+				// which is the one position withRecall exists to avoid.
+				var recalled string
 				if graph != nil && graph.Preflight != nil {
 					if terms := graph.Preflight.LackingContext; len(terms) > 0 {
 						found := a.recall(answerCtx, ChatTurn{SessionID: trigger.SessionID, History: trigger.History}, terms)
-						if block := recallBlock(found, terms); block != "" {
-							chatPrompt += "\n\n" + block
-						}
+						recalled = recallBlock(found, terms)
 					}
 				}
 
 				// The answer, as a node. Same call as before; it now has a place
 				// on the graph, which is what gives an interjection somewhere to
 				// land and a trace something to show.
-				answer, chatID, llmErr := a.runChatNode(answerCtx, trigger, graph, query, chatPrompt)
+				answer, chatID, llmErr := a.runChatNode(answerCtx, trigger, graph, query, chatPrompt, recalled)
 				if llmErr == nil {
 					// A steer typed while that answer was being written. Recorded
 					// beside the chat node and handed to the aggregator, which

@@ -116,7 +116,6 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	} else {
 		messages = BuildMessagesWithHistory(system, t.Query, nil)
 	}
-	messages = withRecall(messages, recallBlock(t.Recalled, t.RecallTerms))
 	if len(t.Images) > 0 && IsVisionModel(t.Model) {
 		llm.AttachImages(messages, t.Images)
 	}
@@ -136,6 +135,7 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		Reply:       replyDecisionBudget,
 		Temperature: 0.7,
 		Model:       t.Model,
+		Recalled:    recallBlock(t.Recalled, t.RecallTerms),
 		SessionID:   t.SessionID,
 	})
 	if err != nil {

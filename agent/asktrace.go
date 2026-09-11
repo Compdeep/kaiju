@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -134,14 +135,25 @@ func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 		GateReturned: id.GateReturned,
 		LatencyMS:    time.Since(started).Milliseconds(),
 	}
+	// Every system message, in order, and the last user one.
+	//
+	// It kept only the LAST system message, which was the whole prompt while
+	// there was only ever one. A recalled block is a second — placed just before
+	// the message it was recalled for, which is where it reads correctly and
+	// also where it displaced the persona in every trace of a turn that reached
+	// back. An operator then saw the recall and not the prompt.
+	var system []string
 	for _, m := range req.Messages {
 		switch m.Role {
 		case "system":
-			tr.System = m.Content
+			if m.Content != "" {
+				system = append(system, m.Content)
+			}
 		case "user":
 			tr.User = m.Content
 		}
 	}
+	tr.System = strings.Join(system, "\n\n")
 	if err != nil {
 		tr.Err = err.Error()
 	}

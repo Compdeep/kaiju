@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"context"
-	"slices"
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -30,7 +28,7 @@ func TestApplyReasoningBudget_SendsAnEffortTheModelActsOn(t *testing.T) {
 		return []string{"low", "medium", "high"}, false
 	})
 	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(context.Background(), req, "deepseek/deepseek-v4-pro-0813")
+	a.applyReasoningBudget(req, "deepseek/deepseek-v4-pro-0813")
 
 	if req.Reasoning == nil || req.Reasoning.Effort != "low" {
 		t.Fatalf("the effort was not sent: %+v", req.Reasoning)
@@ -43,7 +41,7 @@ func TestApplyReasoningBudget_SendsAnEffortTheModelActsOn(t *testing.T) {
 func TestApplyReasoningBudget_WithholdsAnEffortTheModelIgnores(t *testing.T) {
 	a := reasoningAgent("low", 0, func(string) ([]string, bool) { return nil, false })
 	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(context.Background(), req, "qwen/qwen3.6-35b-a3b")
+	a.applyReasoningBudget(req, "qwen/qwen3.6-35b-a3b")
 
 	if req.Reasoning != nil {
 		t.Errorf("an effort was sent to a model that ignores it: %+v", req.Reasoning)
@@ -55,7 +53,7 @@ func TestApplyReasoningBudget_WithholdsAnEffortTheModelIgnores(t *testing.T) {
 func TestApplyReasoningBudget_WithholdsAnEffortOutsideTheMeasuredSet(t *testing.T) {
 	a := reasoningAgent("high", 0, func(string) ([]string, bool) { return []string{"low"}, false })
 	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(context.Background(), req, "m")
+	a.applyReasoningBudget(req, "m")
 	if req.Reasoning != nil {
 		t.Errorf("an unmeasured effort was sent: %+v", req.Reasoning)
 	}
@@ -65,14 +63,14 @@ func TestApplyReasoningBudget_WithholdsAnEffortOutsideTheMeasuredSet(t *testing.
 func TestApplyReasoningBudget_BudgetOnlyWhereItIsHonoured(t *testing.T) {
 	honoured := reasoningAgent("", 2048, func(string) ([]string, bool) { return nil, true })
 	req := &llm.ChatRequest{}
-	honoured.applyReasoningBudget(context.Background(), req, "anthropic/claude-sonnet-5")
+	honoured.applyReasoningBudget(req, "anthropic/claude-sonnet-5")
 	if req.Reasoning == nil || req.Reasoning.MaxTokens != 2048 {
 		t.Fatalf("the budget was not sent: %+v", req.Reasoning)
 	}
 
 	ignored := reasoningAgent("", 2048, func(string) ([]string, bool) { return nil, false })
 	req2 := &llm.ChatRequest{}
-	ignored.applyReasoningBudget(context.Background(), req2, "qwen/qwen3.6-35b-a3b")
+	ignored.applyReasoningBudget(req2, "qwen/qwen3.6-35b-a3b")
 	if req2.Reasoning != nil {
 		t.Errorf("a budget was sent to a model that overruns it: %+v", req2.Reasoning)
 	}
@@ -83,7 +81,7 @@ func TestApplyReasoningBudget_BudgetOnlyWhereItIsHonoured(t *testing.T) {
 func TestApplyReasoningBudget_SaysNothingWhenUnset(t *testing.T) {
 	a := reasoningAgent("", 0, func(string) ([]string, bool) { return []string{"low"}, true })
 	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(context.Background(), req, "m")
+	a.applyReasoningBudget(req, "m")
 	if req.Reasoning != nil {
 		t.Errorf("an unset deployment sent something: %+v", req.Reasoning)
 	}
@@ -93,7 +91,7 @@ func TestApplyReasoningBudget_SaysNothingWhenUnset(t *testing.T) {
 func TestApplyReasoningBudget_NoCatalogAsksNothing(t *testing.T) {
 	a := reasoningAgent("low", 2048, nil)
 	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(context.Background(), req, "m")
+	a.applyReasoningBudget(req, "m")
 	if req.Reasoning != nil {
 		t.Errorf("an unmeasured model was sent a setting: %+v", req.Reasoning)
 	}
@@ -104,7 +102,7 @@ func TestApplyReasoningBudget_NoCatalogAsksNothing(t *testing.T) {
 func TestApplyReasoningBudget_NeverTurnsThinkingOn(t *testing.T) {
 	a := reasoningAgent("low", 0, func(string) ([]string, bool) { return []string{"low"}, false })
 	req := llm.WithoutReasoning(&llm.ChatRequest{})
-	a.applyReasoningBudget(context.Background(), req, "m")
+	a.applyReasoningBudget(req, "m")
 	if req.Reasoning.On() {
 		t.Error("a request with thinking off had it turned on")
 	}
@@ -122,7 +120,7 @@ func TestSetReasoningEffort_ReachesTheNextRequest(t *testing.T) {
 	})
 
 	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(context.Background(), req, "m")
+	a.applyReasoningBudget(req, "m")
 	if req.Reasoning != nil {
 		t.Fatalf("something was asked before anything was set: %+v", req.Reasoning)
 	}
@@ -135,7 +133,7 @@ func TestSetReasoningEffort_ReachesTheNextRequest(t *testing.T) {
 	}
 
 	req2 := &llm.ChatRequest{}
-	a.applyReasoningBudget(context.Background(), req2, "m")
+	a.applyReasoningBudget(req2, "m")
 	if req2.Reasoning == nil {
 		t.Fatal("the change did not reach the next request")
 	}
@@ -157,7 +155,7 @@ func TestSetReasoningEffort_EmptyStopsAsking(t *testing.T) {
 		t.Fatal("empty was refused, but it is how the picker stops asking")
 	}
 	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(context.Background(), req, "m")
+	a.applyReasoningBudget(req, "m")
 	if req.Reasoning != nil {
 		t.Errorf("an effort was still asked for after being cleared: %+v", req.Reasoning)
 	}
@@ -176,106 +174,5 @@ func TestSetReasoning_RefusesWhatItCannotMean(t *testing.T) {
 	}
 	if !a.SetReasoningBudget(0) {
 		t.Error("zero was refused, but it is how a budget is cleared")
-	}
-}
-
-// The vocabulary is the providers', and no model takes all of it.
-//
-// It was low/medium/high, which is what a scale usually is and what the OpenAI
-// wire documents. Measuring the catalog found glm-5.2 takes "xhigh" and "high"
-// and neither "low" nor "medium", and gemini-3.5-flash-lite takes "minimal" —
-// so a three-value enum could not ask either model for anything it accepts.
-func TestReasoningEfforts_CarryTheWholeVocabulary(t *testing.T) {
-	for _, e := range []string{"minimal", "low", "medium", "high", "xhigh", "max"} {
-		if _, ok := ParseReasoningEffort(e); !ok {
-			t.Errorf("%q is refused, but it is a value some model in the catalog takes", e)
-		}
-	}
-	if _, ok := ParseReasoningEffort("none"); ok {
-		t.Error(`"none" was accepted; not thinking at all is SetReasoning's question, not this one`)
-	}
-	if _, ok := ParseReasoningEffort("hard"); ok {
-		t.Error(`"hard" was accepted, so the vocabulary is not closed`)
-	}
-	if got, want := ReasoningEfforts(), []string{"minimal", "low", "medium", "high", "xhigh", "max"}; !slices.Equal(got, want) {
-		t.Errorf("efforts = %v, want %v weakest first so a picker reads as a scale", got, want)
-	}
-	// A copy, so a caller building a picker cannot reorder the engine's own list.
-	ReasoningEfforts()[0] = "clobbered"
-	if ReasoningEfforts()[0] != "minimal" {
-		t.Error("the caller's slice shares the engine's array")
-	}
-}
-
-// A run's own effort beats the node's setting, and does not outlive the run.
-//
-// This is what the per-request field is for. makeen picks a model per chat for
-// one organisation among many on a shared node, so the effort has to be one
-// run's choice; a PATCH to the node's config would change it for every other
-// organisation on the same daemon.
-func TestReasoningEffort_TheRunsChoiceWinsAndDoesNotPersist(t *testing.T) {
-	a := reasoningAgent("low", 0, func(string) ([]string, bool) {
-		return []string{"low", "medium", "high"}, true
-	})
-
-	ctx := withLaneSelection(context.Background(), laneSelectionFromTrigger(Trigger{
-		ReasoningEffort:    "high",
-		ReasoningMaxTokens: 4096,
-	}))
-	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(ctx, req, "m")
-	if req.Reasoning == nil || req.Reasoning.Effort != "high" {
-		t.Fatalf("the run's own effort did not win: %+v", req.Reasoning)
-	}
-	if req.Reasoning.MaxTokens != 4096 {
-		t.Errorf("budget = %d, want the run's 4096", req.Reasoning.MaxTokens)
-	}
-
-	// The next run carries no selection and must see the node's setting again.
-	plain := &llm.ChatRequest{}
-	a.applyReasoningBudget(context.Background(), plain, "m")
-	if plain.Reasoning == nil || plain.Reasoning.Effort != "low" {
-		t.Errorf("the node's setting did not come back: %+v", plain.Reasoning)
-	}
-	if plain.Reasoning.MaxTokens != 0 {
-		t.Errorf("a budget outlived the run that asked for it: %d", plain.Reasoning.MaxTokens)
-	}
-}
-
-// A run that says nothing leaves the node's setting alone, rather than reading
-// as a request for nothing.
-//
-// Empty and zero are what every existing caller sends, since neither field was
-// there until now. Treating them as "ask for nothing" would silently disable a
-// configured effort for every client that has not been updated.
-func TestReasoningEffort_SayingNothingKeepsTheNodesSetting(t *testing.T) {
-	a := reasoningAgent("medium", 2048, func(string) ([]string, bool) {
-		return []string{"low", "medium", "high"}, true
-	})
-	ctx := withLaneSelection(context.Background(), laneSelectionFromTrigger(Trigger{
-		Provider: "p", Model: "m", // a selection, but nothing about reasoning
-	}))
-	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(ctx, req, "m")
-	if req.Reasoning == nil || req.Reasoning.Effort != "medium" || req.Reasoning.MaxTokens != 2048 {
-		t.Errorf("a run that said nothing changed the setting: %+v", req.Reasoning)
-	}
-}
-
-// The catalog still decides, whoever asked. A per-request effort a model does
-// not act on is dropped exactly as a configured one is — otherwise the request
-// field would be the way round the measurement.
-func TestReasoningEffort_TheCatalogStillNarrowsARunsChoice(t *testing.T) {
-	a := reasoningAgent("", 0, func(string) ([]string, bool) {
-		return []string{"high", "xhigh"}, false // as z-ai/glm-5.2 measured
-	})
-	ctx := withLaneSelection(context.Background(), laneSelectionFromTrigger(Trigger{
-		ReasoningEffort:    "low",
-		ReasoningMaxTokens: 512,
-	}))
-	req := &llm.ChatRequest{}
-	a.applyReasoningBudget(ctx, req, "z-ai/glm-5.2")
-	if req.Reasoning != nil {
-		t.Errorf("a value the model does not act on was sent anyway: %+v", req.Reasoning)
 	}
 }

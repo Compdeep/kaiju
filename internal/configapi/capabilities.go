@@ -135,23 +135,6 @@ func (c *API) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 				Applies:    "this one turn, overriding the node's setting",
 			},
 			{
-				Key:        "reasoning_effort",
-				Where:      whereRequest,
-				Values:     agent.ReasoningEfforts(),
-				EmptyMeans: "whatever llm.reasoning_effort is set to",
-				Applies: "this one turn, overriding the node's setting — and only where " +
-					"the catalog says the chosen model acts on the value, so a request " +
-					"naming one it does not is a run rather than an error",
-			},
-			{
-				Key:   "reasoning_max_tokens",
-				Where: whereRequest,
-				// No values: it is a token count, and the JSON type says so.
-				EmptyMeans: "whatever llm.reasoning_max_tokens is set to",
-				Applies: "this one turn, overriding the node's setting — and only where a " +
-					"budget is honoured as one, which two models in the catalog do",
-			},
-			{
 				Key:   "chat_mode",
 				Where: whereRequest,
 				// No values: it is a boolean, and the JSON type says so.

@@ -57,7 +57,6 @@
       <div class="col-header chat-header">
         <div class="chat-title" :title="currentTitle">{{ currentTitle }}</div>
         <div class="chat-header-actions">
-          <EffortSelector ref="effortSelectorRef" />
           <IntentSelector ref="intentSelectorRef" />
           <ModelSelector ref="modelSelectorRef" />
           <!-- Only where the workspace section exists: its routes are not
@@ -288,7 +287,6 @@ import DAGTrace from '../components/DAGTrace.vue'
 import ComposablePanel from '../components/ComposablePanel.vue'
 import UploadButton from '../components/UploadButton.vue'
 import UploadChip from '../components/UploadChip.vue'
-import EffortSelector from '../components/EffortSelector.vue'
 import IntentSelector from '../components/IntentSelector.vue'
 import ModelSelector from '../components/ModelSelector.vue'
 import HeaderTools from '../components/HeaderTools.vue'
@@ -344,7 +342,6 @@ const auth = useAuthStore()
 const settings = useSettingsStore()
 const input = ref('')
 const composeInput = ref(null)     // <textarea> ref, for auto-grow
-const effortSelectorRef = ref(null) // <EffortSelector> ref, to re-sync after Advanced settings
 const intentSelectorRef = ref(null) // <IntentSelector> ref, to re-sync after Advanced settings
 const modelSelectorRef = ref(null) // <ModelSelector> ref, to re-sync after Advanced settings
 
@@ -387,9 +384,6 @@ function onSettingsClose() {
   showSettings.value = false
   modelSelectorRef.value?.reload()
   intentSelectorRef.value?.reload()
-  // The modal writes the effort too, and changing a lane's model can change
-  // whether the header offers the control at all.
-  effortSelectorRef.value?.reload()
 }
 
 // ── Inline message editing / regenerate ──

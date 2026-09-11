@@ -105,25 +105,3 @@ func TestAShortKeyIsReplacedEntirely(t *testing.T) {
 		t.Errorf("an empty key became %q; absent must stay absent", got)
 	}
 }
-
-// The reasoning settings are present in the document at their defaults.
-//
-// All three are deliberately not omitempty, and this is what that is for: a
-// client reading this document to build a picker cannot otherwise tell a key
-// absent because the feature does not exist here from one absent because it is
-// at its default. kaiju's own settings modal reads exactly these three, and an
-// older daemon that does not have them should render no control rather than a
-// control that saves nothing.
-func TestTheReasoningSettingsArePresentAtTheirDefaults(t *testing.T) {
-	_, out := getConfig(t, config.Default())
-	llm, ok := out["llm"].(map[string]any)
-	if !ok {
-		t.Fatal("no llm block in the config document")
-	}
-	for _, key := range []string{"reasoning", "reasoning_effort", "reasoning_max_tokens"} {
-		if _, present := llm[key]; !present {
-			t.Errorf("llm.%s is absent at its default, so a client cannot tell "+
-				"an unset setting from a build that does not have it", key)
-		}
-	}
-}

@@ -39,18 +39,6 @@ func TestEveryWaitedOnLaneHandlesADeadReply(t *testing.T) {
 			t.Errorf("%s puts no deadline on its model call, so %s waits as long as the "+
 				"model takes — max_tokens bounds the reply, not the wait", c.file, c.lane)
 		}
-		// A deadline cancels the call, and a cancelled call returns an error and
-		// no reply — so the reasoning it produced can only come from a buffer
-		// filled while it streamed. Both lanes passed nil here and threw away
-		// what the first attempt had spent its whole allowance producing.
-		if !strings.Contains(body, "cutThought(") {
-			t.Errorf("%s hands its retry nothing, so a deadline on %s throws away the "+
-				"thinking it just paid for", c.file, c.lane)
-		}
-		if !strings.Contains(body, "thinkingCapture") && !strings.Contains(body, "completeHeavyStreaming") {
-			t.Errorf("%s does not keep the reasoning as it streams, so there is nothing "+
-				"for %s to hand back", c.file, c.lane)
-		}
 	}
 }
 

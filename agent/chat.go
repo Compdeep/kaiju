@@ -38,11 +38,6 @@ type ChatTurn struct {
 	// RecallTerms is what those messages were found by looking for, so the model
 	// is told what the search was and can judge a match that is not relevant.
 	RecallTerms []string
-	// Thinking is whether this turn needs the model to reason before it answers:
-	// ReasoningOn, ReasoningOff, or empty for no opinion, which leaves the model
-	// as it is. Decided per turn by the call that reads the message first — see
-	// PreflightResult.Thinking.
-	Thinking string
 }
 
 // ChatResult is the outcome of a chat turn.
@@ -89,18 +84,8 @@ func (a *Agent) Chat(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	//
 	// This is the only way to reach back on this lane: there are no tools here,
 	// so "what did we say about X earlier" is answerable only by looking.
-	lacking, thinking := a.recallTerms(ctx, t.TriggerID, t.Query, t.History)
+	lacking := a.recallTerms(ctx, t.TriggerID, t.Query, t.History)
 	t.Recalled, t.RecallTerms = a.recall(ctx, t, lacking), lacking
-	// Not every conversational turn needs reasoning, and a model that reasons by
-	// default does it on all of them — a greeting costs the same wait as a
-	// comparison. Decided per turn there rather than configured, because it is a
-	// property of the message and nobody can set it in advance.
-	//
-	// A caller that already decided keeps its answer: this lane is also reached
-	// from the router, which asked the same question one call earlier.
-	if t.Thinking == "" {
-		t.Thinking = thinking
-	}
 	return a.Converse(ctx, t)
 }
 
@@ -182,15 +167,6 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 		// cap IS the answer, and its 4,096 ceiling is exactly what glm-5.3 spent
 		// thinking before returning nothing.
 		MaxTokens: a.replyBudget(replyDecisionBudget),
-	}
-
-	// What this turn was judged to need. Empty leaves the model alone, which is
-	// what every turn got before this and what a failed decision gets now.
-	switch t.Thinking {
-	case ReasoningOn:
-		llm.WithReasoning(req)
-	case ReasoningOff:
-		llm.WithoutReasoning(req)
 	}
 
 	// A clock on the call, for the same reason the planner has one: max_tokens

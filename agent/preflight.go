@@ -46,19 +46,6 @@ type PreflightResult struct {
 	// can see. Empty is the usual answer and means nothing was missing. Only the
 	// router fills it; the classify call has no opinion about it.
 	LackingContext []string
-
-	// Thinking is whether this turn needs the model to reason before it
-	// answers: ReasoningOn, ReasoningOff, or empty for no opinion.
-	//
-	// The router decides it, because it is the one stage that reads the message
-	// before anything else does and it is already deciding what kind of turn
-	// this is. It applies to the chat lane only — a planned run always reasons.
-	//
-	// Empty is not "no": a router that failed, or a reply that did not carry the
-	// field, leaves the model's own default alone. Reading a failure as "do not
-	// think" would make a stage that trips quietly change how every answer after
-	// it is written.
-	Thinking string
 }
 
 // preflightCategories is the fixed set of tool categories the preflight
@@ -244,10 +231,10 @@ func asksToTakePrivilege(query string) bool {
  */
 // Only reached when nothing has decided yet. A turn set to answer uses
 // recallTerms and its own prompt; a turn set to plan asks nothing at all.
-func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history []llm.Message) (string, []string, string) {
+func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history []llm.Message) (string, []string) {
 	if a.classifyStub != nil {
 		pf := a.classifyStub(query, history)
-		return pf.Mode, pf.LackingContext, pf.Thinking
+		return pf.Mode, pf.LackingContext
 	}
 	// Deterministic override — decided in code, NOT by the classifier. A question
 	// about the live plugin/tool inventory ("do you have plugins?", "what tools do
@@ -259,15 +246,15 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	// capability list.
 	if mentionsLiveInventory(query) {
 		log.Printf("[route] deterministic → agent (asks about live plugin/tool inventory)")
-		return "agent", nil, ""
+		return "agent", nil
 	}
 	if asksToTakePrivilege(query) {
 		log.Printf("[route] deterministic → agent (asks to take privilege on this machine)")
-		return "agent", nil, ""
+		return "agent", nil
 	}
 	if asksForAnAction(query) {
 		log.Printf("[route] deterministic → agent (names an action to take)")
-		return "agent", nil, ""
+		return "agent", nil
 	}
 	// Give the router just enough context to interpret a terse follow-up, then the
 	// current message. See routeContext for what's included (summary + last turn).
@@ -294,42 +281,27 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	// the (also aligned) planner then refused. Failing toward the cheap, safe
 	// conversational lane keeps the user's selected chat model in play.
 	if err != nil {
-		return "chat", nil, ""
+		return "chat", nil
 	}
 	raw, err := extractToolArgs(resp)
 	if err != nil {
 		traceFault(ctx, "no tool args returned")
-		return "chat", nil, ""
+		return "chat", nil
 	}
 	var out struct {
 		Mode    string   `json:"mode"`
 		Lacking []string `json:"lacking_context"`
-		Think   *bool    `json:"think"`
 	}
 	if err := ParseLLMJSON(raw, &out); err != nil {
 		traceFault(ctx, "parse failed: "+err.Error())
-		return "chat", nil, ""
+		return "chat", nil
 	}
 	lacking := cleanTerms(out.Lacking)
 	switch out.Mode {
 	case "chat", "agent":
-		return out.Mode, lacking, thinkingFrom(out.Think)
+		return out.Mode, lacking
 	default:
-		return "chat", lacking, thinkingFrom(out.Think)
-	}
-}
-
-// thinkingFrom turns the router's answer into the vocabulary the reasoning
-// switch already uses. A missing field is no opinion, not a no — a pointer
-// because false is a real answer and the zero value cannot be told from it.
-func thinkingFrom(think *bool) string {
-	switch {
-	case think == nil:
-		return ""
-	case *think:
-		return ReasoningOn
-	default:
-		return ReasoningOff
+		return "chat", lacking
 	}
 }
 
@@ -340,22 +312,15 @@ func thinkingFrom(think *bool) string {
  *       put that decision in the same small reply as the words — where the words
  *       could and did spend the whole budget before the decision was written.
  *
- *       Its own prompt and its own tool. On any failure the answer is no terms
- *       and no opinion about thinking: the turn is answered from what is in
- *       front of it, by a model left as it was, which is what happens on most
- *       turns anyway.
- *
- *       It answers the thinking question too, because this is the call the chat
- *       mode makes instead of the router's — a turn the operator sent straight
- *       to chat never reaches routeQuery, and would otherwise be the one kind of
- *       turn nothing decided this for.
+ *       Its own prompt and its own tool, so the reply carries one thing. On any
+ *       failure the answer is no terms: the turn is answered from what is in
+ *       front of it, which is what happens on most turns anyway.
  * param: ctx, triggerID, query, history - as routeQuery.
- * return: the words to look up, and whether this turn needs thinking.
+ * return: the words to look up, or nothing.
  */
-func (a *Agent) recallTerms(ctx context.Context, triggerID, query string, history []llm.Message) ([]string, string) {
+func (a *Agent) recallTerms(ctx context.Context, triggerID, query string, history []llm.Message) []string {
 	if a.classifyStub != nil {
-		pf := a.classifyStub(query, history)
-		return pf.LackingContext, pf.Thinking
+		return a.classifyStub(query, history).LackingContext
 	}
 	msgs := []llm.Message{{Role: "system", Content: prompt.Recall}}
 	msgs = append(msgs, routeContext(history)...)
@@ -369,22 +334,21 @@ func (a *Agent) recallTerms(ctx context.Context, triggerID, query string, histor
 		MaxTokens:   routeReplyBudget,
 	})
 	if err != nil {
-		return nil, ""
+		return nil
 	}
 	raw, err := extractToolArgs(resp)
 	if err != nil {
 		traceFault(ctx, "no tool args returned")
-		return nil, ""
+		return nil
 	}
 	var out struct {
 		Lacking []string `json:"lacking_context"`
-		Think   *bool    `json:"think"`
 	}
 	if err := ParseLLMJSON(raw, &out); err != nil {
 		traceFault(ctx, "parse failed: "+err.Error())
-		return nil, ""
+		return nil
 	}
-	return cleanTerms(out.Lacking), thinkingFrom(out.Think)
+	return cleanTerms(out.Lacking)
 }
 
 // routeReplyBudget is what a router reply must fit in.
@@ -397,17 +361,12 @@ func (a *Agent) recallTerms(ctx context.Context, triggerID, query string, histor
 // fifteen phrases ran out of part way through the fifteenth — taking the mode
 // with it, because the mode had not been written yet.
 //
-// 128 was margin, not the fix. Raising it alone buys a few more items from a
+// 128 is margin, not the fix. Raising it alone buys a few more items from a
 // model with no reason to stop: the same reply would have been cut in the same
-// paragraph, four items later. What stops it is the bound in the schemas. The
-// margin is here so a provider that pretty-prints its JSON, or spells the enum
-// in full, is not the difference between an answer and a truncation.
-//
-// 160 because both replies carry one more field now — whether this turn needs
-// thinking — and a closed schema makes every property required and writes them
-// in the order Go sorts keys, which puts that one last in both. A field written
-// last is the field a cut reply loses.
-const routeReplyBudget = 160
+// paragraph, four items later. What stops it is the bound in the schemas. This
+// is here so a provider that pretty-prints its JSON, or spells the enum in
+// full, is not the difference between an answer and a truncation.
+const routeReplyBudget = 128
 
 // actionVerbs are the words a person uses to ask for something to be DONE.
 //

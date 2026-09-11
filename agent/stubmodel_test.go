@@ -52,11 +52,6 @@ type stubCall struct {
 	Function string // the function the stage asked for
 	System   string // the system prompt it sent
 	User     string // the last user message
-	// Reasoning is the request's reasoning instruction as it arrived: "on",
-	// "off", or "" when the request said nothing. Recorded because whether a
-	// lane asked for thinking is a decision with no other visible trace — the
-	// reply of a model that thought and one that did not look the same.
-	Reasoning string
 	// Messages is every message the request carried, in order.
 	//
 	// System and User are the two a test usually wants and are kept for the
@@ -141,9 +136,6 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 				Name string `json:"name"`
 			} `json:"json_schema"`
 		} `json:"response_format"`
-		Reasoning *struct {
-			Enabled *bool `json:"enabled"`
-		} `json:"reasoning"`
 	}
 	body, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(body, &req)
@@ -160,12 +152,6 @@ func (s *stubModel) handle(w http.ResponseWriter, r *http.Request) {
 		fn, schema = n, true
 	}
 	call := stubCall{Function: fn}
-	if r := req.Reasoning; r != nil && r.Enabled != nil {
-		call.Reasoning = "off"
-		if *r.Enabled {
-			call.Reasoning = "on"
-		}
-	}
 	for _, m := range req.Messages {
 		sm := stubMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID, Name: m.Name}
 		for _, tc := range m.ToolCalls {

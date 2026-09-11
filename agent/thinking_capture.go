@@ -21,51 +21,27 @@ import (
  * call ends. What arrived, arrived.
  */
 type thinkingCapture struct {
-	mu      sync.Mutex
-	thought strings.Builder
-	written strings.Builder
+	mu sync.Mutex
+	b  strings.Builder
 }
 
-/*
- * onChunk is the stream callback, and it keeps both kinds of chunk.
- * desc: A model delivers its thinking one of two ways — as reasoning chunks, or
- *       written into the content between <think> and </think> — and a caller
- *       that keeps only the first can watch a model think for two minutes and
- *       collect nothing, because every chunk it sent was content.
- *
- *       Content is kept for that reason alone. What is taken from it is the
- *       thinking inside those tags and nothing else, so a half-written answer
- *       is never handed to a retry as though it were thought.
- * param: chunk - the text that arrived.
- * param: kind - "reasoning" or "content", as the client tags it.
- */
+// onChunk is the stream callback. Reasoning is kept; visible content is not —
+// that comes back on the response when there is one, and duplicating it here
+// would hand the retry its own half-written answer as though it were thought.
 func (t *thinkingCapture) onChunk(chunk, kind string) {
-	if chunk == "" {
+	if kind != "reasoning" || chunk == "" {
 		return
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	if kind == "reasoning" {
-		t.thought.WriteString(chunk)
-		return
-	}
-	t.written.WriteString(chunk)
+	t.b.WriteString(chunk)
+	t.mu.Unlock()
 }
 
-// text is what was thought so far: the reasoning chunks, and the thinking
-// written inline in the content. An unterminated <think> counts — a model cut
-// off mid-thought never writes the closing tag.
+// text is what was thought so far.
 func (t *thinkingCapture) text() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	got := t.thought.String()
-	if _, inline := llm.LiftThinking(t.written.String()); inline != "" {
-		if got != "" {
-			got += "\n"
-		}
-		got += inline
-	}
-	return strings.TrimSpace(got)
+	return strings.TrimSpace(t.b.String())
 }
 
 // cutThought wraps captured thinking as a response, so a caller recovering from
@@ -101,31 +77,7 @@ func cutThought(reasoning string) *llm.ChatResponse {
 func (a *Agent) completeHeavyStreaming(ctx context.Context, req *llm.ChatRequest) (*llm.ChatResponse, string, error) {
 	var cap thinkingCapture
 	resp, err := a.askStreamResp(ctx, Heavy, req, cap.onChunk)
-	return resp, thinkingOf(resp, &cap), err
-}
-
-/*
- * thinkingOf is what the model thought, taken from wherever it survived.
- * desc: The reply where there is one, and the capture where there is not.
- *
- *       That order matters, and getting it the other way round is why a whole
- *       run's planner reasoning went missing while the model was plainly
- *       thinking: the client assembles a reply two ways — reasoning chunks, and
- *       <think> lifted out of the finished content — and only the first of
- *       those passes through a callback. A call that completes has already had
- *       both done for it, on the reply.
- *
- *       The capture is for the call that never produces a reply at all, which
- *       is every call stopped by a deadline.
- * param: resp - the reply, or nil.
- * param: cap - what was collected while it streamed.
- * return: the thinking, or "" when there was none.
- */
-func thinkingOf(resp *llm.ChatResponse, cap *thinkingCapture) string {
-	if got := reasoningOf(resp); got != "" {
-		return got
-	}
-	return cap.text()
+	return resp, cap.text(), err
 }
 
 // The most thinking worth putting on the wire for a reader.

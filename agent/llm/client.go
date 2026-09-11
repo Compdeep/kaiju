@@ -1008,22 +1008,6 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 	}, nil
 }
 
-/*
- * LiftThinking separates thinking written inline from the text around it.
- * desc: A model delivers its reasoning one of two ways: as its own field on the
- *       reply, or written into the content between <think> and </think>. This
- *       is the second, and it is why a caller watching only the reasoning
- *       chunks of a stream can watch a model think for two minutes and collect
- *       nothing — every chunk it sent was content.
- *
- *       Exported for callers that assemble a reply themselves. The client
- *       applies it to every reply it assembles, so an ordinary caller needs
- *       nothing.
- * param: s - the content as it arrived.
- * return: the content with the thinking removed, and the thinking.
- */
-func LiftThinking(s string) (clean, think string) { return extractThink(s) }
-
 // extractThink lifts <think>…</think> blocks out of s, returning the cleaned text
 // (blocks removed) and the concatenated thinking. Handles multiple blocks and an
 // unterminated trailing <think> (streamed but cut off).

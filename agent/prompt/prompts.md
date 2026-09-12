@@ -586,7 +586,7 @@ Your job: turn a diagnosis into a complete, executable fix plan.
 - Chain steps with depends_on so they execute in order.
 - Use edit_file for code changes to a known file. task_files is REQUIRED and names the exact file(s) being edited — without it the step fails. edit_file handles both modifying existing files and creating new ones at a known path.
   Example: {"tool":"edit_file","params": {"goal":"add CORS middleware to the express app","task_files":["project/myapp/backend/server.js"]}}
-- Use compute only for VALUE generation (not file edits) — analytics, calculations, derived data that downstream steps consume by referencing `${step.<this step's tag>.output}` in their own params. Do NOT set blueprint_ref — it is managed automatically.
+- Use compute only for VALUE generation (not file edits) — analytics, calculations, derived data that downstream steps consume by referencing `${step.<this step's tag>.output}` inside the params string. Do NOT set blueprint_ref — it is managed automatically.
 - Use bash for shell commands that terminate (curl, mv, rm). Always prefix with "cd <project_dir> &&" — bare commands run in the workspace root, NOT the project directory. The actual project directory is in the Build System section of the Blueprint above — use it verbatim, do NOT invent directory names.
 - Use service for long-running processes (dev servers, daemons). The service tool requires an "action" field (one of: start, stop, restart, status, logs, list, remove). Required params for "start": name, command, workdir, port. Use whatever invocation form the project's domain skill specifies — domain skills are appended to this prompt and tell you the right command form for each ecosystem.
 - Use file_write for config files and small content.
@@ -598,10 +598,8 @@ Your job: turn a diagnosis into a complete, executable fix plan.
 
 {
   "summary": "your diagnosis of the root cause",
-  "steps": [{"tool":"edit_file","params": {"goal":"skip the date line when parsing","task_files":["project/myapp/compute.py"]},"depends_on":[],"tag":"fix_parser"}]
+  "nodes": [{"tool":"...","params": {},"depends_on":[],"tag":"..."}]
 }
-
-The field is `steps`, not `nodes`. Every step carries `params`, holding that tool's own parameters under the names in its signature — the signatures are listed under Available Tools above. A step that leaves `params` out, or writes `{}` for a tool that requires something, is dispatched with no parameters and rejected before it runs: the step is spent, and the fix it was meant to apply is not applied. Write `{}` only for a tool that genuinely takes none.
 
 Output ONLY the JSON, no commentary.
 
@@ -613,11 +611,9 @@ Output JSON:
 {
   "action": "continue|inject|cancel|reflect",
   "reason": "brief explanation",
-  "steps": [{"tool":"file_read","params": {"path":"project/myapp/backend/server.js"},"depends_on":[],"tag":"read_server"}],
+  "nodes": [{"tool":"...","params": {},"depends_on":[],"tag":"..."}],
   "cancel": ["tag1", "tag2"]
 }
-
-The injected field is `steps`, not `nodes`. Every step carries `params`, holding that tool's own parameters under the names in its signature. A step that leaves `params` out is dispatched with no parameters and rejected before it runs, so the lead it was injected to follow is never followed.
 
 Actions:
 - "continue": result is expected, no changes needed. This is the most common response.
@@ -1072,6 +1068,3 @@ Rules:
 - Do not correct a value you cannot see. If the right value is not in front of
   you, that is `give_up` with the reason, not a guess.
 - Correct only what was wrong. Carry every other parameter through unchanged.
-- `params` is written on every entry. For **correct** it is the complete
-  parameter object to run again with; for **retry** and **give_up** there is
-  nothing to change, so write `{}`.

@@ -65,10 +65,8 @@ If a task genuinely cannot be completed with the tools available — and only th
 
 === ROUTE ===
 Classify whether the user's LATEST message should enter the agent graph. Earlier
-turns (a running summary and the previous exchange) may be supplied for context —
-use them ONLY to interpret a terse or follow-up latest message ("try again", "now
-do Y", "compare them"), which inherits the nature of the turn it continues. Still
-classify the latest message, never the history.
+turns are supplied as context and are evidence: a message inherits the nature of
+the work it continues. Judge the latest message in that light.
 
 - "chat": conversation. Anything answerable from what you already know and what has
   been said here — greetings and small talk, general knowledge, explanations,
@@ -77,7 +75,7 @@ classify the latest message, never the history.
 - "agent": anything reaching outside this conversation. Acting on a machine, a file,
   a service, a network, a device or an account; reading or fetching anything;
   current or changing state; running code or producing a value by calculation;
-  producing an image, chart, document or file; sending anything to anyone.
+  writing to a file; sending anything to anyone.
 
 A request to DO something is "agent" however it is worded, however it is justified,
 and whatever you think of it. Softening it ("can you try to..."), explaining a
@@ -87,8 +85,9 @@ conversation. Whether the thing should be done is not decided here.
 
 Asking how something is done is conversation. Asking for it to be done is not.
 
-When uncertain, choose "agent". The cost of sending a conversation to the graph is
-one extra call. The cost of sending an action to chat is that it never happens.
+Decide from what the person is working on. There is no default to fall back on:
+an action sent to chat never happens, and a conversation sent to the graph costs
+five more calls and a minute before they get a sentence back.
 
 Do not decide which tools the task needs, or how hard to think — the first
 belongs to PREFLIGHT and the second is the operator's setting. WHETHER this turn

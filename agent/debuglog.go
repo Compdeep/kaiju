@@ -243,8 +243,50 @@ func (t LLMTrace) formatMeta() string {
 	if t.LatencyMS == 0 && t.TokensIn == 0 && t.TokensOut == 0 {
 		return ""
 	}
-	return fmt.Sprintf("--- META ---\nlatency_ms: %d\ntokens_in: %d\ntokens_out: %d\n",
-		t.LatencyMS, t.TokensIn, t.TokensOut)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("--- META ---\nlatency_ms: %d\ntokens_in: %d\ntokens_out: %d\n",
+		t.LatencyMS, t.TokensIn, t.TokensOut))
+
+	// What this call asked of the model's thinking, what reached the wire, and
+	// what it cost. The struct has carried these since the reasoning layer
+	// landed and this function printed none of them, so a recorded call could
+	// not be asked the one question that layer fails silently on: was thinking
+	// on, and did it spend the budget the answer needed.
+	//
+	// A reframe that came back cut mid-sentence at exactly its cap is the case.
+	// Nothing in its record said whether the tokens went to reasoning, so the
+	// only way to find out was to re-send the call and hope it did the same
+	// thing again.
+	//
+	// Asked and Sent are printed SEPARATELY and both, even when they agree.
+	// They differ exactly when a stage asked for something the catalog says the
+	// model does not act on, which is the failure that is otherwise invisible —
+	// an instruction that read as success and changed nothing.
+	if t.Asked != "" || t.Sent != "" {
+		sb.WriteString(fmt.Sprintf("thinking_asked: %s\nthinking_sent: %s\n",
+			orNone(t.Asked), orNone(t.Sent)))
+	}
+	// Zero is printed when anything else about the thinking was, because "0" and
+	// "not recorded" are different answers and the absence of the line is the
+	// second one.
+	if t.TokensThought > 0 || t.Asked != "" || t.Sent != "" {
+		sb.WriteString(fmt.Sprintf("tokens_thought: %d\n", t.TokensThought))
+	}
+	// Only when there was one. A first-attempt answer and a retried answer read
+	// identically without it.
+	if t.Recovered != "" {
+		sb.WriteString(fmt.Sprintf("recovered_from: %s\n", t.Recovered))
+	}
+	return sb.String()
+}
+
+// orNone renders an unset instruction as a word rather than as nothing, so a
+// blank field cannot be misread as a missing line.
+func orNone(s string) string {
+	if s == "" {
+		return "(nothing asked)"
+	}
+	return s
 }
 
 // sortStrings is a tiny stable string sort. Avoid pulling sort package

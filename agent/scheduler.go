@@ -1609,13 +1609,36 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						log.Printf("[dag] reflection: continue (%s), batch counters reset", ref.Reason)
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONTINUE", Text.TruncateLog(ref.Reason, 200))
 						launchReady()
-						// If nothing launched, the reflector expected pending steps that
-						// don't exist (deduped or already completed). Force another
-						// reflection so it sees "0 pending" and either investigates or concludes.
+						// "continue" asserts there are steps still to run. When nothing
+						// launched there are none — and nothing is in flight to produce
+						// any, or this branch would not be reached — so the assertion is
+						// contradicted by the graph. The graph is the fact; the decision
+						// is a model's answer to a three-value enum with no way to refuse
+						// one that does not fit. So it is overruled rather than re-asked.
+						//
+						// It used to be re-asked, with workSinceReflection forced to 1 so
+						// the "no work" break could not fire while it was. That turned one
+						// wrong answer into an unbounded loop: re-reflecting resamples the
+						// same question on an unchanged graph, and on the run that led to
+						// this change the recorded prompt was measured at four "continue"
+						// to four "conclude" over eight sends — so each lap was a fresh
+						// coin flip, and each lap appended CONTINUE and CONTINUE_EMPTY to
+						// the worklog the next lap reads. Twelve laps, 2m20s and 136k
+						// tokens, to arrive at the answer that was already in hand before
+						// the first reflection.
+						//
+						// Concluding here loses nothing: the aggregator writes the reply
+						// from the same evidence either way, and the reflector's summary is
+						// kept. Only outcome is dropped, which this stage is already told
+						// not to fill when an aggregator follows it.
 						if inflight == 0 {
-							log.Printf("[dag] reflection said continue but nothing to launch — forcing re-evaluation")
-							appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONTINUE_EMPTY", "reflector expected pending steps but none remain")
-							workSinceReflection = 1 // prevent the "no work" break
+							log.Printf("[dag] reflection said continue with nothing to run — the plan is complete, concluding")
+							appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONCLUDE",
+								Text.TruncateLog(ref.Summary, 200))
+							graph.SkipAllPending()
+							reflectionConcluded = true
+							reflectionOutcome = ref.Outcome
+							reflectionAggregate = ref.Aggregate
 						}
 
 					case "replan":

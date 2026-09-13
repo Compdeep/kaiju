@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -324,6 +325,16 @@ func (p *Processor) List(sessionID string) ([]*Result, error) {
 			continue
 		}
 		relPath := filepath.Join("uploads", sessionID, meta.Filename)
+		// The sidecar is not the upload. A write that failed part way is
+		// cleaned up with os.Remove on the file alone, so a .meta.json can
+		// outlive the bytes it describes — and this listing is what the chip
+		// strip is restored from, so the attachment came back on every session
+		// load and its path went into every query after it. The stage that
+		// found out was file_read, once per run.
+		if _, err := os.Stat(filepath.Join(p.agent.Workspace(), relPath)); err != nil {
+			log.Printf("[uploads] %s: metadata without a file, not listing it", relPath)
+			continue
+		}
 		res := &Result{
 			Filename:   meta.Filename,
 			Path:       relPath,

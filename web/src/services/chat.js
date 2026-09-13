@@ -161,12 +161,69 @@ export async function refreshMessages(id) {
   if (!ss) return
   try {
     const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
-    ss.messages = (msgs || []).map(m => {
+    const before = ss.messages
+    ss.messages = (msgs || []).map((m, i) => {
       const msg = { id: m.id, role: m.role, content: m.content, compactedInto: m.compacted_into || 0 }
       if (m.dag_trace) { try { msg.trace = JSON.parse(m.dag_trace) } catch {} }
+      // A trace already on screen is never taken off it by a refetch.
+      //
+      // This replaced the whole list, so any trace held only in memory went
+      // with it. That is every stopped run: the answer the server stored has
+      // no dag_trace, because the id needed to post one against arrives on the
+      // /execute response and a stopped run never gets one. The nodes were
+      // right there in the message object and the next refresh dropped them.
+      //
+      // Matched by POSITION and role rather than by id, because the message
+      // that loses its trace is exactly the one with no id yet. The two lists
+      // are the same conversation in the same order, so index i is the same
+      // turn in both; the role check stops a mismatched list moving a trace
+      // onto somebody else's message.
+      if (!msg.trace) {
+        const prev = before[i]
+        if (prev && prev.role === m.role && prev.trace && prev.trace.length) {
+          msg.trace = prev.trace
+        }
+      }
       return msg
     })
+    // A turn still in memory that the server has not caught up with is kept.
+    // Truncating to the server's list would delete the stopped answer itself,
+    // trace and all, before /messages has it.
+    if (before.length > ss.messages.length) {
+      ss.messages.push(...before.slice(ss.messages.length))
+    }
   } catch { /* keep current view on failure */ }
+}
+
+/*
+ * desc: Persist a finished run's trace against the newest assistant message,
+ *       for a run that never learned its own message id.
+ *
+ *       send() posts the trace with the id /execute returned. A STOPPED run has
+ *       no such response — the fetch was aborted — so its nodes lived only in
+ *       the pushed message object and vanished on the next refetch. The id it
+ *       needs does exist by now: the server stored the stopped answer, and the
+ *       refresh above has just read it back.
+ * @param {string} sid - session id
+ * @param {Array} nodes - the run's nodes, captured before the store was cleared
+ */
+async function attachTraceToLastAnswer(sid, nodes) {
+  if (!sid || !nodes || !nodes.length) return
+  const s = useSessionsStore()
+  const ss = s.getSession(sid)
+  if (!ss) return
+  for (let i = ss.messages.length - 1; i >= 0; i--) {
+    const m = ss.messages[i]
+    if (m.role !== 'assistant') continue
+    // Already carries one — a later run's trace is not overwritten.
+    if (m.trace && m.trace.length) return
+    m.trace = nodes
+    if (!m.id) return // on screen, but nothing to post it against yet
+    try {
+      await api.post(`/api/v1/sessions/${sid}/trace`, { message_id: m.id, nodes })
+    } catch { /* on screen either way */ }
+    return
+  }
 }
 
 /**
@@ -227,8 +284,15 @@ export async function regenerate() {
   } finally {
     stopControllers.delete(sid)
     sess.loading = false
+    // Same order as send(): take the nodes before the store is cleared, then
+    // attach them to the answer once the refresh has given it an id. This path
+    // discards the /execute response, so there is no id to post against at the
+    // time of the call and a regenerate's trace was dropped on every run, not
+    // only a stopped one.
+    const finishedNodes = dag.nodes.length ? [...dag.nodes] : []
     dag.archiveAndClear()
     await refreshMessages(sid)
+    await attachTraceToLastAnswer(sid, finishedNodes)
   }
 }
 
@@ -364,11 +428,14 @@ export async function send(text) {
     // trace belongs to that one; posting without it asked the server to guess,
     // and its guess was "the newest assistant message" — which is how a
     // one-node interjection replaced the trace of the run that did the work.
-    if (sendingSid && savedMessageID && dag.nodes.length) {
+    // Taken before archiveAndClear empties the live list, so the trace outlives
+    // the store it was streamed into whichever way the run ended.
+    const finishedNodes = dag.nodes.length ? [...dag.nodes] : []
+    if (sendingSid && savedMessageID && finishedNodes.length) {
       try {
         await api.post(`/api/v1/sessions/${sendingSid}/trace`, {
           message_id: savedMessageID,
-          nodes: dag.nodes,
+          nodes: finishedNodes,
         })
       } catch {}
     }
@@ -379,7 +446,14 @@ export async function send(text) {
     dag.archiveAndClear()
     loadSessions()
     // Sync ids from the server so the just-sent messages become editable.
-    refreshMessages(sendingSid)
+    await refreshMessages(sendingSid)
+    // A run with no savedMessageID is a stopped or failed one: /execute never
+    // returned an id to post its trace against. The refresh above has just read
+    // the stored answer back, so the id exists now — attach it there instead of
+    // losing a run's worth of nodes because of how it ended.
+    if (sendingSid && !savedMessageID && finishedNodes.length) {
+      await attachTraceToLastAnswer(sendingSid, finishedNodes)
+    }
   }
 }
 

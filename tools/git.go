@@ -67,7 +67,7 @@ func (g *Git) Impact(params map[string]any) int {
 		return toolapi.ImpactObserve
 	case "add", "commit", "branch_create", "checkout", "stash", "tag":
 		return toolapi.ImpactAffect
-	case "push", "reset", "pull", "merge", "rebase":
+	case "push", "reset", "pull", "merge":
 		return toolapi.ImpactControl
 	default:
 		return toolapi.ImpactAffect

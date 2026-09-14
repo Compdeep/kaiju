@@ -541,7 +541,13 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 			// name still reaches the same branch.
 			focus, _ := params["focus"].(string)
 			out, err = w.formatExtract(ctx, status, rawURL, bodyBytes, focus)
-		default: // markdown
+		case "markdown":
+			out, err = w.formatMarkdown(ctx, status, rawURL, bodyBytes)
+		default:
+			// A name this build does not know reads as markdown rather than
+			// failing. Written out rather than left to carry markdown as well,
+			// so every format the enum offers has a case of its own and a value
+			// that quietly stops being handled is a test failure.
 			out, err = w.formatMarkdown(ctx, status, rawURL, bodyBytes)
 		}
 	}

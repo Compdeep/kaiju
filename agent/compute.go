@@ -1055,19 +1055,26 @@ var reservedComputeParams = map[string]bool{
 	"task_files":     true,
 }
 
-// normaliseContextPairs turns the declared {key, value} list into the map the
+// normaliseContextPairs turns the declared "key=value" list into the map the
 // rest of this file works with, and leaves every other shape alone.
 //
-// The schema asks for a list because a map whose keys nobody can name in
-// advance is the one shape strict cannot express, and one field like that takes
-// the WHOLE plan document off strict rather than just this tool. What arrives
-// here is still whatever the sender chose: a list from a model reading the
-// current schema, a map from one taught on the old one or from a programmatic
-// caller, and a bare string from a reference that resolved to text — see
-// excerpt_reference_test.go, which holds both of the latter two.
+// The schema asks for a list of STRINGS because of two separate limits on a
+// strict schema, and one field breaking either takes the WHOLE plan document
+// off strict rather than just this tool. A map whose keys nobody can name in
+// advance cannot be expressed at all, which rules out the obvious shape. A list
+// of {key, value} objects can be expressed, but sits two levels below params
+// and put the document one level past the nesting a strict schema may use; a
+// list of strings is one level and stays inside it.
 //
-// A pair missing its key is dropped rather than guessed at: an unnamed value in
-// the coder's Available Data section is a value it cannot refer to.
+// What arrives here is still whatever the sender chose: a list of strings from a
+// model reading the current schema, a list of {key, value} objects from one
+// taught on the shape before it, a map from an older one or a programmatic
+// caller, and a bare string from a reference that resolved to text — see
+// excerpt_reference_test.go, which holds the last two.
+//
+// An entry with no name is dropped rather than guessed at: an unnamed value in
+// the coder's Available Data section is a value it cannot refer to. Only the
+// FIRST "=" separates, so a value may contain as many as it likes.
 func normaliseContextPairs(v any) any {
 	list, ok := v.([]any)
 	if !ok {
@@ -1075,15 +1082,26 @@ func normaliseContextPairs(v any) any {
 	}
 	out := make(map[string]any, len(list))
 	for _, e := range list {
-		pair, ok := e.(map[string]any)
-		if !ok {
-			return v // not the declared shape; hand it on untouched
+		switch entry := e.(type) {
+		case string:
+			key, value, found := strings.Cut(entry, "=")
+			key = strings.TrimSpace(key)
+			if !found || key == "" {
+				continue
+			}
+			out[key] = value
+		case map[string]any:
+			// The shape this field declared before the nesting limit forced the
+			// change. Still accepted, because a model does not re-read the
+			// schema mid-run and a caller may have been written against it.
+			key, _ := entry["key"].(string)
+			if key == "" {
+				continue
+			}
+			out[key] = entry["value"]
+		default:
+			return v // not a shape this understands; hand it on untouched
 		}
-		key, _ := pair["key"].(string)
-		if key == "" {
-			continue
-		}
-		out[key] = pair["value"]
 	}
 	if len(out) == 0 {
 		return v

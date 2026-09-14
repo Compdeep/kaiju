@@ -297,7 +297,7 @@ func (w *WebFetch) Parameters() json.RawMessage {
 			"focus": {"type": "string", "description": "For summary mode: what to extract (e.g. 'pricing and shipping policies', 'key competitors')"},
 			"method": {"type": "string", "description": "HTTP method (default: GET)", "enum": ["GET", "POST"]},
 			"body": {"type": "string", "description": "Request body (for POST)"},
-			"headers": {"type": "array", "description": "Additional HTTP headers (override the browser defaults), as {name, value} pairs. Rarely needed — a full browser header set is sent automatically.", "items": {"type": "object", "additionalProperties": false, "required": ["name", "value"], "properties": {"name": {"type": "string"}, "value": {"type": "string"}}}},
+			"headers": {"type": "array", "description": "Additional HTTP headers (override the browser defaults), one \"Name: value\" string per entry. Rarely needed — a full browser header set is sent automatically.", "items": {"type": "string"}},
 			"referer": {"type": "string", "description": "The page this URL was found on — set it to where you got the link (the search-results page, or the site's own homepage like https://example.com/). Many sites return 403 for requests with a blank referer; supplying a plausible one often gets through. Optional but recommended when fetching a ${step.N.results.M.url} from a search."}
 		},
 		"required": ["url"],
@@ -397,17 +397,27 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 	// document off strict, not just this tool. The map is still read: it is
 	// what every caller wrote before, and what a model taught on the old shape
 	// still sends.
+	// Three shapes, because the declared one has changed twice and a model does
+	// not re-read the schema mid-run. A list of "Name: value" strings is what the
+	// schema asks for now; a list of {name, value} objects is what it asked for
+	// before the nesting limit forced the change; a map is what it asked for
+	// before strict. Only the first ":" separates, so a value may contain more.
 	switch h := params["headers"].(type) {
 	case []any:
 		for _, e := range h {
-			pair, ok := e.(map[string]any)
-			if !ok {
-				continue
-			}
-			name, _ := pair["name"].(string)
-			value, _ := pair["value"].(string)
-			if name != "" {
-				req.Header.Set(name, value)
+			switch entry := e.(type) {
+			case string:
+				name, value, found := strings.Cut(entry, ":")
+				name = strings.TrimSpace(name)
+				if found && name != "" {
+					req.Header.Set(name, strings.TrimSpace(value))
+				}
+			case map[string]any:
+				name, _ := entry["name"].(string)
+				value, _ := entry["value"].(string)
+				if name != "" {
+					req.Header.Set(name, value)
+				}
 			}
 		}
 	case map[string]any:

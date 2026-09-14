@@ -88,14 +88,10 @@ func (g *Git) Parameters() json.RawMessage {
 				"enum": ["status", "log", "diff", "add", "commit", "branch_list", "branch_create", "checkout", "push", "pull", "show", "stash", "tag", "reset", "merge"],
 				"description": "Git action to perform"
 			},
-			"args": {"type": "string", "description": "Additional arguments (e.g. file paths, branch names, commit messages)"},
+			"args": {"type": "string", "description": "Additional arguments (e.g. file paths, branch names, commit messages) — required for commit, branch_create, checkout and merge"},
 			"path": {"type": "string", "description": "Working directory (default: current directory)"}
 		},
 		"required": ["action"],
-		"allOf": [
-			{"if": {"properties": {"action": {"enum": ["commit", "branch_create", "checkout", "merge"]}}, "required": ["action"]},
-			 "then": {"required": ["args"]}}
-		],
 		"additionalProperties": false
 	}`)
 }

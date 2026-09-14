@@ -259,7 +259,50 @@ func closedSchema(raw json.RawMessage) json.RawMessage {
  *       claim strict for the document at all.
  * param: m - the node, modified in place.
  */
+// outsideStrict names the keywords a strict schema has no use for.
+//
+// Two reasons a keyword lands here, and they are different reasons. Some state
+// a rule about the FINISHED document — if/then/else, and the allOf that holds
+// them — which a filter built before the first token cannot act on, because it
+// answers "what may this document contain" and the filter only ever asks "what
+// may come next". The rest constrain a value's CONTENT rather than the shape
+// around it — a string's length or pattern, a number's range — and shape is all
+// a filter carries.
+//
+// Dropping them here loses nothing, because the provider could not have applied
+// them either way, and it is dropped from the SENT copy alone: the tool's own
+// schema is untouched, and dispatcher_validation.go still reads every one of
+// these off it and enforces them against the finished arguments. That split is
+// the point. The two readers do not have the same powers, and a schema written
+// for the one that reads whole documents must not disable the one that reads
+// tokens.
+//
+// Sending one instead was not a small loss. A provider that checks refuses the
+// request; one that does not accepts it, builds no filter, and answers
+// unconstrained — and nothing in the reply tells the two apart. Five tools
+// carried an allOf/if/then written for the validator, and from the day the plan
+// schema began embedding tool schemas no plan was constrained at all.
+var outsideStrict = []string{
+	"allOf", "if", "then", "else", "not", "oneOf",
+	"dependentSchemas", "dependentRequired", "dependencies",
+	"patternProperties", "propertyNames", "unevaluatedProperties",
+	"minLength", "maxLength", "pattern",
+	"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+	"minItems", "maxItems", "uniqueItems", "contains", "minContains", "maxContains",
+	"format", "default",
+}
+
+// dropOutsideStrict removes from one node the keywords a strict schema has no
+// use for. Called on every node the walk reaches, so a keyword nested inside a
+// branch is removed as surely as one at the root.
+func dropOutsideStrict(m map[string]any) {
+	for _, k := range outsideStrict {
+		delete(m, k)
+	}
+}
+
 func closeOne(_ string, m map[string]any) {
+	dropOutsideStrict(m)
 	if !declaresProperties(m) {
 		return
 	}

@@ -59,7 +59,7 @@ var frozenPromptOrder = []string{
 }
 
 var frozenPrompts = map[string]frozenPrompt{
-	"SOUL": {"03802a1782d4ffb3", 6524},
+	"SOUL": {"84a8aede96d54aae", 3767},
 	// The auto lane's, and only its own now: the chat lane asks a different
 	// question with a different prompt, so this one says which lane it is for.
 	"ROUTE": {"4771c8698ef76629", 3097},
@@ -67,7 +67,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	// things, and asking both in one reply let the words starve the decision.
 	"RECALL":          {"867c79be8a26ea3e", 1196},
 	"PREFLIGHT":       {"a2b9b41e91f4a918", 6354},
-	"EXECUTIVE":       {"a417aa26aac75e09", 8291},
+	"EXECUTIVE":       {"03d663361ea12a00", 11369},
 	"AGGREGATOR":      {"a782c5558ef001d0", 3631},
 	"REFRAME_PLAN":    {"d29f36e12276e5d3", 3503},
 	"REFRAME_REFLECT": {"9135887028deee2a", 3434},

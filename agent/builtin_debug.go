@@ -83,7 +83,8 @@ var debugParamSchema = json.RawMessage(`{
 	"properties": {
 		"problem": {"type": "string", "description": "The failure to diagnose and fix: exact error messages, file paths, module names, and what was being attempted. This is Holmes's investigation brief."}
 	},
-	"required": ["problem"]
+	"required": ["problem"],
+	"additionalProperties": false
 }`)
 
 func (d *DebugTool) Parameters() json.RawMessage { return debugParamSchema }

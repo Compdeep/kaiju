@@ -58,7 +58,8 @@ func (t *OfficeExtract) Parameters() json.RawMessage {
 			"path": {"type": "string", "description": "Path to the .docx, .pptx, or .xlsx file to read."},
 			"max_chars": {"type": "integer", "description": "Optional cap on returned characters (default 200000)."}
 		},
-		"required": ["path"]
+		"required": ["path"],
+		"additionalProperties": false
 	}`)
 }
 

@@ -272,7 +272,8 @@ var serviceParamSchema = json.RawMessage(`{
 		"lines":   {"type": "integer", "description": "Number of log lines to return (default 50, for logs action)"},
 		"stream":  {"type": "string", "enum": ["out","err","both"], "description": "Which log stream to tail (default both, for logs action)"}
 	},
-	"required": ["action"]
+	"required": ["action"],
+	"additionalProperties": false
 }`)
 
 func (s *Service) Parameters() json.RawMessage { return serviceParamSchema }

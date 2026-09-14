@@ -15,12 +15,15 @@
 // Each failure is logged with a [dispatch:reject] prefix so traces can
 // count rejection rates without a dedicated metric.
 //
-// Compute is not special-cased here. Its schema doesn't set
-// `additionalProperties: false`, so JSON Schema default (true) applies
-// and validateDirectParams allows extras (the dotted "context.foo" key
-// pattern compute uses for context injection). Bash explicitly sets
-// `additionalProperties: false`, so its extras get rejected. Each tool
-// declares its own strictness; the validator just reads.
+// Compute is not special-cased here, and no longer needs to be. It used to
+// leave `additionalProperties` unset so the dotted "context.foo" keys it
+// wired data through would pass, which meant its declared shape and the
+// shape a model could actually produce disagreed: closeOne sets
+// `additionalProperties: false` on every schema it sends, so a strict plan
+// could not carry such a key at all while this still accepted one. Compute
+// and edit_file now declare false as well, and data reaches them through
+// the `context` list. Each tool declares its own strictness; the validator
+// just reads.
 
 package agent
 
@@ -353,7 +356,7 @@ func validatePlanWiring(toolName string, dependsOn []string, params map[string]a
 	}
 	log.Printf("[dispatch:reject] %s: depends_on %v but no ${node...} templates — data flow incomplete",
 		toolName, dependsOn)
-	return fmt.Errorf("tool %s declares depends_on %v but no ${step.N.field} placeholder appears anywhere in params — if you depend on those steps' data, reference it inline (e.g. \"context.csv\": \"${step.0.content}\"); if you meant pure sequencing, compute/edit_file is the wrong tool",
+	return fmt.Errorf("tool %s declares depends_on %v but no ${step.N.field} placeholder appears anywhere in params — if you depend on those steps' data, put it in context (e.g. \"context\": [\"csv=${step.0.content}\"]); if you meant pure sequencing, compute/edit_file is the wrong tool",
 		toolName, dependsOn)
 }
 

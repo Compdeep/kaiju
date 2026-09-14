@@ -38,7 +38,7 @@ func TestComputeInputs_AcceptsAWiredCompute(t *testing.T) {
 	plan := []PlanStep{
 		{Tool: "file_read", Tag: "read_csv", Params: map[string]any{"path": "x.csv"}},
 		{Type: "compute", Tool: "compute", Tag: "rank", Params: map[string]any{
-			"goal": "rank the rows", "context.csv": "${step.read_csv.content}",
+			"goal": "rank the rows", "context": []any{"csv=${step.read_csv.content}"},
 		}},
 	}
 	if errs := validatePlanComputeInputs(plan); len(errs) != 0 {

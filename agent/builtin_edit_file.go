@@ -103,7 +103,8 @@ var editFileParamSchema = json.RawMessage(`{
 		"context": {"type": "array", "description": "Optional data from upstream steps, one \"key=value\" string per entry — wire a ${step.<tag>.<field>} placeholder into the value, e.g. \"spec=${step.read_spec.content}\". A list of strings rather than an object because a map whose keys nobody can name in advance cannot be carried by a strict schema, and one such field takes the whole plan document off strict.", "items": {"type": "string"}},
 		"hints": {"type": "array", "items": {"type": "string"}, "description": "Optional error messages from previous failed attempts on this file."}
 	},
-	"required": ["task_files", "goal"]
+	"required": ["task_files", "goal"],
+	"additionalProperties": false
 }`)
 
 func (e *EditFileTool) Parameters() json.RawMessage {

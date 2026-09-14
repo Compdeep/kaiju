@@ -1112,6 +1112,15 @@ func normaliseContextPairs(v any) any {
 // mergeWiredParamsIntoContext collects any non-reserved keys from params and
 // merges them into ctxData so the coder's "Available Data" section shows
 // them. Preserves a pre-existing ctxData if one is present.
+//
+// A plan cannot produce such a key any more. compute declares
+// additionalProperties false, so validatePlanParams refuses an invented name at
+// planning and validateDirectParams refuses it again at dispatch; data arrives
+// through the context list instead. What is left for this to catch is a caller
+// that reaches Execute without passing either check — the API, a test, an
+// application embedding the engine — and dropping a value such a caller wired
+// would starve the coder silently rather than tell anyone. So it stays, and it
+// is a backstop now rather than the wiring route it was written as.
 func mergeWiredParamsIntoContext(params map[string]any, ctxData any) any {
 	var extras map[string]any
 	for k, v := range params {

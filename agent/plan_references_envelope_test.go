@@ -48,7 +48,7 @@ func envRegistry(t *testing.T) *toolapi.Registry {
 func TestValidatePlanReferences_AcceptsEnvelopeContent(t *testing.T) {
 	steps := []PlanStep{
 		{Tool: "file_read", Params: map[string]any{"path": "ttm.csv"}},
-		{Tool: "compute", Params: map[string]any{"goal": "rank rows", "context.csv": "${step.0.content}"}, DependsOn: []int{0}},
+		{Tool: "compute", Params: map[string]any{"goal": "rank rows", "context": []any{"csv=${step.0.content}"}}, DependsOn: []int{0}},
 	}
 	if errs := validatePlanReferences(steps, envRegistry(t)); len(errs) != 0 {
 		t.Errorf("a correct file_read → compute plan was rejected: %v", errs)

@@ -62,7 +62,8 @@ var computeParamSchema = json.RawMessage(`{
 		"language":   {"type": "string", "description": "Preferred language (auto-detected if omitted)"},
 		"task_files": {"type": "array", "items": {"type": "string"}, "description": "DEPRECATED on compute — use the edit_file tool instead for known-path file edits. Only the architect's internal tasks in deep mode set this meaningfully."}
 	},
-	"required": ["goal", "mode"]
+	"required": ["goal", "mode"],
+	"additionalProperties": false
 }`)
 
 func (c *ComputeTool) Parameters() json.RawMessage {

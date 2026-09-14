@@ -155,7 +155,7 @@ func TestValidateDataFlow_AllowsEmptyDependsOn(t *testing.T) {
 }
 
 func TestValidateDataFlow_AllowsWhenTemplatePresent(t *testing.T) {
-	params := map[string]any{"context.x": "${node.n1.content}"}
+	params := map[string]any{"context": []any{"x=${node.n1.content}"}}
 	if err := validatePlanWiring("compute", []string{"n1"}, params); err != nil {
 		t.Fatalf("deps + template → should allow, got %v", err)
 	}
@@ -165,7 +165,7 @@ func TestValidateDataFlow_AllowsStepFormTemplate(t *testing.T) {
 	// Pre-rewrite (planStepsToNodes) the template still uses ${step.N}.
 	// Validator should accept either form so the check survives both
 	// stages of the pipeline if it ever fires earlier than expected.
-	params := map[string]any{"context.x": "${step.0.content}"}
+	params := map[string]any{"context": []any{"x=${step.0.content}"}}
 	if err := validatePlanWiring("compute", []string{"n1"}, params); err != nil {
 		t.Fatalf("step.N templates should also count as wired, got %v", err)
 	}
@@ -362,5 +362,42 @@ func TestTheDispatchCapIsNotDeclaredInAnExecutionPath(t *testing.T) {
 			t.Errorf("%s declares maxToolResultLen; it belongs with truncateToolResult, "+
 				"which applies it for both paths", f)
 		}
+	}
+}
+
+// Data reaches compute through the context list, and an invented parameter name
+// is refused at planning rather than at dispatch.
+//
+// The planner used to wire data by naming a key nobody had declared —
+// "context.csv": "${step.0.content}" — which worked only because compute left
+// additionalProperties unset. closeOne sets it false on every schema it sends,
+// so a plan held to that schema could not write such a key at all, while this
+// validator went on accepting one: the shape a model could produce and the shape
+// we claimed to accept had come apart. Compute and edit_file declare false now,
+// and the error names what the tool does take, so the executive can correct
+// against it instead of re-planning the same step.
+func TestPlanParams_ContextIsAListAndAnInventedNameIsRefused(t *testing.T) {
+	reg := toolapi.NewRegistry()
+	a := &Agent{registry: reg}
+	if err := reg.Register(NewComputeTool(a)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	listed := []PlanStep{{Tool: "compute", Tag: "c", Params: map[string]any{
+		"goal": "rank rows", "mode": "shallow",
+		"context": []any{"csv=${step.read_csv.content}"}}}}
+	if errs := validatePlanParams(listed, reg); len(errs) != 0 {
+		t.Errorf("a compute wired through context was rejected: %v", errs)
+	}
+
+	dotted := []PlanStep{{Tool: "compute", Tag: "c", Params: map[string]any{
+		"goal": "rank rows", "mode": "shallow",
+		"context.csv": "${step.read_csv.content}"}}}
+	errs := validatePlanParams(dotted, reg)
+	if len(errs) == 0 {
+		t.Fatal("an invented parameter name was accepted, so the declared shape and the sent shape still disagree")
+	}
+	if !strings.Contains(errs[0], "context.csv") || !strings.Contains(errs[0], "context") {
+		t.Errorf("the error should name the key it refused and what the tool does take, got: %s", errs[0])
 	}
 }

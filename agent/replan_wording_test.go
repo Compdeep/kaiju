@@ -35,7 +35,7 @@ func TestTheNoSuchStepCorrectionDoesNotRestateTheFailedMove(t *testing.T) {
 	steps := []PlanStep{
 		{Tool: "web_search", Tag: "search_server_count", Params: map[string]any{"query": "x"}},
 		{Tool: "compute", Tag: "calc", Params: map[string]any{
-			"context.tam": "${step.fetch_tam.content}", // a tag from an EARLIER arc
+			"context": []any{"tam=${step.fetch_tam.content}"}, // a tag from an EARLIER arc
 		}},
 	}
 	errs := validatePlanReferences(steps, nil)

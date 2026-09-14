@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,6 +164,48 @@ func (b *Bash) Excerpts() []toolapi.Excerpt {
 func (b *Bash) OutputSchema() json.RawMessage {
 	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(bashData{}))
 }
+
+// Destination is the host this command reaches, so two commands that reach the
+// same one are spaced rather than sent together.
+//
+// Ten steps that do not depend on each other should run at once, and they
+// should not when they all arrive at one service. web_fetch has said where its
+// calls go since the throttle was keyed on a destination; a URL inside a shell
+// string said nothing, so every bash step shared one key and ten curls to one
+// host left in the same second. Measured on a live run: eight of ten came back
+// as the host's HTML error page rather than its plain-text reply, which is the
+// form the model could not read as a failure — so the fan-out destroyed the
+// error messages that would have corrected it.
+//
+// The first URL in the command decides, because a command that fetches twice is
+// already spaced by the first. A command with no URL yields "", which is what an
+// unaddressed tool has always returned and is never delayed: ten greps over a
+// local file stay parallel.
+//
+// Parsing stays here. The engine compares two opaque strings and does not learn
+// that either is a host.
+func (b *Bash) Destination(params map[string]any) string {
+	cmd, _ := params["command"].(string)
+	raw := commandURL.FindString(cmd)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// commandURL finds the first http(s) URL in a command, stopping at whatever
+// shell syntax ends it — a quote, whitespace, a pipe, a redirect or a separator.
+// Case-insensitive on the scheme: a host is no less itself in capitals, and
+// missing one there would send those requests together.
+var commandURL = regexp.MustCompile(`(?i)https?://[^\s"'` + "`" + `|<>&;)]+`)
+
+// Throttle is the gap between two commands reaching ONE host. The same 1.2
+// seconds web_fetch declares, for the same reason and against the same service.
+func (b *Bash) Throttle() time.Duration { return 1200 * time.Millisecond }
 
 /*
  * Parameters returns the JSON schema for the tool's input parameters.

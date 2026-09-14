@@ -121,3 +121,35 @@ func TestAShellIsNotAReadOnlyTool(t *testing.T) {
 			"would ship an unrestricted shell enabled", got)
 	}
 }
+
+// A call that discloses secrets is not observation, and a call that only reads
+// an archive's index is not a write. Both tools used to answer with one rating
+// whatever they were asked to do, which meant the masked env listing every run
+// makes and the unmasked one that returns API keys in full sat at the same tier,
+// and reading an archive demanded what writing one does.
+func TestImpact_RatedOnWhatTheCallDoesNotWhatTheToolIs(t *testing.T) {
+	env := &EnvList{}
+	if got := env.Impact(map[string]any{}); got != toolapi.ImpactObserve {
+		t.Errorf("a masked env listing should stay observe, got %d", got)
+	}
+	if got := env.Impact(map[string]any{"filter": "PATH"}); got != toolapi.ImpactObserve {
+		t.Errorf("a filtered masked listing should stay observe, got %d", got)
+	}
+	if got := env.Impact(map[string]any{"show_sensitive": true}); got <= toolapi.ImpactObserve {
+		t.Errorf("show_sensitive returns secrets in full and must rate above observe, got %d", got)
+	}
+
+	arc := &Archive{}
+	if got := arc.Impact(map[string]any{"action": "list"}); got != toolapi.ImpactObserve {
+		t.Errorf("listing an archive reads and writes nothing, got %d", got)
+	}
+	for _, action := range []string{"create", "extract"} {
+		if got := arc.Impact(map[string]any{"action": action}); got <= toolapi.ImpactObserve {
+			t.Errorf("archive %s writes to the filesystem and must rate above observe, got %d", action, got)
+		}
+	}
+	// No action named is the abstract question, answered with the worst it does.
+	if got := arc.Impact(map[string]any{}); got <= toolapi.ImpactObserve {
+		t.Errorf("archive with no action should answer with the worst it can do, got %d", got)
+	}
+}

@@ -47,11 +47,26 @@ func (e *EnvList) Description() string {
 
 /*
  * Impact returns the safety impact level for this tool.
- * desc: Always returns ImpactObserve since listing environment variables is non-destructive.
- * param: _ - unused parameters
- * return: ImpactObserve (0)
+ * desc: Listing variable names is observation. Printing the values behind the
+ *        masked ones is not: show_sensitive returns API keys, tokens and
+ *        passwords in full, and a tool rated observe is the tier a run reaches
+ *        for without asking. Rated on what the call does rather than on what
+ *        the tool is, the same way git and service are, so the masked listing
+ *        every run makes stays free and the unmasked one meets the bar its
+ *        output deserves.
+ *
+ *        Affect rather than control: it changes nothing and is not
+ *        irreversible. What it does is disclose, and observe is the one tier
+ *        that says a call has no consequence worth weighing.
+ * param: params - read for show_sensitive.
+ * return: ImpactObserve for a masked listing, ImpactAffect for an unmasked one.
  */
-func (e *EnvList) Impact(map[string]any) int { return toolapi.ImpactObserve }
+func (e *EnvList) Impact(params map[string]any) int {
+	if show, _ := params["show_sensitive"].(bool); show {
+		return toolapi.ImpactAffect
+	}
+	return toolapi.ImpactObserve
+}
 
 /*
  * OutputSchema returns the JSON schema for the tool's output.

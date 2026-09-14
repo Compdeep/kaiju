@@ -314,8 +314,19 @@ func validateDirectParams(tool toolapi.Tool, params map[string]any) error {
 	if schema.AdditionalProperties {
 		return nil // tool's schema allows extras; no name left to reject
 	}
+	// What the engine puts on the node itself, which no model wrote and the
+	// schema deliberately does not name — see toolapi.EngineSet. Without this,
+	// closing compute's schema refused every coder node deep mode grafts, since
+	// each carries the architect's blueprint, brief, structure and signatures.
+	engineSet := map[string]bool{}
+	for _, key := range toolapi.EngineSetParamsOf(tool) {
+		engineSet[key] = true
+	}
 	for key := range params {
 		if _, declared := schema.Properties[key]; declared {
+			continue
+		}
+		if engineSet[key] {
 			continue
 		}
 		allowed := sortedKeys(schema.Properties)

@@ -267,6 +267,43 @@ func ToolCategories(t Tool) []string {
  *       services throttles each of them separately, and a tool with one
  *       destination throttles as a whole.
  */
+// EngineSet is implemented by a tool whose call may carry parameters the engine
+// puts there itself.
+//
+// A tool's Parameters() is two things at once: what a plan may write, and what
+// the dispatcher will accept. Those are the same for almost every tool and
+// differ for the few the engine grafts nodes for — compute's deep mode is the
+// one today, where an architect's reply becomes a coder node carrying fields no
+// model wrote. Declaring those in the schema would offer them to the planner and
+// send them to the provider inside the plan document, where a shape strict
+// cannot express takes every tool's branch with it.
+//
+// A tool that does not implement this is unaffected: its schema is the whole of
+// what it accepts, which is the ordinary case.
+type EngineSet interface {
+	/*
+	 * EngineSetParams names parameters the engine sets rather than the planner.
+	 * desc: Accepted at dispatch in addition to the schema's own properties, and
+	 *       still refused in a plan, where naming one would be a guess.
+	 * return: the parameter names, or nil.
+	 */
+	EngineSetParams() []string
+}
+
+/*
+ * EngineSetParamsOf returns the parameters a tool says the engine sets.
+ * desc: Nil for a tool that does not implement EngineSet, which is the
+ *       ordinary case and means its schema is the whole of what it accepts.
+ * param: tool - the tool to ask.
+ * return: the names, or nil.
+ */
+func EngineSetParamsOf(tool Tool) []string {
+	if es, ok := tool.(EngineSet); ok {
+		return es.EngineSetParams()
+	}
+	return nil
+}
+
 type Throttled interface {
 	/*
 	 * Throttle returns the minimum interval between consecutive invocations.

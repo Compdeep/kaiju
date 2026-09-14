@@ -57,11 +57,25 @@ func (a *Archive) OutputSchema() json.RawMessage {
 /*
  * Impact returns the safety impact level for this tool.
  * desc: Always returns ImpactAffect since archive operations modify the filesystem.
- * param: params - unused parameters
- * return: ImpactAffect (1)
+ * param: params - read for the action.
+ * return: ImpactObserve for list, ImpactAffect for extract and create.
  */
 func (a *Archive) Impact(params map[string]any) int {
-	return toolapi.ImpactAffect
+	// Rated per action, as git and service are. One flat rating meant reading an
+	// archive's index demanded the tier that writing one does, so a run that
+	// only wanted to see what was inside was held to the bar for changing the
+	// filesystem.
+	//
+	// No action named is the abstract question — what tier is archive — and the
+	// honest answer is the worst it can do, since extract writes wherever dest
+	// points.
+	action, _ := params["action"].(string)
+	switch action {
+	case "list":
+		return toolapi.ImpactObserve
+	default:
+		return toolapi.ImpactAffect
+	}
 }
 
 /*

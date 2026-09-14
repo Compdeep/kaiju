@@ -30,6 +30,34 @@ var _ toolapi.TypedExecutor = (*ComputeTool)(nil)
  */
 func NewComputeTool(a *Agent) *ComputeTool { return &ComputeTool{agent: a} }
 
+/*
+ * EngineSetParams names the parameters the engine puts on a compute node
+ * itself, which a plan never writes.
+ * desc: Deep mode does not run the planner's compute step directly. The
+ *       architect breaks the work into items and the scheduler grafts a shallow
+ *       compute node per item, carrying what that coder needs to agree with the
+ *       others — the blueprint it works from, its brief, the workspace tree, the
+ *       signatures they share, and anything to run or start afterwards. Those
+ *       are built in Go from the architect's reply; no model writes them.
+ *
+ *       They are deliberately NOT in Parameters(). That schema is the contract
+ *       the planner is held to, and it travels to the provider inside the plan
+ *       document: naming them there would offer a planner seven fields it must
+ *       never use, and two of them are shapes a strict schema cannot carry at
+ *       all — interfaces is a map whose keys are whatever the architect named,
+ *       and one such field takes the WHOLE plan document off strict. Measured:
+ *       adding them put .steps[].params back to additionalProperties true.
+ *
+ *       So the schema says what a plan may write and this says what the engine
+ *       adds, and validateDirectParams reads both. A plan naming one of these is
+ *       still refused at planning, which is correct — it would be guessing at a
+ *       value only the architect can know.
+ * return: the parameter names the engine sets, never the planner.
+ */
+func (c *ComputeTool) EngineSetParams() []string {
+	return []string{"blueprint_ref", "blueprint_mode", "brief", "structure", "interfaces", "execute", "service"}
+}
+
 func (c *ComputeTool) Name() string { return "compute" }
 
 func (c *ComputeTool) Description() string {

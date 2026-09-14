@@ -100,7 +100,7 @@ var editFileParamSchema = json.RawMessage(`{
 		},
 		"goal": {"type": "string", "description": "What the Coder should do to the file (e.g., 'add CORS middleware', 'fix the missing comma on line 11', 'implement the health endpoint')."},
 		"language": {"type": "string", "description": "Optional language hint. Auto-detected from the file extension if omitted."},
-		"context": {"type": "object", "description": "Optional data from upstream steps (wire ${step.N.field} placeholders inside this object). Handed to the Coder as reference material."},
+		"context": {"type": "array", "description": "Optional data from upstream steps, as {key, value} pairs — wire ${step.<tag>.<field>} placeholders into the value. A list rather than an object because a map whose keys nobody can name in advance is the one shape a strict schema cannot carry, and one such field takes the whole plan document off strict.", "items": {"type": "object", "additionalProperties": false, "required": ["key", "value"], "properties": {"key": {"type": "string"}, "value": {"type": "string"}}}},
 		"hints": {"type": "array", "items": {"type": "string"}, "description": "Optional error messages from previous failed attempts on this file."}
 	},
 	"required": ["task_files", "goal"]

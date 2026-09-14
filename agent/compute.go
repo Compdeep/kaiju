@@ -32,7 +32,7 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 	goal, _ := params["goal"].(string)
 	mode, _ := params["mode"].(string)
 	query, _ := params["query"].(string)
-	ctxData := params["context"]
+	ctxData := normaliseContextPairs(params["context"])
 	hints, _ := params["hints"].([]any)
 	blueprintRef, _ := params["blueprint_ref"].(string)
 	blueprintMode, _ := params["blueprint_mode"].(string) // "follow" (default) or "reference"
@@ -1053,6 +1053,42 @@ var reservedComputeParams = map[string]bool{
 	"service":        true,
 	"interfaces":     true,
 	"task_files":     true,
+}
+
+// normaliseContextPairs turns the declared {key, value} list into the map the
+// rest of this file works with, and leaves every other shape alone.
+//
+// The schema asks for a list because a map whose keys nobody can name in
+// advance is the one shape strict cannot express, and one field like that takes
+// the WHOLE plan document off strict rather than just this tool. What arrives
+// here is still whatever the sender chose: a list from a model reading the
+// current schema, a map from one taught on the old one or from a programmatic
+// caller, and a bare string from a reference that resolved to text — see
+// excerpt_reference_test.go, which holds both of the latter two.
+//
+// A pair missing its key is dropped rather than guessed at: an unnamed value in
+// the coder's Available Data section is a value it cannot refer to.
+func normaliseContextPairs(v any) any {
+	list, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	out := make(map[string]any, len(list))
+	for _, e := range list {
+		pair, ok := e.(map[string]any)
+		if !ok {
+			return v // not the declared shape; hand it on untouched
+		}
+		key, _ := pair["key"].(string)
+		if key == "" {
+			continue
+		}
+		out[key] = pair["value"]
+	}
+	if len(out) == 0 {
+		return v
+	}
+	return out
 }
 
 // mergeWiredParamsIntoContext collects any non-reserved keys from params and

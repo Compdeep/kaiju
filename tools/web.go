@@ -297,7 +297,7 @@ func (w *WebFetch) Parameters() json.RawMessage {
 			"focus": {"type": "string", "description": "For summary mode: what to extract (e.g. 'pricing and shipping policies', 'key competitors')"},
 			"method": {"type": "string", "description": "HTTP method (default: GET)", "enum": ["GET", "POST"]},
 			"body": {"type": "string", "description": "Request body (for POST)"},
-			"headers": {"type": "object", "description": "Additional HTTP headers (override the browser defaults). Rarely needed — a full browser header set is sent automatically.", "additionalProperties": {"type": "string"}},
+			"headers": {"type": "array", "description": "Additional HTTP headers (override the browser defaults), as {name, value} pairs. Rarely needed — a full browser header set is sent automatically.", "items": {"type": "object", "additionalProperties": false, "required": ["name", "value"], "properties": {"name": {"type": "string"}, "value": {"type": "string"}}}},
 			"referer": {"type": "string", "description": "The page this URL was found on — set it to where you got the link (the search-results page, or the site's own homepage like https://example.com/). Many sites return 403 for requests with a blank referer; supplying a plausible one often gets through. Optional but recommended when fetching a ${step.N.results.M.url} from a search."}
 		},
 		"required": ["url"],
@@ -391,8 +391,27 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 	// came from); a caller-supplied `headers` value still overrides any of these.
 	referer, _ := params["referer"].(string)
 	setBrowserHeaders(req, referer)
-	if headers, ok := params["headers"].(map[string]any); ok {
-		for k, v := range headers {
+	// Two shapes. The schema declares a list of {name, value} pairs, because a
+	// map whose keys nobody can name in advance is the one thing a strict
+	// schema cannot express — and one field like that takes the WHOLE plan
+	// document off strict, not just this tool. The map is still read: it is
+	// what every caller wrote before, and what a model taught on the old shape
+	// still sends.
+	switch h := params["headers"].(type) {
+	case []any:
+		for _, e := range h {
+			pair, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := pair["name"].(string)
+			value, _ := pair["value"].(string)
+			if name != "" {
+				req.Header.Set(name, value)
+			}
+		}
+	case map[string]any:
+		for k, v := range h {
 			if vs, ok := v.(string); ok {
 				req.Header.Set(k, vs)
 			}

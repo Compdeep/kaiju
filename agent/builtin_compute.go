@@ -57,7 +57,7 @@ var computeParamSchema = json.RawMessage(`{
 		"goal":       {"type": "string", "description": "What to compute — describe the desired outcome, not how to implement it"},
 		"mode":       {"type": "string", "enum": ["shallow","deep"], "description": "shallow: fast single pass. deep: plans approach first then implements"},
 		"query":      {"type": "string", "description": "The original user request for full context"},
-		"context":    {"type": "object", "description": "Data from upstream steps (wire via ${step.N.field} placeholders inside this object)"},
+		"context":    {"type": "array", "description": "Data from upstream steps, as {key, value} pairs — wire ${step.<tag>.<field>} placeholders into the value. A list rather than an object because a map whose keys nobody can name in advance is the one shape a strict schema cannot carry, and one such field takes the whole plan document off strict.", "items": {"type": "object", "additionalProperties": false, "required": ["key", "value"], "properties": {"key": {"type": "string"}, "value": {"type": "string"}}}},
 		"hints":      {"type": "array", "items": {"type": "string"}, "description": "Error messages from previous failed attempts"},
 		"language":   {"type": "string", "description": "Preferred language (auto-detected if omitted)"},
 		"task_files": {"type": "array", "items": {"type": "string"}, "description": "DEPRECATED on compute — use the edit_file tool instead for known-path file edits. Only the architect's internal tasks in deep mode set this meaningfully."}

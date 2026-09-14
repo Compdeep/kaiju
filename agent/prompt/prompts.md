@@ -85,6 +85,12 @@ conversation. Whether the thing should be done is not decided here.
 
 Asking how something is done is conversation. Asking for it to be done is not.
 
+What is true RIGHT NOW is not general knowledge, however ordinary the subject.
+A question about the present state of anything — a value as it stands, what a
+page says today, where something is at this moment — has to be looked up or
+worked out, so it is "agent". The same question without the present tense is
+conversation.
+
 Decide from what the person is working on. There is no default to fall back on:
 an action sent to chat never happens, and a conversation sent to the graph costs
 five more calls and a minute before they get a sentence back.

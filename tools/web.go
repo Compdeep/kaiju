@@ -92,11 +92,16 @@ func (w *WebFetch) Name() string { return "web_fetch" }
 
 /*
  * Description returns a human-readable description of the tool.
- * desc: Explains the available fetch formats: markdown, text, raw, and summary.
+ * desc: Names the three formats ExecuteTyped actually branches on. It used to
+ *        offer "raw (full HTML)", which no branch has ever read — a request for
+ *        it fell through to markdown — and to omit "extract", which is the one
+ *        worth reaching for. This line is what the planner reads: the schema is
+ *        never shown to a model, only rendered as a signature, so a format named
+ *        here and not implemented is a format the planner will ask for.
  * return: description string
  */
 func (w *WebFetch) Description() string {
-	return "Fetch a URL and extract its content. Formats: markdown (default, extracts main article content), text (plain text), raw (full HTML), summary (LLM-extracted key information with optional focus)."
+	return "Fetch a URL and return its content. Formats: markdown (default, the page as clean text), text (the same, stripped of markup), extract (only the parts matching `focus`, quoted word for word). The whole page is always written to disk and its path returned, whichever you pick."
 }
 
 /*
@@ -293,7 +298,7 @@ func (w *WebFetch) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"url": {"type": "string", "description": "A real HTTP/HTTPS URL to fetch. Must start with http:// or https://. Never use placeholder values — wire upstream URLs in via ${step.N.results.M.url} (or similar dot-paths into the upstream JSON)."},
-			"format": {"type": "string", "description": "What to return inline. markdown (default) — the page as clean text, best for reading a reference document you are going to work from. text — the same, stripped of all markup. extract — only the parts matching the focus, quoted word for word, read across the WHOLE page; use this when you need exact names, parameters or figures, because it does not paraphrase. The full page is always written to disk and its path returned, whichever you pick.", "enum": ["markdown", "text", "extract", "summary"]},
+			"format": {"type": "string", "description": "What to return inline. markdown (default) — the page as clean text, best for reading a reference document you are going to work from. text — the same, stripped of all markup. extract — only the parts matching the focus, quoted word for word, read across the WHOLE page; use this when you need exact names, parameters or figures, because it does not paraphrase. The full page is always written to disk and its path returned, whichever you pick.", "enum": ["markdown", "text", "extract"]},
 			"focus": {"type": "string", "description": "For summary mode: what to extract (e.g. 'pricing and shipping policies', 'key competitors')"},
 			"method": {"type": "string", "description": "HTTP method (default: GET)", "enum": ["GET", "POST"]},
 			"body": {"type": "string", "description": "Request body (for POST)"},
@@ -529,6 +534,11 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 			// "summary" is what this was called when it paraphrased. It never
 			// did — its instruction has always been to extract — so the name is
 			// kept working rather than breaking every caller that learned it.
+			//
+			// Accepted, not offered. It is out of the enum because a planner
+			// held to that enum should be choosing between three behaviours,
+			// not four names for three; a caller that already knows the old
+			// name still reaches the same branch.
 			focus, _ := params["focus"].(string)
 			out, err = w.formatExtract(ctx, status, rawURL, bodyBytes, focus)
 		default: // markdown

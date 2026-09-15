@@ -77,7 +77,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	"MICROPLANNER":    {"fb204a95b4bb5c47", 4599},
 	"OBSERVER":        {"b3f8806d71436c94", 1041},
 	"GROUPREVIEW":     {"1a80f0a1888030f0", 1956},
-	"REFLECTOR":       {"117081fcf087d36e", 6552},
+	"REFLECTOR":       {"fe5544fccce7faa4", 6677},
 	"INTERJECTION":    {"417d206c70b452b2", 788},
 	"CLASSIFIER":      {"1f813616ac1a9d88", 270},
 	"CURATOR":         {"7345d945b7f1b76f", 3199},

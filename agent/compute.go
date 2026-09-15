@@ -234,32 +234,63 @@ func computeSessionID(g *Graph) string {
 	return g.SessionID
 }
 
-// projectPrefix returns the project root path, resolved in order:
-//  1. graph.ProjectRoot (set by architect)
-//  2. common prefix of taskFiles (e.g. "project/kaiju_webapp/" from task_files paths)
-//  3. "project/<session>/" — one directory per conversation
-//  4. "project/" (legacy fallback, when there is no session to name)
+// projectPrefix returns the project root path: the conversation's own directory,
+// and under it the name the architect chose.
 //
-// Step 3 exists because only the architect sets ProjectRoot, so every run that
-// never planned deeply fell through to a bare "project/" shared by every
-// conversation on the machine. A later run's coder then met a file it had not
-// written, was handed no content to match against, and failed applying edits to
-// something another conversation had left there.
+//	project/<session>/<architect's name>/    a deep run that named a project
+//	project/<session>/                       every other run with a session
+//	project/                                 no session to name
+//
+// The conversation used to come LAST, after the architect's name and after the
+// common prefix of taskFiles. Which meant it applied only to runs that never
+// planned deeply: an architect returning "project/kaiju_webapp" put that
+// directory at the top, beside the per-conversation ones and belonging to none
+// of them. Two conversations asked for the same kind of thing, the model chose
+// the same name twice, and the second run's coder met files it had not written —
+// the same failure the per-conversation directory was added to stop, one level
+// up from where it was stopped.
+//
+// So the conversation is the root now and the architect names a directory inside
+// it. Nothing on disk moves; a run resuming a session written before this finds
+// its files where the paths stored with it say they are, since those paths are
+// carried whole rather than rebuilt.
 func projectPrefix(g *Graph, taskFiles []string) string {
-	if g != nil && g.ProjectRoot != "" {
-		root := g.ProjectRoot
-		if !strings.HasSuffix(root, "/") {
-			root += "/"
-		}
-		return root
-	}
-	if root := rootFromTaskFiles(taskFiles); root != "" {
-		return root
-	}
+	base := "project/"
 	if dir := threadDir(computeSessionID(g)); dir != "" {
-		return "project/" + dir + "/"
+		base += dir + "/"
 	}
-	return "project/"
+	if g != nil && g.ProjectRoot != "" {
+		if name := projectName(g.ProjectRoot, base); name != "" {
+			return base + name + "/"
+		}
+		// A root that is only the conversation's own directory, or only
+		// "project/", names nothing further — the base already is the answer.
+		return base
+	}
+	if root := rootFromTaskFiles(taskFiles, base); root != "" {
+		return root
+	}
+	return base
+}
+
+// projectName reduces the architect's chosen root to the one directory it names
+// beneath base, or "" when it names none.
+//
+// The architect writes what it likes: "kaiju_webapp", "project/kaiju_webapp",
+// and — once it has been shown paths under the new layout — the whole
+// "project/<session>/kaiju_webapp". All three mean the same directory, and
+// splicing the base onto the last of them would repeat it.
+func projectName(root, base string) string {
+	name := strings.Trim(root, "/")
+	name = strings.TrimPrefix(name, strings.Trim(base, "/"))
+	name = strings.TrimPrefix(name, "/")
+	name = strings.TrimPrefix(name, "project/")
+	// Only the first segment. A root naming a file or a subdirectory inside the
+	// project still identifies the project by its first part.
+	if i := strings.Index(name, "/"); i >= 0 {
+		name = name[:i]
+	}
+	return name
 }
 
 // threadDir reduces a session id to one path segment, or "" when there is
@@ -282,22 +313,28 @@ func threadDir(sessionID string) string {
 	return id
 }
 
-// rootFromTaskFiles extracts the project root from task_files paths.
-// If all paths share a common prefix deeper than "project/" (e.g.
-// "project/kaiju_webapp/"), returns that prefix. Returns "" if no
-// consistent root can be determined.
-func rootFromTaskFiles(taskFiles []string) string {
+// rootFromTaskFiles extracts the project root from task_files paths: the one
+// directory they all share beneath base. Returns "" when they do not agree on
+// one, or name none.
+//
+// base is passed in rather than assumed to be "project/" so that a set of paths
+// written under the conversation's directory —
+// "project/<session>/kaiju_webapp/src/main.jsx" — yields the project and not
+// the conversation. Read against a bare "project/" it would have stopped at the
+// session id and called that the project root.
+func rootFromTaskFiles(taskFiles []string, base string) string {
 	if len(taskFiles) == 0 {
 		return ""
 	}
-	// Split first path: "project/kaiju_webapp/src/main.jsx" → ["project", "kaiju_webapp", "src", "main.jsx"]
-	parts := strings.Split(taskFiles[0], "/")
-	if len(parts) < 3 || parts[0] != "project" {
-		return ""
+	rest := strings.TrimPrefix(taskFiles[0], base)
+	if rest == taskFiles[0] {
+		return "" // not under base at all
 	}
-	// Candidate root is "project/<name>/"
-	candidate := parts[0] + "/" + parts[1] + "/"
-	// Verify all task_files share this prefix
+	i := strings.Index(rest, "/")
+	if i <= 0 {
+		return "" // a file directly in base names no project
+	}
+	candidate := base + rest[:i] + "/"
 	for _, tf := range taskFiles[1:] {
 		if !strings.HasPrefix(tf, candidate) {
 			return ""

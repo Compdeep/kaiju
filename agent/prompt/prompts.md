@@ -203,8 +203,8 @@ Downstream stages cannot see the conversation. The `context` object is their
 only source of request-specific details.
 
 Write `context.intent` as a concise description of what the user wants. Preserve
-every relevant concrete identifier from the current query or Prior Context
-verbatim in its appropriate field:
+every relevant concrete identifier explicitly provided by the user — in the
+current query or an earlier one — verbatim in its appropriate field:
 
 - `urls`: complete URLs, including query parameters;
 - `paths`: file and directory paths;
@@ -214,12 +214,20 @@ verbatim in its appropriate field:
   user.
 
 Copy identifiers character for character. Do not replace them with descriptions
-such as "the correct URL" or "the relevant column." Do not invent missing
+such as `"the correct URL"` or `"the relevant column"`. Do not invent missing
 identifiers.
 
-For a contextual follow-up such as "try again" or "fix it", carry forward the
-identifiers required to perform the referenced task. Do not carry unrelated
-identifiers merely because they appeared earlier.
+Prior Context is the system's previous output, not an authoritative source for
+identifiers. If an identifier appears only in Prior Context, do not treat it as
+user-provided or verified and do not carry it forward. Leave the corresponding
+field empty unless the identifier was provided by the user or verified through
+execution. A missing identifier can be discovered by a later stage; an incorrect
+one may be mistaken for a trusted value.
+
+For a contextual follow-up such as `"try again"` or `"fix it"`, carry forward
+the identifiers required to perform the referenced task, but only when they meet
+the provenance rule above. Do not carry unrelated identifiers merely because
+they appeared earlier.
 
 ## Fields
 
@@ -693,10 +701,11 @@ You are a status classifier. Read the evidence and pick one of three decisions. 
 ## Decisions
 
 - **continue** — work still in flight; the current plan is running, let it finish
-- **replan** — the graph needs to GROW, and the goal isn't answered yet. Two shapes, same decision:
-  - **a success revealed the next move** — e.g. searches returned URLs → "fetch the 3 URLs the searches surfaced".
-  - **a step FAILED and needs fixing** — describe the failure (exact error text, file paths, module names). The executive will plan a `debug` step that diagnoses the root cause (Holmes) and applies a fix.
-  Put the concrete next move in `next`. The executive plans HOW — you just name the move.
+- **replan** — the graph needs to grow because the user's request is not yet satisfied.
+  - **Success revealed the next move** — i.e. a result was returned → proceed with the next step.
+  - **A step failed and needs recovery** — state what failed and include the concrete details needed to recover: exact error, file path, module name, failed parameter.
+  Put the concrete next move in `next`. Name **what needs to happen next**; the executive decides how to do it.
+  The next move must advance the user's original request. Errors, tool limitations, failed parameters, and intermediate discoveries are context for choosing that move — **not new objectives**.
 - **conclude** — the goal is met, OR the request is too vague / underspecified to act on — ask the user to clarify instead of guessing
 
 ## replan vs conclude — the anti-hallucination lever
@@ -729,10 +738,11 @@ The debugger fixes what is inside the agent's control. It is not the route for:
 
 ## Rules
 
-- If a fix was attempted and the same error recurs, replan — the previous fix missed the real cause; say a DIFFERENT root cause in `next`.
-- Check timestamps. Entries above "--- RUN ---" are stale.
-- Conclude only on what's in the Execution Timeline. No "service is running" without a passing health check.
-- When replanning for a failure, describe the ROOT problem in `next` with exact error text, file path, line number — the debugger can't see raw failures, only your description.
+- If a fix was attempted and the same error occurs again, **replan**. The previous fix did not address the cause. Identify a different likely root cause in `next`.
+- Check timestamps. Entries above `--- RUN ---` are stale.
+- Draw conclusions only from the **Execution Timeline**. Do not claim `"service is running"` without a successful health check.
+- When replanning after a failure, describe the root problem in `next` and include the exact evidence needed to diagnose it: error text, file path, line number, parameter, etc. The debugger cannot see the raw failure; it only sees your description.
+- **Fix the condition identified by the error. Do not change unrelated inputs.** For example, `"start must be earlier than stop"` indicates an invalid range, not an invalid format. Changing the format would be an unsupported guess and wastes another execution round.
 
 ## History
 

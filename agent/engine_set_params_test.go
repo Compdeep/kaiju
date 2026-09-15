@@ -13,6 +13,7 @@ package agent
 // interfaces is a map whose keys only the architect knows.
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -84,5 +85,106 @@ func TestEngineSetParams_TheyAreNotInTheSchemaTheProviderReceives(t *testing.T) 
 	}
 	for _, p := range llm.StrictProblems(sent) {
 		t.Errorf("the plan document cannot be enforced: %s: %s", p.Path, p.Why)
+	}
+}
+
+// task_files end to end, through every stage that reads a tool's schema.
+//
+// It used to be declared on compute with "DEPRECATED on compute — use the
+// edit_file tool instead" in its own description: the schema offered a planner a
+// parameter and told the same planner not to use it, while the architect set it
+// on every coder node. A description is advice, and advice is what a planner
+// weighs against the rest of its instructions. This is the refusal that advice
+// was asking for.
+//
+// Four stages read the schema and each has to land differently, which is why
+// this is one test and not four assertions in separate files: refusing a plan is
+// only correct if the architect's node still passes, and dropping it from the
+// signature is only correct if edit_file's own route is untouched.
+
+// The planner is not shown it.
+func TestTaskFiles_TheSignatureThePlannerReadsDoesNotOfferIt(t *testing.T) {
+	_, reg := computeOnlyAgent(t)
+	entry := toolIndexEntry(reg, "compute")
+	if entry == "" {
+		t.Fatal("compute has no index entry")
+	}
+	sig := entry[:strings.Index(entry, ")")+1]
+	if strings.Contains(sig, "task_files") {
+		t.Errorf("compute's signature still offers task_files: %s", sig)
+	}
+	// And the one it is meant to reach for instead still does.
+	edit := toolIndexEntry(reg, "edit_file")
+	if !strings.Contains(edit[:strings.Index(edit, ")")+1], "task_files") {
+		t.Errorf("edit_file's signature no longer offers task_files: %s", edit)
+	}
+}
+
+// A plan writing it is refused, and told which stage owns it rather than that it
+// does not exist — a planner may well have seen the name on a coder node in the
+// trace, and "does not exist" would be a lie it cannot act on.
+func TestTaskFiles_APlanWritingItIsRefusedAndToldWhy(t *testing.T) {
+	_, reg := computeOnlyAgent(t)
+	steps := []PlanStep{{Tool: "compute", Tag: "c", Params: map[string]any{
+		"goal": "edit the parser", "mode": "shallow",
+		"task_files": []any{"parser.go"}}}}
+	errs := validatePlanParams(steps, reg)
+	if len(errs) == 0 {
+		t.Fatal("a plan writing task_files on compute was accepted")
+	}
+	if !strings.Contains(errs[0], "task_files") {
+		t.Errorf("the correction does not name the parameter it refused: %s", errs[0])
+	}
+	if strings.Contains(errs[0], "does not exist") {
+		t.Errorf("the correction says the name does not exist, which is not true of it: %s", errs[0])
+	}
+	if !strings.Contains(errs[0], "sets") || !strings.Contains(errs[0], "a plan does not write it") {
+		t.Errorf("the correction does not say which stage owns it: %s", errs[0])
+	}
+}
+
+// The architect's coder node carries it and still dispatches. This is the half
+// that fails if task_files is simply deleted rather than moved.
+func TestTaskFiles_AnArchitectsCoderNodeStillCarriesIt(t *testing.T) {
+	_, reg := computeOnlyAgent(t)
+	tool, _ := reg.Get("compute")
+	params := map[string]any{
+		"goal": "build the parser", "mode": "shallow",
+		"task_files": []any{"project/s-1/webapp/parser.go"},
+	}
+	if err := validateDirectParams(tool, params); err != nil {
+		t.Fatalf("a coder node carrying task_files was refused at dispatch: %v", err)
+	}
+}
+
+// edit_file's own route is untouched: it declares task_files, requires it, and
+// hands it to compute through a Go call that never meets either validator.
+func TestTaskFiles_EditFilesOwnRouteIsUnchanged(t *testing.T) {
+	_, reg := computeOnlyAgent(t)
+	tool, ok := reg.Get("edit_file")
+	if !ok {
+		t.Fatal("edit_file not registered")
+	}
+	schema, err := parseToolSchema(tool.Parameters())
+	if err != nil {
+		t.Fatalf("edit_file schema: %v", err)
+	}
+	if _, declared := schema.Properties["task_files"]; !declared {
+		t.Fatal("edit_file no longer declares task_files")
+	}
+	var required bool
+	for _, r := range schema.Required {
+		if r == "task_files" {
+			required = true
+		}
+	}
+	if !required {
+		t.Error("edit_file no longer requires task_files")
+	}
+	// A plan using edit_file the way it is meant to is clean.
+	steps := []PlanStep{{Tool: "edit_file", Tag: "e", Params: map[string]any{
+		"goal": "add the CORS middleware", "task_files": []any{"server.go"}}}}
+	if errs := validatePlanParams(steps, reg); len(errs) != 0 {
+		t.Errorf("a correct edit_file step was rejected: %v", errs)
 	}
 }

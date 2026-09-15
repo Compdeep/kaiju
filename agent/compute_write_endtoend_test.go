@@ -271,12 +271,20 @@ func TestAScriptStillRunsAndItsOutputReachesTheNextStep(t *testing.T) {
 // text in a file that is already there.
 //
 // The write path is what changed; this asserts the branch above it did not.
+//
+// Planned as edit_file rather than as a compute carrying task_files. Both reach
+// the same branch — edit_file hands its parameters to runCompute — but only one
+// of them is a plan the engine accepts: compute sets task_files itself and a
+// plan naming it is refused at planning, which is what compute's own
+// description has said to do all along. This test wrote the refused form, and
+// the reply to the correction was the same plan three times over.
 func TestEditModeStillReplacesTextInAnExistingFile(t *testing.T) {
 	model := newStubModel(t, map[string]stubReply{
 		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "operate"}},
-		"plan": computePlanned("amend_notes", map[string]any{
+		"plan": plan(step("edit_file", "amend_notes", map[string]any{
+			"goal":       "replace the count in the notes",
 			"task_files": []string{"project/notes.txt"},
-		}),
+		})),
 		"submit_code": {Args: map[string]any{
 			"language": "text",
 			"filename": "project/notes.txt",
@@ -287,6 +295,9 @@ func TestEditModeStillReplacesTextInAnExistingFile(t *testing.T) {
 		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "amended"}},
 	})
 	a := agentWithCompute(t, model)
+	if err := a.registry.Register(NewEditFileTool(a)); err != nil {
+		t.Fatalf("register edit_file: %v", err)
+	}
 
 	existing := filepath.Join(a.cfg.Workspace, "project", "notes.txt")
 	if err := os.MkdirAll(filepath.Dir(existing), 0o755); err != nil {

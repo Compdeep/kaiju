@@ -3087,8 +3087,12 @@ func validatePlanReferencesIn(steps []PlanStep, registry *toolapi.Registry, grap
 //
 //   - a name the schema does not declare — web_search(topn: …), where the count
 //     knob is max_results. Checked only when the schema is closed
-//     (additionalProperties:false); an open-schema tool (compute, edit_file)
-//     legitimately takes extra dotted context.* keys, so extras are allowed there.
+//     (additionalProperties:false). It used to say compute and edit_file were
+//     open and legitimately took extra dotted context.* keys; both are closed now
+//     and data reaches them through the context list. A name the ENGINE sets on
+//     such a node, rather than the planner — toolapi.EngineSet — is refused here
+//     too, and said differently: it exists, and writing it is not the planner's
+//     to do.
 //   - a name the schema marks required that the step does not supply. Checked for
 //     every tool, open schema or closed, because requiring a parameter and
 //     allowing unlisted ones are separate statements. A step supplying none at all
@@ -3139,8 +3143,22 @@ func validatePlanParams(steps []PlanStep, registry *toolapi.Registry) []string {
 		if schema.AdditionalProperties {
 			continue // extras allowed → no name left to reject
 		}
+		// What the engine puts on the node itself — see toolapi.EngineSet. A plan
+		// naming one is still refused, because its value is something only the
+		// stage that sets it can know, but "does not exist" would be a lie about
+		// a name the planner may well have seen on a node in the trace.
+		engineSet := map[string]bool{}
+		for _, key := range toolapi.EngineSetParamsOf(tool) {
+			engineSet[key] = true
+		}
 		for key := range s.Params {
 			if _, declared := schema.Properties[key]; declared {
+				continue
+			}
+			if engineSet[key] {
+				errs = append(errs, fmt.Sprintf(
+					"step %d (%s): %s sets %q itself and a plan does not write it — %s accepts: %s",
+					i, s.Tool, s.Tool, key, s.Tool, strings.Join(sortedKeys(schema.Properties), ", ")))
 				continue
 			}
 			errs = append(errs, fmt.Sprintf("step %d (%s): parameter %q does not exist — %s accepts only: %s",

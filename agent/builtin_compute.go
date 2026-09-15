@@ -52,10 +52,18 @@ func NewComputeTool(a *Agent) *ComputeTool { return &ComputeTool{agent: a} }
  *       adds, and validateDirectParams reads both. A plan naming one of these is
  *       still refused at planning, which is correct — it would be guessing at a
  *       value only the architect can know.
+ *
+ *       task_files is here for a different reason and reaches the same place.
+ *       It was declared, and its own description said "DEPRECATED on compute —
+ *       use the edit_file tool instead", so the schema offered a planner a
+ *       parameter it told the same planner not to use, while the architect set
+ *       it on every coder node. A description is advice; this is the refusal
+ *       that advice was asking for. compute's Description already says where to
+ *       go instead, so the planner is not left without a route.
  * return: the parameter names the engine sets, never the planner.
  */
 func (c *ComputeTool) EngineSetParams() []string {
-	return []string{"blueprint_ref", "blueprint_mode", "brief", "structure", "interfaces", "execute", "service"}
+	return []string{"blueprint_ref", "blueprint_mode", "brief", "structure", "interfaces", "execute", "service", "task_files"}
 }
 
 func (c *ComputeTool) Name() string { return "compute" }
@@ -87,8 +95,7 @@ var computeParamSchema = json.RawMessage(`{
 		"query":      {"type": "string", "description": "The original user request for full context"},
 		"context":    {"type": "array", "description": "Data from upstream steps, one \"key=value\" string per entry — wire a ${step.<tag>.<field>} placeholder into the value, e.g. \"csv=${step.read_csv.content}\". A list of strings rather than an object because a map whose keys nobody can name in advance cannot be carried by a strict schema, and one such field takes the whole plan document off strict.", "items": {"type": "string"}},
 		"hints":      {"type": "array", "items": {"type": "string"}, "description": "Error messages from previous failed attempts"},
-		"language":   {"type": "string", "description": "Preferred language (auto-detected if omitted)"},
-		"task_files": {"type": "array", "items": {"type": "string"}, "description": "DEPRECATED on compute — use the edit_file tool instead for known-path file edits. Only the architect's internal tasks in deep mode set this meaningfully."}
+		"language":   {"type": "string", "description": "Preferred language (auto-detected if omitted)"}
 	},
 	"required": ["goal", "mode"],
 	"additionalProperties": false

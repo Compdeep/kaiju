@@ -109,7 +109,11 @@ func reflectorSchema() llm.ToolDef {
 					},
 					"next": {
 						"type": "string",
-						"description": "Only if replan: the concrete next move. SUCCESS lead → e.g. 'fetch the 3 URLs the searches surfaced'. FAILURE to fix → describe the failure with exact error text, file paths, module names (the executive will plan a debug step to diagnose + fix it). Name the move, not the tool call."
+						"description": "Only if replan: what needs to happen next, in one or two sentences. Name the move, not the call that performs it, and write NO parameter values — no formats, identifiers, addresses or settings to use instead. The stage that plans owns those. What failed goes in 'failure', not here."
+					},
+					"failure": {
+						"type": "string",
+						"description": "Only if replan after a failure: what was tried and what came back, quoted exactly from the timeline — the inputs the step used and the error text it returned. Copy; do not paraphrase, correct, or add a value that is not there."
 					},
 					"outcome": {
 						"type": "string",

@@ -25,11 +25,36 @@ type reflectionOutput struct {
 	Summary    string          `json:"summary"`             // status description
 	Problem    string          `json:"problem,omitempty"`   // only for investigate: what's wrong (passed to Holmes)
 	Next       string          `json:"next,omitempty"`      // only for replan: the concrete next step the executive should plan (steps succeeded and revealed more work)
+	Failure    string          `json:"failure,omitempty"`   // only for replan after a failure: what was tried and what came back, quoted — see the split below
 	RawOutcome json.RawMessage `json:"outcome"`             // only for conclude — may be string or object
 	Outcome    string          `json:"-"`                   // parsed from RawOutcome
 	Reason     string          `json:"reason"`              // backward compat — used as Summary fallback
 	Aggregate  *bool           `json:"aggregate,omitempty"` // only for conclude
 }
+
+// Next and Failure are separate because they come from different places, and
+// nothing downstream can tell them apart once they are in one string.
+//
+// Failure is READ: the inputs a step used and the text that came back. Next is
+// DECIDED: what should happen instead. Written into one field, a value the
+// reflector read off an error and a value it supplied from memory arrive looking
+// identical — and reframe_plan is told to preserve operational specifics exactly,
+// correctly, because it cannot know which is which either.
+//
+// Measured across two runs of the same request. Every value the reflector took
+// from a result was right; every value it supplied was wrong, and each one cost
+// a round:
+//
+//	read off the API's own error, "try YYYY-MMM-DD {HH:MN} format"
+//	  '2026-Sep-15'                                            accepted
+//	supplied from memory
+//	  '2026-09-15_00:00:00'   Cannot interpret date
+//	  '2026-09-15_00:00'      Cannot interpret date
+//	  '@500@10'               Cannot find central body
+//
+// So the cut is by provenance, at the only stage that knows it. The planner
+// receives what failed and chooses the replacement itself, which is the stage
+// that owns parameters.
 
 /*
  * ReflectionBody is the typed output of a reflection (or interjection) node.

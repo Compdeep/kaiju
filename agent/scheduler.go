@@ -119,8 +119,9 @@ func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget
  * param: budget - the execution budget.
  * return: resolved IGX intent and error.
  */
-// replanFrameTemplate is the frame handed to the executive on a replan (%s = the
-// reflector's `next`). It MUST keep teaching step wiring — leading with a
+// replanFrameTemplate is the frame handed to the executive on a replan (first %s
+// = the reflector's `next`, second = replanFailureBlock). It MUST keep teaching
+// step wiring — leading with a
 // web_search→web_fetch chain (`${step.0.results.0.url}`, `depends_on:[0]`) — and
 // MUST NOT tell the planner to avoid `${step}`/`depends_on` for its new steps.
 // A prompt that bans wiring here is exactly what collapsed replans to flat plans
@@ -129,7 +130,45 @@ func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget
 // What it carries is what is true of EVERY re-plan: the plan so far has run, and
 // this is how new steps are wired. Anything true only of some re-plans is added
 // at the call site — see replanDebugParagraph.
-const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n\nPlan the next steps needed to close what remains and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. a `web_search` tagged `find_docs`, then a `web_fetch` whose url param is `${step.find_docs.results.0.url}`. The reference IS the wiring; do not also write `depends_on`. A reference addresses the NEW steps in THIS plan, by their tags. A step that already RAN is not addressable from here — neither its position nor its tag reaches back, because both name steps in THIS plan. What it returned is above, as a tool result: take the value out of that and write the value itself into the param, with `depends_on:[]`. A value you write literally must be one you can point to in the material above — a tool result, or the request itself. Copying it from there is what the sentence before this one asks for. What you may not write is a value you recall or assume: a URL, an id or a path you cannot find above does not exist, and the step that produces it is what to plan instead."
+//
+// The second slot is the failure the reflector quoted, kept apart from its
+// `next` because the two have different standing. `next` is a judgement about
+// what should happen; the failure block is a copy of what did. The last sentence
+// of this template tells the planner it may write only values it can point to in
+// the material above — and before the split, a value the reflector had invented
+// sat in that material, inside `next`, and satisfied the test. Now what sits
+// there is the inputs that failed and the text that came back, which is what the
+// rule was written to admit.
+/*
+ * replanFrame assembles the re-plan frame from the reflector's two fields.
+ * desc: One place builds it, so what the planner is shown and what a test reads
+ *       cannot drift apart.
+ * param: next - the reflector's proposed move.
+ * param: failureBlock - replanFailureBlock's output, or "".
+ * return: the frame appended to the objective.
+ */
+func replanFrame(next, failureBlock string) string {
+	return fmt.Sprintf(replanFrameTemplate, next, failureBlock)
+}
+
+/*
+ * replanFailureBlock renders the failure the reflector quoted, or nothing.
+ * desc: Headed and labelled so the planner reads it as a record rather than as
+ *       an instruction. A replan after a success carries no failure and gets no
+ *       heading, rather than an empty one it has to interpret.
+ * param: failure - the reflector's `failure` field, possibly empty.
+ * return: the block to splice into the frame, with its own blank line, or "".
+ */
+func replanFailureBlock(failure string) string {
+	failure = strings.TrimSpace(failure)
+	if failure == "" {
+		return ""
+	}
+	return "\nWhat was tried, and what came back:\n" + failure +
+		"\n\nThose are the inputs that failed, not the ones to use. Choose the replacement yourself.\n"
+}
+
+const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n%s\nPlan the next steps needed to close what remains and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. a `web_search` tagged `find_docs`, then a `web_fetch` whose url param is `${step.find_docs.results.0.url}`. The reference IS the wiring; do not also write `depends_on`. A reference addresses the NEW steps in THIS plan, by their tags. A step that already RAN is not addressable from here — neither its position nor its tag reaches back, because both name steps in THIS plan. What it returned is above, as a tool result: take the value out of that and write the value itself into the param, with `depends_on:[]`. A value you write literally must be one you can point to in the material above — a tool result, or the request itself. Copying it from there is what the sentence before this one asks for. What you may not write is a value you recall or assume: a URL, an id or a path you cannot find above does not exist, and the step that produces it is what to plan instead."
 
 // replanDebugParagraph is added to the frame only when something has actually
 // failed.
@@ -1702,7 +1741,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// Anchor the user's goal verbatim (formatTrigger inside the
 						// executive); hand it a generic frame: what's already done
 						// (worklog) + the reflector's `next`. The executive decides HOW.
-						frame := fmt.Sprintf(replanFrameTemplate, next)
+						frame := replanFrame(next, replanFailureBlock(ref.Failure))
 						// How to diagnose a failure, only where there is one.
 						// FailedNodes already excludes the ones a debug cycle
 						// has since addressed, so a run whose failures were

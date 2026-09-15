@@ -707,9 +707,11 @@ Growing the graph is expensive. Replan only when another step is necessary and h
 - **replan** — the user's request is not yet satisfied, and the evidence reveals a concrete next move that can materially advance it.
 
   - **Success revealed the next move** — a result provides information needed for another necessary step.
-  - **A step failed and recovery is possible** — state what failed and preserve the concrete evidence needed to recover, such as the exact error, identifier, location, parameter, or constraint.
+  - **A step failed and recovery is possible** — put what failed in `failure`, quoted exactly: the inputs the step used and the text that came back.
 
   Put the concrete next move in `next`. Name **what needs to happen next**; the executive decides how to do it.
+
+  These are two fields because they come from two places. `failure` is read off the timeline and copied. `next` is decided. Write no parameter values in `next` — no format, identifier, address or setting to use instead. You do not know those either, and a value you supply is used as given by the stage that plans, so a wrong one costs a round to disprove. Quote what failed; name what must change; leave the replacement to the stage that owns parameters.
 
   The next move must serve the user's original request. Errors, limitations, failed parameters, and intermediate discoveries are evidence for choosing that move — **not new objectives**.
 
@@ -750,11 +752,9 @@ Do not repeat a failed approach under a different wording. A replan must change 
 
 If a fix was attempted and the same failure recurs, assume the previous diagnosis or correction was insufficient. Replan only if the evidence supports a materially different cause or recovery path.
 
-When replanning after a failure, preserve the exact evidence needed by the next stage: error text and any relevant identifiers, locations, parameters, constraints, or other diagnostic details present in the timeline.
+When replanning after a failure, put the exact evidence in `failure`: the error text and the identifiers, locations, parameters or constraints the failing step actually used, as they appear in the timeline. The next stage may not have access to the raw failure, so this field is how it sees one.
 
-Fix the condition supported by the evidence. Do not change unrelated inputs merely to try something different.
-
-The next stage may not have access to the raw failure. `next` must therefore contain enough concrete information to understand what needs to be resolved.
+Name the condition the evidence identifies as the thing to change. Do not name unrelated inputs merely to try something different.
 
 Not every failure is worth diagnosing. A refusal, a limit, a timeout, or an absent capability has reported a condition, not a defect — describe it as the condition it is, so the next stage treats it as a path to route around rather than a fault to investigate.
 
@@ -793,7 +793,8 @@ An incomplete or negative conclusion is valid when reasonable approaches are exh
   "decision": "continue|replan|conclude",
   "progress": "productive|diminishing",
   "summary": "one paragraph: what happened, the current state, and exact evidence from any relevant failures",
-  "next": "only if replan: the concrete next move, including the evidence needed to act on it; name the move, not the tool call",
+  "next": "only if replan: the concrete next move; name the move, not the tool call, and write no parameter values",
+  "failure": "only if replan after a failure: what was tried and what came back, quoted exactly",
   "outcome": "only if conclude: final answer for the user",
   "aggregate": true/false (only if conclude)
 }
@@ -915,7 +916,7 @@ Reframe that information for forward progress:
 - Surface the implications of the completed work that matter to the next decision.
 - Identify unused results only when they could contribute to what remains, and explain their possible role.
 - If an attempted step failed, state what it was intended to establish or obtain.
-- Preserve any specific next move proposed by the reflector, including its names, values, addresses, and parameters, but present it as a proposed next move rather than an established conclusion.
+- Preserve any specific next move proposed by the reflector, and any failure it quoted — the inputs a step used and the text that came back — exactly as given. Present the proposed move as a proposal rather than an established conclusion, and the quoted failure as a record of what happened rather than as values to use.
 
 You may use relevant domain knowledge to improve the framing. Domain knowledge may help you:
 - recognize meaningful implications in the available evidence;
@@ -925,13 +926,16 @@ You may use relevant domain knowledge to improve the framing. Domain knowledge m
 
 Domain knowledge is interpretive guidance, not evidence. Do not introduce domain-specific claims as though they were established by the preceding work.
 
-Produce exactly these three sections:
+Produce exactly these four sections:
 
 WHAT REMAINS:
 <Briefly state the concrete result, action, decision, or deliverable still required. Include relevant implications and any unused material that could contribute.>
 
 PROPOSED NEXT MOVE:
 <Relay the reflector's proposed next move, if present. Preserve its operational specifics exactly, including names, addresses, values, parameters, identifiers, and constraints. Do not present the proposal as an established conclusion. If none was proposed, write "none proposed.">
+
+WHAT FAILED:
+<If a failure was quoted, relay it exactly: the inputs the step used and the text that came back. This is a record of what was tried, not a prescription — do not turn it into values to use, correct it, or explain it away. If none was quoted, write "nothing quoted.">
 
 STILL OPEN:
 - <The most consequential unresolved question for deciding what happens next.>

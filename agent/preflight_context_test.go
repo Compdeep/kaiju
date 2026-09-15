@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -98,6 +99,90 @@ func TestPreflightContext_SchemaComesFromTheStruct(t *testing.T) {
 		}
 		if p.Description == "" {
 			t.Errorf("%q has no description; the model is told the name and not what goes in it", field)
+		}
+	}
+}
+
+// A heading is a claim about what sits under it, so an identifier goes under the
+// one that describes it.
+//
+// Text() names each field to the planner — "URLs", "Paths", "Selectors and field
+// names" — and Paths is documented as file and directory paths. A URL there tells
+// the planner a web page is a file on this machine. Observed on a run that named
+// JPL Horizons: the same address arrived in urls AND in paths, so the planner was
+// shown it twice under two descriptions, only one of them true.
+func TestPreflightContext_AWebAddressIsFiledAsAURLNotAPath(t *testing.T) {
+	var raw preflightContextRaw
+	if err := json.Unmarshal([]byte(`{
+		"intent": "get the barycenter position",
+		"urls": ["https://ssd.jpl.nasa.gov/horizons/"],
+		"paths": ["https://ssd.jpl.nasa.gov/horizons/"]
+	}`), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(raw.Paths) != 0 {
+		t.Errorf("a web address was left under Paths: %v", raw.Paths)
+	}
+	if len(raw.URLs) != 1 {
+		t.Errorf("the duplicate was added again instead of folded in: %v", raw.URLs)
+	}
+	if text := raw.Text(); strings.Contains(text, "Paths:") {
+		t.Errorf("the planner is shown a Paths heading with nothing true under it:\n%s", text)
+	}
+}
+
+// Moved, not dropped. An identifier the model bothered to copy is one the task
+// probably names, and losing it silently is worse than a wrong heading.
+func TestPreflightContext_AMisfiledAddressIsMovedRatherThanLost(t *testing.T) {
+	var raw preflightContextRaw
+	if err := json.Unmarshal([]byte(`{
+		"intent": "read the spec",
+		"paths": ["https://example.com/spec.html", "docs/notes.md"]
+	}`), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !slices.Contains(raw.URLs, "https://example.com/spec.html") {
+		t.Errorf("the address was dropped instead of moved: urls=%v", raw.URLs)
+	}
+	if !slices.Contains(raw.Paths, "docs/notes.md") {
+		t.Errorf("a real path was moved with it: paths=%v", raw.Paths)
+	}
+	if len(raw.Paths) != 1 {
+		t.Errorf("Paths should hold only the real path, got %v", raw.Paths)
+	}
+}
+
+// Only the scheme decides it. A path can carry everything else a URL can, and a
+// file named like a query string is still a file.
+func TestPreflightContext_OnlyTheSchemeMakesItAURL(t *testing.T) {
+	stay := []string{
+		"report.html?v=2",
+		"docs/api.json",
+		"/var/log/syslog",
+		"C:\\Users\\me\\notes.txt",
+		"ssd.jpl.nasa.gov/horizons/", // no scheme: not this check's business
+		"ftp://files.example.com/x",  // a scheme, but not one web_fetch takes
+	}
+	var raw preflightContextRaw
+	body, _ := json.Marshal(map[string]any{"intent": "x", "paths": stay})
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(raw.Paths) != len(stay) {
+		t.Errorf("entries were moved that are not web addresses: kept %v", raw.Paths)
+	}
+	if len(raw.URLs) != 0 {
+		t.Errorf("something was filed as a URL that has no web scheme: %v", raw.URLs)
+	}
+
+	for _, moved := range []string{"http://example.com/a", "HTTPS://Example.com/B", "  https://example.com/c  "} {
+		var r preflightContextRaw
+		b, _ := json.Marshal(map[string]any{"intent": "x", "paths": []string{moved}})
+		if err := json.Unmarshal(b, &r); err != nil {
+			t.Fatalf("unmarshal %q: %v", moved, err)
+		}
+		if len(r.Paths) != 0 || len(r.URLs) != 1 {
+			t.Errorf("%q was not filed as a URL: paths=%v urls=%v", moved, r.Paths, r.URLs)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/gates"
@@ -140,6 +141,7 @@ type preflightContextRaw struct {
 func (r *preflightContextRaw) UnmarshalJSON(b []byte) error {
 	var asObject PreflightContext
 	if err := json.Unmarshal(b, &asObject); err == nil {
+		asObject.filed()
 		r.PreflightContext = asObject
 		return nil
 	}
@@ -149,6 +151,56 @@ func (r *preflightContextRaw) UnmarshalJSON(b []byte) error {
 	}
 	r.PreflightContext = PreflightContext{Intent: asText}
 	return nil
+}
+
+/*
+ * filed puts each identifier under the heading that describes it.
+ * desc: The fields are separate because Text() names each one to the planner,
+ *       and a heading is a claim about what the thing under it is. Paths says
+ *       "file and directory paths", so a URL there tells the planner a web page
+ *       is a file on this machine.
+ *
+ *       Observed: a run that named JPL Horizons got the same URL in urls AND in
+ *       paths, so the planner was shown it twice under two descriptions. Only
+ *       one of those was true.
+ *
+ *       Just the one rule, because it is the only one that can be decided
+ *       rather than judged: a path beginning http:// or https:// is a URL, and
+ *       nothing else about the entry has to be understood to know that. Whether
+ *       a selector is really a field name or a proper noun is a reading, not a
+ *       test, and is left to the prompt.
+ *
+ *       Moved rather than dropped. An identifier the model bothered to copy is
+ *       one the task probably names, and losing it silently is worse than
+ *       having it under the wrong heading — which is why the duplicate is
+ *       folded in rather than added twice.
+ */
+func (c *PreflightContext) filed() {
+	kept := c.Paths[:0]
+	for _, p := range c.Paths {
+		if !isWebURL(p) {
+			kept = append(kept, p)
+			continue
+		}
+		if !slices.Contains(c.URLs, p) {
+			c.URLs = append(c.URLs, p)
+		}
+	}
+	c.Paths = kept
+	if len(c.Paths) == 0 {
+		c.Paths = nil // omitempty, so an emptied list does not print an empty heading
+	}
+}
+
+// isWebURL reports whether an entry names a web address rather than a file.
+//
+// The scheme alone, because that is what the distinction rests on. A path can
+// contain anything else a URL can — dots, slashes, a query-looking suffix — and
+// a file called report.html?v=2 is still a file.
+func isWebURL(s string) bool {
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(strings.ToLower(s), "http://") ||
+		strings.HasPrefix(strings.ToLower(s), "https://")
 }
 
 /*

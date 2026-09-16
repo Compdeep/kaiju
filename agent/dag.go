@@ -1029,16 +1029,46 @@ func (g *Graph) payloadOf(b NodeBody) json.RawMessage {
 	return out
 }
 
-// shortenPayloadValues walks a decoded payload and cuts long strings, leaving
-// every key, every nesting level and every list length as they were. What is
-// lost is the middle of a long value; what survives is which fields exist.
+/*
+ * shortenPayloadValues walks a decoded payload and cuts long strings, leaving
+ * every key, every nesting level and every list length as they were. What is
+ * lost is the middle of a long value; what survives is which fields exist, and
+ * both ends of each one.
+ *
+ * Both ends, because the end is where a failure says what it was. The bash tool
+ * already keeps the head and the tail of stderr for exactly that reason — its
+ * comment records that a head-only cut left "Traceback (most recent call last):"
+ * with no error type under it — and this function then re-cut the same string
+ * head-only and threw that tail away again.
+ *
+ * A real trace: a step that computed the solar system barycenter printed its
+ * results, then raised TypeError on a trailing line. Its stderr was a download
+ * progress bar followed by the traceback, and what reached the trace was 400
+ * characters of progress bar. The reflector had the error and concluded
+ * correctly; an operator reading the trace saw a failed node with no cause.
+ *
+ * The budget is unchanged, only split. A value short enough to keep is still
+ * untouched, and the marker still says how long the whole thing was.
+ */
 func shortenPayloadValues(v any, max int) any {
 	switch t := v.(type) {
 	case string:
 		if len(t) <= max {
 			return t
 		}
-		return t[:max] + fmt.Sprintf("… (%d chars)", len(t))
+		// Split the same budget rather than widening it: a trace that grew to
+		// keep tails would be cut somewhere else instead, by payloadWholeChars,
+		// which drops a payload whole rather than shortening it.
+		head := max / 2
+		tail := max - head
+		// Runes, not bytes. Cutting mid-character leaves a replacement glyph in
+		// the middle of a path or a Japanese message, and json.Marshal happily
+		// carries it to a reader who cannot tell it from the data.
+		r := []rune(t)
+		if len(r) <= head+tail {
+			return t
+		}
+		return string(r[:head]) + fmt.Sprintf("… (%d chars) …", len(t)) + string(r[len(r)-tail:])
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, inner := range t {

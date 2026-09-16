@@ -55,3 +55,74 @@ func TestNodePayload_NilWithoutABody(t *testing.T) {
 		t.Fatal("no body, no payload")
 	}
 }
+
+/*
+ * The end of a cut value survives, because the end is where a failure says what
+ * it was.
+ *
+ * The bash tool keeps the head and the tail of stderr on purpose — a head-only
+ * cut left "Traceback (most recent call last):" with no error type under it —
+ * and this payload shortener then re-cut the same string head-only and threw
+ * that tail away. In the run that prompted this, a step's stderr was a download
+ * progress bar followed by a TypeError, and the trace carried 400 characters of
+ * progress bar and no error at all.
+ */
+func TestNodePayload_KeepsTheEndOfALongValue(t *testing.T) {
+	stderr := strings.Repeat("[####] 50% de440.bsp\r", 200) +
+		"Traceback (most recent call last):\n  File \"<string>\", line 31\n" +
+		"TypeError: unsupported operand type(s) for -: 'Distance' and 'Distance'\n"
+
+	g := NewGraph()
+	id := g.AddNode(&Node{Type: NodeTool, Tag: "compute_ssb", ToolName: "bash"})
+	body, err := json.Marshal(map[string]any{"stderr": stderr, "exit_code": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolMessage{
+		Type: "command", Status: toolapi.StatusError, Data: body,
+	}})
+
+	var got map[string]any
+	if err := json.Unmarshal(nodePayload(g.Get(id)), &got); err != nil {
+		t.Fatalf("payload unreadable: %v", err)
+	}
+	cut, _ := got["stderr"].(string)
+	if !strings.Contains(cut, "TypeError: unsupported operand") {
+		t.Errorf("the error was cut off; a reader sees a failed node with no cause:\n%s", cut)
+	}
+	if !strings.Contains(cut, "[####] 50%") {
+		t.Errorf("the start was dropped; how the command began is also evidence:\n%s", cut)
+	}
+	if len(cut) > payloadValueChars+40 {
+		t.Errorf("the budget grew: %d chars", len(cut))
+	}
+	if !strings.Contains(cut, "chars") {
+		t.Errorf("a cut value must still say how long the whole thing was: %s", cut)
+	}
+}
+
+// A cut lands between characters, not inside one. Cutting a multi-byte
+// character in half leaves a replacement glyph that a reader cannot tell from
+// the data, and json.Marshal carries it without complaint.
+func TestNodePayload_DoesNotCutAMultiByteCharacterInHalf(t *testing.T) {
+	long := strings.Repeat("設定ファイルが読み込めません。", 200)
+
+	g := NewGraph()
+	id := g.AddNode(&Node{Type: NodeTool, Tag: "read", ToolName: "reader"})
+	body, err := json.Marshal(map[string]any{"message": long})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolMessage{
+		Type: "page", Status: toolapi.StatusOK, Data: body,
+	}})
+
+	var got map[string]any
+	if err := json.Unmarshal(nodePayload(g.Get(id)), &got); err != nil {
+		t.Fatalf("payload unreadable: %v", err)
+	}
+	cut, _ := got["message"].(string)
+	if strings.ContainsRune(cut, '�') {
+		t.Errorf("a character was cut in half: %q", cut)
+	}
+}

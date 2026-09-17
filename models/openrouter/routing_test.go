@@ -23,7 +23,7 @@ import "testing"
 // found by the run that verified the other two, which is the measure of how
 // many more there may be: three offenders in about two dozen calls, from a pool
 // of twenty-one endpoints. One of those prose
-// replies is a failed turn on a live queen: "parse plan() arguments (retry
+// replies is a failed turn on a live deployment: "parse plan() arguments (retry
 // failed): invalid character 'E' looking for beginning of value", reported to
 // the operator with no plan.
 //

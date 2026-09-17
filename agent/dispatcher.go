@@ -768,6 +768,42 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		return "", nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
 
+	// Ensure params is not nil, before anything reads it.
+	if params == nil {
+		params = make(map[string]any)
+	}
+
+	/*
+	 * The call is held to the shape its tool asked for, before the gate reads it.
+	 *
+	 * Before the gate and not before execution, because the gate's decision is
+	 * computed FROM these parameters: EnvList returns ImpactAffect or
+	 * ImpactObserve depending on show_sensitive, and Git and Clipboard branch on
+	 * action. Impact() and ExecuteTyped() read the map separately, so the day one
+	 * coerces more loosely than the other, a call classified Observe executes as
+	 * Affect. Checking here means the gate reasons about a map that matched what
+	 * was declared, or about one whose departure from it has been said out loud.
+	 *
+	 * Logged, not refused. Models produce off-spec parameters routinely — one
+	 * deployment's log holds 27 plan-parse failures — and tools cope with
+	 * slightly wrong ones today, so refusing on sight would fail runs that work
+	 * and we would hear about it from an operator rather than from a log line.
+	 * What rejects, and what is coerced instead, is a decision to make after
+	 * reading what real traffic actually produces. The violations also catch the
+	 * other thing worth knowing: a schema that is wrong about its own tool.
+	 *
+	 * Beside validateDirectParams rather than instead of it. That one runs in
+	 * fireNode, so it sees planned nodes and not the ReAct loop's calls, and it
+	 * reads a schema for two things: required names, and names the schema does
+	 * not declare when it is closed. It reads no types at all, which is the half
+	 * that matters here — a declared string arriving as a number is what becomes
+	 * the empty string, and neither path noticed. This runs where both paths
+	 * meet.
+	 */
+	for _, v := range toolapi.ValidateParams(tool.Parameters(), params) {
+		log.Printf("[params] %s.%s", toolName, v)
+	}
+
 	// Resolve the tool's effective impact via the intent registry (DB
 	// override wins, falls back to tool.Impact() default).
 	impact := a.intentRegistry.ResolveToolIntent(toolName, tool, params)
@@ -783,11 +819,6 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 			})
 			return "", nil, err
 		}
-	}
-
-	// Ensure params is not nil
-	if params == nil {
-		params = make(map[string]any)
 	}
 
 	// Gate: IGX triad check with scope cap — impact <= min(intent, clearance, scope_cap)

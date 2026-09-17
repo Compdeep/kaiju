@@ -43,36 +43,10 @@ func TestEverySchemaIsReadableAndSelfConsistent(t *testing.T) {
 			continue
 		}
 
-		// An empty call must report exactly the tool's required fields and
-		// nothing else. Anything more means the schema faults a call for a
-		// field it did not ask for.
-		vs := toolapi.ValidateParams(raw, map[string]any{})
-		required := map[string]bool{}
-		for _, r := range requiredOf(doc) {
-			required[r] = true
-		}
-		for _, v := range vs {
-			if v.Declared != "required" {
-				t.Errorf("%s: an empty call reports %v — the schema faults a field it did not ask for", name, v)
-				continue
-			}
-			if !required[v.Path] {
-				t.Errorf("%s: %q reported absent but is not in required", name, v.Path)
-			}
-		}
-		if len(vs) != len(required) {
-			t.Errorf("%s: %d required fields, %d reported absent", name, len(required), len(vs))
+		// An empty call has no values to be wrong about, so a schema that
+		// reports anything here faults a call for a field nobody sent.
+		if vs := toolapi.ValidateParams(raw, map[string]any{}); len(vs) > 0 {
+			t.Errorf("%s: an empty call reports %v", name, vs)
 		}
 	}
-}
-
-func requiredOf(doc map[string]any) []string {
-	list, _ := doc["required"].([]any)
-	out := make([]string, 0, len(list))
-	for _, item := range list {
-		if s, ok := item.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
 }

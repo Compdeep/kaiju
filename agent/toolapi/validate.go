@@ -21,11 +21,9 @@ import (
  * rather than narrower — a rule that names no host is one that reaches every
  * host. A malformed parameter does not fail the call, it widens it.
  *
- * This checks only what the tool declared. Semantic rules — one of these two
- * fields but not both, this path must exist, this duration is absurd — stay with
- * the tool, which is the only thing that knows them. The split is deliberate:
- * what is declared is checked in one place for every tool, and what is meant is
- * checked by the tool that means it.
+ * Semantic rules — one of these two fields but not both, this path must exist —
+ * stay with the tool, which is the only thing that knows them. What is declared
+ * is checked here for every tool; what is meant is checked by the tool.
  */
 
 // Violation is one parameter that does not match what the tool declared.
@@ -40,7 +38,9 @@ func (v Violation) String() string {
 }
 
 /*
- * ValidateParams reports every way a call departs from its tool's schema.
+ * ValidateParams reports every way a call's values depart from its tool's
+ * schema — types, enum membership, range, array elements, nested objects.
+ * Presence is validateDirectParams' question, not this one's.
  *
  * Unknown properties are NOT a violation. bash accepts cmd and script, neither
  * of which is in its schema, because models send them and the tool chose to
@@ -70,15 +70,10 @@ func validateObject(schema map[string]any, params map[string]any, prefix string)
 	}
 	var out []Violation
 
-	// Required first: a missing field is a different fault from a wrong one, and
-	// saying "declared string, got nothing" for an absent key reads as a type
-	// error rather than an omission.
-	for _, name := range stringsOf(schema["required"]) {
-		if _, present := params[name]; !present {
-			out = append(out, Violation{Path: prefix + name, Declared: "required", Got: "absent"})
-		}
-	}
-
+	// Presence belongs to validateDirectParams, which treats null as absent,
+	// knows which parameters may legitimately be empty, and reads conditional
+	// requirements. Asking it here too answered the null case differently, so
+	// the same call was refused on one path and passed on the other.
 	for name, raw := range props {
 		spec, _ := raw.(map[string]any)
 		if spec == nil {

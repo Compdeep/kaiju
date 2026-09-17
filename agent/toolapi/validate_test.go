@@ -56,17 +56,21 @@ func TestAWrongTypeIsReportedRatherThanBecomingAZeroValue(t *testing.T) {
 	}
 }
 
-// A missing required field is an omission, not a type error, and reads as one.
-func TestAMissingRequiredFieldIsNamedAsAbsent(t *testing.T) {
-	v := only(t, check(t, `{"timeout_sec": 5}`))
-	if v.Path != "command" || v.Declared != "required" || v.Got != "absent" {
-		t.Errorf("violation = %v, want command required/absent", v)
+// Presence is validateDirectParams' question. Asking it here too answered the
+// null case differently, so the same call was refused on one path and passed on
+// the other.
+func TestPresenceIsSomebodyElsesQuestion(t *testing.T) {
+	if vs := check(t, `{"timeout_sec": 5}`); len(vs) > 0 {
+		t.Errorf("a missing required field was reported here: %v", vs)
+	}
+	if vs := check(t, `{"command": null}`); len(vs) > 0 {
+		t.Errorf("a null required field was reported here: %v", vs)
 	}
 }
 
-// An optional field left out is not a fault, and an explicit null is the model
-// saying "no value", which is the same thing.
-func TestAnAbsentOrNullOptionalIsNotAFault(t *testing.T) {
+// An absent field has no value to be wrong about, and an explicit null is the
+// model saying "no value", which is the same thing.
+func TestAnAbsentOrNullFieldIsNotAFault(t *testing.T) {
 	if vs := check(t, `{"command":"ls"}`); len(vs) > 0 {
 		t.Errorf("an absent optional was reported: %v", vs)
 	}
@@ -144,7 +148,7 @@ func TestNothingDeclaredMeansNothingToHoldTo(t *testing.T) {
 			t.Errorf("schema %q reported %v", schema, vs)
 		}
 	}
-	if vs := ValidateParams(json.RawMessage(bashish), nil); len(vs) != 1 {
-		t.Errorf("a nil map should still miss its required field, got %v", vs)
+	if vs := ValidateParams(json.RawMessage(bashish), nil); len(vs) > 0 {
+		t.Errorf("a nil map has no values to be wrong about, got %v", vs)
 	}
 }

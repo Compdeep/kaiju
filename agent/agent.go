@@ -408,9 +408,52 @@ type Agent struct {
 	// investigation's events; each event is tagged with its own Graph's SessionID
 	// at emission, so consumers can route by session.
 	dagMu    sync.RWMutex
-	dagSubs  map[int]chan DAGEvent // subscriber ID → channel
+	dagSubs  map[int]dagSub // subscriber ID → its channels
 	dagSubID int
+
+	// Streamed text, held back briefly so one reply is a few events rather
+	// than hundreds. Keyed by session and event type — see streamChunk.
+	streamMu  sync.Mutex
+	streamBuf map[string]*streamPending
 }
+
+// dagSub is one subscriber: the events it receives, and a signal that it missed
+// one it could not afford to miss.
+//
+// lost is how a dropped state event stops being silent. The events channel is
+// deliberately lossy for streamed text — a chunk the reader could not keep up
+// with is text that is already on its way to the database — but a node reaching
+// its terminal state is not recoverable from anywhere else, and dropping one
+// leaves a spinner turning for the rest of the session. A subscriber that misses
+// one is told to go away and come back, which it can recover from.
+type dagSub struct {
+	ch   chan DAGEvent
+	lost chan struct{}
+}
+
+// streamPending is text waiting to go out as one event, and the timer that will
+// send it.
+type streamPending struct {
+	session string
+	evType  string
+	text    string
+	timer   *time.Timer
+}
+
+// isStreamedText says whether an event carries a piece of a reply rather than a
+// fact about the run. The two are treated differently on the way out: text may
+// be coalesced and may be dropped, a fact may be neither.
+func isStreamedText(evType string) bool {
+	return evType == "outcome" || evType == "reasoning"
+}
+
+// streamFlushDelay is how long a chunk waits for the ones behind it.
+//
+// Long enough that a reply of a few thousand tokens becomes tens of events
+// instead of hundreds — which is what stopped filling a subscriber's buffer and
+// taking the terminal event queued behind it. Short enough that text still
+// arrives as something being typed rather than in paragraphs.
+const streamFlushDelay = 50 * time.Millisecond
 
 /*
  * New creates an Agent with the given configuration.
@@ -505,7 +548,7 @@ func New(cfg Config) (*Agent, error) {
 		clearanceExplicit: clearanceExplicit,
 		memory:            mem,
 		triggers:          make(chan Trigger, 16),
-		dagSubs:           make(map[int]chan DAGEvent),
+		dagSubs:           make(map[int]dagSub),
 		skillGuidance:     builtinSkills,
 		soulPrompt:        soul,
 		intentRegistry:    NewIntentRegistry(),
@@ -1147,14 +1190,14 @@ func (a *Agent) Cancel(session string) bool {
  *       receives all DAGEvent values broadcast during investigations.
  * return: read-only DAGEvent channel and cleanup function.
  */
-func (a *Agent) SubscribeDAG() (<-chan DAGEvent, func()) {
+func (a *Agent) SubscribeDAG() (<-chan DAGEvent, <-chan struct{}, func()) {
 	a.dagMu.Lock()
 	defer a.dagMu.Unlock()
 
 	a.dagSubID++
 	id := a.dagSubID
-	ch := make(chan DAGEvent, 64)
-	a.dagSubs[id] = ch
+	sub := dagSub{ch: make(chan DAGEvent, 64), lost: make(chan struct{}, 1)}
+	a.dagSubs[id] = sub
 
 	unsub := func() {
 		a.dagMu.Lock()
@@ -1163,13 +1206,13 @@ func (a *Agent) SubscribeDAG() (<-chan DAGEvent, func()) {
 		// Drain any buffered events so senders don't block
 		for {
 			select {
-			case <-ch:
+			case <-sub.ch:
 			default:
 				return
 			}
 		}
 	}
-	return ch, unsub
+	return sub.ch, sub.lost, unsub
 }
 
 /*
@@ -1202,13 +1245,124 @@ func (a *Agent) broadcastDAGEvent(graph *Graph, evt DAGEvent) {
 		evt.SessionID = graph.SessionID
 	}
 
+	// Anything that is not a piece of a reply goes out behind the text already
+	// waiting, not in front of it. A reader that received "done" and then the
+	// last of the answer would append text after the turn it belongs to.
+	if !isStreamedText(evt.Type) {
+		a.flushStreams(evt.SessionID)
+	}
+	a.deliver(evt)
+}
+
+/*
+ * streamChunk holds a piece of streamed text for the ones behind it.
+ * desc: Every chunk used to be its own broadcast. A reply of a couple of
+ *       thousand tokens is hundreds of events, all through one 64-deep channel
+ *       per subscriber, and the send that finds it full is dropped — so the
+ *       event lost was whichever came next, which is the node reaching its
+ *       terminal state or the run reporting itself done. The run finished, the
+ *       answer was stored, and the trace kept spinning on "synthesize" until the
+ *       page was reloaded. The frontend already carried a note saying exactly
+ *       this, and a repair that only runs inside the handler for the event being
+ *       dropped.
+ *
+ *       Coalescing is the half that removes the cause: tens of events instead of
+ *       hundreds, and a buffer that stops filling. Not dropping state is the
+ *       half that makes the rest survivable — see deliver.
+ * param: graph - the run's graph, or nil.
+ * param: session - the session this text belongs to.
+ * param: evType - "outcome" or "reasoning"; they are held separately so the
+ *        answer and the thinking do not interleave into one blob.
+ * param: chunk - the text as it arrived.
+ */
+func (a *Agent) streamChunk(graph *Graph, session, evType, chunk string) {
+	if session == "" && graph != nil {
+		session = graph.SessionID
+	}
+	key := session + "\x00" + evType
+
+	a.streamMu.Lock()
+	if a.streamBuf == nil {
+		a.streamBuf = make(map[string]*streamPending)
+	}
+	p, ok := a.streamBuf[key]
+	if !ok {
+		p = &streamPending{session: session, evType: evType}
+		a.streamBuf[key] = p
+	}
+	p.text += chunk
+	if p.timer == nil {
+		// The tail needs no separate flush: the last chunk schedules this, and it
+		// fires whether or not another chunk follows.
+		p.timer = time.AfterFunc(streamFlushDelay, func() { a.flushStreamKey(key) })
+	}
+	a.streamMu.Unlock()
+}
+
+// flushStreamKey sends one pending buffer, if it still holds anything.
+func (a *Agent) flushStreamKey(key string) {
+	a.streamMu.Lock()
+	p := a.streamBuf[key]
+	if p == nil || p.text == "" {
+		if p != nil {
+			p.timer = nil
+		}
+		a.streamMu.Unlock()
+		return
+	}
+	text, session, evType := p.text, p.session, p.evType
+	p.text = ""
+	p.timer = nil
+	a.streamMu.Unlock()
+
+	a.deliver(DAGEvent{Type: evType, Text: text, SessionID: session})
+}
+
+// flushStreams sends everything a session is still holding, in order, before an
+// event that must not arrive ahead of it.
+func (a *Agent) flushStreams(session string) {
+	a.streamMu.Lock()
+	var keys []string
+	for key, p := range a.streamBuf {
+		if p.session == session && p.text != "" {
+			keys = append(keys, key)
+		}
+	}
+	a.streamMu.Unlock()
+	for _, key := range keys {
+		a.flushStreamKey(key)
+	}
+}
+
+/*
+ * deliver hands one event to every subscriber.
+ * desc: Streamed text may be dropped when a subscriber cannot keep up — it is
+ *       already on its way to the database and the page refetches it. Everything
+ *       else is a fact about the run that exists nowhere else, so a subscriber
+ *       that cannot take one is signalled instead of silently skipped: its
+ *       reader closes the connection, the browser reconnects, and it resyncs.
+ *       A forced reconnect is something a client recovers from. A dropped
+ *       terminal event is not.
+ * param: evt - the event, with its SessionID already set.
+ */
+func (a *Agent) deliver(evt DAGEvent) {
+	lossless := !isStreamedText(evt.Type)
+
 	a.dagMu.RLock()
 	defer a.dagMu.RUnlock()
 
-	for _, ch := range a.dagSubs {
+	for _, sub := range a.dagSubs {
 		select {
-		case ch <- evt:
-		default: // drop if subscriber is slow
+		case sub.ch <- evt:
+		default:
+			if !lossless {
+				continue // text: the page can fetch it back
+			}
+			select {
+			case sub.lost <- struct{}{}:
+				log.Printf("[dag] subscriber buffer full on a %q event — asking it to reconnect", evt.Type)
+			default: // already told
+			}
 		}
 	}
 }

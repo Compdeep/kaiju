@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A stage that writes something a person reads must stream it.
@@ -74,28 +75,34 @@ func TestEveryStageThatAnswersAPersonStreams(t *testing.T) {
 // in three files, which is what a mapping written out three times leaves you
 // with; there is one now, so the behaviour itself can be checked.
 func TestStreamedChunksAreBroadcastAsOutcome(t *testing.T) {
-	a := &Agent{dagSubs: map[int]chan DAGEvent{}}
-	ch, unsub := a.SubscribeDAG()
+	a := &Agent{dagSubs: map[int]dagSub{}}
+	ch, _, unsub := a.SubscribeDAG()
 	defer unsub()
 
 	send := a.streamTo(nil, "sess")
 	send("the answer", "content")
 	send("thinking about it", "reasoning")
 
-	for _, want := range []struct{ typ, text string }{
-		{"outcome", "the answer"},
-		{"reasoning", "thinking about it"},
-	} {
+	// Chunks are held briefly and sent together now, so this waits rather than
+	// reading what happens to be there — and reads them as a set, because the
+	// answer and the thinking are held apart and their timers are independent.
+	want := map[string]string{"outcome": "the answer", "reasoning": "thinking about it"}
+	got := map[string]string{}
+	deadline := time.After(2 * time.Second)
+	for len(got) < len(want) {
 		select {
-		case got := <-ch:
-			if got.Type != want.typ || got.Text != want.text {
-				t.Errorf("chunk arrived as %q/%q, want %q/%q", got.Type, got.Text, want.typ, want.text)
+		case ev := <-ch:
+			got[ev.Type] = ev.Text
+			if ev.SessionID != "sess" {
+				t.Errorf("chunk carried session %q, want the one it was streamed for", ev.SessionID)
 			}
-			if got.SessionID != "sess" {
-				t.Errorf("chunk carried session %q, want the one it was streamed for", got.SessionID)
-			}
-		default:
-			t.Fatalf("no %q event was broadcast", want.typ)
+		case <-deadline:
+			t.Fatalf("only %v arrived, want %v", got, want)
+		}
+	}
+	for typ, text := range want {
+		if got[typ] != text {
+			t.Errorf("%s arrived as %q, want %q", typ, got[typ], text)
 		}
 	}
 }
@@ -105,8 +112,8 @@ func TestStreamedChunksAreBroadcastAsOutcome(t *testing.T) {
 // destination is an event every open trace receives for a run it is not
 // watching.
 func TestChunksWithNowhereToGoAreNotBroadcast(t *testing.T) {
-	a := &Agent{dagSubs: map[int]chan DAGEvent{}}
-	ch, unsub := a.SubscribeDAG()
+	a := &Agent{dagSubs: map[int]dagSub{}}
+	ch, _, unsub := a.SubscribeDAG()
 	defer unsub()
 
 	a.streamTo(nil, "")("something", "content")

@@ -712,7 +712,9 @@ func runChat() {
 	// while a turn is in flight the only source of DAG events is the agent tool
 	// delegating to the executive. Print each step so a long agent run isn't a
 	// silent wait.
-	dagCh, unsubDAG := ag.SubscribeDAG()
+	// The lost signal is ignored here: this reader is a progress ticker for a
+	// terminal, not a view that has to stay consistent with the graph.
+	dagCh, _, unsubDAG := ag.SubscribeDAG()
 	defer unsubDAG()
 	go func() {
 		for evt := range dagCh {

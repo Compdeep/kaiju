@@ -10,8 +10,8 @@ import (
 // tagged with its emitting graph's SessionID at broadcast time — never from a
 // shared Agent field a concurrent run could clobber. Run under -race.
 func TestBroadcastDAGEvent_PerGraphSessionTagging(t *testing.T) {
-	a := &Agent{dagSubs: map[int]chan DAGEvent{}}
-	ch, unsub := a.SubscribeDAG()
+	a := &Agent{dagSubs: map[int]dagSub{}}
+	ch, _, unsub := a.SubscribeDAG()
 	defer unsub()
 
 	gA := &Graph{SessionID: "sess-A"}

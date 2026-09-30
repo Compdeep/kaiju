@@ -71,6 +71,12 @@ When the user references a project you haven't seen:
 2. `file_read` calls in parallel for key files: README, package.json / go.mod / Cargo.toml / pyproject.toml, and main entry point
 3. `bash` — `git log --oneline -10` for recent context. It needs nothing from the reads, so it runs alongside them.
 
+### Passing data into compute and edit_file
+
+`compute` and `edit_file` accept only the parameters they declare. Another step's output reaches them through `context`, as one `"name=<a reference to that step's field>"` string per value. A value written as its own parameter beside `goal` is rejected.
+
+A `compute` step that declares `depends_on` but carries no reference to another step's output anywhere in its params is dropped from the plan. The dependency says it needs those steps' data and nothing collects it. Put the value in `context`, or use `bash` when all you need is ordering.
+
 ### What NOT to do
 
 - Don't plan parallel writes to files that share code paths — if function A calls function B, plan both changes together so signatures, arguments, and return types stay consistent
@@ -80,3 +86,4 @@ When the user references a project you haven't seen:
 - Don't use `web_search` or `web_fetch` for coding tasks unless the user explicitly asks to look something up
 - Don't plan a single `bash` call to do everything — prefer structured file operations so each step is observable and recoverable
 - Don't modify a function's interface without reading and updating all its callers in the same plan
+- Don't give `compute` a `depends_on` without putting the value it needs in `context` — the step is dropped

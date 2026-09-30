@@ -129,7 +129,9 @@ func (a *Agent) streamTo(graph *Graph, session string) func(chunk, kind string) 
 		if kind == "reasoning" {
 			evType = "reasoning"
 		}
-		a.broadcastDAGEvent(graph, DAGEvent{Type: evType, Text: chunk, SessionID: session})
+		// Held for a moment and sent with the chunks behind it, rather than one
+		// event per chunk — see Agent.streamChunk.
+		a.streamChunk(graph, session, evType, chunk)
 	}
 }
 

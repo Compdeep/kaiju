@@ -43,13 +43,15 @@ func TestReplanFrame_TeachesWiring(t *testing.T) {
 func TestExecutivePrompt_TeachesStepWiring(t *testing.T) {
 	p := prompt.Executive
 	for _, want := range []string{
-		"## Wiring data between steps",
-		// The reference, and the search → fetch example that uses it. By TAG:
-		// it was `${step.0.results.0.url}`, a POSITION, and a position is
-		// counted from the first step of the plan it is in, so a plan that
-		// drops a step renumbers every reference after it.
-		"${step.find_docs.results.0.url}",
-		"web_fetch",
+		"## Data flow",
+		// The reference, written with a TAG. It was `${step.0.results.0.url}`, a
+		// POSITION, and a position is counted from the first step of the plan it is
+		// in, so a plan that drops a step renumbers every reference after it.
+		//
+		// A concrete web_fetch chain was asserted here too. Fetch mechanics belong
+		// to the tool's own card — web-research and precise_research carry extract
+		// and full_content_path — not to the prompt every plan reads.
+		"${step.discover.result.id}",
 		// Still named, because a reference is now the dependency and the
 		// prompt has to say when depends_on is still yours to write.
 		"depends_on",

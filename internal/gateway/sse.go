@@ -113,13 +113,21 @@ func streamDAG(ag *agent.Agent, admit func(*http.Request) (func(string) bool, bo
 		fmt.Fprint(w, ": connected\n\n")
 		flusher.Flush()
 
-		ch, unsub := ag.SubscribeDAG()
+		ch, lost, unsub := ag.SubscribeDAG()
 		defer unsub()
 
 		ctx := r.Context()
 		for {
 			select {
 			case <-ctx.Done():
+				return
+			case <-lost:
+				// This connection missed an event that exists nowhere else — a
+				// node's terminal state, or the run reporting itself done — so
+				// what it is showing is now wrong and will stay wrong. Ending
+				// the response is the repair: EventSource reconnects on its own
+				// and the client resyncs on open.
+				log.Printf("[sse] dropped a state event, closing so the client resyncs")
 				return
 			case ev, ok := <-ch:
 				if !ok {

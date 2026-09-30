@@ -567,6 +567,48 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("- info: sysinfo, env_list, disk_usage, net_info, bash\n\n")
 	}
 
+	// A first plan may stop at understanding, and is told so here.
+	//
+	// The planner writes every step's params in one shot, before any of them
+	// has run. For a step that reads, that is fine — it is being told where to
+	// look. A step that WRITES carries a decision instead: where the change
+	// goes. When the plan has not established that yet, the decision is made by
+	// the stage with the least information in the run, and nothing downstream
+	// can move it — params are literals by the time anything executes.
+	//
+	// One live run: "the overview is missing from the architecture doc TOC".
+	// The plan read three files and ran an analysis step to find which source
+	// generated the contents list — and, in the same plan, seven seconds
+	// earlier, fixed the edit to docs/src/assemble.py. The analysis came back
+	// naming docs/src/build.py. It was correct, and it was wired into the
+	// edit's context, and it arrived at a step whose target was already
+	// written down. The contents list is not in assemble.py, so the only change
+	// available there was to post-process the rendered output. The run shipped
+	// that, and reported a fix to the file it had not touched.
+	//
+	// Not framed as permission, and not asking the planner to rate its own
+	// confidence. Nothing blocked it from reading first; it wrote the target
+	// because it felt certain, and a model that feels certain declines an
+	// invitation to check. So the test is a property of the draft in front of
+	// it — has this plan established what it is about to act on — which it can
+	// apply without knowing anything about itself.
+	//
+	// Only on the first plan. A re-plan already has the evidence, and
+	// EdgeReFrame tells it what is still open.
+	if graph != nil && len(graph.ReplanRecords()) == 0 {
+		sb.WriteString("## This Round\n")
+		sb.WriteString("This is the first plan of this turn, and you can plan again once these " +
+			"steps return — so you do not have to reach the answer in one plan.\n\n")
+		sb.WriteString("A step that writes commits you to where the change goes. If this plan " +
+			"has not established that yet — if you would need to look at something first to " +
+			"know you had it right, the shape of a file, how a thing is put together, where " +
+			"it actually lives — then you are guessing, and the guess is fixed in the params " +
+			"before any step runs. Plan what establishes it and stop there. You will plan the " +
+			"write with the answer in hand.\n\n")
+		sb.WriteString("If the plan rests on nothing you have yet to establish, plan the whole " +
+			"thing and finish in one round.\n\n")
+	}
+
 	// The identity and the persistence litany, AFTER the planning contract
 	// rather than before it.
 	//
@@ -899,7 +941,7 @@ var executivePlanStepOpen = `{
 					"type":       {"type": "string", "enum": ["tool","compute"], "description": "Node type: tool (default) or compute (LLM code generation)"},
 					"tool":       {"type": "string", "description": "Tool name from the Tools list"},
 					"params":     {"type": "object", "additionalProperties": true, "description": "The tool's input parameters, as an object whose keys are the parameter names in that tool's signature. ALWAYS populate for tools with required params marked *; write {} when the tool takes none. A value is either something you have — {\"command\": \"ls -la\"} — or a REFERENCE to an earlier step's output, written ${step.<that step's tag>.<dot-path into its output>}. Example: a fetch reading the first result of a search tagged find_docs is {\"url\": \"${step.find_docs.results.0.url}\"}."},
-					"depends_on": {"type": "array", "items": {"type": "integer"}, "description": "Which earlier steps must finish before this one starts, by position. Write [] when none do. Using another step's OUTPUT needs nothing here — the ${step.tag.field} reference orders it for you. This is for the other kind: a step that must simply happen first. A command that writes a file, then a step that reads that file; an install, then the thing that needs it. Those pass no value between them, so nothing else can see the order."},
+					"depends_on": {"type": "array", "items": {"type": ["integer", "string"]}, "description": "Which earlier steps must finish before this one starts, by position. STEPS RUN IN PARALLEL: every step whose depends_on is [] is dispatched at once, so [] means \"nothing is holding this step back\" — correct for independent work, wrong the moment one step acts on what another produces. Using another step's OUTPUT needs nothing here: the ${step.tag.field} reference orders it for you. This field is for the other kind, where no value passes but the order still matters — a step that writes a file and a command that runs it, an install and the thing that needs it. Leave it out there and both start together, the second reads the state from before the first, and the plan reports success on a wrong result. An unnecessary dependency costs a little time; a missing one breaks the plan silently."},
 					"tag":        {"type": "string", "description": "This step's name, unique within the plan: letters, digits, _ or - with no spaces. Other steps reference this step by it."}
 				}
 			}
@@ -2458,13 +2500,6 @@ func (a *Agent) parseExecutiveOutput(raw string, isAuto bool) ([]PlanStep, gates
 		})
 	}
 
-	// The dependency the planner did not declare, taken from the params.
-	//
-	// After the reference repair above, so a step already ordered by a
-	// ${step.N} reference is not ordered twice, and before cycle detection, so
-	// an edge added here is checked by the same pass that checks the model's.
-	linkPathDeps(steps)
-
 	// Cycle detection — a DAG must be acyclic. Detect and break any cycles.
 	// Uses topological sort; steps involved in cycles have their offending deps removed.
 	if hasCycle, fixed := breakCycles(steps); hasCycle {
@@ -2751,6 +2786,7 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 				nodes[i].DependsOn = append(nodes[i].DependsOn, dep)
 			}
 		}
+
 	}
 
 	// Batch reflections removed — the scheduler handles reflection timing.

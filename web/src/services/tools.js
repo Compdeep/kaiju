@@ -50,6 +50,52 @@ function resolveSession(ev) {
   return useSessionsStore().sessionId
 }
 
+/**
+ * Read back the viewed session's state after the stream was interrupted.
+ *
+ * The server ends the response when it had to drop a state event, because a
+ * node's terminal state exists nowhere else and a trace left showing the old one
+ * stays wrong for the rest of the session. This is the half that makes the
+ * reconnect worth anything: what was missed is read back rather than waited for.
+ *
+ * Only the session on screen, and only while it still believes it is running —
+ * that spinner is exactly what a dropped terminal event leaves behind, and the
+ * stored messages carry the answer and the finished trace it would have brought.
+ */
+function resync() {
+  const dag = useDagStore()
+  const sessions = useSessionsStore()
+
+  const sid = dag.activeSessionId || sessions.sessionId
+  if (!sid) return
+  const ds = dag.getSession(sid)
+  if (!ds || !ds.running) return
+
+  const ss = sessions.getSession(sid)
+  if (ss && ss.sendInFlight) return // the POST in flight will deliver it itself
+
+  api.get(`/api/v1/sessions/${sid}/messages`).then(msgs => {
+    const list = msgs || []
+    const last = list.length ? list[list.length - 1] : null
+    // An assistant reply is on record, so the run this trace is waiting on is
+    // over, however its last event ended up.
+    if (!last || last.role !== 'assistant') return
+    for (const n of ds.nodes) if (n.state === 'running') n.state = 'resolved'
+    ds.running = false
+    ds.interjectMode = false
+    if (ss) {
+      ss.loading = false
+      ss.messages = list.map(m => {
+        const msg = { role: m.role, content: m.content }
+        if (m.dag_trace) {
+          try { msg.trace = JSON.parse(m.dag_trace) } catch {}
+        }
+        return msg
+      })
+    }
+  }).catch(() => {})
+}
+
 export function connect() {
   if (eventSource) return
 
@@ -57,6 +103,22 @@ export function connect() {
   // can't set headers, so the token rides the query string (kaiju supports it).
   const token = localStorage.getItem('kaiju_token') || ''
   eventSource = new EventSource('/events?token=' + encodeURIComponent(token))
+
+  // Resync whenever the stream (re)opens.
+  //
+  // The server ends the response when it had to drop a state event, because a
+  // node's terminal state exists nowhere else and a trace showing the old one
+  // stays wrong for the rest of the session. EventSource reconnects on its own,
+  // and this is the half that makes that worth doing: whatever was missed while
+  // we were away is read back from the server rather than waited for.
+  //
+  // `first` skips the very first open, where there is nothing to have missed and
+  // send() is usually mid-flight.
+  let first = true
+  eventSource.onopen = () => {
+    if (first) { first = false; return }
+    resync()
+  }
 
   eventSource.onmessage = (e) => {
     try {

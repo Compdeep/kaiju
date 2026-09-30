@@ -634,6 +634,28 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 		return defaultPreflight()
 	}
 
+	// A first turn has nowhere to have read a path, so it has none to preserve.
+	//
+	// paths is a field the model is asked to fill, and asked for a path when the
+	// user named none it writes the conventional filenames for what was
+	// described. One turn asked to restyle "the architecture document" and got
+	// ARCHITECTURE.md, architecture.md and docs/architecture.md twice — none of
+	// which exist in that repo, where the file is docs/architecture.html. The
+	// round that followed was spent discovering that, and the invented name
+	// reached the planner as a fact.
+	//
+	// Cleared rather than corrected. The paths this stage gets right are the ones
+	// it copies out of the previous answer — the turn that produced
+	// /home/sites/uinloop/docs/architecture.html had that path verbatim in its
+	// prior context — and on a first turn there is no previous answer to copy
+	// from. What the plan needs instead is one step that looks, which is a thing
+	// it does in a single call.
+	if lastAssistantMessage(history) == "" && len(out.Context.Paths) > 0 {
+		log.Printf("[dag] preflight: dropping %d path(s) on a first turn with no prior context: %v",
+			len(out.Context.Paths), out.Context.Paths)
+		out.Context.Paths = nil
+	}
+
 	return a.validatePreflight(out)
 }
 

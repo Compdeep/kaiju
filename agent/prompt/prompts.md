@@ -207,7 +207,12 @@ every relevant concrete identifier explicitly provided by the user — in the
 current query or an earlier one — verbatim in its appropriate field:
 
 - `urls`: complete URLs, including query parameters;
-- `paths`: file and directory paths;
+- `paths`: file and directory paths. Copy one only when it is written out in the
+  current query or in Prior Context. A target the user described rather than named —
+  "the architecture document", "the config", "that script" — belongs in `intent` as
+  the description it is, and leaves `paths` empty. Do not write the filename such a
+  thing usually has: a plan can find the real one in a single step, and a name that
+  turns out not to exist reaches the planner as a fact and is acted on;
 - `selectors`: HTML/CSS selectors, API endpoints, function names, column names,
   field names, and other exact lookup keys;
 - `constants`: exact values, limits, delays, formats, and rules stated by the

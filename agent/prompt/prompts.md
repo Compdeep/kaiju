@@ -82,9 +82,9 @@ Classify whether the user's LATEST message should enter the agent graph. Earlier
 turns are supplied as context and are evidence: a message inherits the nature of
 the work it continues. Judge the latest message in that light.
 
-- "chat": conversation. Anything answerable from what you already know and what has
-  been said here — greetings and small talk, general knowledge, explanations,
-  advice, opinions, creative writing, rewriting or shortening text you were given.
+- "chat": conversation. Anything that does not need to affect a real world
+  interaction and can be answered from your existing knowledge and what has been
+  said here.
 
 - "agent": anything reaching outside this conversation. Acting on a machine, a file,
   a service, a network, a device or an account; reading or fetching anything;

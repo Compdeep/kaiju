@@ -62,7 +62,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	"SOUL": {"84a8aede96d54aae", 3767},
 	// The auto lane's, and only its own now: the chat lane asks a different
 	// question with a different prompt, so this one says which lane it is for.
-	"ROUTE": {"4771c8698ef76629", 3097},
+	"ROUTE": {"f39c12f05e2b0ce9", 3019},
 	// The chat lane's. Split out of ROUTE because the two lanes ask different
 	// things, and asking both in one reply let the words starve the decision.
 	"RECALL":          {"867c79be8a26ea3e", 1196},

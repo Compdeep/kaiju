@@ -46,7 +46,10 @@ func (f *FileRead) Name() string { return "file_read" }
  * return: description string
  */
 func (f *FileRead) Description() string {
-	return "Read the contents of a file. Returns the file content as text."
+	return "Read the contents of a FILE, returned as text. The path must be a file; " +
+		"to list what is inside a directory, use file_list. Text only: a Word, PowerPoint or " +
+		"Excel file needs office_extract, and an image needs image_read — pointed at either, " +
+		"this returns bytes rather than failing."
 }
 
 /*
@@ -348,7 +351,9 @@ func (f *FileWrite) Name() string { return "file_write" }
  * return: description string
  */
 func (f *FileWrite) Description() string {
-	return "Write content to a file. Creates the file if it doesn't exist, or overwrites it."
+	return "Write content you already have to a file. Creates the file if it does not exist, " +
+		"and REPLACES it entirely if it does — read it first with file_read when you mean to " +
+		"keep what is there. To change part of an existing file, use edit_file instead."
 }
 
 /*
@@ -509,7 +514,10 @@ func (f *FileList) Name() string { return "file_list" }
  * desc: Explains that this tool lists files and directories at a path.
  * return: description string
  */
-func (f *FileList) Description() string { return "List files and directories at the given path." }
+func (f *FileList) Description() string {
+	return "List the entries of a DIRECTORY. The path must be a directory — pointed at a " +
+		"file it fails with \"not a directory\". To read a file's contents, use file_read."
+}
 
 /*
  * Impact returns the safety impact level for this tool.

@@ -119,7 +119,10 @@ func NewWebSearchWithConfig(cfg SearchConfig) *WebSearch {
 func (w *WebSearch) Name() string { return "web_search" }
 
 func (w *WebSearch) Description() string {
-	return "Search the web for information. Returns search results with titles, URLs, and snippets."
+	return "Search the web for information. Returns search results with titles, URLs, and " +
+		"snippets. A snippet is not a source: it is the search engine's summary, not the page. " +
+		"Read the results you intend to use with web_fetch, or use web_research to search and " +
+		"read in one step."
 }
 
 func (w *WebSearch) Impact(map[string]any) int { return toolapi.ImpactObserve }

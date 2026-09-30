@@ -507,7 +507,7 @@ func (b *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 // the raw string.
 type bashData struct {
 	ExitCode int    `json:"exit_code" desc:"the command's exit status; 0 is success"`
-	Stdout   string `json:"stdout" desc:"standard output, cut to 4000 bytes at each end if longer"`
+	Stdout   string `json:"stdout" desc:"standard output as TEXT, cut to 4000 bytes at each end if longer. This field is TEXT — it does NOT produce a list, and there is no element to index. Do not chain it into a parameter that takes one value, such as a path: the next step receives everything the command printed. Have the command print only the value you need, or read the values off this output in a later plan"`
 	Stderr   string `json:"stderr" desc:"standard error, cut the same way"`
 	Command  string `json:"command" desc:"the command line that was run"`
 

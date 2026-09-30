@@ -91,7 +91,7 @@ func (f *FileRead) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"path": {"type": "string", "description": "Path to the file to read"},
+			"path": {"type": "string", "description": "Path to ONE file. This parameter takes a SINGLE path — it is NOT a list and NOT a command's output. Do not wire a step that prints several paths into it: the reference arrives as one filename containing newlines and the read fails. Have the earlier step print one path, or plan the reads once you can see them."},
 			"max_lines": {"type": "integer", "description": "Read the FIRST N lines (default: 500). Ignored when tail_lines is set."},
 			"tail_lines": {"type": "integer", "description": "Read the LAST N lines instead — for a log, where the interesting part is at the bottom. Set this OR max_lines, not both: this one wins and max_lines is not applied."}
 		},

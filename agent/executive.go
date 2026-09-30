@@ -567,48 +567,6 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("- info: sysinfo, env_list, disk_usage, net_info, bash\n\n")
 	}
 
-	// A first plan may stop at understanding, and is told so here.
-	//
-	// The planner writes every step's params in one shot, before any of them
-	// has run. For a step that reads, that is fine — it is being told where to
-	// look. A step that WRITES carries a decision instead: where the change
-	// goes. When the plan has not established that yet, the decision is made by
-	// the stage with the least information in the run, and nothing downstream
-	// can move it — params are literals by the time anything executes.
-	//
-	// One live run: "the overview is missing from the architecture doc TOC".
-	// The plan read three files and ran an analysis step to find which source
-	// generated the contents list — and, in the same plan, seven seconds
-	// earlier, fixed the edit to docs/src/assemble.py. The analysis came back
-	// naming docs/src/build.py. It was correct, and it was wired into the
-	// edit's context, and it arrived at a step whose target was already
-	// written down. The contents list is not in assemble.py, so the only change
-	// available there was to post-process the rendered output. The run shipped
-	// that, and reported a fix to the file it had not touched.
-	//
-	// Not framed as permission, and not asking the planner to rate its own
-	// confidence. Nothing blocked it from reading first; it wrote the target
-	// because it felt certain, and a model that feels certain declines an
-	// invitation to check. So the test is a property of the draft in front of
-	// it — has this plan established what it is about to act on — which it can
-	// apply without knowing anything about itself.
-	//
-	// Only on the first plan. A re-plan already has the evidence, and
-	// EdgeReFrame tells it what is still open.
-	if graph != nil && len(graph.ReplanRecords()) == 0 {
-		sb.WriteString("## This Round\n")
-		sb.WriteString("This is the first plan of this turn, and you can plan again once these " +
-			"steps return — so you do not have to reach the answer in one plan.\n\n")
-		sb.WriteString("A step that writes commits you to where the change goes. If this plan " +
-			"has not established that yet — if you would need to look at something first to " +
-			"know you had it right, the shape of a file, how a thing is put together, where " +
-			"it actually lives — then you are guessing, and the guess is fixed in the params " +
-			"before any step runs. Plan what establishes it and stop there. You will plan the " +
-			"write with the answer in hand.\n\n")
-		sb.WriteString("If the plan rests on nothing you have yet to establish, plan the whole " +
-			"thing and finish in one round.\n\n")
-	}
-
 	// The identity and the persistence litany, AFTER the planning contract
 	// rather than before it.
 	//

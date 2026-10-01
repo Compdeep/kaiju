@@ -22,13 +22,27 @@ import (
 
 const indexFields = `{"type":"object","properties":{"query":{"type":"string","description":"the search query executed"},"results":{"type":"array","description":"ranked search results"}}}`
 
-// Declaring the same fields either way must reach the planner identically.
+// Declaring the same fields either way reaches the planner identically, except
+// that an envelope also carries content — the field holding the text a tool
+// returned. That one is the tool's value, not its plumbing: a read whose payload
+// is only path, lines_shown and truncated has its document in content, and a
+// planner never shown the name writes ${step.tag} for "the whole result" and
+// receives the measurements. So content is expected here, and nothing else from
+// the envelope is.
 func TestToolIndexShowsTheToolNotTheEnvelope(t *testing.T) {
 	wrapped := compactOutputShape(toolapi.EnvelopeSchema(indexFields))
 	flat := compactOutputShape(json.RawMessage(indexFields))
 
-	if wrapped != flat {
-		t.Errorf("the same fields render differently by declaration:\n  wrapped: %s\n  flat:    %s", wrapped, flat)
+	if !strings.Contains(wrapped, "content:") {
+		t.Errorf("an envelope must name content, the field its text arrives in: %s", wrapped)
+	}
+	if strings.Contains(flat, "content") {
+		t.Errorf("a flat schema declares no content, so none should be rendered: %s", flat)
+	}
+	// Identical once content is set aside: the envelope contributes that field
+	// and nothing else.
+	if stripped := removeField(wrapped, "content"); stripped != flat {
+		t.Errorf("the envelope contributed more than content:\n  wrapped minus content: %s\n  flat:                  %s", stripped, flat)
 	}
 	for _, want := range []string{"query", "results"} {
 		if !strings.Contains(wrapped, want) {
@@ -87,4 +101,18 @@ func TestTheAgentBuiltinsDeclareWhatTheyReturn(t *testing.T) {
 			}
 		})
 	}
+}
+
+// removeField drops one "name: description" entry from a rendered shape, so the
+// rest can be compared with a shape that never had it.
+func removeField(shape, name string) string {
+	inner := strings.TrimSuffix(strings.TrimPrefix(shape, "{"), "}")
+	kept := []string{}
+	for _, part := range strings.Split(inner, ", ") {
+		if strings.HasPrefix(part, name+":") {
+			continue
+		}
+		kept = append(kept, part)
+	}
+	return "{" + strings.Join(kept, ", ") + "}"
 }

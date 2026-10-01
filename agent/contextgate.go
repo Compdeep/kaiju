@@ -1397,10 +1397,43 @@ func (s *toolIndexSource) Load(g *Graph, t *Trigger, a *Agent, params map[string
 // Format: `{prop1: desc, prop2: desc, ...}` optionally preceded by the
 // top-level schema description when it's short and load-bearing (e.g.
 // web_fetch's "CONSUMES URLs — does NOT produce URLs" warning).
+// hasEnvelopeContent reports whether a schema is an envelope declaring content.
+func hasEnvelopeContent(schema json.RawMessage) bool {
+	var s struct {
+		Envelope   bool                       `json:"x-envelope"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if json.Unmarshal(schema, &s) != nil || !s.Envelope {
+		return false
+	}
+	_, ok := s.Properties["content"]
+	return ok
+}
+
+// hasPart reports whether the rendered field list already names a field.
+func hasPart(parts []string, name string) bool {
+	for _, p := range parts {
+		if strings.HasPrefix(p, name+":") || strings.HasPrefix(p, name+" (") || p == name {
+			return true
+		}
+	}
+	return false
+}
+
 func compactOutputShape(schema json.RawMessage) string {
-	// The tool's own fields, never the envelope's. A planner shown
-	// {content, data, detail, status, type} learns nothing about what this tool
+	// The tool's own fields, and content. Not the rest of the envelope: a planner
+	// shown {data, detail, status, type} learns nothing about what this tool
 	// returns and cannot write a reference into it.
+	//
+	// content is the exception, and it was stripped with the framing for a long
+	// time. For a tool whose value IS text — a file read, a document extracted,
+	// an image described — the payload beside it is only measurements: path,
+	// lines_shown, lines_total, truncated. A planner shown those eight fields and
+	// not content has no way to know the field holding the file exists, so it
+	// writes ${step.tag} for "the whole result" and receives the measurements.
+	// That replaced a nine-line document with an invention twice in one day, and
+	// the field it needed was one word it had never been shown.
+	envelopeHasContent := hasEnvelopeContent(schema)
 	schema = toolapi.PayloadSchema(schema)
 	if schema == nil {
 		return ""
@@ -1428,6 +1461,12 @@ func compactOutputShape(schema json.RawMessage) string {
 		} else {
 			parts = append(parts, name)
 		}
+	}
+	// Named first, because it is what a read is for and the measurements are
+	// about it. A tool whose payload already declares its own content — web_fetch
+	// does — says it better than this does, so it is not said twice.
+	if envelopeHasContent && !hasPart(parts, "content") {
+		parts = append(parts, "content: the text this tool returned — reference it with ${step.<tag>.content}")
 	}
 	sortStrings(parts)
 

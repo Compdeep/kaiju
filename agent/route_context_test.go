@@ -75,17 +75,31 @@ func TestRouteContextKeepsTheConversationSummary(t *testing.T) {
 	}
 }
 
-// A long reply is capped, and capping must not mutate the caller's history — the
-// same slice is read again by the lane that answers.
+// A long reply is capped from BOTH ends, and capping must not mutate the caller's
+// history — the same slice is read again by the lane that answers.
+//
+// Both ends because what a terse follow-up answers is written at the end: an
+// offer, a question, a next step. A cap that keeps only the opening keeps the one
+// part that cannot say what "yeah" means.
 func TestRouteContextCapsTheReplyWithoutMutatingHistory(t *testing.T) {
-	long := strings.Repeat("x", 900)
+	long := "OPENING" + strings.Repeat("x", 900) + "Want me to do that pass?"
 	history := []llm.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: long},
 	}
 	got := routeContext(history)
-	if len(got) != 2 || len([]rune(got[1].Content)) != 501 {
-		t.Errorf("the reply was not capped: %d runes", len([]rune(got[1].Content)))
+	if len(got) != 2 {
+		t.Fatalf("the exchange is %v, want the user message and the reply", contents(got))
+	}
+	capped := got[1].Content
+	if len([]rune(capped)) >= len([]rune(long)) {
+		t.Errorf("the reply was not capped: %d runes", len([]rune(capped)))
+	}
+	if !strings.HasPrefix(capped, "OPENING") {
+		t.Errorf("the opening was dropped: %.40q", capped)
+	}
+	if !strings.HasSuffix(capped, "Want me to do that pass?") {
+		t.Errorf("the end was dropped, which is where the question the next message answers lives: %.40q", capped)
 	}
 	if history[1].Content != long {
 		t.Error("routeContext modified the caller's history; the answering lane reads the same slice")

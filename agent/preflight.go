@@ -548,8 +548,19 @@ func routeContext(history []llm.Message) []llm.Message {
 		start = 0
 	}
 	for _, m := range prior[start:] {
+		// Head AND tail, not the head alone.
+		//
+		// What a terse follow-up is answering is written at the END of a message:
+		// an offer, a question, a proposed next step. Keeping the opening keeps the
+		// one part that cannot say what "yeah" means.
+		//
+		// One turn ended "Want me to do that pass?". The router was shown the first
+		// 500 characters — the start of a review — read a conversation where an
+		// opinion had been given and agreed with, and classified "yeah" as chat.
+		// The lane it went to has no tools and answered by describing a diffstat,
+		// a byte count and a build that had never run.
 		if m.Role == "assistant" && len(m.Content) > 500 {
-			m.Content = m.Content[:500] + "…"
+			m.Content = m.Content[:300] + "\n…\n" + m.Content[len(m.Content)-200:]
 		}
 		out = append(out, m)
 	}

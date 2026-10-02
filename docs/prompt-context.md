@@ -77,7 +77,7 @@ Tools (file_read, bash, service, etc.) write their results back into the graph a
 
 ### The kernel heartbeat
 
-`internal/agent/kernel.go` reads the worklog directly (not via the gate) because it's a watchdog goroutine that runs across investigations and doesn't feed an LLM. It observes log lines for stuck-detection patterns. This is at a different layer than prompt assembly.
+`agent/kernel.go` reads the worklog directly (not via the gate) because it's a watchdog goroutine that runs across investigations and doesn't feed an LLM. It observes log lines for stuck-detection patterns. This is at a different layer than prompt assembly.
 
 ### Path resolution operations
 

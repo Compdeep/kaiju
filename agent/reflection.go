@@ -226,6 +226,28 @@ func (a *Agent) assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, 
 	sb.WriteString(a.formatTrigger(trigger))
 	sb.WriteString("\n\n")
 
+	// What the planner was working to, beside what the user said.
+	//
+	// These two were different and only the first reached here. A turn asked
+	// "report back to me on the changes"; preflight read the conversation and
+	// built an objective of "rewrite the prose in this section, then report the
+	// changes", and the planner planned both. The rewrite was blocked twice by a
+	// bad path. This stage saw only the user's seven words, judged the reporting
+	// half complete — which it was — and concluded with three replan rounds
+	// unused, while the step the planner had planned twice had never run.
+	//
+	// Both, labelled, because each catches what the other cannot. Only the
+	// request, and a planned action can finish unexecuted without this stage
+	// knowing it was wanted. Only the objective, and an identifier preflight
+	// invented becomes the thing being judged, with no copy of what was actually
+	// asked to notice it by — one turn had a guessed filename in there three
+	// times, once under "Exact values and rules", for a file that did not exist.
+	if graph != nil && graph.Preflight != nil && !graph.Preflight.Context.Empty() {
+		sb.WriteString("## What the planner was working to\n\n")
+		sb.WriteString(graph.Preflight.Context.Text())
+		sb.WriteString("\n\nThis is preflight's reading of the request above, and it is what the plan was written against. Where it names something the request does not, it is a reading and not a fact. Where it names work the request implies and the evidence does not show done, that work is still open.\n\n")
+	}
+
 	// ## History — the running record of this investigation: the round counter +
 	// wall clock (the soft brake), then one compact line per prior replan and per
 	// prior debug fix, so the reflector can SEE what earlier rounds already tried

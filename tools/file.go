@@ -46,10 +46,13 @@ func (f *FileRead) Name() string { return "file_read" }
  * return: description string
  */
 func (f *FileRead) Description() string {
-	return "Read the contents of a FILE, returned as text. The path must be a file; " +
-		"to list what is inside a directory, use file_list. Text only: a Word, PowerPoint or " +
-		"Excel file needs office_extract, and an image needs image_read — pointed at either, " +
-		"this returns bytes rather than failing."
+	return "Read the contents of a FILE, returned as text. ONE file: path takes a single " +
+		"path, never a list and never a command's output — given several it reads a filename " +
+		"made of all of them and fails, so narrow the earlier step to one path or plan the " +
+		"reads once you can see them. The path must be a file; to list what is inside a " +
+		"directory, use file_list. Text only: a Word, PowerPoint or Excel file needs " +
+		"office_extract, and an image needs image_read — pointed at either, this returns " +
+		"bytes rather than failing."
 }
 
 /*
@@ -91,7 +94,7 @@ func (f *FileRead) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"path": {"type": "string", "description": "Path to ONE file. This parameter takes a SINGLE path — it is NOT a list and NOT a command's output. Do not wire a step that prints several paths into it: the reference arrives as one filename containing newlines and the read fails. Have the earlier step print one path, or plan the reads once you can see them."},
+			"path": {"type": "string", "description": "Path to one file"},
 			"max_lines": {"type": "integer", "description": "Read the FIRST N lines (default: 500). Ignored when tail_lines is set."},
 			"tail_lines": {"type": "integer", "description": "Read the LAST N lines instead — for a log, where the interesting part is at the bottom. Set this OR max_lines, not both: this one wins and max_lines is not applied."}
 		},

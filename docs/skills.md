@@ -4,7 +4,7 @@ Kaiju has two things that look similar but serve different purposes, and they're
 
 ## Tools vs skills
 
-- **Tools** — Go code that implements the `Tool` interface. Has an `Execute()` method that actually does work. Lives in `tools/` or `internal/agent/` depending on whether it needs contextual execution. Examples: `bash`, `file_read`, `file_write`, `web_search`, `compute`, `service`.
+- **Tools** — Go code that implements the `Tool` interface. Has an `Execute()` method that actually does work. Lives in `tools/` or `agent/` depending on whether it needs contextual execution. Examples: `bash`, `file_read`, `file_write`, `web_search`, `compute`, `service`.
 - **Skills** — markdown files that provide planning guidance via prompt injection. Never execute. Their body gets read and pasted into LLM prompts at specific points.
 
 Both can show up in the same lists (the registry, the UI trace rows), which caused confusion historically. In current code they're cleanly separated: tools live in `a.registry`, guidance-only skills live in `a.skillGuidance`.
@@ -12,7 +12,7 @@ Both can show up in the same lists (the registry, the UI trace rows), which caus
 ## Two kinds of skills
 
 ### CapabilityCards
-- Small, embedded in the binary at `internal/agent/prompts/capabilities/*.md`
+- Small, embedded in the binary at `agent/prompts/skills/*.md`
 - Four of them: `data_retrieval`, `general_reasoning`, `self_awareness`, `system_operations`
 - Not user-editable without recompiling
 - Good for stable, orthogonal "what kind of task is this" classification
@@ -105,10 +105,10 @@ Merging them would require migrating the 4 capability cards to SkillMD format an
 
 ## Files
 
-- `internal/agent/prompts.go` — CapabilityCard type, embedded loader, `ComposeBodies`, `ComposeAggregatorGuidance`
-- `internal/agent/skillmd/*.go` — SkillMD parser, loader, watcher, frontmatter, gating
-- `internal/agent/preflight.go` — manifest building, selection flow
-- `internal/agent/dispatcher.go` — `resolveComputeSkillCards` (extracts architect/coder guidance for compute calls)
+- `agent/prompts.go` — CapabilityCard type, embedded loader, `ComposeBodies`, `ComposeAggregatorGuidance`
+- `agent/skillmd/*.go` — SkillMD parser, loader, watcher, frontmatter, gating
+- `agent/preflight.go` — manifest building, selection flow
+- `agent/dispatcher.go` — `resolveComputeSkillCards` (extracts architect/coder guidance for compute calls)
 
 ## Related docs
 

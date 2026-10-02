@@ -37,7 +37,7 @@ The kernel owns exactly one `Scheduler`; the scheduler's executor callback is `A
 
 ## The priority worker pool
 
-`internal/agent/job_scheduler.go`. One priority queue feeding a fixed pool of worker goroutines.
+`agent/job_scheduler.go`. One priority queue feeding a fixed pool of worker goroutines.
 
 ### Priorities
 
@@ -174,9 +174,9 @@ So an interjection is soft: it doesn't cancel anything; it becomes the next refl
 
 | file | responsibility |
 |---|---|
-| `internal/agent/job_scheduler.go` | priority queue + worker pool, `Job`, preemption, reserve, queue cap, `SetConcurrency` |
-| `internal/agent/kernel.go` | `schedulePolicy`, `Submit`/`SubmitSync`/`Interject`/`Cancel` front door, heartbeat auto-interject |
-| `internal/agent/scheduler.go` | `RunDAGSync`, `dagCtx`, the batch loop, `launchReady`, `injectInterjection`, aggregator skip on cancel |
-| `internal/agent/dag.go` | `Budget` (`MaxNodes`/`MaxLLMCalls`/`MaxPerSkill`), `ReadyNodes`, `GatePending` |
+| `agent/job_scheduler.go` | priority queue + worker pool, `Job`, preemption, reserve, queue cap, `SetConcurrency` |
+| `agent/kernel.go` | `schedulePolicy`, `Submit`/`SubmitSync`/`Interject`/`Cancel` front door, heartbeat auto-interject |
+| `agent/scheduler.go` | `RunDAGSync`, `dagCtx`, the batch loop, `launchReady`, `injectInterjection`, aggregator skip on cancel |
+| `agent/dag.go` | `Budget` (`MaxNodes`/`MaxLLMCalls`/`MaxPerSkill`), `ReadyNodes`, `GatePending` |
 | `internal/api/api.go` | `handleStop` (`POST /api/v1/stop`), `handleInterject` (`POST /api/v1/interject`) |
 | `internal/config/config.go` | `agent.max_concurrent` → worker-pool size |

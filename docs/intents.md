@@ -166,9 +166,9 @@ Scenario: admin wants a new "read_all" intent that allows broader read access th
 ## Implementation
 
 - `internal/db/intents.go` — DB types, CRUD, seeding
-- `internal/agent/intent_registry.go` — in-memory registry, Load/ResolveToolIntent/PromptBlock
+- `agent/intent_registry.go` — in-memory registry, Load/ResolveToolIntent/PromptBlock
 - `internal/api/intent_handlers.go` — REST handlers
 - `web/src/components/tabs/IntentsTab.vue` — admin UI
 - Preflight and planner both pull from `a.intentRegistry` at prompt-building time
 
-Full test coverage: `internal/db/intents_test.go`, `internal/agent/intent_registry_test.go`, `internal/agent/intent_enforcement_test.go`.
+Full test coverage: `internal/db/intents_test.go`, `agent/intent_registry_test.go`, `agent/intent_enforcement_test.go`.

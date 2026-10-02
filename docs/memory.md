@@ -8,7 +8,7 @@ Kaiju keeps memory in **two separate places**. They are not the same store, and 
 
 1. **The Memory Manager (DB-backed)** — `internal/memory/manager.go` on top of `internal/db/memories.go`, persisting to SQLite (`kaiju.db`). This is the **chat-boundary** memory: per-session conversation **history** (the `sessions` + `messages` tables) plus per-user **long-term** semantic / episodic / procedural facts (the `memories` table, namespaced `{user}/{type}`). It is loaded and written **only** at the chat boundary in `handleExecute`, is user-scoped for multi-tenant isolation, and is what compaction and the "## Your Memory" injection (below) operate on. Everything in this doc about history, long-term facts, namespacing, and compaction refers to this store.
 
-2. **The agent KV store (JSON-backed)** — `internal/agent/memory.go`, a plain key/value store persisted to `<data_dir>/agent/memory.json`, with optional per-entry TTL and tags. This is the store the LLM **tools** `memory_store` / `memory_recall` / `memory_search` read and write. It is a flat scratchpad the model can jot to and recall from during a run; it is **not** the DB, not the `memories` table, and not per-user namespaced.
+2. **The agent KV store (JSON-backed)** — `agent/memory.go`, a plain key/value store persisted to `<data_dir>/agent/memory.json`, with optional per-entry TTL and tags. This is the store the LLM **tools** `memory_store` / `memory_recall` / `memory_search` read and write. It is a flat scratchpad the model can jot to and recall from during a run; it is **not** the DB, not the `memories` table, and not per-user namespaced.
 
 Keep them straight: the DB Memory Manager holds memory *about the conversation and the user*, injected automatically at the chat boundary; the agent KV store holds memory *the model deliberately pokes at through tools*.
 
@@ -36,7 +36,7 @@ By keeping memory at the chat boundary, both reads and writes are attested by th
 
 The LLM tools `memory_store`, `memory_recall`, and `memory_search` exist as deliberate, auditable actions the LLM can take, the same way it can call `bash` or `file_write`. They appear in the worklog as explicit tool calls. This is allowed because it requires the LLM to make an active decision rather than memory being injected automatically by code processing untrusted input.
 
-Note that these tools operate on the **agent KV store** (`internal/agent/memory.go`), not the DB-backed Memory Manager — see [Two distinct stores](#two-distinct-stores). So even this sanctioned execution-layer path never reaches the chat-boundary conversation/long-term store; it writes to a separate scratchpad.
+Note that these tools operate on the **agent KV store** (`agent/memory.go`), not the DB-backed Memory Manager — see [Two distinct stores](#two-distinct-stores). So even this sanctioned execution-layer path never reaches the chat-boundary conversation/long-term store; it writes to a separate scratchpad.
 
 ### How to know if you're crossing the boundary
 

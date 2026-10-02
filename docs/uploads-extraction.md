@@ -58,7 +58,7 @@ Compile with `-tags plugin_pdf` and switch on with `plugins: ["pdf"]`. See
 
 ## The uploads processor
 
-`internal/agent/uploads/`. When a user uploads a file, a **synchronous** pipeline
+`agent/uploads/`. When a user uploads a file, a **synchronous** pipeline
 runs — the HTTP request blocks until the file is on disk and its sidecars are
 written, so the frontend chip goes straight from "uploading…" to "✓".
 
@@ -158,7 +158,7 @@ saying so; the coverage edge reads that and does not invent content. See
 |---|---|
 | `tools/office.go` | `office_extract` tool + OOXML extractors + `RegisterOfficeDecoders` |
 | `internal/plugins/pdf/pdf.go` | the `pdf_extract` tool + `application/pdf` decoder (build-tag plugin) |
-| `internal/agent/uploads/processor.go` | the synchronous upload pipeline + limits |
-| `internal/agent/uploads/extract.go` | metadata extractors (text/CSV/JSON/JSONL) + LLM summary |
+| `agent/uploads/processor.go` | the synchronous upload pipeline + limits |
+| `agent/uploads/extract.go` | metadata extractors (text/CSV/JSON/JSONL) + LLM summary |
 | `tools/web.go` | `web_fetch`: read-cap raise, `decodePageBinary`, `primaryContent` |
 | `agent/toolapi/decoders.go` | the two `web_fetch` seams (binary decoder + reader fallback) |

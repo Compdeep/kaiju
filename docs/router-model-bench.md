@@ -38,7 +38,7 @@ embedded ROUTE + PREFLIGHT prompts and kaiju's exact tool schemas. Winner:
 
 ## What "the router" is
 
-Two classifiers sit in front of the agent (`internal/agent/preflight.go`):
+Two classifiers sit in front of the agent (`agent/preflight.go`):
 
 1. **ROUTE** (`routeQuery`) — the escalation gate. System prompt = `prompt.Route`,
    forced `route` tool (`mode` ∈ chat|meta|investigate), `temperature 0`,
@@ -57,7 +57,7 @@ already decided. Escalation quality therefore lives entirely in **ROUTE**.
 ## Method
 
 - **Harness**: `scratchpad/preflight_bench.py`. Reads the live embedded prompts
-  from `internal/agent/prompt/prompts.md`, uses kaiju's exact `route` and
+  from `agent/prompt/prompts.md`, uses kaiju's exact `route` and
   `submit_preflight` tool schemas, and calls OpenRouter directly (no full-DAG
   runs). It replicates `routeQuery` faithfully, including fail-safe-to-chat.
 - **Phase A (ROUTE / mode)**: 8 models × 10 queries × **5 runs @ 16 tokens**
@@ -261,5 +261,5 @@ python3 preflight_bench.py      # ~576 calls, 8-way concurrent, ~3 min
 ```
 
 The harness pulls the prompts live from
-`/home/sites/kaiju/kaiju/internal/agent/prompt/prompts.md`, so it re-tests whatever
+`/home/sites/kaiju/kaiju/agent/prompt/prompts.md`, so it re-tests whatever
 ROUTE/PREFLIGHT prompt is current. Edit `MODELS` / `QUERIES` to extend.

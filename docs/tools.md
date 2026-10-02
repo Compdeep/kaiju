@@ -11,7 +11,7 @@ emit, and the full catalogue of what ships built in.
 
 ## The Tool interface
 
-`agent/toolapi/skill.go`. Four methods, implemented by every compiled
+`agent/toolapi/tool.go`. Four methods, implemented by every compiled
 built-in and every SKILL.md wrapper:
 
 ```go
@@ -245,10 +245,10 @@ for how those seams feed `web_fetch`.
 
 | file | responsibility |
 |---|---|
-| `agent/toolapi/skill.go` | `Tool` interface, impact tiers, optional interfaces |
+| `agent/toolapi/tool.go` | `Tool` interface, impact tiers, optional interfaces |
 | `agent/toolapi/registry.go` | the in-process registry (source + enabled) |
 | `agent/toolapi/toolmessage.go` | the `ToolMessage` envelope + constructors |
 | `agent/toolapi/decoders.go` | `web_fetch` binary-decoder + reader-fallback seams |
 | `tools/*.go` | the built-in tool implementations |
-| `internal/agent/builtin_compute.go` / `builtin_edit_file.go` / `builtin_debug.go` / `builtin_vision.go` | the agent-bound tools |
+| `agent/builtin_compute.go` / `builtin_edit_file.go` / `builtin_debug.go` / `builtin_vision.go` | the agent-bound tools |
 | `cmd/kaiju/main.go` (~L389–510) | registration + config gates |

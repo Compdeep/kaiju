@@ -276,16 +276,29 @@ Requires:
 
 ```
 cmd/kaiju/          Entry point (chat, serve, run, skill, user commands)
+agent/              DAG engine (planner, scheduler, reflection, aggregator)
+  llm/              Provider clients, lanes, reply sizing
+  toolapi/          Tool interface, registry, ToolMessage envelope
+  prompt/           System prompts (prompts.md) + operator overrides
+  gates/            The IGX execution gate
+  skillmd/          SKILL.md parsing
+  uploads/          Upload pipeline + extraction
+  toolfind/         Tool ranking index
+tools/              Built-in tools (bash, file, web, git, etc.)
+models/             Model catalogue
+ui/                 Config handler the frontend page reads
 internal/
-  agent/            DAG engine (planner, scheduler, reflection, aggregator)
   api/              REST API handlers
-  tools/            Built-in tools (bash, file, web, git, etc.)
   gateway/          HTTP server, WebSocket, SSE, JWT auth
   db/               SQLite (users, sessions, memories, audit)
   config/           Configuration loading
+  configapi/        Runtime config read/patch handlers
   channels/         Channel plugins (CLI, web)
   memory/           Session history + semantic memory
   auth/             JWT service
+  clearance/        External authorization endpoint client
+  plugins/          Compiled plugin registry (pdf, remote)
+  skillhub/         ClawHub skill registry client
   workspace/        Workspace bootstrapping
 skills/bundled/     19 bundled skills
 web/                Vue 3 frontend (Vite + Pinia)

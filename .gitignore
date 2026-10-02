@@ -85,3 +85,6 @@ report.json
 
 # Data files dropped in for a run. ttm.csv was a company expense ledger.
 /*.csv
+
+# Third-party ICC binaries: a plugin installs its own, see its install.md
+plugins/*/profiles/

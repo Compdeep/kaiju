@@ -1,0 +1,3 @@
+# pdf tier — page subset, reorder, rotate. The wheel bundles qpdf, so no system
+# package and no root.
+pikepdf>=8.0

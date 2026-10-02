@@ -1,0 +1,3 @@
+# cv tier — deskew only. Headless: no GUI libraries, and the wheel bundles its
+# own native code, so no system package and no root.
+opencv-python-headless>=4.9

@@ -1,0 +1,3 @@
+# base tier — probe, geometry, colour, ICC conversion
+Pillow>=10.0
+numpy>=1.24

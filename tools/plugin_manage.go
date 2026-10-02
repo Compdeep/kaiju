@@ -264,6 +264,20 @@ func (p *PluginEnable) ensureRemoteUp(r plugins.RemoteInfo) ([]string, string, e
 				port = u.Port()
 			}
 			cmd := strings.ReplaceAll(startCmd, "{port}", port)
+			// {plugins} is resolved here rather than written into the catalogue,
+			// where it was one developer's absolute path and auto-start therefore
+			// worked on exactly one machine. A binary shipped without the host's
+			// folder resolves it to nothing, and we say we cannot start it instead
+			// of running a command that cannot work.
+			if strings.Contains(cmd, "{plugins}") {
+				dir := plugins.PluginsDir()
+				if dir == "" {
+					return nil, hostURL, fmt.Errorf("couldn't find the plugin host's folder next to the binary or in the working directory, so %q cannot be started here — run its host yourself and point kaiju at it with plugin_option {name:%q, key:\"host\", value:\"<url>\"}", r.Name, r.Name)
+				}
+				cmd = strings.ReplaceAll(cmd, "{plugins}", dir)
+			}
+			// The workspace the host should sandbox file-touching plugins against.
+			cmd = strings.ReplaceAll(cmd, "{workspace}", p.workspace)
 			pnum, _ := strconv.Atoi(port)
 			log.Printf("[plugin] %s host at %s not answering — starting it via the service manager", r.Name, hostURL)
 			if serr := p.svc.StartManaged(r.Name, cmd, "", pnum); serr != nil {

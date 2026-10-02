@@ -14,6 +14,8 @@ package plugins
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 
@@ -140,7 +142,19 @@ type RemoteInfo struct {
 	Name        string
 	Description string
 	DefaultURL  string // where its host runs unless overridden by config remote_plugin_host
-	StartCmd    string // shell command to LAUNCH the host when it isn't running ({port} is substituted); overridable by config remote_plugin_start. Empty ⇒ can't auto-start, only connect.
+	// StartCmd is the shell command that LAUNCHES the host when it isn't running.
+	// Three placeholders are substituted by the caller: {plugins} for the reference
+	// host's directory, {port}, and {workspace} for the agent's sandbox root — the
+	// remote protocol carries no workspace, so a host that serves file-touching
+	// plugins is told where the sandbox is and they enforce it themselves.
+	//
+	// It held an absolute path to one developer's machine, so auto-start worked
+	// there and nowhere else. {plugins} is resolved at use time and resolves to
+	// nothing on an installation with no source tree — where auto-start cannot
+	// work anyway, and connecting to an already-running host still can.
+	//
+	// Overridable by config remote_plugin_start. Empty ⇒ connect only.
+	StartCmd string
 }
 
 // RemoteCatalog is the curated set of known remote plugins. The bridge itself
@@ -150,8 +164,39 @@ var RemoteCatalog = []RemoteInfo{
 		Name:        "webreader",
 		Description: "Read web pages as clean text, rendering JavaScript-heavy pages (SPAs, dashboards) when a plain fetch comes back thin. Once on, web_fetch reads every page through it.",
 		DefaultURL:  "http://127.0.0.1:8092", // 8091 is the MCS worker; keep off it
-		StartCmd:    "/home/sites/kaiju/kaiju/plugins/start.sh {port}",
+		StartCmd:    "{plugins}/start.sh {port} {workspace}",
 	},
+}
+
+/*
+ * PluginsDir locates the reference host's directory, or "" when there is none.
+ * desc: Probed rather than configured, because the one place it was written down
+ *       was an absolute path to the machine it was written on.
+ *
+ *       Beside the binary first, then the working directory — which covers a
+ *       checkout run in place and a deployment that ships the folder next to the
+ *       executable. A binary with neither returns "", and a caller that cannot
+ *       find the host does not pretend it can start one.
+ * return: an absolute path to the plugins directory, or "".
+ */
+func PluginsDir() string {
+	var roots []string
+	if exe, err := os.Executable(); err == nil {
+		if real, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = real
+		}
+		roots = append(roots, filepath.Dir(exe))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		roots = append(roots, wd)
+	}
+	for _, root := range roots {
+		cand := filepath.Join(root, "plugins")
+		if st, err := os.Stat(filepath.Join(cand, "host.py")); err == nil && !st.IsDir() {
+			return cand
+		}
+	}
+	return ""
 }
 
 // RemoteByName returns a known remote plugin by name.

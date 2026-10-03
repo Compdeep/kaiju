@@ -409,12 +409,19 @@ type Graph struct {
 	// again later is one cause and two runs, with two sets of actions and two
 	// outcomes to record.
 	RunID       string
-	ProjectRoot string           // project root path set by the architect (e.g. "project/kaiju_webapp"); empty means legacy "project/"
-	Validators  []ValidatorDef   // architect-declared validation checks, stored for replay after replans
-	Context     *ContextGate     // per-investigation context API; constructed at investigation start
-	ActiveCards []string         // skill card keys selected by preflight; read by skill_guidance source and DAG-path callers
-	Preflight   *PreflightResult // preflight result (mode/intent/skills/compute-mode); per-investigation, read by the planner
-	replanLog   []string         // one compact line per completed replan round, for the reflector's ## History (mu-protected)
+	ProjectRoot string         // project root path set by the architect (e.g. "project/kaiju_webapp"); empty means legacy "project/"
+	Validators  []ValidatorDef // architect-declared validation checks, stored for replay after replans
+	Context     *ContextGate   // per-investigation context API; constructed at investigation start
+	ActiveCards []string       // skill card keys selected by preflight; read by skill_guidance source and DAG-path callers
+	// DirectAnswer is what the planner wrote when it planned no steps. It is the
+	// planner's own prose, addressed to the stage it was told was downstream of
+	// it — the EXECUTIVE prompt opens "You do not answer the user directly" — so
+	// it reads as notes, in the third person, about the person who asked. It used
+	// to be returned verbatim as the reply. Carried here so the aggregator can
+	// say the same things to the reader they were written about.
+	DirectAnswer string
+	Preflight    *PreflightResult // preflight result (mode/intent/skills/compute-mode); per-investigation, read by the planner
+	replanLog    []string         // one compact line per completed replan round, for the reflector's ## History (mu-protected)
 }
 
 // AddReplanRecord appends a one-line record of a replan round, so a later

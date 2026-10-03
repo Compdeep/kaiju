@@ -130,6 +130,21 @@ func (a *Agent) assembleAggregatorPrompt(trigger Trigger, graph *Graph, gateCtx 
 		sb.WriteString("\n\n")
 	}
 
+	// What the planner concluded when it ran nothing.
+	//
+	// This is the whole of the evidence for such a turn: no steps ran, so the
+	// timeline below is empty and the arcs carry nothing. Without it the
+	// aggregator would be asked to write an answer from an empty run and would
+	// correctly report that it has none — so what the planner concluded travels, and
+	// what changes is the voice and the audience, not the content.
+	if graph != nil && graph.DirectAnswer != "" {
+		sb.WriteString("## What the planner concluded, without running anything\n\n")
+		sb.WriteString(graph.DirectAnswer)
+		sb.WriteString("\n\nNo step ran this turn, so this is the whole of what was found. " +
+			"Say it to the person who asked, in the second person. Add nothing to it: it is a " +
+			"conclusion, not a transcript, and anything not in it was not established.\n\n")
+	}
+
 	// Failed and skipped step warnings — must be prominent so the aggregator
 	// doesn't claim success for things that didn't happen.
 	if graph != nil {

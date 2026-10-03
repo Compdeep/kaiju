@@ -46,14 +46,18 @@ type Config struct {
 	API        APIConfig      `json:"api"`
 	Tools      ToolsConfig    `json:"tools"`
 	SkillsDirs []string       `json:"skills_dirs"`
-	// Plugins names the optional, build-tag-gated plugins to switch on at startup
-	// (e.g. ["pdf"]). A name here only takes effect if the binary was compiled
-	// with that plugin's tag (`-tags plugin_pdf`); otherwise it's reported as
-	// missing and ignored. See internal/plugins.
+	// Plugins names the plugins this installation should have (e.g. ["pdf"]). It is
+	// a declaration, not a request: a name here that the binary was not built with
+	// makes it rebuild itself at startup to include it. The --plugins flag unions
+	// with this. See internal/plugins/converge.go.
 	Plugins []string `json:"plugins,omitempty"`
-	// AllowRuntimePluginActivation lets the plugin_enable tool switch a compiled-in
-	// plugin on at runtime (and persist it here). Off by default — the embedding
-	// host opts in. When off, plugin_enable is not registered at all.
+	// AllowRuntimePluginActivation lets the plugin_install tool rebuild kaiju with
+	// a new plugin and restart into it. Off by default — the embedding host opts
+	// in. When off, plugin_install is not registered at all, and plugins are set by
+	// config or the command line only.
+	//
+	// The JSON key is unchanged so existing configs keep working, and it still
+	// answers the same question: may a run extend the agent for itself.
 	AllowRuntimePluginActivation bool `json:"allow_runtime_plugin_activation,omitempty"`
 	// RemotePluginHost is the base URL of the out-of-process plugin host the
 	// `remote` bridge connects to (e.g. http://127.0.0.1:8091). Set via the

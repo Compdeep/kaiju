@@ -53,5 +53,8 @@ done
 # source tree for the same reason the venv is not here.
 cd "$HERE"
 export KAIJU_WORKSPACE="$WORKSPACE"
+# KAIJU_PLUGINS, if the caller set it, names which plugins to load. Unset, the
+# host loads every folder it finds — see load_plugins in registry.py.
+export KAIJU_PLUGINS="${KAIJU_PLUGINS:-}"
 export PYTHONPYCACHEPREFIX="${VENV%/venv}/pycache"
 exec "$VENV/bin/uvicorn" host:app --host 127.0.0.1 --port "$PORT"

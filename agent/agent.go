@@ -1555,6 +1555,37 @@ func (a *Agent) DAGMode() string {
  * param: pollSec - watcher polling interval in seconds.
  * return: error if directory scanning fails.
  */
+// AddPluginSkill takes a plugin's skill card as text and makes it guidance the
+// planner sees, the same place a SKILL.md on disk ends up.
+//
+// A plugin ships a skill because its tool description cannot carry order. The
+// description says what image_edit does; the skill says probe the file before
+// editing it. Before this existed the bridge fetched each card and logged that it
+// was holding one, so that instruction never reached the planner it was written
+// for.
+//
+// A card that will not parse is named and skipped, because a run behaves as
+// though it was never written either way, and silence there is the bug this
+// method exists to fix.
+func (a *Agent) AddPluginSkill(name, markdown string) {
+	fm, body, err := skillmd.Parse([]byte(markdown))
+	if err != nil {
+		log.Printf("[agent] plugin %q ships a skill that will not parse, so it is not loaded: %v", name, err)
+		return
+	}
+	if fm.Name == "" {
+		fm.Name = name
+	}
+	if a.registry.IsBuiltin(fm.Name) {
+		log.Printf("[agent] plugin skill %q not loaded: a builtin of that name exists", fm.Name)
+		return
+	}
+	// No baseDir and no filePath: this card came over HTTP, not off disk, so
+	// nothing should try to re-read or watch it.
+	a.skillGuidance[fm.Name] = skillmd.NewSkillMD(fm, body, "", "", time.Now(), a.registry)
+	log.Printf("[agent] loaded plugin skill %q (%d bytes of guidance)", fm.Name, len(body))
+}
+
 func (a *Agent) InitSkills(ctx context.Context, extraDirs []string, pollSec int) error {
 	dirs := skillmd.DefaultDirs(a.cfg.DataDir, a.cfg.Workspace)
 	dirs = append(dirs, extraDirs...)

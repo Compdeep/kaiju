@@ -1,0 +1,41 @@
+{
+  "comment": [
+    "The catalogue of installable plugins. This file is embedded into the binary,",
+    "so it is the answer to 'what can I install' on every machine, with no file to",
+    "go missing at run time. It is NOT the enabled set: that is config `plugins`",
+    "plus the --plugins flag, and what is actually in a binary is plugins.Compiled().",
+    "",
+    "kind 'go'     — compiled in behind the build tag plugin_<name>.",
+    "kind 'python' — a folder under plugins/ served by the shared Python host, so",
+    "                every one of them needs the single tag plugin_remote.",
+    "",
+    "tier 'core'   — in this repository, arrived by pull request, and the agent may",
+    "                build it on request.",
+    "tier 'community' — carries source + commit. Adding one is an operator action:",
+    "                the agent must never fetch and compile code it chose itself."
+  ],
+  "plugins": [
+    {
+      "name": "pdf",
+      "kind": "go",
+      "tier": "core",
+      "description": "Extract text from PDF files, and read PDF bodies fetched from the web"
+    },
+    {
+      "name": "webreader",
+      "kind": "python",
+      "tier": "core",
+      "dir": "plugins/webreader",
+      "port": 8092,
+      "description": "Read pages that need JavaScript to render, as web_fetch's heavier re-read path"
+    },
+    {
+      "name": "illustrator",
+      "kind": "python",
+      "tier": "core",
+      "dir": "plugins/illustrator",
+      "port": 8092,
+      "description": "Image geometry and colour for print, preserving EXIF, the ICC profile and dpi"
+    }
+  ]
+}

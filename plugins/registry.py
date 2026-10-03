@@ -26,8 +26,13 @@ from typing import Any, Callable
 
 
 def envelope(kind: str, status: str, content: str = "", detail: str = "", data: Any = None) -> dict:
-    """Shape a result as a kaiju ToolMessage. status is one of ok|empty|error."""
-    msg: dict[str, Any] = {"kind": kind, "status": status}
+    """Shape a result as a kaiju ToolMessage. status is one of ok|empty|error.
+
+    The field is "type". It was "kind" here long after the Go side renamed it, so
+    an envelope built through this helper was reshaped by the bridge's fallback
+    path instead of being passed through as the ToolMessage it already was.
+    """
+    msg: dict[str, Any] = {"type": kind, "status": status}
     if content:
         msg["content"] = content
     if detail:
@@ -101,8 +106,18 @@ class Registry:
 
 
 def load_plugins(root: str) -> Registry:
+    """Load the plugins this host was told to serve.
+
+    KAIJU_PLUGINS names them, comma separated. Unset, every folder holding a
+    plugin.py is loaded, which is how this behaved before: the host served
+    whatever was on disk while kaiju's own config said which plugins were
+    enabled, so the two sides could disagree and the host always won.
+    """
+    only = {n.strip() for n in os.environ.get("KAIJU_PLUGINS", "").split(",") if n.strip()}
     reg = Registry()
     for name in sorted(os.listdir(root)):
+        if only and name not in only:
+            continue
         pdir = os.path.join(root, name)
         pfile = os.path.join(pdir, "plugin.py")
         if not os.path.isfile(pfile):

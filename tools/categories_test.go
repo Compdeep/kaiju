@@ -73,6 +73,6 @@ func categorised() []toolapi.Tool {
 		&WebSearch{}, &WebFetch{}, &WebResearch{}, &NetInfo{},
 		&Sysinfo{}, &EnvList{}, &Clipboard{},
 		&MemoryStore{}, &MemoryRecall{}, &MemorySearch{}, &MessageSearch{},
-		&PluginList{}, &PluginEnable{}, &PluginOption{}, &PanelPush{},
+		&PluginList{}, &PluginInstall{}, &PanelPush{},
 	}
 }

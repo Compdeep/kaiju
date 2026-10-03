@@ -1,10 +1,17 @@
 // Package plugins is an optional, build-tag-gated extension point for kaiju.
 //
-// A plugin bundles capabilities that are compiled into the binary ONLY when its
-// build tag is set (e.g. `go build -tags plugin_pdf`) and switched on at runtime
-// only when named in config `plugins` or the `--plugins` flag. This keeps heavy
-// or niche dependencies (PDF parsing, etc.) out of the default binary while
-// letting an operator opt in without forking the codebase.
+// A plugin bundles capabilities that are compiled into the binary only when its
+// build tag is set (e.g. `go build -tags plugin_pdf`). This keeps heavy or niche
+// dependencies out of the default binary while letting an operator opt in without
+// forking the codebase.
+//
+// There is ONE state: a plugin named in config `plugins` or the `--plugins` flag
+// is in the binary and live, or it is not installed. Converge (converge.go) makes
+// that true by rebuilding when the two disagree. There used to be a third state —
+// compiled in but switched off — with a tool to leave it, a second Host to leave
+// it at run time, and a flag per plugin recording which state it was in. Nothing
+// needed it, and while it existed plugin_list could not name a plugin that was
+// actually running.
 //
 // A plugin adds itself from an init() in a build-tagged file (plugins.Add), so
 // the default build links in neither the plugin nor its dependencies. At startup
@@ -14,6 +21,7 @@ package plugins
 
 import (
 	"context"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,6 +35,9 @@ import (
 // the Host.
 type Deps struct {
 	Workspace string // sandbox root; file-touching tools resolve paths under it
+	// AddSkill receives a plugin's planning guidance. A function rather than an
+	// interface so this package stays independent of the agent package.
+	AddSkill func(name, markdown string)
 }
 
 // Host is the surface a plugin registers its capabilities into, at activation. A
@@ -50,6 +61,13 @@ type Host interface {
 	// RegisterReaderFallback teaches core web_fetch a heavier re-read path for a
 	// URL with no extractable content (render + extract).
 	RegisterReaderFallback(fn func(ctx context.Context, rawURL string) (string, error))
+	// AddSkill contributes the plugin's planning guidance — the "when and how"
+	// card that sits beside its tools. A tool description says what a tool does;
+	// the skill says when to reach for it and in what order. Without this the
+	// bridge fetched each plugin's skill and logged that it was carrying it, so
+	// the illustrator plugin's instruction to probe an image before editing it
+	// never reached the planner that needed it.
+	AddSkill(name, markdown string)
 }
 
 // Plugin contributes tools and/or seams to the agent. Register is called once at
@@ -67,7 +85,6 @@ type Plugin interface {
 var (
 	mu         sync.Mutex
 	registered = map[string]Plugin{}
-	activeSet  = map[string]bool{} // plugins whose Register has run (boot or runtime)
 )
 
 // Compiled returns the names of every plugin compiled into this binary, sorted.
@@ -88,84 +105,6 @@ func Add(p Plugin) {
 	mu.Lock()
 	defer mu.Unlock()
 	registered[p.Name()] = p
-}
-
-// Get returns a compiled-in plugin by name (for runtime activation).
-func Get(name string) (Plugin, bool) {
-	mu.Lock()
-	defer mu.Unlock()
-	p, ok := registered[name]
-	return p, ok
-}
-
-// IsActive reports whether a plugin's Register has run (at boot or at runtime).
-func IsActive(name string) bool {
-	mu.Lock()
-	defer mu.Unlock()
-	return activeSet[name]
-}
-
-// MarkActive records a plugin as active. Runtime activation (plugin_enable) calls
-// it after running a plugin's Register with a live host, so IsActive/Catalog
-// reflect plugins switched on after boot.
-func MarkActive(name string) {
-	mu.Lock()
-	defer mu.Unlock()
-	activeSet[name] = true
-}
-
-// Info describes a compiled-in plugin for the plugin_list tool.
-type Info struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Active      bool   `json:"active"`
-}
-
-// Catalog lists every compiled-in plugin with its description and active state,
-// sorted by name — the read model behind plugin_list.
-func Catalog() []Info {
-	mu.Lock()
-	defer mu.Unlock()
-	out := make([]Info, 0, len(registered))
-	for name, p := range registered {
-		out = append(out, Info{Name: name, Description: p.Description(), Active: activeSet[name]})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
-
-// RemoteInfo describes a remote (out-of-process) plugin surfaced to the user by
-// NAME — so a user enables "webreader", never the "remote" bridge. These appear in
-// plugin_list even when their host isn't running; enabling one points the bridge at
-// its host and activates it, and the bridge stays invisible.
-type RemoteInfo struct {
-	Name        string
-	Description string
-	DefaultURL  string // where its host runs unless overridden by config remote_plugin_host
-	// StartCmd is the shell command that LAUNCHES the host when it isn't running.
-	// Three placeholders are substituted by the caller: {plugins} for the reference
-	// host's directory, {port}, and {workspace} for the agent's sandbox root — the
-	// remote protocol carries no workspace, so a host that serves file-touching
-	// plugins is told where the sandbox is and they enforce it themselves.
-	//
-	// It held an absolute path to one developer's machine, so auto-start worked
-	// there and nowhere else. {plugins} is resolved at use time and resolves to
-	// nothing on an installation with no source tree — where auto-start cannot
-	// work anyway, and connecting to an already-running host still can.
-	//
-	// Overridable by config remote_plugin_start. Empty ⇒ connect only.
-	StartCmd string
-}
-
-// RemoteCatalog is the curated set of known remote plugins. The bridge itself
-// ("remote") is never listed — it's infrastructure, not a capability.
-var RemoteCatalog = []RemoteInfo{
-	{
-		Name:        "webreader",
-		Description: "Read web pages as clean text, rendering JavaScript-heavy pages (SPAs, dashboards) when a plain fetch comes back thin. Once on, web_fetch reads every page through it.",
-		DefaultURL:  "http://127.0.0.1:8092", // 8091 is the MCS worker; keep off it
-		StartCmd:    "{plugins}/start.sh {port} {workspace}",
-	},
 }
 
 /*
@@ -199,16 +138,6 @@ func PluginsDir() string {
 	return ""
 }
 
-// RemoteByName returns a known remote plugin by name.
-func RemoteByName(name string) (RemoteInfo, bool) {
-	for _, r := range RemoteCatalog {
-		if r.Name == name {
-			return r, true
-		}
-	}
-	return RemoteInfo{}, false
-}
-
 // Activate registers the capabilities of every plugin named in `want` that is
 // compiled in. It returns the tools to add to the agent registry, the plugin
 // names actually switched on, and any requested-but-not-compiled-in names so the
@@ -230,7 +159,6 @@ func Activate(want []string, d Deps) (active []toolapi.Tool, on, missing []strin
 		}
 		h := &activation{deps: d}
 		p.Register(h)
-		activeSet[name] = true
 		active = append(active, h.tools...)
 		on = append(on, name)
 	}
@@ -246,6 +174,18 @@ type activation struct {
 
 func (a *activation) Workspace() string      { return a.deps.Workspace }
 func (a *activation) AddTool(t toolapi.Tool) { a.tools = append(a.tools, t) }
+
+// AddSkill hands the card to whatever the caller wired in. Deps carries a
+// function rather than this package importing the agent, which would be a cycle.
+// Unwired, a skill is dropped and said to be dropped — the quiet version of that
+// is what this method exists to end.
+func (a *activation) AddSkill(name, markdown string) {
+	if a.deps.AddSkill == nil {
+		log.Printf("[plugins] %s ships a skill (%d bytes) and nothing is wired to receive it", name, len(markdown))
+		return
+	}
+	a.deps.AddSkill(name, markdown)
+}
 
 func (a *activation) RegisterBinaryDecoder(mime string, fn func([]byte) (string, error)) {
 	toolapi.RegisterBinaryDecoder(mime, fn)

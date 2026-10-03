@@ -52,6 +52,7 @@ func schemaFixtures() map[string]toolapi.Tool {
 		"net_info":       &NetInfo{},
 		"office_extract": &OfficeExtract{},
 		"panel_push":     &PanelPush{},
+		"plugin_install": &PluginInstall{},
 		"plugin_list":    &PluginList{},
 		"process_kill":   &ProcessKill{},
 		"process_list":   &ProcessList{},

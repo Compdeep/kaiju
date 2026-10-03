@@ -52,9 +52,10 @@ func hostURL() string {
 // manifest matches the host's GET /plugins response shape.
 type manifest struct {
 	Plugins []struct {
-		Name  string         `json:"name"`
-		Skill string         `json:"skill"`
-		Tools []manifestTool `json:"tools"`
+		Name        string         `json:"name"`
+		Description string         `json:"description"`
+		Skill       string         `json:"skill"`
+		Tools       []manifestTool `json:"tools"`
 	} `json:"plugins"`
 }
 
@@ -82,7 +83,7 @@ func (bridge) Register(h plugins.Host) {
 		return
 	}
 	token := os.Getenv("KAIJU_PLUGIN_TOKEN")
-	tools, readers := 0, 0
+	tools, readers, skills := 0, 0, 0
 	for _, p := range man.Plugins {
 		for _, t := range p.Tools {
 			rt := &remoteTool{base: base, token: token, spec: t}
@@ -97,13 +98,15 @@ func (bridge) Register(h plugins.Host) {
 			}
 		}
 		if p.Skill != "" {
-			// The skill travels with the plugin in the manifest. Injecting it into
-			// kaiju's live skill registry needs a Host.AddSkill hook — a small
-			// follow-up; the tool works without it today.
-			log.Printf("[plugin/remote] plugin %q ships a skill (%d bytes) — carried, not yet injected", p.Name, len(p.Skill))
+			// The skill travels with the plugin in the manifest and now reaches the
+			// planner. It used to be fetched, counted and logged as "carried, not
+			// yet injected", which meant a plugin could ship an instruction like
+			// "probe the image before editing it" and have it read by nobody.
+			h.AddSkill(p.Name, withFrontmatter(p.Name, p.Description, p.Skill))
+			skills++
 		}
 	}
-	log.Printf("[plugin/remote] host %s: %d tool(s) (%d reader) from %d plugin(s)", base, tools, readers, len(man.Plugins))
+	log.Printf("[plugin/remote] host %s: %d tool(s) (%d reader, %d skill) from %d plugin(s)", base, tools, readers, skills, len(man.Plugins))
 }
 
 // readerFrom adapts a remote reader tool into web_fetch's ReaderFallback: it
@@ -215,4 +218,24 @@ func (t *remoteTool) Execute(ctx context.Context, params map[string]any) (string
 	}
 	// Non-envelope response: wrap the raw body as ok text so it still flows.
 	return toolapi.ToolText(string(raw)).JSON(), nil
+}
+
+// withFrontmatter gives a plugin's card the YAML header the skill loader needs,
+// unless the card already has one.
+//
+// A plugin's name and description are in its manifest, so a card that repeated
+// them in frontmatter would be stating the same two facts twice, free to disagree
+// with itself. Plugin authors write the guidance and nothing else — the first
+// cards written this way were rejected whole for "missing frontmatter delimiter",
+// which is a loader detail and not something they should have to know.
+func withFrontmatter(name, description, card string) string {
+	if strings.HasPrefix(strings.TrimLeft(card, " \t\n"), "---") {
+		return card
+	}
+	if description == "" {
+		description = "Guidance for the " + name + " plugin's tools"
+	}
+	// Quoted and escaped: a description is prose and routinely contains a colon,
+	// which unquoted would make the YAML mean something else or fail to parse.
+	return fmt.Sprintf("---\nname: %s\ndescription: %q\n---\n\n%s", name, description, card)
 }

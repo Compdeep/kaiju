@@ -83,6 +83,8 @@ func main() {
 		runUserCmd()
 	case "config":
 		runConfigCmd()
+	case "selfcheck":
+		runSelfcheck()
 	case "version":
 		fmt.Printf("kaiju %s\n", version)
 	case "help", "--help", "-h":
@@ -100,7 +102,11 @@ func printUsage() {
 Usage:
   kaiju chat                  Interactive CLI chat
   kaiju serve [--config FILE] Start gateway daemon (API + channels)
-              [--plugins a,b]   Switch on compiled-in plugins (e.g. pdf)
+              [--plugins a,b]   The plugins this installation should have. If this
+                                binary lacks them it rebuilds itself and restarts.
+  kaiju selfcheck               Load the named plugins, print what is compiled in,
+              [--plugins a,b]   exit non-zero if any is missing. Used to prove a
+                                freshly built binary boots before it replaces one.
   kaiju run "query"           One-shot query, print result, exit
   kaiju skill install <slug>  Install skill from ClawHub
   kaiju skill list            List installed skills
@@ -539,52 +545,84 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		reg.Replace(tools.NewMemorySearch(mem), "builtin")
 	}
 
-	// plugin_list lets the agent report which optional plugins are built in and
-	// which are active (read-only) — only worth registering when at least one
-	// plugin is compiled in. plugin_enable (runtime activation) is offered ONLY
-	// when the host opts in via AllowRuntimePluginActivation.
-	var pluginEnable *tools.PluginEnable
-	if len(plugins.Compiled()) > 0 {
-		reg.Replace(tools.NewPluginList(), "builtin")
-		if cfg.AllowRuntimePluginActivation {
-			pluginEnable = tools.NewPluginEnable(reg, cfg, svc)
-			reg.Replace(pluginEnable, "builtin")
-			reg.Replace(tools.NewPluginOption(cfg), "builtin")
-		}
+	// plugin_list reports the catalogue against what this binary carries. It is
+	// always registered: "what could I have" is answerable on a build with no
+	// plugins at all, and that is exactly when someone asks.
+	reg.Replace(tools.NewPluginList(), "builtin")
+	// plugin_install rebuilds kaiju with a plugin and restarts into it, so it is
+	// offered only when the operator opts in. Compiling new code into the agent's
+	// own binary is a larger grant than any tool call, and it stays behind a switch.
+	if cfg.AllowRuntimePluginActivation {
+		reg.Replace(tools.NewPluginInstall(cfg), "builtin")
 	}
 
-	// Export the persisted remote-plugin host (set via plugin_option) so the
-	// `remote` bridge — activated just below, or later via plugin_enable —
-	// connects to it instead of the default localhost.
+	// The persisted host URL, so the bridge connects where the operator put it
+	// rather than to the default on localhost.
 	if cfg.RemotePluginHost != "" {
 		os.Setenv("KAIJU_PLUGIN_HOST", cfg.RemotePluginHost)
 	}
 
-	// Optional plugin tools (compiled in behind build tags, switched on by config
-	// `plugins` or the `--plugins` flag). On a default build nothing is compiled
-	// in, so Activate returns nothing and this is a no-op.
-	if want := mergePluginNames(cfg.Plugins, pluginNamesFromArgs()); len(want) > 0 {
-		ptools, on, missing := plugins.Activate(want, plugins.Deps{Workspace: cfg.Agent.Workspace})
+	// Normalised, so a config that names the old bridge resolves to the plugins it
+	// carried and every consumer below agrees on the set.
+	want := plugins.Normalise(mergePluginNames(cfg.Plugins, pluginNamesFromArgs()))
+
+	// The Python host comes up BEFORE activation, not after it.
+	//
+	// The bridge registers a host's tools when it activates, once. If the host is
+	// not answering at that moment it contributes nothing and the plugins are
+	// quietly absent — which is what used to happen, and was then patched
+	// afterwards by re-registering through a second Host implementation. Starting
+	// the host first makes the patch unnecessary, and the second implementation is
+	// gone with it.
+	tools.NewHostSupervisor(cfg, svc, cfg.Agent.Workspace).EnsureUp(want)
+
+	if len(want) > 0 {
+		// Activation names, not catalogue names: a python plugin is carried by the
+		// bridge, which is registered as "remote".
+		ptools, _, _ := plugins.Activate(plugins.ActivationNames(want), plugins.Deps{
+			Workspace: cfg.Agent.Workspace,
+			AddSkill:  ag.AddPluginSkill,
+		})
 		for _, pt := range ptools {
+			// A plugin does not get to take a builtin's name.
+			//
+			// Registry.Replace overwrites whatever holds a name, and a remote
+			// plugin's tool names come from a manifest the host chose. A host
+			// advertising "bash" or "file_write" would have silently replaced the
+			// real one with its own, keeping the name, the schema the planner sees
+			// and none of the behaviour.
+			if reg.IsBuiltin(pt.Name()) {
+				log.Printf("[kaiju] plugin tool %q refused: a builtin owns that name", pt.Name())
+				continue
+			}
 			reg.Replace(pt, "plugin")
 		}
-		if len(on) > 0 {
-			log.Printf("[kaiju] plugins active: %s", strings.Join(on, ", "))
+		// What is actually live, which is `want` minus anything still missing.
+		// Printing `want` claimed a plugin was running whenever a rebuild had been
+		// refused, which is the one moment the line is read.
+		absent := map[string]bool{}
+		for _, n := range plugins.Missing(want) {
+			absent[n] = true
 		}
-		if len(missing) > 0 {
-			log.Printf("[kaiju] plugins requested but not compiled in (rebuild with -tags plugin_<name>): %s", strings.Join(missing, ", "))
+		var live []string
+		for _, n := range want {
+			if !absent[n] {
+				live = append(live, n)
+			}
 		}
-	} else if compiled := plugins.Compiled(); len(compiled) > 0 {
-		log.Printf("[kaiju] plugins compiled in but none activated (set config `plugins` or --plugins): %s", strings.Join(compiled, ", "))
-	}
-
-	// Boot self-heal: for any remote capability already in config (webreader, …),
-	// make sure its host is up and connected — starting it through the service
-	// manager if the boot Activate found it down (active-but-toolless). Paired with
-	// the service manager's auto-restart, this makes the reader "just work" across
-	// restarts and host crashes, instead of silently coming up dead.
-	if pluginEnable != nil {
-		pluginEnable.EnsureRemoteHostsUp()
+		if len(live) > 0 {
+			log.Printf("[kaiju] plugins: %s", strings.Join(live, ", "))
+		}
+		// Reported in catalogue names, which is what the operator asked for.
+		// Activate's own `missing` is in activation-name space, where a python
+		// plugin's absence shows up as "remote" and names nothing they typed.
+		//
+		// Converge should have made this impossible before we got here, so if it
+		// still happens the rebuild did not take and the name that was dropped is
+		// more useful than wondering why a tool is absent.
+		if absent := plugins.Missing(want); len(absent) > 0 {
+			log.Printf("[kaiju] requested but not in this binary even after converge: %s", strings.Join(absent, ", "))
+		}
 	}
 
 	// Load SKILL.md user skills
@@ -794,9 +832,47 @@ func runChat() {
 	}
 }
 
+// runSelfcheck proves a binary carries what it was built for, and boots.
+//
+// It is the gate between a finished build and replacing a working binary. Linking
+// is not enough: a plugin whose init() or Register panics produces a binary that
+// compiles and dies on start, and swapping that in gives a supervisor something to
+// restart into the same panic forever. So this actually activates them.
+//
+// It touches no database, binds no port and builds no agent — it must be cheap and
+// must not disturb the installation it is checking.
+func runSelfcheck() {
+	want := mergePluginNames(nil, pluginNamesFromArgs())
+	if len(want) > 0 {
+		// Activate for real. Its tools are thrown away; what matters is that
+		// Register ran without panicking.
+		plugins.Activate(want, plugins.Deps{Workspace: os.TempDir()})
+	}
+	compiled := plugins.Compiled()
+	fmt.Printf("plugins compiled in: %s\n", strings.Join(compiled, ", "))
+	if missing := plugins.Missing(want); len(missing) > 0 {
+		fmt.Fprintf(os.Stderr, "missing: %s\n", strings.Join(missing, ", "))
+		os.Exit(1)
+	}
+}
+
 // runServe starts the gateway daemon with all enabled channels and API.
 func runServe() {
 	cfg := loadConfig()
+
+	// Become the binary we were asked to be, before anything binds a port or opens
+	// the database — so there is no in-flight work for the handover to lose.
+	//
+	// `--plugins a,b` declares what this installation is. If this binary was not
+	// built with those, Converge builds one that was, proves it boots, replaces
+	// this file and re-execs. It returns normally when there is nothing to do,
+	// which is every ordinary start.
+	if err := plugins.Converge(plugins.Normalise(mergePluginNames(cfg.Plugins, pluginNamesFromArgs()))); err != nil {
+		// Not fatal. A machine with no Go toolchain, or no source tree, cannot
+		// rebuild — and serving without a plugin beats refusing to serve.
+		log.Printf("[kaiju] %v", err)
+	}
+
 	if cfg.LLM.APIKey == "" {
 		log.Println("[kaiju] WARNING: No LLM API key configured. Agent will not work until configured via UI or env var.")
 	}
@@ -991,6 +1067,16 @@ func runServe() {
 			}(msg)
 		}
 	}()
+
+	// How to put the server down before the process is replaced. plugin_install
+	// arms a handover and calls this; without it the exec would drop connections
+	// mid-response.
+	plugins.SetDrain(func() {
+		log.Println("[kaiju] draining for plugin handover...")
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer drainCancel()
+		gw.Shutdown(drainCtx)
+	})
 
 	// Graceful shutdown
 	sigCh := make(chan os.Signal, 1)

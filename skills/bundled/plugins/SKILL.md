@@ -1,53 +1,50 @@
 ---
 name: "Plugins"
-description: "Discover the optional plugins/capabilities this kaiju has, and — only when the user explicitly asks — switch one on."
+description: "Report which plugins this kaiju has and which it could have, and — only when the user asks — install one, which rebuilds kaiju and restarts it."
 ---
 
 ## Core Role
 
-When the user asks what you can do, whether any plugins are available, or whether
-you can do something that might need an optional capability (reading web pages,
-PDFs, etc.), check with the `plugin_list` tool rather than guessing. It reports
-each optional plugin as:
+When the user asks what you can do, whether a plugin exists, or whether you can do
+something that might need one, call `plugin_list` rather than guessing. It reports
+every plugin in the catalogue as:
 
-- **active** — its tools are live, use them now;
-- **available** — built into this binary but switched off; you can enable it;
-- and anything not listed at all isn't in this build (adding it needs an operator
-  rebuild — you cannot do that yourself).
+- **installed** — its tools are live, use them now;
+- **not installed** — in the catalogue, so `plugin_install` can build it in.
+
+A name the catalogue does not list cannot be installed here at all, and saying so
+is the correct answer.
 
 ## Planning Guidance
 
-- **This is about PLUGINS, not system services.** A request to "enable web
-  reading / read these JS pages / turn on the crawler / enable the reader / enable
-  this capability" is a plugin question — use `plugin_list` / `plugin_enable` /
-  `plugin_option`. Do NOT reach for the `service` tool (that manages OS daemons
-  like nginx/redis) and do NOT ask "which service" — the user means a plugin.
-- On "what can you do / are there plugins / can you do X?" → call `plugin_list`
-  and answer from it. Name what's active, and mention anything **available** you
-  could switch on.
-- **Propose, then enable.** If a capability the user wants is **available (off)**,
-  OFFER it and ask them to confirm — e.g. "I can do that if I enable the
-  `webreader` plugin — want me to?" Enable only after they say yes, or if they
-  asked to enable it outright.
-- To enable, call `plugin_enable` with the capability `name` from `plugin_list`
-  (e.g. `webreader`). Enable the capability by its own name — there is no separate
-  "bridge" or "remote" step to reason about; any plumbing comes up on its own.
-- **A reader capability wires itself into `web_fetch`.** Once `webreader` is
-  enabled, you do NOT call a separate tool to use it — `web_fetch` reads every page
-  through it automatically (JS/SPA pages included). Just fetch as usual.
-- **If enabling reports its host is unreachable**, its background service isn't
-  running at the default address. Say so; if the user gives you a URL, set it with
-  `plugin_option {name:"webreader", key:"host", value:"<url>"}` and enable again.
-- If `plugin_enable` reports the capability isn't built into this binary, tell the
-  user it needs an operator to rebuild — you can't add it.
+- **This is about PLUGINS, not system services.** "Can you read JS-heavy pages",
+  "turn on the crawler", "can you edit images" are plugin questions — use
+  `plugin_list`, then `plugin_install`. Do NOT reach for the `service` tool, which
+  manages OS daemons, and do NOT ask "which service".
+- On "what can you do / are there plugins / can you do X?" → call `plugin_list` and
+  answer from it. Name what is installed, and name anything you could install.
+- **Propose, then install.** If the thing the user wants is not installed, say what
+  installing it involves and ask. Install without asking only when they asked for
+  it outright.
+- **Installing rebuilds kaiju and restarts it.** `plugin_install` compiles a new
+  binary, proves it boots, replaces the running one and hands over about twenty
+  seconds later. Say that before you call it, because the user will see a restart.
+  Your answer is delivered first; the handover follows it.
+- **It can fail for reasons you cannot fix.** A rebuild needs kaiju's source tree
+  and a Go toolchain on the machine. Without them `plugin_install` says so, and
+  that is a complete answer — do not look for another route to the same end, and do
+  not offer to run build commands through `bash`.
+- **One call installs one plugin.** It keeps everything already installed; you do
+  not need to name the others.
+- **A reader plugin wires itself into `web_fetch`.** Once `webreader` is installed
+  you do not call a separate tool — `web_fetch` reads every page through it,
+  JavaScript-heavy pages included. Just fetch as usual.
+- **Report honestly when a capability is absent.** "I can't do that, and there is
+  no plugin here for it" is a finished answer. Never describe what a tool you do
+  not have would have returned.
 
 ## RULES
 
-- Never enable a plugin on your own initiative — only when the user explicitly
-  asks, or confirms an offer you made.
-- Don't claim a capability you don't have. Check `plugin_list` first; if it isn't
-  active and isn't available, say plainly it isn't in this build.
-- `plugin_enable` grants you new capabilities — treat it as a deliberate,
-  user-approved action, not a routine step. (If it isn't offered at all, the
-  operator has disabled runtime activation; you can still explain how to enable a
-  plugin via config.)
+1. Never claim a plugin is installed without `plugin_list` saying so.
+2. Never install a plugin the user did not ask for, even when it would help.
+3. Never present a plugin's absence as a failure of the request.

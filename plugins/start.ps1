@@ -44,6 +44,9 @@ Get-ChildItem -Path $Here -Directory | ForEach-Object {
 # A plugin that touches files enforces its own sandbox against this; unset, it
 # refuses every path.
 $env:KAIJU_WORKSPACE = $Workspace
+# Named plugins only, when the caller said which; otherwise the host loads every
+# folder it finds.
+if (-not $env:KAIJU_PLUGINS) { $env:KAIJU_PLUGINS = "" }
 $env:PYTHONPYCACHEPREFIX = Join-Path (Split-Path -Parent $Venv) "pycache"
 Set-Location $Here
 & $Py -m uvicorn host:app --host 127.0.0.1 --port $Port

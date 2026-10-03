@@ -115,17 +115,30 @@ func TestEverySettingSaysWhereItApplies(t *testing.T) {
 	}
 }
 
-// Active plugins are a subset of compiled ones. Reporting an active plugin that
-// is not in the binary would send a caller looking for a feature that cannot run.
-func TestActivePluginsAreCompiledOnes(t *testing.T) {
+// Everything compiled in is something the catalogue lists. A binary carrying a
+// plugin the catalogue has never heard of cannot be reproduced by anyone reading
+// the catalogue to build it, and plugin_list would not be able to name it.
+//
+// This replaced a check that active plugins are a subset of compiled ones. There
+// is no longer an active set distinct from the compiled one, so that check could
+// only ever pass.
+func TestCompiledPluginsAreInTheCatalogue(t *testing.T) {
 	got := capabilities(t)
-	compiled := map[string]bool{}
-	for _, n := range got.PluginsCompiled {
-		compiled[n] = true
+	listed := map[string]bool{}
+	for _, n := range got.PluginsInstallable {
+		listed[n] = true
 	}
-	for _, n := range got.PluginsActive {
-		if !compiled[n] {
-			t.Errorf("plugin %q is reported active and is not compiled in", n)
+	if len(listed) == 0 {
+		t.Fatal("plugins_installable is empty, so the embedded catalogue did not reach the API")
+	}
+	for _, n := range got.PluginsCompiled {
+		// "remote" is the bridge, which carries the python plugins and is not one
+		// itself, so it is deliberately not in the catalogue.
+		if n == "remote" {
+			continue
+		}
+		if !listed[n] {
+			t.Errorf("plugin %q is compiled in and the catalogue does not list it", n)
 		}
 	}
 }

@@ -54,7 +54,6 @@ func (t *MemoryRecall) Categories() []string  { return []string{"info"} }
 func (t *MemorySearch) Categories() []string  { return []string{"info"} }
 func (t *MessageSearch) Categories() []string { return []string{"info"} }
 
-func (t *PluginList) Categories() []string   { return []string{"info"} }
-func (t *PluginEnable) Categories() []string { return []string{"info"} }
-func (t *PluginOption) Categories() []string { return []string{"info"} }
-func (t *PanelPush) Categories() []string    { return []string{"info"} }
+func (t *PluginList) Categories() []string    { return []string{"info"} }
+func (t *PluginInstall) Categories() []string { return []string{"info"} }
+func (t *PanelPush) Categories() []string     { return []string{"info"} }

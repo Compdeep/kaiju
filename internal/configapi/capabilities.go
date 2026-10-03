@@ -59,11 +59,12 @@ type Setting struct {
 type Capabilities struct {
 	// Settings are the enumerable config keys and their accepted values.
 	Settings []Setting `json:"settings"`
-	// Plugins compiled into this binary, and the ones switched on. Compiled but
-	// not active is the ordinary case: a plugin is code that is present and not
-	// asked for, and a caller enabling one needs to know which of those it is.
-	PluginsCompiled []string `json:"plugins_compiled"`
-	PluginsActive   []string `json:"plugins_active"`
+	// Plugins compiled into this binary, which is the same thing as the plugins
+	// that are live: there is no longer a compiled-but-off state for a caller to
+	// distinguish, so plugins_active reported the same list and is gone.
+	// PluginsInstallable is the catalogue — what this kaiju could be rebuilt with.
+	PluginsCompiled    []string `json:"plugins_compiled"`
+	PluginsInstallable []string `json:"plugins_installable"`
 	// ProviderRouting reports whether this build steers OpenRouter away from
 	// particular hosts. The lists themselves are not published: they are this
 	// deployment's operational judgement about third parties, and a caller needs
@@ -129,21 +130,20 @@ func (c *API) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 			},
 		},
 		PluginsCompiled:       plugins.Compiled(),
-		PluginsActive:         activePlugins(),
+		PluginsInstallable:    installablePlugins(),
 		ProviderRoutingBlocks: len(openrouter.Blocked()),
 		ProviderRoutingAllows: len(openrouter.Allowed()),
 	}
 	jsonResponse(w, out, http.StatusOK)
 }
 
-// activePlugins is the compiled list narrowed to the ones switched on.
-func activePlugins() []string {
-	all := plugins.Compiled()
-	on := make([]string, 0, len(all))
-	for _, n := range all {
-		if plugins.IsActive(n) {
-			on = append(on, n)
-		}
+// installablePlugins is the catalogue's names — what this kaiju could carry, as
+// opposed to what it does.
+func installablePlugins() []string {
+	all := plugins.Installable()
+	out := make([]string, 0, len(all))
+	for _, e := range all {
+		out = append(out, e.Name)
 	}
-	return on
+	return out
 }

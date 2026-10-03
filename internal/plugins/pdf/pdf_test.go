@@ -19,12 +19,19 @@ type captureHost struct {
 	ws       string
 	tools    []toolapi.Tool
 	decoders map[string]func([]byte) (string, error)
+	skills   map[string]string
 }
 
 var _ plugins.Host = (*captureHost)(nil)
 
 func (h *captureHost) Workspace() string      { return h.ws }
 func (h *captureHost) AddTool(t toolapi.Tool) { h.tools = append(h.tools, t) }
+func (h *captureHost) AddSkill(name, markdown string) {
+	if h.skills == nil {
+		h.skills = map[string]string{}
+	}
+	h.skills[name] = markdown
+}
 func (h *captureHost) RegisterBinaryDecoder(mime string, fn func([]byte) (string, error)) {
 	if h.decoders == nil {
 		h.decoders = map[string]func([]byte) (string, error){}

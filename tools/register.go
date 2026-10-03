@@ -7,7 +7,6 @@ import (
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/toolapi"
-	"github.com/Compdeep/kaiju/internal/plugins"
 )
 
 // Registering kaiju's tools, and taking one of their names.
@@ -107,16 +106,16 @@ type Deps struct {
 	Fetch FetchLimits
 
 	// Plugins is the application's plugin configuration. Nil omits
-	// plugin_enable and plugin_option, which have nothing to persist a change
-	// to. plugin_list is registered whenever a plugin is compiled in, since
-	// listing what is available needs no configuration.
+	// plugin_install, which would have nowhere to record what it installed, so the
+	// install would be undone by the next start. plugin_list needs no
+	// configuration and is always registered.
 	Plugins PluginConfig
 
-	// AllowPluginActivation lets a run turn a plugin on for itself. It is the
-	// application's policy, not a capability: an agent that may install its own
-	// extensions mid-run is a different proposition from one that may not, so
-	// this is off unless asked for.
-	AllowPluginActivation bool
+	// AllowPluginInstall lets a run install a plugin, which rebuilds kaiju's own
+	// binary and restarts into it. It is the application's policy, not a
+	// capability: an agent that may compile new code into itself is a different
+	// proposition from one that may not, so this is off unless asked for.
+	AllowPluginInstall bool
 
 	// Exclude names tools to leave unregistered, so an application can take one
 	// of their names for itself. An entry matching no tool is reported rather
@@ -209,14 +208,13 @@ func Register(reg *toolapi.Registry, d Deps) ([]string, error) {
 		put(NewMemorySearch(d.Memory))
 	}
 
-	// Plugins. Listing what is compiled in needs nothing; turning one on needs
-	// somewhere to record it and the application's permission.
-	if len(plugins.Compiled()) > 0 {
-		put(NewPluginList())
-		if d.Plugins != nil && d.AllowPluginActivation {
-			put(NewPluginEnable(reg, d.Plugins, svc))
-			put(NewPluginOption(d.Plugins))
-		}
+	// Plugins. Listing the catalogue needs nothing and is always available, because
+	// "what could I have" is answerable on a binary built with none of them.
+	// Installing one rebuilds the binary, so it needs somewhere to record what this
+	// installation should be, and the application's permission to do it at all.
+	put(NewPluginList())
+	if d.Plugins != nil && d.AllowPluginInstall {
+		put(NewPluginInstall(d.Plugins))
 	}
 
 	if failed != nil {

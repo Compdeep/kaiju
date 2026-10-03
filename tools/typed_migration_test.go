@@ -36,7 +36,7 @@ func allTools(t *testing.T) map[string]toolapi.Tool {
 		"office_extract": NewOfficeExtract(ws),
 		"panel_push":     NewPanelPush(),
 		"plugin_list":    NewPluginList(),
-		"plugin_option":  NewPluginOption(&config.Config{}),
+		"plugin_install": NewPluginInstall(&config.Config{}),
 		"process_kill":   NewProcessKill(),
 		"process_list":   NewProcessList(),
 		"service":        NewService(ws),
@@ -46,8 +46,7 @@ func allTools(t *testing.T) map[string]toolapi.Tool {
 		// The variants main actually registers, which take configuration the
 		// plain constructors do not. Missing these was how the first version of
 		// this guard passed while three registered tools went unchecked.
-		"plugin_enable": NewPluginEnable(toolapi.NewRegistry(), &config.Config{}, NewService(ws)),
-		"web_research":  NewWebResearch(SearchConfig{}, nil),
+		"web_research": NewWebResearch(SearchConfig{}, nil),
 	}
 }
 

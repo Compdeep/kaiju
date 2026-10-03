@@ -95,7 +95,9 @@ func (f *FileRead) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"path": {"type": "string", "description": "Path to one file"},
-			"max_lines": {"type": "integer", "description": "Read the FIRST N lines (default: 500). Ignored when tail_lines is set."},
+			"max_lines": {"type": "integer", "description": "How many lines to read (default: 500). Counted from the start of the file, or from offset when one is given. Ignored when tail_lines is set."},
+			"offset": {"type": "integer", "description": "The first line to read, counting from 1. Use with max_lines to read a region in the MIDDLE of a long file, rather than only its start or end."},
+			"numbered": {"type": "boolean", "description": "Prefix each line with its line number in the file. Use when you intend to cite line numbers back — an edit that names the lines it changes needs them."},
 			"tail_lines": {"type": "integer", "description": "Read the LAST N lines instead — for a log, where the interesting part is at the bottom. Set this OR max_lines, not both: this one wins and max_lines is not applied."}
 		},
 		"required": ["path"],
@@ -163,6 +165,17 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 	if tl, ok := toolapi.ParamNum(params, "tail_lines"); ok && tl > 0 {
 		tailLines = int(tl)
 	}
+	// Where to start. 1 is the first line, so a region is offset plus max_lines.
+	// Without this the only readable parts of a file were its start and its end,
+	// and an edit to the middle of a long file had to hold the whole thing.
+	offset := 1
+	if off, ok := toolapi.ParamNum(params, "offset"); ok && off > 1 {
+		offset = int(off)
+	}
+	// Opt-in, and deliberately not the default: a step that wires this text into a
+	// coder which writes the file back would otherwise save the numbers into it.
+	// A caller that means to cite line numbers asks for them.
+	numbered, _ := params["numbered"].(bool)
 
 	// Streamed, not slurped. This read the whole file into memory and then threw
 	// away all but a few lines, so asking for the last five lines of a 200MB log
@@ -187,7 +200,13 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 			}
 			continue
 		}
+		if total < offset {
+			continue // before the region asked for
+		}
 		if len(head) < maxLines {
+			if numbered {
+				line = fmt.Sprintf("%6d| %s", total, line)
+			}
 			head = append(head, line)
 		}
 	}
@@ -216,11 +235,19 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 		}), nil
 	}
 	shown := len(head)
-	if total > maxLines {
-		head = append(head, fmt.Sprintf("... (truncated at %d of %d lines)", maxLines, total))
+	first, last := 0, 0
+	if shown > 0 {
+		first, last = offset, offset+shown-1
+	}
+	// Truncated means "there is more of this file than you were shown", which a
+	// region read can be at either end.
+	cut := first > 1 || last < total
+	if cut {
+		head = append(head, fmt.Sprintf("... (showing lines %d-%d of %d)", first, last, total))
 	}
 	return toolapi.ToolOK("text", strings.Join(head, "\n"), fileReadData{
-		Path: path, LinesShown: shown, LinesTotal: total, Truncated: total > maxLines,
+		Path: path, LinesShown: shown, LinesTotal: total, Truncated: cut,
+		FirstLine: first, LastLine: last,
 	}), nil
 }
 

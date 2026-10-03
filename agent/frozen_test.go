@@ -81,7 +81,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	"INTERJECTION":    {"417d206c70b452b2", 788},
 	"CLASSIFIER":      {"1f813616ac1a9d88", 270},
 	"CURATOR":         {"7345d945b7f1b76f", 3199},
-	"CHAT":            {"864f24afcef03491", 2118},
+	"CHAT":            {"da887f1e924ef207", 2458},
 	"VISION":          {"a34b6cb0dc575294", 218},
 	"REACT":           {"8ac5f1aca3a544d3", 1669},
 }

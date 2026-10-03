@@ -324,7 +324,11 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	// current message. See routeContext for what's included (summary + last turn).
 	msgs := []llm.Message{{Role: "system", Content: prompt.Route}}
 	msgs = append(msgs, routeContext(history)...)
-	msgs = append(msgs, llm.Message{Role: "user", Content: query})
+	// Capped, head and tail. The query went to the router verbatim, so a pasted
+	// log or file rode on a call whose whole job is one word of output — and the
+	// decision never needed the middle of it. Both ends because what a message
+	// asks for is at the start or the end, not the bulk in between.
+	msgs = append(msgs, llm.Message{Role: "user", Content: capQuery(query)})
 	ctx = withTrace(ctx, TraceID{NodeType: "preflight", Tag: "route"})
 	resp, err := a.completeRoute(ctx, &llm.ChatRequest{
 		Messages:    msgs,
@@ -336,16 +340,29 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 		// way through and fail to parse, taking the routing decision with it.
 		MaxTokens: routeReplyBudget,
 	})
-	// On ANY classifier failure — the model errored, refused, or returned
-	// unparseable output — fall back to "chat", which the ROUTE prompt itself calls
-	// the default and common case. Escalating to the agent should be a POSITIVE
-	// decision, not what happens when the router trips. An aligned route model often
-	// balks at classifying borderline content (e.g. adult roleplay), and defaulting that
-	// balk to "investigate" wrongly forced those turns onto the agent path — where
-	// the (also aligned) planner then refused. Failing toward the cheap, safe
-	// conversational lane keeps the user's selected chat model in play.
+	// A classifier failure falls back to "chat" — EXCEPT a truncated reply, which
+	// falls back to "agent".
+	//
+	// The two are different failures and the old code treated them alike. A refusal
+	// is a judgement: an aligned route model balks at classifying borderline content
+	// (adult roleplay, say), and sending that balk to the agent wrongly forced those
+	// turns onto a path where the also-aligned planner refused in turn. Failing
+	// toward the conversational lane keeps the user's own chat model in play, and
+	// escalating to the agent stays a POSITIVE decision.
+	//
+	// A truncation is not a judgement. The model was answering and ran out of room,
+	// so the mode it was about to write is unknown — and "chat" is the lane with no
+	// tools, which means a mechanical failure silently becomes a turn where nothing
+	// happens. Observed: one provider ignored reasoning {enabled:false}, spent the
+	// whole budget thinking, and every affected turn was answered by a lane that
+	// could not act, promising work it had no way to do. Agent costs a slower answer;
+	// chat costs the turn.
 	if err != nil {
 		return "chat", nil, llm.WantAuto
+	}
+	if truncatedReply(resp) {
+		traceFault(ctx, "reply truncated before the mode was written — routing to agent")
+		return "agent", nil, llm.WantAuto
 	}
 	raw, err := extractToolArgs(resp)
 	if err != nil {
@@ -363,6 +380,13 @@ func (a *Agent) routeQuery(ctx context.Context, triggerID, query string, history
 	if err := ParseLLMJSON(raw, &out); err != nil {
 		traceFault(ctx, "parse failed: "+err.Error())
 		return "chat", nil, llm.WantAuto
+	}
+	// A reply that parsed but carries no mode is the truncation case again, reached
+	// when a provider closes the JSON it cut short. Same reasoning: unknown is not
+	// "conversation".
+	if out.Mode == "" {
+		traceFault(ctx, "reply carried no mode — routing to agent")
+		return "agent", cleanTerms(out.Lacking), wantFrom(out.Think)
 	}
 	lacking := cleanTerms(out.Lacking)
 	switch out.Mode {
@@ -451,12 +475,32 @@ func (a *Agent) recallTerms(ctx context.Context, triggerID, query string, histor
 // fifteen phrases ran out of part way through the fifteenth — taking the mode
 // with it, because the mode had not been written yet.
 //
-// 128 is margin, not the fix. Raising it alone buys a few more items from a
-// model with no reason to stop: the same reply would have been cut in the same
-// paragraph, four items later. What stops it is the bound in the schemas. This
-// is here so a provider that pretty-prints its JSON, or spells the enum in
-// full, is not the difference between an answer and a truncation.
-const routeReplyBudget = 128
+// 128 then ran out too. A reply enumerating "section 1.1" through "section 1.12"
+// was cut in the middle of the thirteenth, and because Go sorts map keys the
+// array is generated BEFORE mode — so the one field the call exists to produce
+// had not been written when the budget ran out. An unparseable reply routes to
+// chat, the lane with no tools, so the turn silently did nothing.
+//
+// 256 then ran out as well, and measuring it said why: the budget is not being
+// spent on the answer. The answer is twelve tokens. The rest is the model's
+// REASONING, which this call never asked for — thinking_asked is off — and which
+// the provider emits anyway and bills against max_tokens.
+//
+// Measured on the call that failed, same prompt and model, three budgets:
+//
+//	256  -> finish_reason length,     927 chars of reasoning, no tool call
+//	512  -> finish_reason length,    2054 chars of reasoning, no tool call
+//	1024 -> finish_reason tool_calls, 1512 chars of reasoning, correct answer
+//
+// Reasoning at 512 ran LONGER than at 1024, so its length varies per call and any
+// ceiling set near it decides the turn by chance. 1024 is four times the longest
+// answer this has ever produced and clear of the reasoning observed.
+//
+// This is a ceiling, not a cap on content: the caps are termMaxChars on the way
+// back and queryMaxChars on the way in. And it is still only margin — a reply that
+// does not parse now routes to agent rather than chat, because the cost of
+// guessing wrong about a classifier failure is a whole turn where nothing happens.
+const routeReplyBudget = 256
 
 // actionVerbs are the words a person uses to ask for something to be DONE.
 //
@@ -488,11 +532,22 @@ func asksForAnAction(query string) bool {
 	return actionVerbs.MatchString(query)
 }
 
-// cleanTerms drops the blanks and the repeats from what the router asked for.
+// termMaxChars is the longest a single search term may be.
+//
+// The schema says maxLength 40, and the schema is not enforced here: closedSchema
+// strips maxLength and maxItems out of the copy sent to the provider, and this
+// caller unmarshals the arguments itself rather than going through the dispatcher
+// that would re-check them. So the bound has to be applied to what comes back.
+const termMaxChars = 80
+
+// cleanTerms drops the blanks and the repeats from what the router asked for, and
+// cuts anything over-long.
 //
 // A model listing the same word twice, or offering an empty string among real
 // ones, would otherwise widen the search expression without widening what it
-// finds.
+// finds. A model offering a paragraph where a phrase was asked for spends the
+// reply budget on it — these are search terms, matched against earlier messages
+// as written, so past a hundred characters there is nothing left to match.
 func cleanTerms(in []string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -502,9 +557,41 @@ func cleanTerms(in []string) []string {
 			continue
 		}
 		seen[strings.ToLower(t)] = true
-		out = append(out, t)
+		out = append(out, capTerm(t))
 	}
 	return out
+}
+
+// queryMaxChars is the most of the user's message the router is shown.
+//
+// Generous, because the decision reads the message. Bounded, because nothing
+// bounded it before: a 50KB paste was sent in full to a call that answers with a
+// single word, on every turn.
+const queryMaxChars = 4000
+
+// capQuery cuts the user's message to queryMaxChars, keeping both ends and saying
+// that it was cut, so the router does not read a truncated message as a complete
+// one that simply stops.
+func capQuery(q string) string {
+	r := []rune(q)
+	if len(r) <= queryMaxChars {
+		return q
+	}
+	const half = queryMaxChars / 2
+	return string(r[:half]) + "\n…[cut from the middle of a longer message]…\n" + string(r[len(r)-half:])
+}
+
+// capTerm cuts a term to termMaxChars, keeping both ends.
+//
+// Head and tail rather than head alone: a term is matched against earlier text,
+// and the distinguishing part of a long one is as often at the end as the start.
+func capTerm(t string) string {
+	r := []rune(t)
+	if len(r) <= termMaxChars {
+		return t
+	}
+	const half = termMaxChars / 2
+	return string(r[:half]) + "…" + string(r[len(r)-half:])
 }
 
 // routeContext returns a MINIMAL slice of chat history for the router: the running
@@ -935,4 +1022,24 @@ func lastAssistantMessage(history []llm.Message) string {
 		}
 	}
 	return ""
+}
+
+/*
+ * truncatedReply reports whether the provider stopped because it ran out of room.
+ * desc: finish_reason "length" means the model was still writing. Whatever it was
+ *       about to say is unknown, which is different from a model that declined to
+ *       answer — and the two want opposite defaults.
+ * param: resp - the provider's reply, possibly nil.
+ * return: true when any choice was cut short.
+ */
+func truncatedReply(resp *llm.ChatResponse) bool {
+	if resp == nil {
+		return false
+	}
+	for _, c := range resp.Choices {
+		if c.FinishReason == "length" {
+			return true
+		}
+	}
+	return false
 }

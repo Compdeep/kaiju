@@ -217,6 +217,8 @@ func (m *Manager) LoadHistory(ctx context.Context, sessionID string, maxMessages
 		msgs = append(msgs, llm.Message{
 			Role:    dm.Role,
 			Content: content,
+			// What this turn ran, off its own trace. Empty when unknown.
+			Provenance: provenanceOf(dm.DAGTrace),
 		})
 	}
 	return msgs, nil
@@ -242,7 +244,11 @@ func (m *Manager) LoadChatHistory(ctx context.Context, sessionID string, maxMess
 	for _, dm := range dbMsgs {
 		switch dm.Role {
 		case "user", "assistant", "system":
-			msgs = append(msgs, llm.Message{Role: dm.Role, Content: dm.Content})
+			msgs = append(msgs, llm.Message{
+				Role:       dm.Role,
+				Content:    dm.Content,
+				Provenance: provenanceOf(dm.DAGTrace),
+			})
 		}
 	}
 	return msgs, nil

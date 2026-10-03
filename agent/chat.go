@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/prompt"
@@ -124,6 +126,19 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	ctx = withLaneSelection(ctx, laneSelection{answerProvider: t.Provider, answerModel: t.Model})
 
 	system := ComposeSystemPrompt(a.soulPrompt, prompt.Chat)
+	// What the recent turns actually ran, beside the conversation rather than inside
+	// it. This lane has no tools, so a turn in front of it that reports a build or a
+	// file written was either an agent run or an invention, and role and content do
+	// not say which. One turn read "the docs were rebuilt" in the message above it
+	// and answered "Confirmed in source and generated outputs", which it could not
+	// have checked.
+	//
+	// Beside, not inside: LoadChatHistory promises the turns verbatim because a
+	// roleplay thread needs them exact, so nothing is prefixed onto a message the
+	// way prefixAssistantHistory does for the executive.
+	if note := historyProvenanceNote(t.History); note != "" {
+		system += "\n\n" + note
+	}
 	var messages []llm.Message
 	if len(t.History) > 0 {
 		// History already ends with the current user message (stored, then loaded).
@@ -161,3 +176,51 @@ func (a *Agent) Converse(ctx context.Context, t ChatTurn) (ChatResult, error) {
 	res.Content = proseOf(resp)
 	return res, nil
 }
+
+// historyProvenanceNote lists which recent turns ran tools, newest last, or returns
+// "" when none of them is known to have.
+//
+// Only turns with provenance are listed. A turn with none is left out rather than
+// called toolless: most stored history predates tracing, and a chat-lane reply never
+// wrote a trace at all, so "ran nothing" would be a claim about the record rather
+// than a reading of it.
+func historyProvenanceNote(history []llm.Message) string {
+	type entry struct {
+		back  int
+		tools string
+	}
+	var found []entry
+	assistants := 0
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role != "assistant" {
+			continue
+		}
+		assistants++
+		if history[i].Provenance != "" {
+			found = append(found, entry{assistants, history[i].Provenance})
+		}
+		if assistants >= provenanceNoteTurns {
+			break
+		}
+	}
+	if len(found) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("What the recent turns ran, from the record of those runs:\n")
+	for i := len(found) - 1; i >= 0; i-- {
+		where := fmt.Sprintf("%d turns back", found[i].back)
+		if found[i].back == 1 {
+			where = "the turn before this one"
+		}
+		fmt.Fprintf(&b, "- %s ran: %s\n", where, found[i].tools)
+	}
+	b.WriteString("A turn not listed is one nothing is recorded for. That is not evidence it ran nothing, " +
+		"so do not describe it either way. These are other turns' actions, never this one's: you have no tools here.")
+	return b.String()
+}
+
+// provenanceNoteTurns is how many recent assistant turns the note looks back over.
+// Three covers the turn being replied to and the work behind it without listing a
+// whole session.
+const provenanceNoteTurns = 3

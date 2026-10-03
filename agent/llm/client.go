@@ -26,13 +26,18 @@ import (
 // (json:"-") and never persisted — the agent's session stores text, and images
 // are re-supplied per request by the host (Makeen), never held in kaiju.
 type Message struct {
-	Role       string        `json:"role"` // "system", "user", "assistant", "tool"
-	Content    string        `json:"content,omitempty"`
-	Reasoning  string        `json:"reasoning,omitempty"` // hidden reasoning from thinking models (reasoning field + lifted <think>…</think>)
-	Parts      []ContentPart `json:"-"`                   // multimodal parts; overrides Content when set
-	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
-	ToolCallID string        `json:"tool_call_id,omitempty"` // set when role == "tool"
-	Name       string        `json:"name,omitempty"`         // function name for tool results
+	Role      string        `json:"role"` // "system", "user", "assistant", "tool"
+	Content   string        `json:"content,omitempty"`
+	Reasoning string        `json:"reasoning,omitempty"` // hidden reasoning from thinking models (reasoning field + lifted <think>…</think>)
+	Parts     []ContentPart `json:"-"`                   // multimodal parts; overrides Content when set
+	// Provenance says what produced this turn — the tools an agent run fired, or
+	// empty when nothing is known. Never sent to a provider: it is here so a lane
+	// can tell a turn that did work from one that only spoke, which role and
+	// content alone cannot.
+	Provenance string     `json:"-"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"` // set when role == "tool"
+	Name       string     `json:"name,omitempty"`         // function name for tool results
 }
 
 // ContentPart is one element of a multimodal message content array.

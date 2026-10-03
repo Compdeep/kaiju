@@ -817,8 +817,16 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		if _, statErr := os.Stat(codePath); os.IsNotExist(statErr) {
 			return "", fmt.Errorf("cannot edit %s: it does not exist, so there is nothing to replace — write it whole instead", destPath)
 		}
-		if err := ApplyFileEdits(codePath, editResp.Edits); err != nil {
+		changed, err := ApplyFileEdits(codePath, editResp.Edits)
+		if err != nil {
 			return "", fmt.Errorf("apply edits to %s: %w", destPath, err)
+		}
+		if !changed {
+			// Edits that applied and changed nothing. "N edits applied" counts
+			// operations, not effect, so this reported success and the next stage
+			// read it as the work being done.
+			return a.computeNoChange(graph, tag, destPath,
+				fmt.Sprintf("%d edit(s) applied to %s and left it as it was", len(editResp.Edits), destPath))
 		}
 
 		log.Printf("[dag] compute edit applied: %s (%s, %d edits)", codePath, editResp.Language, len(editResp.Edits))
@@ -951,6 +959,21 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	codePath, safeErr := workspace.Resolve(a.cfg.Workspace, destPath)
 	if safeErr != nil {
 		return "", fmt.Errorf("compute write rejected: %w", safeErr)
+	}
+	// The coder handed back what was already there.
+	//
+	// The only no-op guard in this branch is codeStr == "" above, which catches a
+	// coder that returned nothing and misses one that returned the file unchanged.
+	// 14-s11.html was rewritten four times that way, each pass logging "OK: wrote",
+	// and 32 em-dashes became 31 — then the reflector read four successes and
+	// concluded the whole document was done.
+	//
+	// The content was read at the prompt-building loop above and is out of scope
+	// here, so it is read again. A read against a write that would otherwise claim
+	// to have worked.
+	if prev, rerr := os.ReadFile(codePath); rerr == nil && string(prev) == codeStr {
+		return a.computeNoChange(graph, tag, destPath,
+			fmt.Sprintf("the coder returned %s unchanged", destPath))
 	}
 	os.MkdirAll(filepath.Dir(codePath), 0755)
 	if err := OverwriteFile(codePath, codeStr); err != nil {
@@ -1221,4 +1244,22 @@ func rewriteExecutePath(cmd, prefix string) string {
 		return rewritten
 	}
 	return cmd
+}
+
+// computeNoChange reports a write that did not change the file.
+//
+// The same `no_changes` result the empty-code case has returned all along, so
+// computebody.go already reads it and already turns it into an empty rather than an
+// OK envelope — which is how a stage downstream gets a verdict other than success.
+// The worklog line is NO_CHANGE for the same reason: it is what the next coder
+// reads, and "OK: wrote" is what told four passes in a row that the job was done.
+func (a *Agent) computeNoChange(graph *Graph, tag, destPath, reason string) (string, error) {
+	out, _ := json.Marshal(map[string]any{
+		"type":       "result",
+		"no_changes": true,
+		"reason":     reason,
+	})
+	log.Printf("[dag] compute %s: %s — treating as no-op", tag, reason)
+	appendWorklog(a.cfg.MetadataDir, computeSessionID(graph), tag, "NO_CHANGE", reason)
+	return string(out), nil
 }

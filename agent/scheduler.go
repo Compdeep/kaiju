@@ -1887,7 +1887,19 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// result came out stamped "..." as though it had been cut. The
 						// reframe then read that marker and told the next stage the data
 						// was incomplete.
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "OK", fmt.Sprintf("%s: %s", node.ToolName, worklogEvidence(nodeEvidence(node, comp))))
+						// Not for a compute node. Those log themselves, at the point
+						// where they know whether the write changed the file — so a
+						// second line here said OK for a node that had just reported
+						// NO_CHANGE, and the two contradicted each other.
+						//
+						// It was also the worse of the two lines: a compute node's
+						// evidence is its raw result JSON, whose keys marshal
+						// alphabetically, so the 200-character cut landed inside
+						// "execute":"KAIJU_CONTEXT='…'" — an internal command line
+						// standing in for the record of an edit.
+						if node.Type != NodeCompute {
+							appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "OK", fmt.Sprintf("%s: %s", node.ToolName, worklogEvidence(nodeEvidence(node, comp))))
+						}
 					}
 				}
 				log.Printf("[dag] node %s (%s) resolved (%d bytes): %s",
@@ -2574,6 +2586,31 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		var convErr *ExecutiveConversationalError
 		if errors.As(err, &convErr) {
 			if convErr.Text != "" {
+				// Through the aggregator, not straight out.
+				//
+				// This text is the planner's, and the EXECUTIVE prompt tells it "You
+				// do not answer the user directly" — so it writes for the stage it
+				// believes is downstream. Returned verbatim it reached the person as
+				// notes about them: "The homepage content the user pasted was analyzed
+				// directly", "Correction issued", "Awaiting the user's choice". Correct
+				// prose for the audience it was given, and the wrong audience.
+				//
+				// The aggregator is the stage whose prompt begins "You are responding
+				// directly to the user", and it carries the rules that go with that —
+				// no promises of future action, no asking permission, no claiming work
+				// that did not happen. An empty plan skipped all of it.
+				//
+				// What it concluded travels on the graph so nothing is re-derived: one extra
+				// call on the answer lane, which re-voices what the planner found.
+				// If it fails, the planner's own text is still the answer — a clumsy
+				// reply beats none.
+				graph.DirectAnswer = convErr.Text
+				if revoiced, _, aggErr := a.runAggregator(answerCtx, trigger, graph, gates.Intent(0), trigger.History, Answer, nil); aggErr == nil && strings.TrimSpace(revoiced) != "" {
+					// notrecorded: answered without planning — see TestEveryRunExitRecords
+					return &SyncResult{Outcome: revoiced}, nil
+				} else if aggErr != nil {
+					log.Printf("[dag] re-voicing the planner's direct answer failed, sending it as written: %v", aggErr)
+				}
 				// notrecorded: answered without planning — see TestEveryRunExitRecords
 				return &SyncResult{Outcome: convErr.Text}, nil
 			}

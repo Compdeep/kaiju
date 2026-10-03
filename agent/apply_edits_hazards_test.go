@@ -100,12 +100,15 @@ func TestApplyFileEdits_LeavesTheFileAloneWhenAnEditCannotApply(t *testing.T) {
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	err := ApplyFileEdits(path, []EditOp{
+	changed, err := ApplyFileEdits(path, []EditOp{
 		{OldContent: "port = 8080", NewContent: "port = 9090"},
 		{OldContent: "this text is not in the file", NewContent: "x"},
 	})
 	if err == nil {
 		t.Fatal("the second edit cannot apply, so the call must fail")
+	}
+	if changed {
+		t.Error("a failed edit reported that it changed the file")
 	}
 	after, readErr := os.ReadFile(path)
 	if readErr != nil {

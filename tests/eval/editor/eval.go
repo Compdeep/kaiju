@@ -269,7 +269,9 @@ func runScenario(ctx context.Context, client *llm.Client, fixturePath string, sc
 
 	// Apply the edit.
 	if len(parsed.Edits) > 0 {
-		if err := agent.ApplyFileEdits(workFile, parsed.Edits); err != nil {
+		// The changed flag is ignored here: this harness grades whether the edit
+		// applied, and a correct edit that happens to be a no-op is still applied.
+		if _, err := agent.ApplyFileEdits(workFile, parsed.Edits); err != nil {
 			r.Status = "edit_fail"
 			r.Reason = fmt.Sprintf("%v", err)
 			r.DurationMs = time.Since(start).Milliseconds()
@@ -469,4 +471,3 @@ func relPath(p string) string {
 	}
 	return rel
 }
-

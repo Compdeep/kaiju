@@ -1478,16 +1478,25 @@ func FormatFunctionMapForPrompt(fm FunctionMap, maxBytes int) string {
 //
 // The write itself goes through commitFile, so structured files (.json, .yaml,
 // .yml) are parse-validated before they touch disk.
-func ApplyFileEdits(filePath string, edits []EditOp) error {
+// Returns whether the file's content actually changed. Edits that apply cleanly
+// and leave the text as it was are reported as applied by every count that exists
+// — N edits, no error — and a caller that logs that as success tells the next
+// stage the work is done. Both texts are already in hand here, so the answer is
+// one comparison.
+func ApplyFileEdits(filePath string, edits []EditOp) (changed bool, err error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", filePath, err)
+		return false, fmt.Errorf("read %s: %w", filePath, err)
 	}
 	result, err := ApplyEdits(string(data), edits)
 	if err != nil {
-		return fmt.Errorf("edit %s: %w", filePath, err)
+		return false, fmt.Errorf("edit %s: %w", filePath, err)
 	}
-	return commitFile(filePath, result)
+	if result == string(data) {
+		// Nothing to write, and saying so is the point: the file is as it was.
+		return false, nil
+	}
+	return true, commitFile(filePath, result)
 }
 
 // OverwriteFile writes the full content of a file, replacing whatever is there.

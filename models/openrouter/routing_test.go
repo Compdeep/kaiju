@@ -43,8 +43,24 @@ import "testing"
 // The whitelist stays empty on purpose. Naming anything there removes fallback,
 // so a listed host being down becomes a failed call rather than a slower answer
 // from someone else — a blacklist gets the same exclusion and keeps the rest.
+//
+// akashml/fp8 refuses to stop reasoning. Every stage that forces a small tool
+// call sends reasoning {enabled:false} and the catalog marks this model's
+// reasoning optional, so the instruction is both sent and supported. Through this
+// host it was not honoured: the router's 128-token reply was spent on 900-2000
+// characters of thinking, the mode was never written, and an unparseable reply
+// routes to the lane with no tools — so the turn silently did nothing.
+//
+// Measured on the route call that failed, same prompt, reasoning disabled:
+//
+//	akashml/fp8    provider returned error
+//	deepinfra/fp8  0 chars of reasoning, 38 tokens, {"mode":"agent","think":true}
+//	parasail/fp8   0 chars of reasoning, 23 tokens, {"mode":"agent","think":true}
+//
+// Two hosts answer the same call correctly in under 40 tokens. This one cannot,
+// and asked not to reason it errors outright rather than complying.
 func TestTheShippedListsAreWhatWeIntend(t *testing.T) {
-	want := []string{"darkbloom", "novita", "gmicloud/fp8", "phala"}
+	want := []string{"darkbloom", "novita", "gmicloud/fp8", "phala", "akashml/fp8"}
 	blocked := Blocked()
 	same := len(blocked) == len(want)
 	for i := range want {

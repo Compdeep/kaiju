@@ -718,10 +718,35 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 			if !strings.HasPrefix(targetPath, "/") && !strings.HasPrefix(targetPath, projectPrefix(graph, codeCtx.taskFiles)) {
 				targetPath = projectPrefix(graph, codeCtx.taskFiles) + targetPath
 			}
-			fullPath := filepath.Join(a.cfg.Workspace, targetPath)
+			// workspace.Resolve, not filepath.Join. Join does not honour an absolute
+			// second argument — it concatenates — so a task file outside the
+			// workspace became
+			// <workspace>/home/sites/uinloop/platform/main.ts, the read failed, and
+			// the continue below turned that into write mode. The file was perfectly
+			// readable. Every edit to a repository outside the sandbox was therefore
+			// a blind full rewrite: 38 coder calls in one session, not one of them
+			// shown the file it was changing. One of them replaced an Express server
+			// with its own idea of one and dropped four of five routes.
+			//
+			// Resolve is the same function the write below already uses, and it
+			// returns an absolute path outside the workspace unchanged.
+			fullPath, resErr := workspace.Resolve(a.cfg.Workspace, targetPath)
+			if resErr != nil {
+				log.Printf("[dag] compute %s: task file %s is not a path this run may touch: %v", tag, targetPath, resErr)
+				continue
+			}
 			data, readErr := os.ReadFile(fullPath)
-			if readErr != nil || len(data) == 0 {
-				continue // file doesn't exist or empty — write mode
+			if readErr != nil {
+				// Said out loud. A file that is genuinely absent is the ordinary
+				// case for creation, and a file that exists and could not be read is
+				// the start of a blind rewrite — and the two were the same silence.
+				if !os.IsNotExist(readErr) {
+					log.Printf("[dag] compute %s: %s exists and could not be read, so this becomes a blind write: %v", tag, fullPath, readErr)
+				}
+				continue
+			}
+			if len(data) == 0 {
+				continue // empty file — nothing to edit, write mode is right
 			}
 			editable = true
 			userPrompt += "\n## Mode: EDIT (file exists — use old_content/new_content text replacements)\n"

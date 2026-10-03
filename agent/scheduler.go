@@ -1887,7 +1887,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// result came out stamped "..." as though it had been cut. The
 						// reframe then read that marker and told the next stage the data
 						// was incomplete.
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "OK", fmt.Sprintf("%s: %s", node.ToolName, Text.TruncateLog(nodeEvidence(node, comp), 100)))
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "OK", fmt.Sprintf("%s: %s", node.ToolName, worklogEvidence(nodeEvidence(node, comp))))
 					}
 				}
 				log.Printf("[dag] node %s (%s) resolved (%d bytes): %s",
@@ -3457,4 +3457,80 @@ func cleanShellFix(raw string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(strings.Trim(strings.TrimSpace(s), "`"))
+}
+
+// worklogEvidenceChars is how much of a tool's result the worklog keeps.
+//
+// This is prompt input, not a log line. The worklog is what the planner reads on
+// the NEXT turn, so the number is sized for a reader that has to act on it rather
+// than for a trace that has to fit one terminal row.
+//
+// It was 100. A file_list returning 707 bytes of JSON survived as two filenames
+// and a third cut mid-word; the planner, holding the pattern NN-slug.html, two
+// real examples and the slugs from the conversation, continued the numbering
+// arithmetically and invented nine paths that do not exist. Nine reads failed,
+// nine edit_file nodes died on empty dependencies, and the run did the work twice.
+//
+// Not 1000. The worklog for that session was already 48KB over 332 entries, and
+// the gate that serves it to the planner came back at its ceiling twice
+// (return_size 96035 of budget 96000). Ten times the entry size does not give the
+// planner ten times the evidence — it makes the gate drop whole entries instead of
+// shortening them, and a dropped entry is invisible where a shortened one at least
+// carries its marker.
+const worklogEvidenceChars = 300
+
+// worklogEvidence shapes a tool result for the worklog: a count and some names
+// when it is a list, a character cap otherwise.
+//
+// A list is the case a character cap cannot serve. Cutting JSON at N bytes does
+// not yield a short version of the list, it yields the first two entries and no
+// sign of the rest — "…[cut 100/707]" says bytes were lost, which a planner reads
+// as clipped text rather than as "do not extrapolate from this". The count and the
+// "and N more" are the part that stops the extrapolation, and they cost less room
+// than the JSON they replace.
+func worklogEvidence(evidence string) string {
+	if names, total := listedNames(evidence); total > 0 {
+		shown := names
+		if len(shown) > worklogListNames {
+			shown = shown[:worklogListNames]
+		}
+		out := fmt.Sprintf("%d entries — %s", total, strings.Join(shown, ", "))
+		if rest := total - len(shown); rest > 0 {
+			out += fmt.Sprintf(", and %d more", rest)
+		}
+		return out
+	}
+	return Text.TruncateLog(evidence, worklogEvidenceChars)
+}
+
+// worklogListNames is how many of a list's names are written out before the rest
+// become a count. Enough to show the shape of the naming, not enough to read as
+// the whole set.
+const worklogListNames = 6
+
+// listedNames pulls the names out of a tool result that is a list of entries, and
+// reports how many there were in total. total is 0 when the result is not one.
+func listedNames(evidence string) (names []string, total int) {
+	trimmed := strings.TrimSpace(evidence)
+	if i := strings.IndexByte(trimmed, '{'); i > 0 {
+		// A typed tool prefixes its payload, e.g. `file_list: {"entries":…}`.
+		trimmed = trimmed[i:]
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		return nil, 0
+	}
+	var payload struct {
+		Entries []struct {
+			Name string `json:"name"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil || len(payload.Entries) == 0 {
+		return nil, 0
+	}
+	for _, e := range payload.Entries {
+		if e.Name != "" {
+			names = append(names, e.Name)
+		}
+	}
+	return names, len(payload.Entries)
 }

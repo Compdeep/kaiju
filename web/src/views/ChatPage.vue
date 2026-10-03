@@ -96,11 +96,19 @@
         </div>
 
         <template v-for="(msg, i) in sessions.messages" :key="i">
-          <!-- A message a summary now stands for. Still in the record, so it is
-               rendered, but folded away until its summary is opened. -->
+          <!-- An intermediate summary: compacted into a later one, which now stands
+               for everything this stood for. Not rendered at all. Opening the live
+               summary shows the turns themselves, and eight restatements of them
+               interleaved with the turns is noise. -->
+          <template v-if="msg.compactedInto && isSummary(msg)"></template>
+
+          <!-- A turn a summary now stands for. Still in the record, so it is
+               rendered, but folded away until the summary at the END of its chain
+               is opened — not its immediate parent, which is usually another
+               summary with no toggle of its own. -->
           <div
-            v-if="msg.compactedInto"
-            v-show="opened[msg.compactedInto]"
+            v-else-if="msg.compactedInto"
+            v-show="opened[rootSummary[msg.id]]"
             :class="['msg', msg.role, 'msg-folded']"
           >
             <div class="msg-meta">
@@ -391,15 +399,64 @@ function onSettingsClose() {
 // one reveals the messages it stands for, which are otherwise folded away.
 const opened = ref({})
 
-/** desc: how many messages a given summary stands for (0 if it is not a summary). */
-function foldedCount(id) {
-  if (!id) return 0
-  let n = 0
-  for (const m of sessions.messages) if (m.compactedInto === id) n++
-  return n
+const summaryPrefix = '[Conversation summary]: '
+
+/** desc: whether a row is one of the compactor's summaries rather than a turn. */
+function isSummary(msg) {
+  return msg.role === 'system' && (msg.content || '').startsWith(summaryPrefix)
 }
 
-const summaryPrefix = '[Conversation summary]: '
+/**
+ * desc: each message's OUTERMOST summary — the one whose toggle reveals it.
+ *
+ *       Compaction chains. A summary is itself compacted into the next summary,
+ *       so a buried message's compactedInto usually names another summary rather
+ *       than the live one. One session held 54 messages, 43 of them under a chain
+ *       eight summaries deep; following a single link reached the 3 pointing
+ *       directly at the live summary and left the other 40 loaded in the browser
+ *       with no toggle anywhere that could show them.
+ * return: a map of message id to the id of the summary that stands for it, 0 for
+ *         a message nothing stands for.
+ */
+const rootSummary = computed(() => {
+  const next = new Map()
+  for (const m of sessions.messages) next.set(m.id, m.compactedInto || 0)
+  const root = {}
+  for (const m of sessions.messages) {
+    let id = m.compactedInto || 0
+    const seen = new Set()
+    // Walk to the end of the chain. The guard is for a cycle, which would mean
+    // corrupt data rather than deep nesting, and must not hang the view.
+    while (id && next.get(id) && !seen.has(id)) {
+      seen.add(id)
+      id = next.get(id)
+    }
+    root[m.id] = id
+  }
+  return root
+})
+
+/**
+ * desc: how many real turns each summary stands for, transitively. Intermediate
+ *       summaries are not counted, because they are not shown — the number has to
+ *       match what opening it actually reveals.
+ *
+ *       A map rather than a function over the list: the template asks this of
+ *       every row it draws, and a scan per row is quadratic in the length of the
+ *       conversation, which is the one thing that always grows.
+ */
+const foldedCounts = computed(() => {
+  const n = {}
+  for (const m of sessions.messages) {
+    const root = rootSummary.value[m.id]
+    if (root && !isSummary(m)) n[root] = (n[root] || 0) + 1
+  }
+  return n
+})
+
+function foldedCount(id) {
+  return (id && foldedCounts.value[id]) || 0
+}
 
 /** desc: the summary without the marker the compactor writes in front of it. */
 function summaryText(content) {

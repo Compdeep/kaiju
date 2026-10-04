@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -138,4 +139,58 @@ func TestCoderSchema_DeclaresEveryFieldTheEngineReads(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Every field on EditOp is declared in the schema too.
+//
+// The guard above walks the top-level reply structs, so it sees `edits` and stops
+// there. EditOp's own fields are what the coder actually fills in, and a field the
+// engine reads but never declared is one the coder has no way to know about —
+// which is how `lines` could be added to the struct and never reach a model.
+func TestCoderSchema_DeclaresEveryEditField(t *testing.T) {
+	var schema struct {
+		Properties struct {
+			Edits struct {
+				Items struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				} `json:"items"`
+			} `json:"edits"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(coderSchema(true).Function.Parameters, &schema); err != nil {
+		t.Fatalf("the coder schema will not parse: %v", err)
+	}
+	declared := schema.Properties.Edits.Items.Properties
+	if len(declared) == 0 {
+		t.Fatal("the edits item declares no properties")
+	}
+
+	t.Logf("declared on an edit: %v", keysOf(declared))
+	for _, f := range jsonTagsOf(reflect.TypeOf(EditOp{})) {
+		if _, ok := declared[f]; !ok {
+			t.Errorf("EditOp field %q is read by the engine and not declared in the schema, "+
+				"so the coder cannot know to send it", f)
+		}
+	}
+}
+
+func keysOf(m map[string]json.RawMessage) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func jsonTagsOf(t reflect.Type) []string {
+	var out []string
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		out = append(out, strings.Split(tag, ",")[0])
+	}
+	return out
 }

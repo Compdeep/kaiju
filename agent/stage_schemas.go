@@ -584,12 +584,18 @@ func coderSchema(editable bool) llm.ToolDef {
 		editsField = `,
 					"edits": {
 						"type": "array",
-						"description": "Text-replacement edits. Use this for EXISTING files (edit mode). Each edit is a verbatim old_content → new_content replacement.",
+						"description": "Replacements within an EXISTING file. Prefer these over rewriting the file: an edit needs only the part you are changing, so a long file never has to be held whole. Each one is applied in order to the result of the one before it.",
 						"items": {
 							"type": "object",
 							"properties": {
-								"old_content": {"type": "string"},
-								"new_content": {"type": "string"}
+								"lines": {
+									"type": "array",
+									"items": {"type": "integer"},
+									"description": "[first, last] — the lines where old_content is, counting from 1 and including both ends. Give these whenever you know them: without them, text that appears more than once is refused because which occurrence you meant is unknown. Read the file with numbered:true to get them."
+								},
+								"old_content": {"type": "string", "description": "The exact text to replace, verbatim including whitespace. It is checked against the lines you named — if it is not there, the edit is refused and you are told what is."},
+								"new_content": {"type": "string", "description": "What replaces it."},
+								"why": {"type": "string", "description": "Why this edit, in a few words. Recorded, never matched."}
 							},
 							"required": ["old_content", "new_content"]
 						}

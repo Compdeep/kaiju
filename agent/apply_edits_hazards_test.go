@@ -7,27 +7,94 @@ import (
 	"testing"
 )
 
-// ApplyEdits replaces the FIRST occurrence of old_content and reports success.
-// These pin the cases where that is silently the wrong occurrence, or where an
-// edit reports success having changed nothing. They record what the code does
-// today so a change to it is deliberate — two of them describe behaviour worth
-// changing, and say so.
+// ApplyEdits applies replacements in order to the running result. These pin the
+// cases where that is subtle: an ambiguous target, an earlier edit moving a later
+// one's text, and the exactness of the match.
 
-// HAZARD. old_content occurring more than once is not an error: the first is
-// replaced and the caller is told the edit succeeded. Whoever wrote the edit may
-// have meant the second, and nothing reports the ambiguity. Claude Code's Edit
-// tool refuses this case for that reason.
-func TestApplyEdits_AmbiguousMatchTakesTheFirstAndSaysNothing(t *testing.T) {
+// Text occurring more than once is refused, not resolved by position.
+//
+// It used to take the first occurrence and report success, so an edit meaning the
+// second changed the wrong line and said it had worked. The coder is the one that
+// knows which it meant, and it can now say so — with lines, or with a longer
+// excerpt that appears once.
+func TestApplyEdits_AmbiguousMatchIsRefused(t *testing.T) {
 	content := "timeout = 30\nretries = 3\ntimeout = 30\n"
+
 	got, err := ApplyEdits(content, []EditOp{{OldContent: "timeout = 30", NewContent: "timeout = 60"}})
+	if err == nil {
+		t.Fatalf("an ambiguous edit was applied anyway, giving %q", got)
+	}
+	// The message has to carry the count and say what to do about it, or the coder
+	// retries the same edit.
+	if !strings.Contains(err.Error(), "appears 2 times") {
+		t.Errorf("the error does not say how many matches there were: %v", err)
+	}
+	if !strings.Contains(err.Error(), "lines") {
+		t.Errorf("the error does not say that lines would resolve it: %v", err)
+	}
+}
+
+// Naming the lines resolves it: the same text, the second occurrence, chosen.
+func TestApplyEdits_LinesChooseWhichOccurrence(t *testing.T) {
+	content := "timeout = 30\nretries = 3\ntimeout = 30\n"
+
+	got, err := ApplyEdits(content, []EditOp{
+		{Lines: []int{3, 3}, OldContent: "timeout = 30", NewContent: "timeout = 60"},
+	})
 	if err != nil {
-		t.Fatalf("today this is accepted, not refused: %v", err)
+		t.Fatalf("a line-named edit was refused: %v", err)
 	}
-	if got != "timeout = 60\nretries = 3\ntimeout = 30\n" {
-		t.Fatalf("the first occurrence is the one replaced, got %q", got)
+	if got != "timeout = 30\nretries = 3\ntimeout = 60\n" {
+		t.Errorf("the wrong occurrence was replaced: %q", got)
 	}
-	if strings.Count(got, "timeout = 30") != 1 {
-		t.Fatal("the second occurrence must be left, which is the hazard: it may have been the intended one")
+}
+
+// The text is the check on the lines. If it is not there, the file is not what the
+// coder thought — so the edit is refused, and the error carries both what was
+// expected and what is actually at those lines.
+func TestApplyEdits_TextNotAtTheNamedLinesIsRefused(t *testing.T) {
+	content := "alpha\nbeta\ngamma\n"
+
+	_, err := ApplyEdits(content, []EditOp{
+		{Lines: []int{1, 1}, OldContent: "gamma", NewContent: "delta"},
+	})
+	if err == nil {
+		t.Fatal("an edit whose text is not at the lines it named was applied")
+	}
+	if !strings.Contains(err.Error(), "expected") || !strings.Contains(err.Error(), "found") {
+		t.Errorf("the error does not carry both sides of the mismatch: %v", err)
+	}
+	if !strings.Contains(err.Error(), "gamma") || !strings.Contains(err.Error(), "alpha") {
+		t.Errorf("the error names neither the expected nor the actual text: %v", err)
+	}
+}
+
+// Lines past the end of the file say so, rather than reading as "not found".
+func TestApplyEdits_LinesPastTheEndSaySo(t *testing.T) {
+	_, err := ApplyEdits("one\ntwo\n", []EditOp{
+		{Lines: []int{40, 41}, OldContent: "two", NewContent: "three"},
+	})
+	if err == nil {
+		t.Fatal("lines past the end of the file were accepted")
+	}
+	if !strings.Contains(err.Error(), "past the end") {
+		t.Errorf("the error does not say the range is past the end: %v", err)
+	}
+}
+
+// An identical string outside the named range is untouched — the replacement
+// happens within the span, not across the file.
+func TestApplyEdits_LeavesIdenticalTextOutsideTheRange(t *testing.T) {
+	content := "x = 1\nx = 1\nx = 1\n"
+
+	got, err := ApplyEdits(content, []EditOp{
+		{Lines: []int{2, 2}, OldContent: "x = 1", NewContent: "x = 2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "x = 1\nx = 2\nx = 1\n" {
+		t.Errorf("the edit reached outside its range: %q", got)
 	}
 }
 

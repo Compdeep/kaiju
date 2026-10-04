@@ -1197,28 +1197,104 @@ func findFuncEndKeyword(lines []string, startIdx int, endKeyword string) int {
 // FunctionMap is a workspace-wide scan result: relative file path → declarations.
 type FunctionMap map[string][]FuncDecl
 
-// EditOp represents a single text replacement returned by the coder LLM.
-// The coder specifies the exact text to find and the replacement text.
-// Simple string matching — no line numbers, no function scanning.
+// EditOp is a single replacement returned by the coder.
+//
+// It names BOTH where and what. Text alone cannot tell two identical strings
+// apart: on `</body>` in a file with two of them, the replacement landed on the
+// first and reported success. Line numbers alone go stale — two edits in one set,
+// and the first one adding a line puts every later number out by one.
+//
+// Together, each covers the other's failure. Lines say which occurrence. The text
+// is the check: if it is not there, the file is not what the coder thought it was,
+// so the edit is refused rather than placed somewhere plausible.
+//
+// Lines are optional, because the architect and older callers supply text only.
+// Given, they are 1-based and inclusive.
 type EditOp struct {
-	OldContent string `json:"old_content"` // exact text to find in the file
+	OldContent string `json:"old_content"` // exact text to find
 	NewContent string `json:"new_content"` // replacement text
+	// Lines is [first, last], 1-based inclusive, naming where OldContent is
+	// expected. Empty means "find it anywhere", which is the older behaviour and
+	// is ambiguous when the text repeats.
+	Lines []int `json:"lines,omitempty"`
+	// Why the edit was made, in the coder's words. Carried into the record; it is
+	// never matched against anything.
+	Why string `json:"why,omitempty"`
 }
 
-// ApplyEdits applies text-match replacements to file content.
-// Each edit finds old_content exactly and replaces with new_content.
-// Returns error if any old_content is not found (no partial matches).
+// ApplyEdits applies replacements to file content, in order.
+//
+// Each edit is applied to the text the previous one produced, so an earlier edit
+// can move what a later one is looking for. With Lines that now fails loudly
+// instead of landing somewhere wrong.
+//
+// Nothing is written unless every edit applies: the caller gets the whole result or
+// an error, never a half-edited file.
 func ApplyEdits(content string, edits []EditOp) (string, error) {
-	for _, e := range edits {
+	for i, e := range edits {
 		if e.OldContent == "" {
 			continue
 		}
-		if !strings.Contains(content, e.OldContent) {
-			return "", fmt.Errorf("old_content not found in file (first 60 chars: %q)", e.OldContent[:min(60, len(e.OldContent))])
+		if len(e.Lines) > 0 {
+			var err error
+			if content, err = applyAtLines(content, e, i); err != nil {
+				return "", err
+			}
+			continue
+		}
+		// Text only. Ambiguity is reported rather than resolved by position: the
+		// coder is the one that knows which occurrence it meant, and it can say so
+		// with Lines or a longer excerpt.
+		if n := strings.Count(content, e.OldContent); n == 0 {
+			return "", fmt.Errorf("edit %d: old_content not found in file (first 60 chars: %q)", i+1, e.OldContent[:min(60, len(e.OldContent))])
+		} else if n > 1 {
+			return "", fmt.Errorf("edit %d: old_content appears %d times, so which one is meant is unknown — give its lines, or a longer excerpt that appears once (first 60 chars: %q)",
+				i+1, n, e.OldContent[:min(60, len(e.OldContent))])
 		}
 		content = strings.Replace(content, e.OldContent, e.NewContent, 1)
 	}
 	return content, nil
+}
+
+/*
+ * applyAtLines replaces one edit's text at the lines it named.
+ * desc: The lines decide which occurrence; the text decides whether the file is
+ *       what the coder thought. A mismatch names both — what was expected and what
+ *       is actually there — because "not found" alone sent a reader looking for a
+ *       path or timing problem twice before.
+ * param: content - the file as it stands after any earlier edits.
+ * param: e - the edit, whose Lines is non-empty.
+ * param: i - the edit's index, for a message that says which one failed.
+ * return: the new content, or an error naming the mismatch.
+ */
+func applyAtLines(content string, e EditOp, i int) (string, error) {
+	first := e.Lines[0]
+	last := first
+	if len(e.Lines) > 1 {
+		last = e.Lines[1]
+	}
+	if first < 1 || last < first {
+		return "", fmt.Errorf("edit %d: lines %v are not a range", i+1, e.Lines)
+	}
+	lines := strings.Split(content, "\n")
+	if last > len(lines) {
+		return "", fmt.Errorf("edit %d: lines %d-%d are past the end of the file, which has %d", i+1, first, last, len(lines))
+	}
+	// The named span, joined back exactly as it was split.
+	span := strings.Join(lines[first-1:last], "\n")
+	idx := strings.Index(span, e.OldContent)
+	if idx < 0 {
+		return "", fmt.Errorf("edit %d: lines %d-%d do not contain the text the edit expects.\n  expected: %q\n  found:    %q",
+			i+1, first, last,
+			e.OldContent[:min(80, len(e.OldContent))],
+			span[:min(80, len(span))])
+	}
+	// Replace within the span only, so an identical string elsewhere is untouched.
+	newSpan := span[:idx] + e.NewContent + span[idx+len(e.OldContent):]
+	out := append([]string{}, lines[:first-1]...)
+	out = append(out, strings.Split(newSpan, "\n")...)
+	out = append(out, lines[last:]...)
+	return strings.Join(out, "\n"), nil
 }
 
 func min(a, b int) int {

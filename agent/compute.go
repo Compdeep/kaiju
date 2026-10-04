@@ -702,56 +702,27 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	if codeCtx.brief != "" {
 		userPrompt += fmt.Sprintf("\n## Architect Brief\n%s\n", codeCtx.brief)
 	}
-	// Whether a file this call may edit already exists. The loop below reads each
-	// named file to show its content; the same answer decides whether "edits" is
-	// offered at all, so the Coder is never given a reply shape that cannot be
-	// carried out.
+	// What is actually there, established by the engine rather than assumed by the
+	// caller or invented by the coder.
+	//
+	// The caller cannot be trusted with it: edit_file passes seven keys, the
+	// architect eleven, a plan's compute step four, and none of them includes the
+	// file's contents. One coder was handed "Available Data: None", asked to
+	// preserve an Express server it had never seen, and wrote its own idea of one.
+	//
+	// editable comes from THIS file — the one that will be written — and not from
+	// whether any named file happened to exist. It used to be the latter while the
+	// edits applied to taskFiles[0], so a multi-file list could offer replacements
+	// against a file the coder was never shown.
 	editable := false
 	if len(codeCtx.taskFiles) > 0 {
 		userPrompt += "\n## Your Task Files (write ONLY these)\n"
 		for _, f := range codeCtx.taskFiles {
 			userPrompt += fmt.Sprintf("- %s\n", f)
 		}
-		// Edit mode: if the file exists, show content for text-match edits.
-		for _, f := range codeCtx.taskFiles {
-			targetPath := f
-			if !strings.HasPrefix(targetPath, "/") && !strings.HasPrefix(targetPath, projectPrefix(graph, codeCtx.taskFiles)) {
-				targetPath = projectPrefix(graph, codeCtx.taskFiles) + targetPath
-			}
-			// workspace.Resolve, not filepath.Join. Join does not honour an absolute
-			// second argument — it concatenates — so a task file outside the
-			// workspace became
-			// <workspace>/home/sites/uinloop/platform/main.ts, the read failed, and
-			// the continue below turned that into write mode. The file was perfectly
-			// readable. Every edit to a repository outside the sandbox was therefore
-			// a blind full rewrite: 38 coder calls in one session, not one of them
-			// shown the file it was changing. One of them replaced an Express server
-			// with its own idea of one and dropped four of five routes.
-			//
-			// Resolve is the same function the write below already uses, and it
-			// returns an absolute path outside the workspace unchanged.
-			fullPath, resErr := workspace.Resolve(a.cfg.Workspace, targetPath)
-			if resErr != nil {
-				log.Printf("[dag] compute %s: task file %s is not a path this run may touch: %v", tag, targetPath, resErr)
-				continue
-			}
-			data, readErr := os.ReadFile(fullPath)
-			if readErr != nil {
-				// Said out loud. A file that is genuinely absent is the ordinary
-				// case for creation, and a file that exists and could not be read is
-				// the start of a blind rewrite — and the two were the same silence.
-				if !os.IsNotExist(readErr) {
-					log.Printf("[dag] compute %s: %s exists and could not be read, so this becomes a blind write: %v", tag, fullPath, readErr)
-				}
-				continue
-			}
-			if len(data) == 0 {
-				continue // empty file — nothing to edit, write mode is right
-			}
-			editable = true
-			userPrompt += "\n## Mode: EDIT (file exists — use old_content/new_content text replacements)\n"
-			userPrompt += fmt.Sprintf("\n## Current Content of %s\n```\n%s\n```\n", targetPath, string(data))
-		}
+		facts := a.coderFileFacts(graph, codeCtx.taskFiles, tag)
+		editable = facts.Exists
+		userPrompt += facts.render()
 	}
 	if codeCtx.structure != "" {
 		userPrompt += "\n## Project Structure\n" + codeCtx.structure + "\n"

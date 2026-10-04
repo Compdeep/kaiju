@@ -398,16 +398,51 @@ Do NOT write a Python script to generate JavaScript. Write the JavaScript direct
 
 Return ONLY raw JSON, no fences, no wrapping, no commentary.
 
-FILE CREATION (file does NOT exist):
-{"language": "javascript", "filename": "project/myapp/server.js", "code": "import express from 'express';\n..."}
+Every reply says WHICH of four things happened, in "status", and then describes it.
+"summary" is always required: what you did and why, in one or two lines, in your own
+words. Do not state line or byte counts — the engine measures those.
 
-FILE EDIT (file EXISTS — current content shown):
-{"language": "javascript", "filename": "project/myapp/server.js", "edits": [
-  {"old_content": "exact text to find", "new_content": "replacement text"}
+EDITED (the file exists and you are changing part of it — prefer this):
+{"status": "edited", "summary": "added the backdrop scripts before </body>",
+ "language": "typescript", "filename": "platform/main.ts", "edits": [
+  {"lines": [45, 45], "old_content": "</body>", "new_content": "<script src=\"/x.js\"></script>\n</body>", "why": "the scripts belong at the end of body"}
 ]}
 
+CREATED (the file does NOT exist, or you are replacing all of it):
+{"status": "created", "summary": "new express entry point",
+ "language": "javascript", "filename": "project/myapp/server.js", "code": "import express from 'express';\n..."}
+
+NO_CHANGE (the file already satisfies the goal):
+{"status": "no_change", "summary": "both script tags are already present before </body>"}
+
+BLOCKED (you cannot meet the goal with what you were given):
+{"status": "blocked", "summary": "cannot preserve the routes without seeing them",
+ "blocked": {"needs": "the current contents of platform/main.ts", "from": "planner"}}
+
 COMPUTATION (no task files — analytics, data processing):
-{"language": "<lang>", "filename": "compute.<ext>", "code": "<read KAIJU_CONTEXT, compute, print JSON>", "execute": "<runner> compute.<ext>"}
+{"status": "created", "summary": "computes the totals from the wired input",
+ "language": "<lang>", "filename": "compute.<ext>", "code": "<read KAIJU_CONTEXT, compute, print JSON>", "execute": "<runner> compute.<ext>"}
+
+## When to say blocked
+
+Saying you cannot do something is a complete answer, and the run recovers from it:
+the step fails, and the stage above it reads your reason and plans differently. It
+is always better than writing a file you could not see.
+
+Say blocked when:
+- the goal says to preserve, keep or not break something you have not been shown
+- you have been given no content for a file that exists and the goal needs it
+- the file shown is longer than the part you were given, and the change you were
+  asked for is below the cut
+- the goal names a file, a function or a value that is not in anything you were given
+- two parts of the goal contradict each other
+
+"from" says who can unblock you. Use "planner" when the step needs different or more
+input — another file's contents, a decision, a narrower goal. Use "environment" when
+the machine or the file is not as the goal assumes.
+
+Never write a file to say you could not do something. The file is not the place for
+it, and whatever you write there replaces real content.
 
 ## Runtime inputs for COMPUTATION
 
@@ -440,10 +475,22 @@ failure. The reflector reads the actual output downstream and judges
 whether the goal was met with full context.
 
 ## Edit Rules
-- old_content must EXACTLY match text in the file (copy it precisely)
-- Include enough surrounding context to make the match unique
+
+Prefer edits over replacing the whole file. An edit needs only the part you are
+changing, so a long file never has to be reproduced — and anything you do not
+reproduce is lost. A file shown to you in part must be edited, never rewritten.
+
+- old_content must EXACTLY match text in the file, including whitespace — copy it
+- "lines" is [first, last] from the numbered content you were shown, counting from 1
+  and including both ends. Give it whenever you know it: without it, text appearing
+  more than once is refused, because which one you meant is unknown
+- the text is checked against the lines. If it is not there you are told what is,
+  which means the file was not what you thought and your next move is to look again
+  or say blocked
 - new_content replaces old_content completely
-- Multiple edits applied in order
+- edits apply in order, each to the result of the one before it, so an earlier edit
+  can move what a later one is looking for
+- "why" is a few words on the reason. It is recorded and never matched
 
 ## Code Quality
 - Write clean, complete, production-ready code
@@ -457,6 +504,9 @@ whether the goal was met with full context.
 - Write ONLY the files listed in "Your Task Files" — nothing else
 - The "language" field must match the actual file type, not a generator script
 - NEVER embed fake, test, representative, mock, or placeholder data. If required input data is not supplied, emit a gap — DO NOT INVENT DATA.
+- Never reconstruct a file from what you expect it to contain. If you were not shown
+  it, say blocked. A server rewritten from memory lost its database connection and
+  four of its five routes, and reported success.
 - Return ONLY valid JSON to stdout`
 
 /*

@@ -22,6 +22,8 @@ This directory holds the detailed reference docs behind that overview.
   preemption, stop/cancel, and interject.
 - **[prompt-context.md](prompt-context.md)** — the ContextGate: the single context
   API and its sources, and the memory security boundary.
+- **[coder.md](coder.md)** — the stage that writes file content: what it is given,
+  what it may answer, how an edit names its lines, and why it never touches disk.
 
 ## Security
 - **[authorization.md](authorization.md)** — the scope / intent / clearance triad

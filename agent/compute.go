@@ -810,18 +810,60 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		return "", fmt.Errorf("compute code LLM: %w", err)
 	}
 
-	// Parse LLM response — two formats handled by the same tool:
-	// Write mode: {language, filename, code} — complete file
-	// Edit mode:  {language, filename, edits: [{old_content, new_content}]} — text replacements
 	raw, err := extractToolArgs(resp)
 	if err != nil {
 		traceFault(ctx, err.Error())
 		return "", fmt.Errorf("compute code: %w", err)
 	}
 
-	// Try edit format first (text-match replacements)
-	var editResp coderEditReply
-	if TryParseLLMJSON(raw, &editResp) && len(editResp.Edits) > 0 {
+	// One declared result, and it leads with what happened.
+	//
+	// The engine used to infer that from which field arrived: edits, so it edited;
+	// code, so it wrote. Nothing could say "the file already satisfies this" and
+	// nothing could say "I cannot do this with what you gave me" — and code was a
+	// required field, so a coder with nothing useful to contribute still had to
+	// contribute a file. One handed back 2,953 bytes of invented TypeScript over a
+	// 2,458-byte Express server and the engine wrote it.
+	var reply CoderResult
+	if perr := ParseLLMJSON(raw, &reply); perr != nil {
+		traceFault(ctx, "coder reply did not parse: "+perr.Error())
+		return "", fmt.Errorf("parse coder reply: %w (raw: %.300s)", perr, raw)
+	}
+	if reply.inferStatus() {
+		// Strict schema, forgiving parser. Worth seeing, though: a coder routinely
+		// omitting a required field is a prompt problem, not a parser problem.
+		log.Printf("[dag] compute %s: reply carried no status, read as %q from what it sent", tag, reply.Status)
+	}
+	if verr := reply.Validate(); verr != nil {
+		// A status contradicting its own payload. Returned rather than applied: the
+		// previous behaviour for `edited` with no edits was to write nothing and
+		// report success, which is the failure this whole protocol exists to end.
+		traceFault(ctx, verr.Error())
+		return "", fmt.Errorf("coder reply: %w", verr)
+	}
+
+	switch reply.Status {
+	case CoderBlocked:
+		// A complete answer, and the run recovers from it. The node fails, the
+		// reflector reads the reason and replans — which it does well; it handled
+		// nine simultaneous failures correctly and replanned with the right paths.
+		// What it cannot act on is a coder that succeeded at the wrong thing.
+		log.Printf("[dag] compute %s: blocked, needs %s (from %s)", tag, reply.Blocked.Needs, reply.Blocked.From)
+		appendWorklog(a.cfg.MetadataDir, computeSessionID(graph), tag, "BLOCKED",
+			fmt.Sprintf("%s — needs %s (%s must supply it)", reply.Summary, reply.Blocked.Needs, reply.Blocked.From))
+		return "", fmt.Errorf("coder blocked: %s — it needs %s, which the %s has to supply",
+			reply.Summary, reply.Blocked.Needs, reply.Blocked.From)
+	case CoderNoChange:
+		dest := reply.Filename
+		if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
+			dest = codeCtx.taskFiles[0]
+		}
+		return a.computeNoChange(graph, tag, dest, reply.Summary)
+	}
+
+	editResp := coderEditReply{Language: reply.Language, Filename: reply.Filename, Edits: reply.Edits, Execute: reply.Execute}
+
+	if reply.Status == CoderEdited {
 		destPath := editResp.Filename
 		if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
 			destPath = codeCtx.taskFiles[0]
@@ -898,11 +940,9 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		return string(out), nil
 	}
 
-	// Write mode — full file
-	var codeResp coderWriteReply
-	if err := ParseLLMJSON(raw, &codeResp); err != nil {
-		return "", fmt.Errorf("parse code response: %w (raw: %.300s)", err, raw)
-	}
+	// Write mode — full file. From the reply already parsed above, not a second
+	// parse of the same bytes.
+	codeResp := coderWriteReply{Language: reply.Language, Filename: reply.Filename, Code: reply.Code, Execute: reply.Execute}
 
 	// Whether anything can run what is about to be written.
 	//

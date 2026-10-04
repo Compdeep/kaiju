@@ -64,13 +64,19 @@ func TestEditorEvalBundle_StillSeesBothShapes(t *testing.T) {
 	}
 }
 
-// A reply may name a file and a language and stop there — saying what is about
-// to be written without ever saying what goes in it. One did:
-// {"filename": "privesc_checklist.json", "language": "json"}, nothing else. The
-// step then failed on a guard about a missing run command, which is a second
-// symptom of the same silence. When writing the file whole is the only shape on
-// offer, the content comes with it.
-func TestCoderSchema_DemandsFileContentWhenThereIsNothingToEdit(t *testing.T) {
+// The reply must say WHICH of the four things happened, before describing it.
+//
+// A reply could once name a file and a language and stop there — saying what was
+// about to be written without ever saying what goes in it. One did:
+// {"filename": "privesc_checklist.json", "language": "json"}, nothing else.
+// Demanding `code` fixed that case and created a worse one: a coder with nothing
+// useful to contribute still had to contribute a file, so one handed back 2,953
+// bytes of invented TypeScript over a 2,458-byte Express server.
+//
+// status and summary are what is demanded now. The payload is checked against the
+// status by CoderResult.Validate, which a JSON Schema `required` array cannot do —
+// it has no way to say "code, but only when status is created".
+func TestCoderSchema_DemandsAStatusAndASummary(t *testing.T) {
 	required := func(editable bool) []string {
 		t.Helper()
 		var parsed struct {
@@ -82,20 +88,49 @@ func TestCoderSchema_DemandsFileContentWhenThereIsNothingToEdit(t *testing.T) {
 		return parsed.Required
 	}
 
-	if got := required(false); !slices.Contains(got, "code") {
-		t.Errorf("with no file to edit, required = %v, want it to demand code", got)
-	}
-	// A file that is already there takes either shape, and a required array
-	// cannot say "one of these two", so neither is demanded.
-	if got := required(true); slices.Contains(got, "code") || slices.Contains(got, "edits") {
-		t.Errorf("with a file to edit, required = %v, want neither shape demanded", got)
-	}
 	for _, editable := range []bool{false, true} {
 		got := required(editable)
-		for _, field := range []string{"language", "filename"} {
+		for _, field := range []string{"status", "summary"} {
 			if !slices.Contains(got, field) {
 				t.Errorf("editable=%v: required = %v, want it to demand %s", editable, got, field)
 			}
+		}
+		// Not code, and not edits. Which one applies depends on the status, and the
+		// required array cannot express that — Validate does.
+		for _, field := range []string{"code", "edits"} {
+			if slices.Contains(got, field) {
+				t.Errorf("editable=%v: required = %v, want %s left to Validate", editable, got, field)
+			}
+		}
+	}
+}
+
+// Refusing is always on offer, whether or not the file exists.
+//
+// This is the field whose absence caused the damage: with no way to say "I cannot",
+// the only expressible action was to write a file.
+func TestCoderSchema_AlwaysOffersBlocked(t *testing.T) {
+	for _, editable := range []bool{false, true} {
+		var parsed struct {
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(coderSchema(editable).Function.Parameters, &parsed); err != nil {
+			t.Fatalf("editable=%v: %v", editable, err)
+		}
+		if _, ok := parsed.Properties["blocked"]; !ok {
+			t.Errorf("editable=%v: the coder is not offered a way to refuse", editable)
+		}
+		got := parsed.Properties["status"].Enum
+		for _, want := range []string{"created", "no_change", "blocked"} {
+			if !slices.Contains(got, want) {
+				t.Errorf("editable=%v: status enum = %v, want %s among them", editable, got, want)
+			}
+		}
+		// edited is only meaningful for a file that exists.
+		if editable != slices.Contains(got, "edited") {
+			t.Errorf("editable=%v: status enum = %v", editable, got)
 		}
 	}
 }

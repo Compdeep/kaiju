@@ -573,18 +573,20 @@ func architectSchema() llm.ToolDef {
 // offer, which settles it before the model is asked rather than after it
 // replies.
 func coderSchema(editable bool) llm.ToolDef {
+	// Edits are offered only for a file that exists, because there is nothing to
+	// replace in a file that does not. Everything else is offered unconditionally:
+	// status, summary and blocked are how the coder reports, and a coder that cannot
+	// report is a coder that must invent.
 	editsField := ""
-	// Writing the file whole is the only shape on offer when nothing exists to
-	// edit, so the content field is demanded. A reply naming a file and a
-	// language and nothing else is schema-valid without this, and says what is
-	// about to be written without ever saying what goes in it.
-	required := `["language", "filename", "code"]`
-	description := "Submit code for a new file, in 'code'."
+	statuses := `"created", "no_change", "blocked"`
+	whichStatus := "Use created for the file's content. Use no_change if it already satisfies the goal. Use blocked if you cannot meet the goal with what you were given."
 	if editable {
+		statuses = `"edited", "created", "no_change", "blocked"`
+		whichStatus = "Use edited with replacements — prefer this, since an edit needs only the part you are changing. Use created only to replace the whole file, which loses anything you did not reproduce. Use no_change if it already satisfies the goal. Use blocked if you cannot meet the goal with what you were given."
 		editsField = `,
 					"edits": {
 						"type": "array",
-						"description": "Replacements within an EXISTING file. Prefer these over rewriting the file: an edit needs only the part you are changing, so a long file never has to be held whole. Each one is applied in order to the result of the one before it.",
+						"description": "Replacements within an EXISTING file. Each is applied in order to the result of the one before it.",
 						"items": {
 							"type": "object",
 							"properties": {
@@ -600,20 +602,33 @@ func coderSchema(editable bool) llm.ToolDef {
 							"required": ["old_content", "new_content"]
 						}
 					}`
-		// Both shapes apply to a file that is already there, and a JSON Schema
-		// "required" array cannot say "one of these two" — so neither is
-		// demanded and the caller reads whichever arrived.
-		required = `["language", "filename"]`
-		description = "Submit code to write or edit. Use 'code' to replace a file wholesale, 'edits' for text replacements within an existing one."
 	}
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{
 			Name:        "submit_code",
-			Description: description,
+			Description: "Report what you did to the file. Say which of the four outcomes happened, then describe it.",
 			Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {
+					"status": {
+						"type": "string",
+						"enum": [` + statuses + `],
+						"description": "What happened. ` + whichStatus + `"
+					},
+					"summary": {
+						"type": "string",
+						"description": "What you did and why, in one or two lines. Your own words — the engine measures how much changed, so do not state line or byte counts."
+					},
+					"blocked": {
+						"type": "object",
+						"description": "Required when status is blocked. Saying you cannot do something is a complete answer and the run recovers from it; writing a file you could not see is not.",
+						"properties": {
+							"needs": {"type": "string", "description": "What would unblock you, concretely — a file's contents, a path that exists, a decision only the asker can make."},
+							"from": {"type": "string", "enum": ["planner", "environment"], "description": "planner when the step needs different or more input. environment when the machine or the file is not as the goal assumes."}
+						},
+						"required": ["needs", "from"]
+					},
 					"language": {
 						"type": "string",
 						"description": "Language identifier (javascript, python, go, html, css, etc.)."
@@ -624,14 +639,14 @@ func coderSchema(editable bool) llm.ToolDef {
 					},
 					"code": {
 						"type": "string",
-						"description": "Complete file content."
+						"description": "Complete file content. Required when status is created."
 					},
 					"execute": {
 						"type": "string",
 						"description": "Shell command that runs the file you just wrote, relative to the workspace project root — for example: python3 compute.py. Give it whenever the printed output of the file is the answer; without it the file is written and never runs."
 					}` + editsField + `
 				},
-				"required": ` + required + `
+				"required": ["status", "summary"]
 			}`),
 		},
 	}

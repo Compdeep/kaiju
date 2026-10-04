@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -1222,79 +1223,167 @@ type EditOp struct {
 	Why string `json:"why,omitempty"`
 }
 
-// ApplyEdits applies replacements to file content, in order.
+// ApplyEdits applies replacements to file content.
 //
-// Each edit is applied to the text the previous one produced, so an earlier edit
-// can move what a later one is looking for. With Lines that now fails loudly
-// instead of landing somewhere wrong.
+// Positions are resolved against the content as the CODER SAW IT, never against a
+// partly-edited version. That distinction is the whole of this function.
 //
-// Nothing is written unless every edit applies: the caller gets the whole result or
-// an error, never a half-edited file.
+// Applying in order with positions checked as it went did not work, and could not:
+// one real set replaced 12 lines with 14 at line 61, and the next edit named line
+// 122 — correct for the file it was shown and two lines stale by the time it was
+// checked. It was refused, the coder was told the file was not what it thought, and
+// it retried the same correct edit twice. The more edits a coder makes, the more
+// certain that is to happen.
+//
+// So: every positional edit is validated against the original before anything is
+// changed, overlapping ranges are refused rather than silently resolved, and the
+// edits are then applied from the BOTTOM UP — each one only moves lines below
+// itself, and those have already been done. Text-only edits carry no positions and
+// follow, in the order given.
+//
+// Nothing is written unless every edit applies. The caller gets the whole result or
+// an error.
 func ApplyEdits(content string, edits []EditOp) (string, error) {
-	for i, e := range edits {
-		if e.OldContent == "" {
-			continue
+	positional, textual, err := splitEdits(edits)
+	if err != nil {
+		return "", err
+	}
+	original := strings.Split(content, "\n")
+
+	// Everything checked first, against the original, so a set that cannot apply
+	// says so before any of it is applied.
+	for _, p := range positional {
+		if p.last > len(original) {
+			return "", fmt.Errorf("edit %d: lines %d-%d are past the end of the file, which has %d", p.idx+1, p.first, p.last, len(original))
 		}
-		if len(e.Lines) > 0 {
-			var err error
-			if content, err = applyAtLines(content, e, i); err != nil {
-				return "", err
-			}
-			continue
+		span := strings.Join(original[p.first-1:p.last], "\n")
+		if !strings.Contains(span, p.e.OldContent) {
+			return "", mismatchAt(p, original, content)
 		}
-		// Text only. Ambiguity is reported rather than resolved by position: the
-		// coder is the one that knows which occurrence it meant, and it can say so
-		// with Lines or a longer excerpt.
-		if n := strings.Count(content, e.OldContent); n == 0 {
-			return "", fmt.Errorf("edit %d: old_content not found in file (first 60 chars: %q)", i+1, e.OldContent[:min(60, len(e.OldContent))])
-		} else if n > 1 {
+	}
+	if err := refuseOverlaps(positional); err != nil {
+		return "", err
+	}
+
+	// Bottom up. Highest starting line first, so an application never moves the
+	// lines an unapplied edit is still relying on.
+	sort.Slice(positional, func(i, j int) bool { return positional[i].first > positional[j].first })
+
+	lines := append([]string(nil), original...)
+	for _, p := range positional {
+		span := strings.Join(lines[p.first-1:p.last], "\n")
+		at := strings.Index(span, p.e.OldContent)
+		if at < 0 {
+			// Unreachable: validated above, and nothing below this point can have
+			// moved these lines. Reported rather than ignored, because reaching it
+			// would mean the bottom-up order is wrong.
+			return "", fmt.Errorf("edit %d: lines %d-%d no longer hold their text after an edit below them, which should be impossible", p.idx+1, p.first, p.last)
+		}
+		newSpan := span[:at] + p.e.NewContent + span[at+len(p.e.OldContent):]
+
+		out := make([]string, 0, len(lines))
+		out = append(out, lines[:p.first-1]...)
+		out = append(out, strings.Split(newSpan, "\n")...)
+		out = append(out, lines[p.last:]...)
+		lines = out
+	}
+	content = strings.Join(lines, "\n")
+
+	// Then the edits with no position, in the order they were given.
+	for _, t := range textual {
+		n := strings.Count(content, t.e.OldContent)
+		switch {
+		case n == 0:
+			return "", fmt.Errorf("edit %d: old_content not found in file (first 60 chars: %q)", t.idx+1, t.e.OldContent[:min(60, len(t.e.OldContent))])
+		case n > 1:
 			return "", fmt.Errorf("edit %d: old_content appears %d times, so which one is meant is unknown — give its lines, or a longer excerpt that appears once (first 60 chars: %q)",
-				i+1, n, e.OldContent[:min(60, len(e.OldContent))])
+				t.idx+1, n, t.e.OldContent[:min(60, len(t.e.OldContent))])
 		}
-		content = strings.Replace(content, e.OldContent, e.NewContent, 1)
+		content = strings.Replace(content, t.e.OldContent, t.e.NewContent, 1)
 	}
 	return content, nil
 }
 
+// placedEdit is one edit and the range it named, kept with its original index so an
+// error names the edit the coder wrote rather than its sorted position.
+type placedEdit struct {
+	idx         int
+	e           EditOp
+	first, last int
+}
+
 /*
- * applyAtLines replaces one edit's text at the lines it named.
- * desc: The lines decide which occurrence; the text decides whether the file is
- *       what the coder thought. A mismatch names both — what was expected and what
- *       is actually there — because "not found" alone sent a reader looking for a
- *       path or timing problem twice before.
- * param: content - the file as it stands after any earlier edits.
- * param: e - the edit, whose Lines is non-empty.
- * param: i - the edit's index, for a message that says which one failed.
- * return: the new content, or an error naming the mismatch.
+ * splitEdits separates the edits that name lines from the ones that do not.
+ * desc: Two kinds, handled differently: a positional edit is resolved against the
+ *       original and applied bottom-up, a textual one is applied in sequence. An
+ *       empty old_content is skipped, as it always has been.
+ * return: the positional edits, the textual ones, or an error for a malformed range.
  */
-func applyAtLines(content string, e EditOp, i int) (string, error) {
-	first := e.Lines[0]
-	last := first
-	if len(e.Lines) > 1 {
-		last = e.Lines[1]
+func splitEdits(edits []EditOp) ([]placedEdit, []placedEdit, error) {
+	var positional, textual []placedEdit
+	for i, e := range edits {
+		if e.OldContent == "" {
+			continue
+		}
+		if len(e.Lines) == 0 {
+			textual = append(textual, placedEdit{idx: i, e: e})
+			continue
+		}
+		first := e.Lines[0]
+		last := first
+		if len(e.Lines) > 1 {
+			last = e.Lines[1]
+		}
+		if first < 1 || last < first {
+			return nil, nil, fmt.Errorf("edit %d: lines %v are not a range", i+1, e.Lines)
+		}
+		positional = append(positional, placedEdit{idx: i, e: e, first: first, last: last})
 	}
-	if first < 1 || last < first {
-		return "", fmt.Errorf("edit %d: lines %v are not a range", i+1, e.Lines)
+	return positional, textual, nil
+}
+
+/*
+ * refuseOverlaps rejects two positional edits covering the same lines.
+ * desc: Which one wins would depend on the order they were applied in, and the
+ *       second would then be checked against text the first had changed — the
+ *       failure this function exists to prevent, reintroduced within one set.
+ * return: an error naming both edits, or nil.
+ */
+func refuseOverlaps(positional []placedEdit) error {
+	for i := 0; i < len(positional); i++ {
+		for j := i + 1; j < len(positional); j++ {
+			a, b := positional[i], positional[j]
+			if a.first <= b.last && b.first <= a.last {
+				return fmt.Errorf("edits %d and %d both cover lines %d-%d and %d-%d: one set may not edit the same lines twice, so combine them into one edit",
+					a.idx+1, b.idx+1, a.first, a.last, b.first, b.last)
+			}
+		}
 	}
-	lines := strings.Split(content, "\n")
-	if last > len(lines) {
-		return "", fmt.Errorf("edit %d: lines %d-%d are past the end of the file, which has %d", i+1, first, last, len(lines))
+	return nil
+}
+
+/*
+ * mismatchAt explains text that is not at the lines an edit named.
+ * desc: Says where the text actually is when it is somewhere else, because that is
+ *       what the coder needs: "the text is at 124, not 122" is actionable where
+ *       "expected X, found Y" reads as the file being wrong and invites the same
+ *       edit again. Both sides are still named when it is nowhere to be found.
+ * param: p - the edit and its range.
+ * param: original - the file's lines as the coder saw them.
+ * param: content - the whole file, for locating the text elsewhere.
+ * return: the error.
+ */
+func mismatchAt(p placedEdit, original []string, content string) error {
+	if at := strings.Index(content, p.e.OldContent); at >= 0 {
+		line := 1 + strings.Count(content[:at], "\n")
+		return fmt.Errorf("edit %d: the text is at line %d, not in the lines %d-%d you named — cite where it is (first 60 chars: %q)",
+			p.idx+1, line, p.first, p.last, p.e.OldContent[:min(60, len(p.e.OldContent))])
 	}
-	// The named span, joined back exactly as it was split.
-	span := strings.Join(lines[first-1:last], "\n")
-	idx := strings.Index(span, e.OldContent)
-	if idx < 0 {
-		return "", fmt.Errorf("edit %d: lines %d-%d do not contain the text the edit expects.\n  expected: %q\n  found:    %q",
-			i+1, first, last,
-			e.OldContent[:min(80, len(e.OldContent))],
-			span[:min(80, len(span))])
-	}
-	// Replace within the span only, so an identical string elsewhere is untouched.
-	newSpan := span[:idx] + e.NewContent + span[idx+len(e.OldContent):]
-	out := append([]string{}, lines[:first-1]...)
-	out = append(out, strings.Split(newSpan, "\n")...)
-	out = append(out, lines[last:]...)
-	return strings.Join(out, "\n"), nil
+	span := strings.Join(original[p.first-1:p.last], "\n")
+	return fmt.Errorf("edit %d: lines %d-%d do not contain the text the edit expects, and it is nowhere in the file.\n  expected: %q\n  found:    %q",
+		p.idx+1, p.first, p.last,
+		p.e.OldContent[:min(80, len(p.e.OldContent))],
+		span[:min(80, len(span))])
 }
 
 func min(a, b int) int {

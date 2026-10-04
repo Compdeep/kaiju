@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,10 +50,11 @@ func TestApplyEdits_LinesChooseWhichOccurrence(t *testing.T) {
 	}
 }
 
-// The text is the check on the lines. If it is not there, the file is not what the
-// coder thought — so the edit is refused, and the error carries both what was
-// expected and what is actually at those lines.
-func TestApplyEdits_TextNotAtTheNamedLinesIsRefused(t *testing.T) {
+// The text is the check on the lines, and when it is somewhere else the error says
+// WHERE. "The text is at line 3, not 1" is actionable; "expected X, found Y" reads
+// as the file being wrong and invites the same edit again — which is what a coder
+// did, retrying a correct edit twice.
+func TestApplyEdits_SaysWhereTheTextActuallyIs(t *testing.T) {
 	content := "alpha\nbeta\ngamma\n"
 
 	_, err := ApplyEdits(content, []EditOp{
@@ -61,11 +63,28 @@ func TestApplyEdits_TextNotAtTheNamedLinesIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("an edit whose text is not at the lines it named was applied")
 	}
-	if !strings.Contains(err.Error(), "expected") || !strings.Contains(err.Error(), "found") {
-		t.Errorf("the error does not carry both sides of the mismatch: %v", err)
+	if !strings.Contains(err.Error(), "at line 3") {
+		t.Errorf("the error does not say where the text is: %v", err)
 	}
-	if !strings.Contains(err.Error(), "gamma") || !strings.Contains(err.Error(), "alpha") {
-		t.Errorf("the error names neither the expected nor the actual text: %v", err)
+	if !strings.Contains(err.Error(), "1-1") {
+		t.Errorf("the error does not name the lines that were cited: %v", err)
+	}
+}
+
+// Text that is nowhere in the file still names both sides, because there is no
+// "where it actually is" to give.
+func TestApplyEdits_TextNowhereInTheFileNamesBothSides(t *testing.T) {
+	_, err := ApplyEdits("alpha\nbeta\n", []EditOp{
+		{Lines: []int{1, 1}, OldContent: "nothing like this", NewContent: "x"},
+	})
+	if err == nil {
+		t.Fatal("an edit for text that is not in the file was applied")
+	}
+	if !strings.Contains(err.Error(), "expected") || !strings.Contains(err.Error(), "found") {
+		t.Errorf("the error does not carry both sides: %v", err)
+	}
+	if !strings.Contains(err.Error(), "nowhere in the file") {
+		t.Errorf("the error does not say the text is absent entirely: %v", err)
 	}
 }
 
@@ -183,5 +202,128 @@ func TestApplyFileEdits_LeavesTheFileAloneWhenAnEditCannotApply(t *testing.T) {
 	}
 	if string(after) != original {
 		t.Fatalf("a failed edit must not write a partial file, got %q", string(after))
+	}
+}
+
+// An earlier edit growing the file must not invalidate a later edit's lines.
+//
+// This is the set that failed in a real run. Edit 1 replaced 12 lines with 14 at
+// line 61; edit 2 named line 122, correct for the file the coder was shown and two
+// lines stale by the time it was checked against the partly-edited result. It was
+// refused, the coder was told the file was not what it thought, and it retried the
+// same correct edit twice.
+//
+// Positions are resolved against the original and applied bottom-up, so this holds
+// however many lines an earlier edit adds or removes.
+func TestApplyEdits_AnEarlierEditDoesNotMoveALaterOnesLines(t *testing.T) {
+	var sb strings.Builder
+	for i := 1; i <= 200; i++ {
+		fmt.Fprintf(&sb, "line %d\n", i)
+	}
+	content := sb.String()
+
+	got, err := ApplyEdits(content, []EditOp{
+		// Grows by two lines, shifting everything below it.
+		{Lines: []int{61, 61}, OldContent: "line 61", NewContent: "line 61\nadded A\nadded B"},
+		// Named against the original, far below the growth.
+		{Lines: []int{122, 122}, OldContent: "line 122", NewContent: "line 122 CHANGED"},
+		// And one above it, which nothing moves.
+		{Lines: []int{10, 10}, OldContent: "line 10", NewContent: "line 10 CHANGED"},
+	})
+	if err != nil {
+		t.Fatalf("a set whose earlier edit grew the file was refused: %v", err)
+	}
+	for _, want := range []string{"line 10 CHANGED", "added A", "added B", "line 122 CHANGED"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q from the result", want)
+		}
+	}
+	// The one below the growth landed on its own line and not on a neighbour.
+	lines := strings.Split(got, "\n")
+	for i, l := range lines {
+		if l == "line 122 CHANGED" {
+			// Original 122, plus the two lines edit 1 added above it.
+			if i+1 != 124 {
+				t.Errorf("the edit landed at line %d, want 124 after two lines were added above it", i+1)
+			}
+		}
+	}
+	if strings.Contains(got, "line 124 CHANGED") {
+		t.Error("the edit changed the line that moved INTO position 122 rather than the one it named")
+	}
+}
+
+// Shrinking is the same problem in the other direction.
+func TestApplyEdits_AnEarlierEditThatShrinksTheFileIsAlsoSafe(t *testing.T) {
+	content := "a\nb\nc\nd\ne\nf\n"
+
+	got, err := ApplyEdits(content, []EditOp{
+		{Lines: []int{2, 4}, OldContent: "b\nc\nd", NewContent: "bcd"}, // 3 lines -> 1
+		{Lines: []int{6, 6}, OldContent: "f", NewContent: "F"},
+	})
+	if err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	if got != "a\nbcd\ne\nF\n" {
+		t.Errorf("got %q, want the later edit to have landed on f", got)
+	}
+}
+
+// Two edits to the same lines is refused rather than resolved by order — whichever
+// applied second would be checked against text the first had changed, which is the
+// failure this design removes.
+func TestApplyEdits_OverlappingRangesAreRefused(t *testing.T) {
+	_, err := ApplyEdits("a\nb\nc\nd\n", []EditOp{
+		{Lines: []int{1, 3}, OldContent: "a", NewContent: "A"},
+		{Lines: []int{2, 4}, OldContent: "c", NewContent: "C"},
+	})
+	if err == nil {
+		t.Fatal("two edits covering the same lines were accepted")
+	}
+	if !strings.Contains(err.Error(), "same lines") {
+		t.Errorf("the error does not explain the overlap: %v", err)
+	}
+	// Both are named, by the index the coder wrote them at.
+	if !strings.Contains(err.Error(), "edits 1 and 2") {
+		t.Errorf("the error does not name both edits: %v", err)
+	}
+}
+
+// Nothing is applied when any edit in the set cannot be. Checked against the
+// original up front, so the error describes the real problem rather than a
+// consequence of a partial application.
+func TestApplyEdits_AWholeSetFailsBeforeAnyOfItApplies(t *testing.T) {
+	content := "keep\nchange me\nkeep\n"
+
+	got, err := ApplyEdits(content, []EditOp{
+		{Lines: []int{2, 2}, OldContent: "change me", NewContent: "changed"},
+		{Lines: []int{3, 3}, OldContent: "not there", NewContent: "x"},
+	})
+	if err == nil {
+		t.Fatal("a set with an impossible edit was applied")
+	}
+	if got != "" {
+		t.Errorf("a failed set returned content: %q", got)
+	}
+	// The error is about edit 2, not a mismatch caused by edit 1 having run.
+	if !strings.Contains(err.Error(), "edit 2") {
+		t.Errorf("the error does not name the edit that could not apply: %v", err)
+	}
+}
+
+// Positional and textual edits in one set: positions are resolved against the
+// original, then the text edits run on the result.
+func TestApplyEdits_MixesPositionalAndTextual(t *testing.T) {
+	content := "alpha\nbeta\ngamma\n"
+
+	got, err := ApplyEdits(content, []EditOp{
+		{Lines: []int{1, 1}, OldContent: "alpha", NewContent: "ALPHA\nextra"},
+		{OldContent: "gamma", NewContent: "GAMMA"},
+	})
+	if err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	if got != "ALPHA\nextra\nbeta\nGAMMA\n" {
+		t.Errorf("got %q", got)
 	}
 }

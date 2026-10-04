@@ -126,8 +126,19 @@ edit is refused and the error carries both what was expected and what is there.
 Without `lines`, text appearing more than once is refused rather than resolved by
 position, and the error says how many matches there were.
 
-Edits apply in order, each to the result of the one before, and the whole set is
-atomic: one bad edit fails all of them and the file is untouched.
+Positions are resolved against the file **as the coder saw it**, never against a
+partly-edited version. Every positional edit is checked against the original before
+anything is applied, overlapping ranges are refused, and the set is then applied
+bottom-up — each edit only moves lines below itself, and those are already done.
+Text-only edits carry no positions and follow, in the order given.
+
+That ordering is not cosmetic. One real set replaced 12 lines with 14 at line 61 and
+then named line 122 — correct for the file it was shown, two lines stale by the time
+it was checked. It was refused, the coder was told the file was not what it thought,
+and it retried the same correct edit twice. The more edits a coder makes, the more
+certain that becomes.
+
+The whole set is atomic: one bad edit fails all of them and the file is untouched.
 
 ## Why edits rather than whole files
 

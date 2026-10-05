@@ -353,3 +353,86 @@ func (a *Agent) graftValidation(graph *Graph, arch *Node, checks []architectChec
 	}
 	return out
 }
+
+// Ordering between the architect's tasks, with the edges that cannot be honoured
+// named rather than dropped in silence.
+//
+// depends_on_tasks is an index into the task list, and three kinds of nonsense
+// arrive in it. A task naming itself wires a node to its own ID: ReadyNodes needs
+// every dependency terminal, so it never runs, and never fails either. Two tasks
+// naming each other do the same to both. An index past the end of the list is a
+// reference to a task that was never planned.
+//
+// None of those can fail the architect. Its coders are already grafted and the
+// work is sound — what is wrong is only the order it asked for, and a plan that
+// still runs in the wrong order beats a plan that does not run. So the edge is
+// dropped and said out loud, because a stalled node leaves nothing to read.
+//
+// A stall is worse than it was. graftArchitectRunNodes waits for every coder to
+// reach a terminal state, so one node waiting on itself now means the execute,
+// service and check nodes are never grafted at all.
+
+// taskDepEdge is one honoured ordering edge: task From waits for task To.
+type taskDepEdge struct{ From, To int }
+
+/*
+ * resolveTaskDeps works out which ordering edges can be honoured.
+ * desc: Edges are taken in the order given, and one is kept only when the task it
+ *       points at cannot already reach the task it points from. That drops the edge
+ *       that closes a cycle rather than the whole cycle, so as much of the
+ *       architect's intended order survives as can.
+ * param: deps - deps[i] is task i's depends_on_tasks.
+ * param: live - live[i] reports whether task i actually got a node; an edge to a
+ *        task the budget cut cannot be wired.
+ * return: the edges to apply, and one sentence per edge that was not.
+ */
+func resolveTaskDeps(deps [][]int, live []bool) (edges []taskDepEdge, dropped []string) {
+	n := len(deps)
+	follows := make([][]bool, n) // follows[a][b]: a waits for b, transitively
+	for i := range follows {
+		follows[i] = make([]bool, n)
+	}
+	reaches := func(from, to int) bool {
+		seen := make([]bool, n)
+		stack := []int{from}
+		for len(stack) > 0 {
+			cur := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if cur == to {
+				return true
+			}
+			if seen[cur] {
+				continue
+			}
+			seen[cur] = true
+			for next := 0; next < n; next++ {
+				if follows[cur][next] {
+					stack = append(stack, next)
+				}
+			}
+		}
+		return false
+	}
+
+	for i := 0; i < n; i++ {
+		if i >= len(live) || !live[i] {
+			continue
+		}
+		for _, j := range deps[i] {
+			switch {
+			case j == i:
+				dropped = append(dropped, fmt.Sprintf("task %d depends on itself", i))
+			case j < 0 || j >= n:
+				dropped = append(dropped, fmt.Sprintf("task %d waits for task %d, which this plan does not have", i, j))
+			case j >= len(live) || !live[j]:
+				dropped = append(dropped, fmt.Sprintf("task %d waits for task %d, which has no node", i, j))
+			case reaches(j, i):
+				dropped = append(dropped, fmt.Sprintf("task %d waits for task %d, which already waits for task %d", i, j, i))
+			default:
+				follows[i][j] = true
+				edges = append(edges, taskDepEdge{From: i, To: j})
+			}
+		}
+	}
+	return edges, dropped
+}

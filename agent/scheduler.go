@@ -2182,16 +2182,29 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: fID, Node: graph.SnapshotNode(fID)})
 						}
 
-						// Resolve inter-task dependencies
+						// Resolve inter-task dependencies. A task naming itself, or
+						// two naming each other, used to wire a node that could never
+						// become ready and never fail — and since the run nodes now
+						// wait for every coder to settle, one such node stops the
+						// execute, service and check nodes from being grafted at all.
+						taskDeps := make([][]int, len(followUps))
+						live := make([]bool, len(followUps))
 						for i, fu := range followUps {
-							if computeNodes[i] == nil {
-								continue
-							}
-							for _, depIdx := range fu.DependsOnTasks {
-								if depIdx >= 0 && depIdx < len(computeIDs) && computeIDs[depIdx] != "" {
-									computeNodes[i].DependsOn = append(computeNodes[i].DependsOn, computeIDs[depIdx])
-								}
-							}
+							taskDeps[i] = fu.DependsOnTasks
+							live[i] = computeNodes[i] != nil && computeIDs[i] != ""
+						}
+						edges, droppedDeps := resolveTaskDeps(taskDeps, live)
+						for _, e := range edges {
+							computeNodes[e.From].DependsOn = append(computeNodes[e.From].DependsOn, computeIDs[e.To])
+						}
+						if len(droppedDeps) > 0 {
+							// Said out loud: the coders still run, in an order the
+							// architect did not ask for, and a stalled node would have
+							// left nothing to read at all.
+							log.Printf("[dag] architect %s: %d ordering edge(s) could not be honoured: %s",
+								node.Tag, len(droppedDeps), strings.Join(droppedDeps, "; "))
+							appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "ORDER_DROPPED",
+								strings.Join(droppedDeps, "; "))
 						}
 
 						// Phases 3, 3.5 and 4 — the execute, service and validation

@@ -209,8 +209,8 @@ func (a *Agent) coderFileFacts(graph *Graph, taskFiles []string, tag string) cod
 		return coderFileFacts{}
 	}
 	target := taskFiles[0]
-	if !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, projectPrefix(graph, taskFiles)) {
-		target = projectPrefix(graph, taskFiles) + target
+	if !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, a.projectPrefix(graph, taskFiles)) {
+		target = a.projectPrefix(graph, taskFiles) + target
 	}
 	facts := coderFileFacts{Path: target}
 

@@ -241,7 +241,13 @@ const baseComputeArchitectPrompt = `You are a software architect. Plan everythin
 - Quality over quantity. Clean, working code that covers all requirements.
 
 ## Paths
-Choose a project root under project/<name>/ based on the goal (e.g. project/kaiju_webapp/, project/data_pipeline/). All files, setup commands, task_files, execute commands, service workdirs, and validators MUST use this root. Never use bare paths. Return the root in the "project_root" field of your output.
+Work where the work is.
+
+If the request names files or directories that already exist, the project root is the directory that holds them, and every path you emit — task_files, setup commands, execute commands, service workdirs, validators — is the real absolute path. Do not copy a file somewhere else to work on it, and do not invent a directory to hold work that already has a home.
+
+Only when there is nothing to work on yet — a new program, with no existing code named anywhere — choose a root under project/<name>/ based on the goal (e.g. project/kaiju_webapp/, project/data_pipeline/) and put every path under it.
+
+Either way, never use bare paths, and return the root you chose in the "project_root" field of your output.
 
 ## Process
 1. If existing blueprints or interfaces are provided below, extend don't rewrite.

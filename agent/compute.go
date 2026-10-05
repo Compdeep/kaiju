@@ -268,7 +268,23 @@ func computeSessionID(g *Graph) string {
 // it. Nothing on disk moves; a run resuming a session written before this finds
 // its files where the paths stored with it say they are, since those paths are
 // carried whole rather than rebuilt.
-func projectPrefix(g *Graph, taskFiles []string) string {
+// Two cases return no prefix at all.
+//
+// In CLI mode the workspace IS the directory kaiju was started in, so a relative
+// path is already where the user meant. PathConfig has said "no project/ prefix"
+// about CLI mode since it was written and nothing implemented it: CLIMode was read
+// in format.go and at bootstrap and nowhere else, so a CLI run still had its files
+// put under project/<session>/ inside the very directory it was pointed at.
+//
+// And an absolute project root names a real place, so there is nothing to prepend.
+// Without this the two concatenate: project/<session>//home/sites/uinloop/docs.
+func (a *Agent) projectPrefix(g *Graph, taskFiles []string) string {
+	if a.cfg.CLIMode {
+		return ""
+	}
+	if g != nil && strings.HasPrefix(g.ProjectRoot, "/") {
+		return ""
+	}
 	base := "project/"
 	if dir := threadDir(computeSessionID(g)); dir != "" {
 		base += dir + "/"
@@ -535,7 +551,13 @@ func (a *Agent) computePlan(ctx context.Context, graph *Graph, goal, query strin
 	// One scan happens here at architect time and is shared by every coder
 	// followup; routing through the gate would either duplicate the scan per
 	// coder or require gate state to be readable from architect-time code.
-	projectStructure := scanWorkspaceTree(a.cfg.Workspace, 3)
+	//
+	// Scanned from the project being worked on, not from a.cfg.Workspace. The
+	// workspace is kaiju's own state directory, and scanning it handed every deep
+	// coder 120 entries of SOUL.md, cookies.txt, de421.bsp, a pile of business-plan
+	// markdown and several dozen session UUIDs, under the heading "Project
+	// Structure", while it edited a file in someone's repository.
+	projectStructure := scanWorkspaceTree(a.projectScanRoot(graph, planOutput.ProjectRoot, planOutput.Tasks), 3)
 
 	if len(planOutput.Tasks) > 0 {
 		// Decomposed: each work item becomes a shallow compute node + file_read nodes
@@ -864,8 +886,8 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
 			destPath = codeCtx.taskFiles[0]
 		}
-		if !strings.HasPrefix(destPath, "/") && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
-			destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
+		if !strings.HasPrefix(destPath, "/") && !strings.HasPrefix(destPath, a.projectPrefix(graph, codeCtx.taskFiles)) {
+			destPath = a.projectPrefix(graph, codeCtx.taskFiles) + destPath
 		}
 		codePath, safeErr := workspace.Resolve(a.cfg.Workspace, destPath)
 		if safeErr != nil {
@@ -934,7 +956,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		// exited 0. A step that reported success, a file with an error object in
 		// it, and nothing anywhere naming the missing variable.
 		if cmd, _ := result["execute"].(string); cmd != "" {
-			cmd = rewriteExecutePath(cmd, projectPrefix(graph, codeCtx.taskFiles))
+			cmd = rewriteExecutePath(cmd, a.projectPrefix(graph, codeCtx.taskFiles))
 			if ctxPath := writeContextFile(a.cfg.MetadataDir, computeSessionID(graph), tag, ctxData); ctxPath != "" {
 				cmd = "KAIJU_CONTEXT=" + shQuote(ctxPath) + " " + cmd
 			}
@@ -983,8 +1005,8 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		if probePath == "" {
 			probePath = fmt.Sprintf("%s_%d.txt", tag, ts)
 		}
-		if !strings.HasPrefix(probePath, "/") && !strings.HasPrefix(probePath, projectPrefix(graph, nil)) {
-			probePath = projectPrefix(graph, nil) + probePath
+		if !strings.HasPrefix(probePath, "/") && !strings.HasPrefix(probePath, a.projectPrefix(graph, nil)) {
+			probePath = a.projectPrefix(graph, nil) + probePath
 		}
 		if guess := defaultExecuteFor(codeResp.Language, probePath, tag); guess != "" {
 			effectiveExecute = guess
@@ -1022,8 +1044,8 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 	if codeCtx != nil && len(codeCtx.taskFiles) > 0 {
 		destPath = codeCtx.taskFiles[0]
 	}
-	if !strings.HasPrefix(destPath, "/") && !strings.HasPrefix(destPath, projectPrefix(graph, codeCtx.taskFiles)) {
-		destPath = projectPrefix(graph, codeCtx.taskFiles) + destPath
+	if !strings.HasPrefix(destPath, "/") && !strings.HasPrefix(destPath, a.projectPrefix(graph, codeCtx.taskFiles)) {
+		destPath = a.projectPrefix(graph, codeCtx.taskFiles) + destPath
 	}
 	codePath, safeErr := workspace.Resolve(a.cfg.Workspace, destPath)
 	if safeErr != nil {
@@ -1082,7 +1104,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		}
 	}
 	if execCmd != "" {
-		execCmd = rewriteExecutePath(execCmd, projectPrefix(graph, codeCtx.taskFiles))
+		execCmd = rewriteExecutePath(execCmd, a.projectPrefix(graph, codeCtx.taskFiles))
 		// Expose the compute's context to the script at runtime. The coder's
 		// system prompt tells it to read $KAIJU_CONTEXT (path to a JSON file)
 		// instead of baking literals into the script — which was the source of
@@ -1331,4 +1353,65 @@ func (a *Agent) computeNoChange(graph *Graph, tag, destPath, reason string) (str
 	log.Printf("[dag] compute %s: %s — treating as no-op", tag, reason)
 	appendWorklog(a.cfg.MetadataDir, computeSessionID(graph), tag, "NO_CHANGE", reason)
 	return string(out), nil
+}
+
+/*
+ * projectScanRoot is the directory whose tree the coders are shown.
+ * desc: Where the work is, which is the request's own paths when it has any. The
+ *       workspace is the fallback and not the convention: it is kaiju's state
+ *       directory, so a coder shown its tree is being told the project is
+ *       somewhere it is not.
+ * param: g - for a project root the architect already named; may be nil.
+ * param: projectRoot - the architect's answer, absolute or workspace-relative.
+ * param: tasks - the work items, whose task files name real locations.
+ * return: an absolute directory, or the workspace when nothing names one.
+ */
+func (a *Agent) projectScanRoot(g *Graph, projectRoot string, tasks []computeWorkItem) string {
+	if strings.HasPrefix(projectRoot, "/") {
+		return projectRoot
+	}
+	if g != nil && strings.HasPrefix(g.ProjectRoot, "/") {
+		return g.ProjectRoot
+	}
+	// The common directory of the absolute task files. One file gives its own
+	// directory; files in different trees give the deepest directory holding all
+	// of them, and files with nothing in common fall through to the workspace.
+	var dirs []string
+	for _, t := range tasks {
+		for _, f := range t.TaskFiles {
+			if strings.HasPrefix(f, "/") {
+				dirs = append(dirs, filepath.Dir(f))
+			}
+		}
+	}
+	if common := commonDir(dirs); common != "" && common != "/" {
+		return common
+	}
+	return a.cfg.Workspace
+}
+
+/*
+ * commonDir returns the deepest directory containing all of the paths.
+ * return: "" when there are none, or when they share nothing above the root.
+ */
+func commonDir(dirs []string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(dirs[0], "/"), "/")
+	for _, d := range dirs[1:] {
+		other := strings.Split(strings.Trim(d, "/"), "/")
+		n := 0
+		for n < len(parts) && n < len(other) && parts[n] == other[n] {
+			n++
+		}
+		parts = parts[:n]
+		if n == 0 {
+			return ""
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "/" + strings.Join(parts, "/")
 }

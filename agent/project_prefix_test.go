@@ -90,7 +90,7 @@ func TestProjectPrefix_TheConversationIsTheRoot(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := projectPrefix(c.graph, c.taskFiles); got != c.want {
+			if got := webAgent().projectPrefix(c.graph, c.taskFiles); got != c.want {
 				t.Fatalf("projectPrefix = %q, want %q", got, c.want)
 			}
 		})
@@ -110,4 +110,11 @@ func TestThreadDir_RejectsAnythingThatIsNotAPlainName(t *testing.T) {
 			t.Fatalf("threadDir(%q) = %q, want it unchanged", ok, got)
 		}
 	}
+}
+
+// The existing cases describe web mode, where the workspace is a sandbox and a
+// relative path needs somewhere to go. CLI mode is the other half and has its own
+// test below.
+func webAgent() *Agent {
+	return &Agent{cfg: Config{PathConfig: PathConfig{Workspace: "/ws"}}}
 }

@@ -505,7 +505,7 @@ func architectSchema() llm.ToolDef {
 								"task_files": {
 									"type": "array",
 									"items": {"type": "string"},
-									"description": "Exactly ONE file path."
+									"description": "Exactly ONE file path. A second path is not edited."
 								},
 								"brief": {"type": "string"},
 								"execute": {"type": "string", "description": "Shell command run AFTER this coder finishes."},

@@ -64,6 +64,20 @@ func (a *Agent) runCompute(ec *ExecuteContext, params map[string]any) (string, e
 		taskFiles = append(taskFiles, of...)
 	}
 
+	// One coder node writes one file. dest is taskFiles[0] in every route, and
+	// coderFileFacts reads that same first entry — so a longer list means the
+	// rest were going to be dropped in silence, and a file the planner meant to
+	// have changed would simply never be. Said here rather than refused, because
+	// the first file is still work worth doing and the reflector can plan the
+	// others once it knows they were not touched.
+	if len(taskFiles) > 1 {
+		log.Printf("[dag] compute %s: %d task files named, and a coder writes one — editing %s, ignoring %s",
+			n.Tag, len(taskFiles), taskFiles[0], strings.Join(taskFiles[1:], ", "))
+		appendWorklog(a.cfg.MetadataDir, ec.Graph.SessionID, n.Tag, "FILES_IGNORED",
+			fmt.Sprintf("only %s was edited; %s were named in the same step and not touched, so they need their own step",
+				taskFiles[0], strings.Join(taskFiles[1:], ", ")))
+	}
+
 	if goal == "" {
 		return "", fmt.Errorf("compute node missing goal param")
 	}

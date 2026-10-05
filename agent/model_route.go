@@ -235,6 +235,7 @@ func (a *Agent) OneShot(ctx context.Context, provider, model string, messages []
 		Messages:    messages,
 		Temperature: temperature,
 		MaxTokens:   maxTokens,
+		ToolChoice:  "none",
 	}
 	resp, err := client.Complete(ctx, oneShot)
 	if err != nil {

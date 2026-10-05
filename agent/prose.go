@@ -93,6 +93,22 @@ func (a *Agent) writeProse(ctx context.Context, t proseTurn) (*llm.ChatResponse,
 		Messages:    withRecall(t.Messages, t.Recalled),
 		Temperature: t.Temperature,
 		MaxTokens:   a.replyBudget(ctx, t.Lane, t.Reply),
+		// No tools on this lane, said explicitly rather than by omission.
+		//
+		// A request that leaves tool_choice out is not a request that forbids tool
+		// calls — it leaves the decision to the provider's default. Kimi-k3 on a
+		// no-tools lane answered one turn with its own tool-call tokens as prose:
+		// "Let me find the architecture document first." followed by
+		// <|open|>call tool="bash" index="1"<|sep|>… and a find command. Nothing
+		// was watching for them, so they reached the user as the answer.
+		//
+		// "none" is the OpenAI-standard way to say it and every endpoint serving
+		// these models supports it. The alternative — matching the model's sentinel
+		// tokens — is not durable: Kimi-K2 documents
+		// <|tool_calls_section_begin|> and K3 emits <|open|>/<|sep|>/<|close|>
+		// instead, so a parser written against the published format would have
+		// silently matched nothing.
+		ToolChoice: "none",
 	}
 	// What this turn was judged to need. Stated here rather than left to the
 	// lane, because it is the one thing about this call the lane cannot know:

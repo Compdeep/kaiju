@@ -75,6 +75,7 @@ func (m *Manager) Compact(ctx context.Context, sessionID string) (string, error)
 		},
 		Temperature: 0.3,
 		MaxTokens:   1024,
+		ToolChoice:  "none", // no tools on this call; see prose.go
 	})
 	if err != nil {
 		return "", fmt.Errorf("memory: compact LLM call: %w", err)

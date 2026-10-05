@@ -80,6 +80,7 @@ func (a *Agent) classifyValidatorOutput(ctx context.Context, tag, output string)
 		},
 		Temperature: 0,
 		MaxTokens:   200,
+		ToolChoice:  "none",
 	})
 	if err != nil {
 		return false, "", fmt.Errorf("llm classifier: %w", err)

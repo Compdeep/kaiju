@@ -290,6 +290,7 @@ func (p *Processor) summarise(ctx context.Context, srcAbs, dstAbs string) error 
 		},
 		Temperature: 0.2,
 		MaxTokens:   1024,
+		ToolChoice:  "none",
 	}
 	resp, err := p.executor.Complete(ctx, req)
 	if err != nil {

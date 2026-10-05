@@ -278,6 +278,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		Tag:      "reframe:" + edge.Name,
 		Input:    map[string]string{"edge": edge.Name},
 	}), Light, &llm.ChatRequest{
+		ToolChoice: "none",
 		// The arcs, not only the prose about them. This stage carries: it takes
 		// what the nodes produced and forms it for the next one to read, and its
 		// paragraph is placed FIRST in that stage's prompt. Given prose alone it

@@ -877,6 +877,7 @@ func (w *WebFetch) formatExtract(ctx context.Context, status, rawURL string, bod
 			},
 			Temperature: 0.2,
 			MaxTokens:   replyTokens,
+			ToolChoice:  "none", // no tools on this call; see prose.go
 		})
 		if err != nil {
 			lastErr = err
@@ -977,6 +978,7 @@ func (w *WebFetch) generalSummary(ctx context.Context, content, sentinel string)
 		},
 		Temperature: 0.2,
 		MaxTokens:   1024,
+		ToolChoice:  "none", // no tools on this call; see prose.go
 	})
 	if err != nil || len(resp.Choices) == 0 {
 		return ""

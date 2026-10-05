@@ -3303,6 +3303,7 @@ func (a *Agent) askShellFix(ctx context.Context, nodeID, objective, command, err
 		},
 		Temperature: 0.0,
 		MaxTokens:   256,
+		ToolChoice:  "none",
 	})
 	if err != nil || len(resp.Choices) == 0 {
 		return "", false

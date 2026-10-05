@@ -43,6 +43,12 @@ type CoderRequest struct {
 	Exists bool   `json:"exists"`
 	Lines  int    `json:"lines"` // how many lines the file has
 	Head   string `json:"head"`  // its first lines, numbered
+	// Files is the rendered block naming the task files and showing the one that
+	// gets written, from coderFileFacts. Held as text because what the coder needs
+	// to read is a numbered listing with its own caveats about what was cut, and
+	// rebuilding that from Exists, Lines and Head at render time would be the same
+	// code twice.
+	Files string `json:"-"`
 
 	Context    any      `json:"context,omitempty"`    // outputs wired from earlier steps
 	Prior      []string `json:"prior,omitempty"`      // what earlier coders did to this file
@@ -277,5 +283,89 @@ func (f coderFileFacts) render() string {
 	sb.WriteString("\nThe line numbers are the file's own. Cite them in an edit's `lines`.\n\n```\n")
 	sb.WriteString(f.Head)
 	sb.WriteString("```\n")
+	return sb.String()
+}
+
+/*
+ * priorEditsFor returns what earlier coders did to this one file.
+ * desc: The worklog lines naming the path, which are the EDIT, NO_CHANGE and
+ *       BLOCKED entries a coder writes about the file it was given. Scoped to the
+ *       file rather than the run: the coder's prompt already carries the last 20
+ *       worklog lines of everything, and in a 14-file pass those were fragments of
+ *       five unrelated files, with this file's own history pushed out of the
+ *       window entirely.
+ *
+ *       It matters most where coders run in parallel on one file. In one session
+ *       HomeView.vue was edited by five separate coder nodes and backdrop.py by
+ *       three, and none of them could see the others.
+ * param: sessionID - whose worklog to read; "" reads the shared one.
+ * param: path - the file the coder is about to write.
+ * return: one line per earlier edit, oldest first, empty when there are none.
+ */
+func (a *Agent) priorEditsFor(sessionID, path string) []string {
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(worklogPath(a.cfg.MetadataDir, sessionID))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if !strings.Contains(line, path) {
+			continue
+		}
+		// Only what a coder wrote about writing it. A bash node that happened to
+		// name the path in a command is not an edit, and a file_read that printed
+		// it is the opposite of one.
+		if !strings.Contains(line, "— EDIT:") && !strings.Contains(line, "— NO_CHANGE:") &&
+			!strings.Contains(line, "— BLOCKED:") && !strings.Contains(line, "wrote "+path) {
+			continue
+		}
+		out = append(out, line)
+	}
+	if len(out) > coderPriorLines {
+		out = out[len(out)-coderPriorLines:]
+	}
+	return out
+}
+
+// How many earlier edits to this file the coder is shown. Enough for a session
+// that has returned to one file several times, bounded because the point is the
+// recent history and the whole worklog is already available through the gate.
+const coderPriorLines = 8
+
+/*
+ * render writes the request into the coder's prompt.
+ * desc: One place where every caller's contribution is laid out, so a field that
+ *       nobody filled is visibly absent rather than silently missing. The order is
+ *       the order it had when each section was appended by hand: what to implement
+ *       against, then the brief, then the file itself, then the project around it,
+ *       then what has already been done to it.
+ * return: the markdown sections, or "" when there is nothing to say.
+ */
+func (r CoderRequest) render() string {
+	var sb strings.Builder
+	if r.Interfaces != nil {
+		if j, err := json.MarshalIndent(r.Interfaces, "", "  "); err == nil && string(j) != "null" {
+			fmt.Fprintf(&sb, "\n## Interfaces (implement exactly to spec)\n```json\n%s\n```\n", string(j))
+		}
+	}
+	if r.Brief != "" {
+		fmt.Fprintf(&sb, "\n## Architect Brief\n%s\n", r.Brief)
+	}
+	if r.Files != "" {
+		sb.WriteString(r.Files)
+	}
+	if r.Structure != "" {
+		sb.WriteString("\n## Project Structure\n" + r.Structure + "\n")
+	}
+	if len(r.Prior) > 0 {
+		// Named for what it is: this file, earlier in this session. A coder that
+		// cannot see it either repeats an edit that is already there or undoes one.
+		fmt.Fprintf(&sb, "\n## Already done to %s in this session\n```\n%s\n```\n"+
+			"These edits are already in the file you were shown above. Do not make them again.\n",
+			r.File, strings.Join(r.Prior, "\n"))
+	}
 	return sb.String()
 }

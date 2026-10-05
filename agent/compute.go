@@ -705,41 +705,52 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		userPrompt += fmt.Sprintf("\n## Preferred Language\n%s\n", lang)
 	}
 
-	// Architect context. codeCtx is always non-nil at every call site (the
-	// dispatcher constructs it before calling). Fields may individually be empty.
-	if codeCtx.interfaces != nil {
-		ifaceJSON, err := json.MarshalIndent(codeCtx.interfaces, "", "  ")
-		if err == nil && string(ifaceJSON) != "null" {
-			userPrompt += fmt.Sprintf("\n## Interfaces (implement exactly to spec)\n```json\n%s\n```\n", string(ifaceJSON))
-		}
-	}
-	if codeCtx.brief != "" {
-		userPrompt += fmt.Sprintf("\n## Architect Brief\n%s\n", codeCtx.brief)
-	}
-	// What is actually there, established by the engine rather than assumed by the
-	// caller or invented by the coder.
+	// One declared request, built here, so every caller's contribution is laid out
+	// in one place instead of each appending its own sections. edit_file passes
+	// seven keys, the architect eleven, a plan's compute step four — and the coder
+	// could rely on none of them being present. One call was handed "Available
+	// Data: None", asked to preserve an Express server it had never seen, and wrote
+	// its own idea of one over the real thing.
 	//
-	// The caller cannot be trusted with it: edit_file passes seven keys, the
-	// architect eleven, a plan's compute step four, and none of them includes the
-	// file's contents. One coder was handed "Available Data: None", asked to
-	// preserve an Express server it had never seen, and wrote its own idea of one.
+	// Exists, Lines, Head and Files are the engine's: what is actually on disk,
+	// rather than what the caller assumed or the coder invented.
 	//
 	// editable comes from THIS file — the one that will be written — and not from
 	// whether any named file happened to exist. It used to be the latter while the
 	// edits applied to taskFiles[0], so a multi-file list could offer replacements
 	// against a file the coder was never shown.
+	req := CoderRequest{
+		Goal:       goal,
+		Context:    ctxData,
+		Brief:      codeCtx.brief,
+		Interfaces: codeCtx.interfaces,
+		Structure:  codeCtx.structure,
+	}
 	editable := false
 	if len(codeCtx.taskFiles) > 0 {
-		userPrompt += "\n## Your Task Files (write ONLY these)\n"
+		var files strings.Builder
+		files.WriteString("\n## Your Task Files (write ONLY these)\n")
 		for _, f := range codeCtx.taskFiles {
-			userPrompt += fmt.Sprintf("- %s\n", f)
+			fmt.Fprintf(&files, "- %s\n", f)
 		}
 		facts := a.coderFileFacts(graph, codeCtx.taskFiles, tag)
+		files.WriteString(facts.render())
+
+		req.File = facts.Path
+		req.Exists = facts.Exists
+		req.Lines = facts.Lines
+		req.Head = facts.Head
+		req.Files = files.String()
+		// What earlier coders did to this same file, which the run-wide worklog
+		// below does not reliably carry: it is the last 20 lines of everything, and
+		// in a multi-file pass this file's own history is pushed out of it.
+		req.Prior = a.priorEditsFor(computeSessionID(graph), facts.Path)
 		editable = facts.Exists
-		userPrompt += facts.render()
 	}
-	if codeCtx.structure != "" {
-		userPrompt += "\n## Project Structure\n" + codeCtx.structure + "\n"
+	userPrompt += req.render()
+	if len(req.Prior) > 0 {
+		log.Printf("[dag] compute %s: %s has %d earlier edit(s) in this session, shown to the coder",
+			tag, req.File, len(req.Prior))
 	}
 
 	// Worklog and skill guidance via ContextGate. Skill guidance is the
@@ -882,7 +893,15 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		}
 
 		log.Printf("[dag] compute edit applied: %s (%s, %d edits)", codePath, editResp.Language, len(editResp.Edits))
-		appendWorklog(a.cfg.MetadataDir, computeSessionID(graph), tag, "EDIT", fmt.Sprintf("%s — %d edits applied", destPath, len(editResp.Edits)))
+		// The coder's own summary goes in the line, because this line is what the
+		// NEXT coder on this file reads as Prior. "3 edits applied" says the work
+		// happened and nothing about what it was, so a later coder could not tell
+		// whether the change it is about to make is already there.
+		editNote := fmt.Sprintf("%s — %d edits applied", destPath, len(editResp.Edits))
+		if s := strings.TrimSpace(reply.Summary); s != "" {
+			editNote += ": " + s
+		}
+		appendWorklog(a.cfg.MetadataDir, computeSessionID(graph), tag, "EDIT", editNote)
 
 		result := map[string]any{
 			"type":         "result",

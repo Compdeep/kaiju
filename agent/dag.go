@@ -240,6 +240,12 @@ type Node struct {
 	// re-reporting fixed failures.
 	SupersededByDebug bool
 
+	// RunGrafted is set on an architect node once the nodes that run and check
+	// its coders' output have been grafted. The graft is attempted each time one
+	// of its coders reaches a terminal state, and this is what makes the last one
+	// the only one that acts.
+	RunGrafted bool
+
 	// AddressesFailures snapshots the IDs of failed nodes this debugger was
 	// dispatched to fix. When the debugger's grafted children all resolve
 	// successfully, those failed nodes get marked SupersededByDebug.
@@ -1323,6 +1329,62 @@ func (g *Graph) WaitAlsoOn(parentID, childID, field string) []string {
 	}
 	sort.Strings(waited)
 	return waited
+}
+
+/*
+ * AlsoWaitFor makes every pending node that already waits on any of afterIDs
+ * wait on each of newIDs too.
+ * desc: For nodes grafted after the ones they must follow. WaitAlsoOn does this
+ *       for a node that reads a named field through a template, which is how the
+ *       shallow path orders its exec child. The architect's run and check nodes
+ *       are referenced by nobody — they carry literal commands — so there is no
+ *       field to match on, and the relation needed here is plainer: whatever was
+ *       waiting for the coders must also wait for what runs their output.
+ * param: afterIDs - the already-grafted nodes to look for in DependsOn.
+ * param: newIDs - the newly grafted nodes to add.
+ * return: the ids of the nodes that gained a dependency.
+ */
+func (g *Graph) AlsoWaitFor(afterIDs, newIDs []string) []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	after := make(map[string]bool, len(afterIDs))
+	for _, id := range afterIDs {
+		after[id] = true
+	}
+	isNew := make(map[string]bool, len(newIDs))
+	for _, id := range newIDs {
+		isNew[id] = true
+	}
+
+	var changed []string
+	for id, n := range g.nodes {
+		if n.State != StatePending || isNew[id] {
+			continue
+		}
+		waits := false
+		for _, dep := range n.DependsOn {
+			if after[dep] {
+				waits = true
+				break
+			}
+		}
+		if !waits {
+			continue
+		}
+		added := false
+		for _, nid := range newIDs {
+			if !slices.Contains(n.DependsOn, nid) {
+				n.DependsOn = append(n.DependsOn, nid)
+				added = true
+			}
+		}
+		if added {
+			changed = append(changed, id)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 func (g *Graph) AddChild(parentID, childID string) {

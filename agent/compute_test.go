@@ -369,8 +369,11 @@ func TestExtractBlueprint_Garbage(t *testing.T) {
 // applied and an operator raising tools.compute.timeout_sec got no change and
 // no warning — both applications default that setting to 120.
 func TestGeneratedCodeRunsUnderTheConfiguredTimeout(t *testing.T) {
-	body := funcBody(t, readSource(t, "scheduler.go"), "runPlanAndSchedule")
-	i := strings.Index(body, `Tag:       computeNodes[i].Tag + "_exec"`)
+	// In architect_graft.go since the run nodes moved out of the up-front graft:
+	// they are built when every coder has resolved, so a coder that failed never
+	// gets one. The setting this guards is unchanged by that move.
+	body := funcBody(t, readSource(t, "architect_graft.go"), "graftTaskExec")
+	i := strings.Index(body, `Tag:       child.Tag + "_exec"`)
 	if i < 0 {
 		t.Fatal("the node that runs generated code is no longer built here; this test names the wrong place")
 	}

@@ -1325,28 +1325,17 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// its service node ready, and the service started against a file that
 				// was never written.
 				//
-				// Only an architect's coder child. A failed bash step says nothing
-				// about the step after it, and the comment above is right about
-				// those. It is also right about shallow compute: a top-level
-				// compute's exec child and the plan steps ordered after it are the
-				// planner's sequencing, and a step that would have succeeded on its
-				// own should still get its turn.
+				// A failed coder child needs no prune now. The nodes that would
+				// have run its output are not grafted until every coder has
+				// resolved, so a failure means they are never created — the same
+				// property the shallow path has always had, where an exec child
+				// comes from comp.Result and a failure leaves no result to read.
 				//
-				// What is different here is only the architect's phase 3, which
-				// wires its run nodes to EVERY coder with a literal command. That is
-				// the one shape where a dependency is satisfied by a failure and the
-				// node acts on a file regardless.
+				// Still called, because this failure may be the last coder to
+				// settle, and the architect's worklog line saying nothing will run
+				// is written there.
 				if node.Type == NodeCompute && architectChild(graph, node) {
-					if skipped := graph.PruneBranch(comp.NodeID); len(skipped) > 0 {
-						log.Printf("[dag] architect coder %s failed → skipped %d node(s) that would have run on its output: %s",
-							node.Tag, len(skipped), strings.Join(skipped, ", "))
-						// In the worklog because that is what the reflector reads. A
-						// skipped node leaves no result of its own, so without this
-						// the only trace is an absence.
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "SKIPPED_DEPENDENTS",
-							fmt.Sprintf("%s did not write its file, so these did not run: %s",
-								node.Tag, strings.Join(skipped, ", ")))
-					}
+					a.graftArchitectRunNodes(graph, graph.Get(node.SpawnedBy), budget)
 				}
 				injectInterjection()
 				launchReady()
@@ -2205,206 +2194,14 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							}
 						}
 
-						// Phase 3: Graft execute/service nodes from the architect's
-						// task params. Each depends on ALL coders completing (not
-						// just its own) because servers typically import files
-						// produced by sibling coders.
-						allCoderIDs := make([]string, 0, len(computeIDs))
-						for _, cid := range computeIDs {
-							if cid != "" {
-								allCoderIDs = append(allCoderIDs, cid)
-							}
-						}
-						for i, fu := range followUps {
-							// One-shot execute — only for grafted coders
-							if computeIDs[i] != "" {
-								if execCmd, ok := fu.Params["execute"].(string); ok && execCmd != "" {
-									svcCmd := ""
-									if svc, ok := fu.Params["service"].(map[string]any); ok {
-										svcCmd, _ = svc["command"].(string)
-									}
-									if execCmd == svcCmd {
-										log.Printf("[dag] skipping execute node for %s — same command declared as service", computeNodes[i].Tag)
-									} else if budget.TrySpawnNode("bash", false) {
-										// This is the step ComputeTimeout is about: the
-										// code compute just wrote, being run. It set no
-										// timeout, so bash's own 60s applied and an
-										// operator raising tools.compute.timeout_sec got
-										// no change and no warning — both applications
-										// default that setting to 120.
-										//
-										// Left unset when the setting is, so bash's
-										// default still applies rather than a zero being
-										// passed as "no time at all".
-										execParams := map[string]any{"command": execCmd}
-										if secs := int(a.cfg.ComputeTimeout.Seconds()); secs > 0 {
-											execParams["timeout_sec"] = secs
-										}
-										execNode := &Node{
-											Type:      NodeTool,
-											ToolName:  "bash",
-											Params:    execParams,
-											DependsOn: append([]string{}, allCoderIDs...),
-											SpawnedBy: comp.NodeID,
-											Tag:       computeNodes[i].Tag + "_exec",
-											Source:    "builtin",
-										}
-										eID := graph.AddNode(execNode)
-										allGraftedNodes = append(allGraftedNodes, execNode)
-										graph.AddChild(comp.NodeID, eID)
-										a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: eID, Node: graph.SnapshotNode(eID)})
-										log.Printf("[dag] compute plan → grafted execute node %s: %s", eID, execCmd)
-									}
-								}
-							} // end computeIDs[i] != "" (execute only for grafted coders)
-							// Long-running service — ALWAYS graft, even if coder was budget-cut.
-							// Services are infrastructure, not per-coder tasks.
-							if svc, ok := fu.Params["service"].(map[string]any); ok {
-								svcCmd, _ := svc["command"].(string)
-								svcName, _ := svc["name"].(string)
-								svcWorkdir, _ := svc["workdir"].(string)
-								svcPort := 0
-								if p, ok := svc["port"].(float64); ok {
-									svcPort = int(p)
-								}
-								if svcCmd != "" {
-									if svcName == "" {
-										svcName = computeNodes[i].Tag + "_svc"
-									}
-									if budget.TrySpawnNode("service", false) {
-										svcParams := map[string]any{"action": "start", "command": svcCmd, "name": svcName}
-										if svcWorkdir != "" {
-											svcParams["workdir"] = svcWorkdir
-										}
-										if svcPort > 0 {
-											svcParams["port"] = float64(svcPort)
-										}
-										svcNode := &Node{
-											Type:      NodeTool,
-											ToolName:  "service",
-											Params:    svcParams,
-											DependsOn: append([]string{}, allCoderIDs...),
-											SpawnedBy: comp.NodeID,
-											Tag:       svcName,
-											Source:    "builtin",
-										}
-										sID := graph.AddNode(svcNode)
-										allGraftedNodes = append(allGraftedNodes, svcNode)
-										graph.AddChild(comp.NodeID, sID)
-										a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
-										log.Printf("[dag] compute plan → grafted service node %s: %s", sID, svcCmd)
-									}
-								}
-							}
-						}
-
-						// Phase 3.5: top-level services — architect-declared services
-						// that aren't tied to any specific task. These are always grafted
-						// (no budget gate) because services are infrastructure.
-						log.Printf("[dag] compute plan → phase 3.5: %d top-level services to graft", len(cr.Services))
-						for _, svc := range cr.Services {
-							if svc.Command == "" {
-								continue
-							}
-							name := svc.Name
-							if name == "" {
-								name = "service"
-							}
-							// Skip if a per-task service with the same name was already grafted.
-							alreadyGrafted := false
-							for _, gn := range allGraftedNodes {
-								if gn.ToolName == "service" && gn.Tag == name {
-									alreadyGrafted = true
-									break
-								}
-							}
-							if alreadyGrafted {
-								log.Printf("[dag] skipping top-level service %s — already grafted from task", name)
-								continue
-							}
-							if !budget.TrySpawnNode("service", false) {
-								log.Printf("[dag] budget exhausted, skipping remaining top-level services")
-								break
-							}
-							svcParams := map[string]any{"action": "start", "command": svc.Command, "name": name}
-							if svc.Workdir != "" {
-								svcParams["workdir"] = svc.Workdir
-							}
-							if svc.Port > 0 {
-								svcParams["port"] = float64(svc.Port)
-							}
-							svcNode := &Node{
-								Type:      NodeTool,
-								ToolName:  "service",
-								Params:    svcParams,
-								DependsOn: append([]string{}, allCoderIDs...),
-								SpawnedBy: comp.NodeID,
-								Tag:       name,
-								Source:    "builtin",
-							}
-							sID := graph.AddNode(svcNode)
-							allGraftedNodes = append(allGraftedNodes, svcNode)
-							graph.AddChild(comp.NodeID, sID)
-							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: sID, Node: graph.SnapshotNode(sID)})
-							log.Printf("[dag] compute plan → grafted top-level service node %s: %s", sID, svc.Command)
-						}
-
-						// Phase 4: validation batch — architect-declared checks.
-						// Each validation entry becomes a bash node running its
-						// check command, depending on all Phase 1-3 grafted
-						// nodes so it runs only after setup + coders complete.
-						// Reflector sees pass/fail as structured evidence of
-						// goal achievement.
-						if len(cr.Validation) > 0 {
-							// Store validators on the graph for replay after investigations.
-							for _, v := range cr.Validation {
-								if v.Check != "" {
-									graph.Validators = append(graph.Validators, ValidatorDef{
-										Name:  v.Name,
-										Check: v.Check,
-									})
-								}
-							}
-
-							var priorIDs []string
-							for _, gn := range allGraftedNodes {
-								priorIDs = append(priorIDs, gn.ID)
-							}
-							var validationNodes []*Node
-							for _, v := range cr.Validation {
-								if !budget.TrySpawnNode("bash", false) {
-									log.Printf("[dag] budget exhausted, skipping remaining validation checks")
-									break
-								}
-								if v.Check == "" {
-									continue
-								}
-								verifyTag := "verify_" + sanitizeTag(v.Name)
-								if verifyTag == "verify_" {
-									verifyTag = fmt.Sprintf("verify_%d", len(validationNodes))
-								}
-								verifyNode := &Node{
-									Type:      NodeTool,
-									ToolName:  "bash",
-									Params:    map[string]any{"command": "sleep 3 && " + v.Check, "timeout_sec": 20},
-									DependsOn: append([]string{}, priorIDs...),
-									SpawnedBy: comp.NodeID,
-									Tag:       verifyTag,
-									Source:    "builtin",
-								}
-								vID := graph.AddNode(verifyNode)
-								graph.AddChild(comp.NodeID, vID)
-								validationNodes = append(validationNodes, verifyNode)
-								allGraftedNodes = append(allGraftedNodes, verifyNode)
-								a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: vID, Node: graph.SnapshotNode(vID)})
-							}
-							if len(validationNodes) > 0 {
-								log.Printf("[dag] compute plan → grafted %d validation checks", len(validationNodes))
-							}
-						} else {
-							log.Printf("[dag] compute plan emitted no validation — no validation batch grafted")
-						}
-
+						// Phases 3, 3.5 and 4 — the execute, service and validation
+						// nodes — are no longer grafted here. They are grafted once
+						// every coder above has resolved, in graftArchitectRunNodes,
+						// which explains why.
+						//
+						// The rewrite below therefore points downstream steps at the
+						// setup nodes and the coders, and AlsoWaitFor adds the run and
+						// check nodes to them when those appear.
 						// Rewrite downstream nodes to depend on all grafted nodes
 						if len(allGraftedNodes) > 0 {
 							rewriteDependentsMultiExcluding(graph, comp.NodeID, allGraftedNodes)
@@ -2441,6 +2238,12 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 								log.Printf("[dag] shallow compute → grafted %d exec nodes", len(grafted))
 							}
 						}
+					} else {
+						// An architect's coder child. Finishing may make it the last
+						// one, which is when what runs and checks their output gets
+						// grafted. The call does nothing until every sibling is
+						// terminal, so it is safe on each of them.
+						a.graftArchitectRunNodes(graph, graph.Get(node.SpawnedBy), budget)
 					}
 				}
 

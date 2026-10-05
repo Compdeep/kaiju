@@ -112,3 +112,38 @@ func TestPruningLeavesAnIndependentSiblingAlone(t *testing.T) {
 		t.Errorf("ready = %v, want just write_styles", ready)
 	}
 }
+
+// The boundary. Pruning is for the architect's coder children only, because only
+// phase 3 wires run nodes to EVERY coder with a literal command. Shallow compute
+// keeps the behaviour it had: its exec child and the plan steps ordered after it
+// are the planner's sequencing, and a step that would have succeeded on its own
+// still gets its turn.
+func TestPruningIsForArchitectChildrenOnly(t *testing.T) {
+	g := NewGraph()
+
+	// A top-level compute, as edit_file or a plan's compute step produces: no
+	// spawner, or one that is not a compute node.
+	topLevel := &Node{Type: NodeCompute, Tag: "edit_main_ts", State: StatePending}
+	g.AddNode(topLevel)
+	if architectChild(g, topLevel) {
+		t.Error("a top-level compute reads as an architect child, so the prune would reach shallow")
+	}
+
+	// A replan-grafted compute: spawned, but by a reflection.
+	refl := &Node{Type: NodeReflection, Tag: "reflect_1", State: StateResolved}
+	rID := g.AddNode(refl)
+	replanned := &Node{Type: NodeCompute, Tag: "edit_again", State: StatePending, SpawnedBy: rID}
+	g.AddNode(replanned)
+	if architectChild(g, replanned) {
+		t.Error("a replanned compute reads as an architect child")
+	}
+
+	// An architect's coder child: spawned by the architect, which is compute.
+	arch := &Node{Type: NodeCompute, Tag: "plan_app", State: StateResolved}
+	aID := g.AddNode(arch)
+	child := &Node{Type: NodeCompute, Tag: "write_server", State: StatePending, SpawnedBy: aID}
+	g.AddNode(child)
+	if !architectChild(g, child) {
+		t.Error("an architect's coder child does not read as one, so the prune never fires")
+	}
+}

@@ -1325,11 +1325,20 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// its service node ready, and the service started against a file that
 				// was never written.
 				//
-				// Only NodeCompute. A failed bash step says nothing about the step
-				// after it, and the comment above is right about those.
-				if node.Type == NodeCompute {
+				// Only an architect's coder child. A failed bash step says nothing
+				// about the step after it, and the comment above is right about
+				// those. It is also right about shallow compute: a top-level
+				// compute's exec child and the plan steps ordered after it are the
+				// planner's sequencing, and a step that would have succeeded on its
+				// own should still get its turn.
+				//
+				// What is different here is only the architect's phase 3, which
+				// wires its run nodes to EVERY coder with a literal command. That is
+				// the one shape where a dependency is satisfied by a failure and the
+				// node acts on a file regardless.
+				if node.Type == NodeCompute && architectChild(graph, node) {
 					if skipped := graph.PruneBranch(comp.NodeID); len(skipped) > 0 {
-						log.Printf("[dag] coder %s failed → skipped %d node(s) that would have run on its output: %s",
+						log.Printf("[dag] architect coder %s failed → skipped %d node(s) that would have run on its output: %s",
 							node.Tag, len(skipped), strings.Join(skipped, ", "))
 						// In the worklog because that is what the reflector reads. A
 						// skipped node leaves no result of its own, so without this

@@ -244,10 +244,54 @@ func (a *Agent) replyBudget(ctx context.Context, l Lane, s budgetSpec) int {
 		return s.Base
 	}
 	window := a.laneWindow(ctx, l)
-	if window <= 0 {
-		return s.Base
+	cap := s.Base
+	if window > 0 {
+		cap = s.resolve(window/s.Share, a.promptScale())
 	}
-	return s.resolve(window/s.Share, a.promptScale())
+	return a.withThinkingRoom(ctx, l, s, cap)
+}
+
+/*
+ * withThinkingRoom widens a cap for a model that reasons before it answers.
+ * desc: max_tokens bounds the whole completion and reasoning_tokens is a subset
+ *       of it, so a thinking model spends the same budget twice: once working out
+ *       what to write and once writing it. The caps were measured from replies —
+ *       the coder's p90 is 1008 tokens of content against a cap of 16384 — and
+ *       nothing in them accounted for the thinking.
+ *
+ *       A coder on kimi-k2.7-code spent 12,026 of 16,384 tokens thinking, leaving
+ *       4,358 for the JSON, and the reply was cut mid-structure. The error it
+ *       produced told the model to plan a shorter reply, which was the wrong
+ *       advice twice over: the reply was already short, and it never got to write
+ *       it. Two retries went the same way, 173 seconds.
+ *
+ *       Doubled, matching wallClock, which doubles the request deadline for the
+ *       same reason and says why: the thinking is proportional to the work rather
+ *       than a fixed overhead, so a bigger job means more of it. Raising one
+ *       without the other moves the failure instead of removing it.
+ *
+ *       Ceiling still binds. A spec whose Base is already its Ceiling does not
+ *       move, which is correct for a stage that forces reasoning off.
+ * return: the cap, doubled when this lane's model will reason, never past Ceiling.
+ */
+func (a *Agent) withThinkingRoom(ctx context.Context, l Lane, s budgetSpec, cap int) int {
+	c, laneModel := a.lane(ctx, l)
+	model := resolvedModel(laneModel, c)
+	// The llmReasoning override belongs to the reasoning lane and ask.go applies
+	// it only there, so the budget has to agree: an operator forcing reasoning off
+	// must not shrink the cap of a different lane whose model thinks regardless.
+	thinks := a.cfg.Thinks != nil && model != "" && a.cfg.Thinks(model)
+	if l == Heavy {
+		thinks = a.heavyThinks(model)
+	}
+	if !thinks {
+		return cap
+	}
+	room := cap * 2
+	if s.Ceiling > 0 && room > s.Ceiling {
+		room = s.Ceiling
+	}
+	return room
 }
 
 /*

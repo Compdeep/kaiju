@@ -1313,6 +1313,32 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				}
 				// Don't cascade prune — let downstream nodes attempt to run.
 				// The reflector will see the failure and decide what to do.
+				//
+				// A failed coder is the exception, because what follows one is not
+				// another step that might still succeed on its own. A node is held
+				// back from a failed dependency only by resolveTemplateField, which
+				// raises blockedByDep when a template reads an empty result. The
+				// architect's execute and service nodes read no template: they carry
+				// a literal command and depend on every coder for ordering, because
+				// a server imports what its siblings wrote. So nothing blocked them,
+				// and IsTerminal counts StateFailed — a coder that wrote no file left
+				// its service node ready, and the service started against a file that
+				// was never written.
+				//
+				// Only NodeCompute. A failed bash step says nothing about the step
+				// after it, and the comment above is right about those.
+				if node.Type == NodeCompute {
+					if skipped := graph.PruneBranch(comp.NodeID); len(skipped) > 0 {
+						log.Printf("[dag] coder %s failed → skipped %d node(s) that would have run on its output: %s",
+							node.Tag, len(skipped), strings.Join(skipped, ", "))
+						// In the worklog because that is what the reflector reads. A
+						// skipped node leaves no result of its own, so without this
+						// the only trace is an absence.
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "SKIPPED_DEPENDENTS",
+							fmt.Sprintf("%s did not write its file, so these did not run: %s",
+								node.Tag, strings.Join(skipped, ", ")))
+					}
+				}
 				injectInterjection()
 				launchReady()
 				continue

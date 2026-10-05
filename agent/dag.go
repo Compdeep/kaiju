@@ -923,12 +923,16 @@ func (g *Graph) HasPendingDependents(nodeID string) bool {
  * desc: BFS traversal from nodeID outward, skipping every pending node
  *       that directly or transitively depends on the failed node.
  * param: nodeID - the root node whose dependents should be skipped.
+ * return: the tags of the nodes that were skipped, for the caller to report.
+ *         A caller that says what did not run saves the reflector working it
+ *         out from an absence.
  */
-func (g *Graph) PruneBranch(nodeID string) {
+func (g *Graph) PruneBranch(nodeID string) []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	// BFS through dependents
+	var skipped []string
 	queue := []string{nodeID}
 	for len(queue) > 0 {
 		current := queue[0]
@@ -941,6 +945,7 @@ func (g *Graph) PruneBranch(nodeID string) {
 			for _, dep := range n.DependsOn {
 				if dep == current {
 					n.State = StateSkipped
+					skipped = append(skipped, n.Tag)
 					g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
 					queue = append(queue, n.ID)
 					break
@@ -948,6 +953,7 @@ func (g *Graph) PruneBranch(nodeID string) {
 			}
 		}
 	}
+	return skipped
 }
 
 /*

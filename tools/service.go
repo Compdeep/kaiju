@@ -32,13 +32,22 @@ type Service struct {
 	mu        sync.Mutex // serializes registry file writes
 	stopPoll  chan struct{}
 	crashes   map[string]int // name → consecutive fast-crash count (auto-restart backoff)
+	// held is name → the pid and port last reported as a port held by something
+	// else, so it is logged when it is first seen and not on every tick.
+	//
+	// The health loop runs every few seconds and this condition persists until a
+	// human clears it, so the line below wrote itself 25,019 times across three
+	// days: 26% of a 15MB log, and every real entry older than that pushed out of
+	// the file. A diagnosis that needed the log could not use it.
+	held map[string]string
 }
 
 // Compile-time interface check
 var _ toolapi.Tool = (*Service)(nil)
 
 func NewService(workspace string) *Service {
-	s := &Service{workspace: workspace, stopPoll: make(chan struct{}), crashes: map[string]int{}}
+	s := &Service{workspace: workspace, stopPoll: make(chan struct{}),
+		crashes: map[string]int{}, held: map[string]string{}}
 	go s.healthLoop()
 	return s
 }
@@ -154,6 +163,11 @@ func (s *Service) healthLoop() {
 	}
 }
 
+// heldState keys the "port held by something else" memory. The pid and the port
+// are both in it, so a different orphan or a different port is reported rather
+// than folded into the one already reported.
+func heldState(pid, port int) string { return fmt.Sprintf("%d:%d", pid, port) }
+
 // reapDead checks all registered services. Dead ones flagged AutoRestart are
 // respawned; the rest are marked crashed. This is what keeps a plugin's backing
 // host (e.g. webreader) up on its own — the reason the reader stops silently
@@ -173,6 +187,7 @@ func (s *Service) reapDead() {
 		}
 		if processIsAlive(recs[i].PID) {
 			s.crashes[recs[i].Name] = 0 // healthy — clear the fast-crash counter
+			delete(s.held, recs[i].Name)
 			continue
 		}
 		if !recs[i].AutoRestart {
@@ -186,9 +201,18 @@ func (s *Service) reapDead() {
 		// (the exact loop this fixes). Leave it: the service is effectively up via
 		// whatever answers the port.
 		if recs[i].Port > 0 && portOpen(recs[i].Port) {
-			log.Printf("[service] %s pid %d dead but port %d still served — not restarting (avoids bind-conflict loop)", recs[i].Name, recs[i].PID, recs[i].Port)
+			// Once per state, not once per tick. The pid and port are in the key so a
+			// genuine change — a different orphan, a different port — is reported.
+			state := heldState(recs[i].PID, recs[i].Port)
+			if s.held[recs[i].Name] != state {
+				s.held[recs[i].Name] = state
+				log.Printf("[service] %s pid %d dead but port %d still served — not restarting (avoids bind-conflict loop). "+
+					"Silent from here unless the pid or port changes.", recs[i].Name, recs[i].PID, recs[i].Port)
+			}
 			continue
 		}
+		// The port is free again, so a recurrence is news.
+		delete(s.held, recs[i].Name)
 		// Genuinely down. Back off if it keeps dying right after starting — a
 		// service that can't start (bad command, missing dep) must not loop forever.
 		if time.Since(recs[i].StartedAt) < minUptime {

@@ -2,6 +2,25 @@ import api from '../api/client'
 import { useSessionsStore } from '../stores/sessions'
 import { useDagStore } from '../stores/dag'
 
+
+// A stable key for rendering, independent of the server's message id.
+//
+// The list was keyed on the array index, so Vue reused the element at position n
+// for whatever message ended up there. Appending a message made it patch every
+// element after the insertion point instead of reusing them, and each of those
+// carries a v-html body — so the rendered markdown of untouched messages was
+// thrown away and rebuilt on every append, which while a reply streams is
+// constantly.
+//
+// Not msg.id: an optimistic user message has none until the server answers, and
+// an assistant message falls back to 0 when the reply carried no message_id. Two
+// zeroes are a duplicate key, which is the bug the index was avoiding.
+let keySeq = 0
+function withKey(m) {
+  if (m && m._k === undefined) m._k = ++keySeq
+  return m
+}
+
 /** Chat service — session CRUD, send, interject. Writes to per-session stores. */
 
 // Per-session AbortController for the in-flight /execute call. There is NO
@@ -124,7 +143,7 @@ export async function switchSession(id) {
   if (ss.messages.length === 0) {
     try {
       const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
-      ss.messages = (msgs || []).map(m => {
+      ss.messages = (msgs || []).map(m => withKey(m)).map(m => {
         // compacted_into is the id of the summary that now stands for this
         // message. Carried so the view can fold it under that summary instead
         // of showing it inline — it is still part of the record, just no
@@ -162,7 +181,7 @@ export async function refreshMessages(id) {
   try {
     const msgs = await api.get(`/api/v1/sessions/${id}/messages`)
     const before = ss.messages
-    ss.messages = (msgs || []).map((m, i) => {
+    ss.messages = (msgs || []).map(m => withKey(m)).map((m, i) => {
       const msg = { id: m.id, role: m.role, content: m.content, compactedInto: m.compacted_into || 0 }
       if (m.dag_trace) { try { msg.trace = JSON.parse(m.dag_trace) } catch {} }
       // A trace already on screen is never taken off it by a refetch.
@@ -190,7 +209,7 @@ export async function refreshMessages(id) {
     // Truncating to the server's list would delete the stopped answer itself,
     // trace and all, before /messages has it.
     if (before.length > ss.messages.length) {
-      ss.messages.push(...before.slice(ss.messages.length))
+      ss.messages.push(...before.slice(ss.messages.length).map(withKey))
     }
   } catch { /* keep current view on failure */ }
 }
@@ -356,7 +375,7 @@ export async function send(text) {
   const attachBlock = buildAttachmentBlock(attached)
   const queryWithAttachments = attachBlock ? `${attachBlock}\n${text}` : text
 
-  sendingSess.messages.push({ role: 'user', content: text })
+  sendingSess.messages.push(withKey({ role: 'user', content: text }))
   sendingSess.loading = true
   // Mark the per-session state as actively sending so the SSE 'done'
   // handler doesn't fire its page-reload-recovery path during a normal
@@ -404,7 +423,7 @@ export async function send(text) {
     }
     if (dag.nodes.length) msg.trace = [...dag.nodes]
     if (data.gaps && data.gaps.length) msg.gaps = data.gaps
-    sendingSess.messages.push(msg)
+    sendingSess.messages.push(withKey(msg))
     savedMessageID = msg.id
     dag.streamingVerdict = ''
   } catch (err) {
@@ -414,10 +433,10 @@ export async function send(text) {
       const partial = (dag.streamingVerdict || '').trim()
       const msg = { role: 'assistant', content: partial ? `${partial}\n\n_⏹ stopped_` : '_⏹ stopped_' }
       if (dag.nodes.length) msg.trace = [...dag.nodes]
-      sendingSess.messages.push(msg)
+      sendingSess.messages.push(withKey(msg))
       dag.streamingVerdict = ''
     } else {
-      sendingSess.messages.push({ role: 'assistant', content: `[error] ${err.message}` })
+      sendingSess.messages.push(withKey({ role: 'assistant', content: `[error] ${err.message}` }))
     }
   } finally {
     stopControllers.delete(sendingSid)

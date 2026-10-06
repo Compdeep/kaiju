@@ -506,16 +506,38 @@ function pushNode(items, n, depth, last) {
  * @param {string|Object} p - Parameters as a JSON string or object
  * @returns {string} Compact formatted parameter string
  */
+// A node's params do not change once it has run, so the line is built once.
+//
+// This is called from the template, once per node, and a function called from a
+// template re-runs on every render. A trace of sixty nodes parsed sixty JSON
+// documents each time any part of the page updated, which while a reply streams
+// is every event. Keyed on the raw value, so a node whose params are rewritten
+// gets a fresh line.
+//
+// Bounded for the reason the markdown cache is: a long session must not hold the
+// params of every node it has ever drawn.
+const PARAMS_CACHE_MAX = 400
+const paramsCache = new Map()
+
 function compactParams(p) {
   if (!p) return ''
+  const key = typeof p === 'string' ? p : JSON.stringify(p)
+  const hit = paramsCache.get(key)
+  if (hit !== undefined) return hit
+  let out = ''
   try {
     const obj = typeof p === 'string' ? JSON.parse(p) : p
-    return Object.entries(obj).map(([k, v]) => {
+    out = Object.entries(obj).map(([k, v]) => {
       let val = typeof v === 'string' ? v : JSON.stringify(v)
       if (val.length > 18) val = val.slice(0, 18) + '\u2026'
       return `${k}=${val}`
     }).join('  ')
-  } catch { return '' }
+  } catch { out = '' }
+  if (paramsCache.size >= PARAMS_CACHE_MAX) {
+    paramsCache.delete(paramsCache.keys().next().value)
+  }
+  paramsCache.set(key, out)
+  return out
 }
 
 /**

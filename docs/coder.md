@@ -56,7 +56,7 @@ and the coder must not invent them.
 | `lines` | engine | how long it is |
 | `head` | engine | its first lines, numbered |
 | `context` | caller | outputs wired from earlier steps |
-| `prior` | engine | what earlier coders did to this file |
+| `prior` | engine | the worklog lines naming this file — the `EDIT`, `NO_CHANGE` and `BLOCKED` entries earlier coders wrote about it, last 8 |
 | `brief` | architect | notes for this work item |
 | `interfaces` | architect | types and APIs to implement against |
 | `structure` | architect | the project tree |
@@ -198,8 +198,12 @@ applied and declining stays free.
 does not run scripts, and `compute.go` attaches `execute` to an edit result anyway.
 A top-level graft would then run it.
 
-**Prior edits are not yet wired.** `CoderRequest.Prior` is declared and nothing
-fills it, so a later coder cannot see what an earlier one did to the same file.
+**`execute` is offered on the editing path.** `coderSchema` offers the field
+whatever the status may be, and its description encourages it — "give it whenever
+the printed output of the file is the answer". For an edit that is nonsense, and
+an `edit_file` coder that fills it gets a bash node grafted by the shallow path,
+on a tool documented as not running scripts. The grafted node is gated like any
+other, so this is a surprise rather than an escape.
 
 ## Code
 

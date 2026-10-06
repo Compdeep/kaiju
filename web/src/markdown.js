@@ -58,11 +58,38 @@ const CONFIG = {
 }
 
 /**
+ * The same text renders to the same HTML, so it is parsed once.
+ *
+ * This is called from templates, and a function called from a template re-runs on
+ * every render of that component. While a reply streams, every event re-rendered
+ * the whole message list and sent every message through marked and DOMPurify
+ * again — including the ones that had not changed since the page loaded. Parsing
+ * is not cheap and sanitising builds a DOM to do it.
+ *
+ * Keyed on the text itself rather than a message id, because a streaming reply
+ * changes under one id and must not serve a stale body. The entry for the
+ * previous chunk is simply never asked for again.
+ *
+ * Bounded, because a long session streaming a long reply would otherwise hold
+ * every intermediate chunk of it. Oldest out first: Map preserves insertion
+ * order, so the first key is the least recently added.
+ */
+const RENDER_CACHE_MAX = 240
+const renderCache = new Map()
+
+/**
  * desc: Render markdown to HTML that is safe to put in the page.
  * @param {string} text - the reply, as markdown
  * @returns {string} HTML with every executable construct removed
  */
 export function renderMarkdown(text) {
   if (!text) return ''
-  return DOMPurify.sanitize(marked.parse(text), CONFIG)
+  const hit = renderCache.get(text)
+  if (hit !== undefined) return hit
+  const html = DOMPurify.sanitize(marked.parse(text), CONFIG)
+  if (renderCache.size >= RENDER_CACHE_MAX) {
+    renderCache.delete(renderCache.keys().next().value)
+  }
+  renderCache.set(text, html)
+  return html
 }

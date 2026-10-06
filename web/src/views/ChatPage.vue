@@ -95,7 +95,7 @@
           <p>Start a conversation</p>
         </div>
 
-        <template v-for="(msg, i) in sessions.messages" :key="i">
+        <template v-for="(msg, i) in sessions.messages" :key="msg._k ?? i">
           <!-- An intermediate summary: compacted into a later one, which now stands
                for everything this stood for. Not rendered at all. Opening the live
                summary shows the turns themselves, and eight restatements of them
@@ -370,11 +370,34 @@ const currentTitle = computed(() => {
  *       Reset to auto first so it also shrinks back when text is removed.
  * @returns {void}
  */
+let growQueued = false
+let lastGrowHeight = 0
+
 function autoGrow() {
-  const el = composeInput.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+  // Once per frame, not once per keystroke.
+  //
+  // Writing height and then reading scrollHeight in the same turn invalidates
+  // layout and then forces the browser to recompute it synchronously. That costs
+  // in proportion to the size of the page, and this page carries the whole trace
+  // with every node's params, so each character typed paid for a full reflow of
+  // all of it.
+  //
+  // requestAnimationFrame coalesces a burst of keystrokes into one measurement,
+  // and the height is only written when it actually changed, so a reflow does not
+  // happen at all while the box stays one row.
+  if (growQueued) return
+  growQueued = true
+  requestAnimationFrame(() => {
+    growQueued = false
+    const el = composeInput.value
+    if (!el) return
+    el.style.height = 'auto'
+    const next = Math.min(el.scrollHeight, 200)
+    if (next !== lastGrowHeight) {
+      lastGrowHeight = next
+      el.style.height = next + 'px'
+    }
+  })
 }
 
 /**

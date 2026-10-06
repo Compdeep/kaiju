@@ -16,7 +16,7 @@ import json, os, sys, time
 from concurrent.futures import ThreadPoolExecutor
 import urllib.request, urllib.error
 
-KEY = json.load(open("/home/sites/makeen/kaiju.config.json"))["providers"]["openrouter"]["api_key"]
+KEY = os.environ["OPENROUTER_API_KEY"]  # an OpenRouter key; never committed
 URL = "https://openrouter.ai/api/v1/chat/completions"
 
 P = json.load(open("prompt.json"))

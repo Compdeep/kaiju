@@ -11,7 +11,7 @@ import (
 // is deliberately a small pure function so it can be tested directly:
 //
 //   - nil claims (a token-less local CLI) ⇒ nil scope ⇒ full access (trusted local).
-//   - an explicit Tools claim (stamped by the host, e.g. makeen) ⇒ EXACTLY those
+//   - an explicit Tools claim (stamped by the host) ⇒ EXACTLY those
 //     tools; "*" means everything. This is the authority — the caller never sees
 //     the signed token, so it cannot widen the grant.
 //   - else a provisioned kaiju user's DB scope (e.g. the local admin).

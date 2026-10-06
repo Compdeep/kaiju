@@ -113,7 +113,7 @@ Four decisions: `continue | replan | conclude | investigate`.
 
 ## Key files
 - `internal/agent/prompt/prompts.md` → `=== REFLECTOR ===` (built-in; not overridden
-  for makeen).
+  by any host).
 - `internal/agent/reflection.go` → `reflectionOutput`, `parseReflectionOutput`,
   `assembleReflectorPrompt`, `fireReflection`.
 - `internal/agent/scheduler.go` → the reflection-decision switch (`case "continue"` ~980,

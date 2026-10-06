@@ -89,3 +89,9 @@ report.json
 # Third-party ICC binaries: a plugin installs its own, see its install.md
 plugins/*/profiles/
 .worklog
+
+# Private to the people working on this checkout, not part of kaiju.
+CLAUDE.md
+.claude/
+docs/how-it-works.md
+agent/testdata/foreign_words.local

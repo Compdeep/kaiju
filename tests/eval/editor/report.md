@@ -59,6 +59,6 @@ Summary: 56 total (pass=50, edit_fail=1, check_fail=5)
 | tests/eval/editor/corpus/python/pydantic_model.py | add a pydantic v2 `@field_validator('email')` classmethod on UserCreate that rai… | pass |  | 2169 |
 | tests/eval/editor/corpus/typescript/ts_service.ts | rewrite both `get` and `list` to use async/await. They must still return the sam… | pass |  | 2110 |
 | tests/eval/editor/corpus/typescript/ts_service.ts | add a private field `private cache = new Map<number, User>()`. In `get`, check c… | pass |  | 1975 |
-| tests/eval/editor/corpus/typescript/ts_service.ts | add a `retries: number = 3` parameter to `get`. If the fetch response is not ok,… | check_fail | exit status 1 — node:internal/modules/run_main:123     triggerUncaughtException(     ^  AssertionError [ERR_ASSERTION]: retry loop missing     at file:///home/sites/kaiju/kaiju/[eval1]:1:206     at … | 1680 |
+| tests/eval/editor/corpus/typescript/ts_service.ts | add a `retries: number = 3` parameter to `get`. If the fetch response is not ok,… | check_fail | exit status 1 — node:internal/modules/run_main:123     triggerUncaughtException(     ^  AssertionError [ERR_ASSERTION]: retry loop missing     at file:///opt/kaiju/[eval1]:1:206     at … | 1680 |
 | tests/eval/editor/corpus/typescript/types.ts | add an exported TypeScript `enum Role` with exactly three values named Admin, Ed… | pass |  | 1042 |
 | tests/eval/editor/corpus/typescript/types.ts | make the `name` field on User optional (append a `?` to the property key). Leave… | pass |  | 660 |

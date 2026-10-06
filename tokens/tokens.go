@@ -1,7 +1,7 @@
 // Package tokens is a tiny in-memory counter for LLM token usage, attributed by
 // two independent context tags: a category (what the work was — chat /
 // background / preflight / …) and a principal (who it was for — an opaque caller
-// id; for makeen, the JWT `sub`). It works because every LLM response already
+// id; behind a host, the JWT `sub`). It works because every LLM response already
 // carries a token count and every call goes through one method (llm.Client.
 // Complete), so accumulating is a single Add at that chokepoint.
 //
@@ -27,7 +27,7 @@ func WithCategory(ctx context.Context, category string) context.Context {
 }
 
 // WithPrincipal tags ctx with the caller this work is on behalf of (opaque — the
-// JWT `sub` for makeen). Set in the API/gateway boundary; propagates to every
+// JWT `sub` behind a host). Set in the API/gateway boundary; propagates to every
 // LLM call made under the same context (i.e. the synchronous request path).
 func WithPrincipal(ctx context.Context, principal string) context.Context {
 	return context.WithValue(ctx, prinKey{}, principal)

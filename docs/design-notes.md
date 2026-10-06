@@ -1,7 +1,7 @@
 # Kaiju Framework — Design Notes
 
 *Running record of decisions about kaiju's shape as something other projects build on.
-Enbarr is the first, but the point is that it should not be the only one.*
+One application embeds it today, but the point is that it should not be the only one.*
 
 *Started 2026-08-03, during the framework review.*
 
@@ -17,8 +17,8 @@ Kaiju holds an opaque string and an interface; it never learns what a machine is
 to reach one, or how one is chosen.
 
 **`TargetValidator` stays in kaiju.** "Check this target string looks valid before
-trying to reach it" is generic. The *implementation* — Enbarr's base58 peer-id check —
-stays in Enbarr.
+trying to reach it" is generic. The *implementation* — the embedding application's own
+address check — stays in that application.
 
 **`SetFleet` moves out.** `FleetContextProvider`, `FleetContext`, `PeerSource`,
 `PeerSnapshot` are one product's vocabulary for one product's idea. Kaiju's own daemon
@@ -27,7 +27,7 @@ never sets one, so the feature exists solely for an embedder.
 But the *capability* it provides is real: it injects "here are the machines you know
 about" into three prompts, and without something like it the planner has nothing to put
 in `Target`. So it is replaced, not deleted — by a neutral way for an application to
-contribute text to a prompt. Enbarr then supplies its fleet listing through that, in
+contribute text to a prompt. The embedding application then supplies its fleet listing through that, in
 its own words, and kaiju never says "fleet" or "peer".
 
 ### D2. Services and per-agent settings are different things
@@ -120,10 +120,10 @@ Two dead settings found while measuring, **not fixed**:
   no effect, the same class as the `Environment` bug fixed in `0ebf503`. Relevant to
   `compute.go`.
 
-**Enbarr's own `Config` is not grouped.** It is still the fork and gets handled at
+**The embedding application's own `Config` is not grouped.** It is still the fork and gets handled at
 switch step 4. Measured: **36 of its 38 fields are shared with kaiju's**; the only
 divergence is `Classifier` / `ClassifierDisabled` against kaiju's `ClassifierEnabled`,
-an inverted flag. Kaiju has 24 fields Enbarr lacks, which arrive free.
+an inverted flag. Kaiju has 24 fields it lacks, which arrive free.
 
 ### O4. "node" means two things
 
@@ -160,7 +160,7 @@ that gets built.
 
 The main `agent` package could not be race-tested — it exceeds the timeout, partly
 because of a pre-existing hanging test (`TestScheduler_CapDropsWhenFull`, which also
-hangs on Enbarr's master). So it is unverified rather than proven clean.
+hangs on the embedding application's master). So it is unverified rather than proven clean.
 
 ---
 

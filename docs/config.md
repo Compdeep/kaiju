@@ -220,7 +220,7 @@ to a capable model. Both fields optional; empty ⇒ no dedicated lane.
 ## `providers`
 
 The credential catalog for per-request model routing. Each entry is a **named
-provider** holding just an endpoint and a key; the host (e.g. makeen) selects a
+provider** holding just an endpoint and a key; the host selects a
 `provider` + `model` per request and kaiju resolves the name to the keyed client
 here. Keys live **only** here — callers supply a selection, never a key.
 
@@ -414,7 +414,7 @@ Top-level boolean, default `false`. When `true`, the `plugin_enable` tool is
 registered and may switch a compiled-in plugin (or the `remote` bridge) on at
 runtime — persisting the change back to this config file — so an operator can turn
 a capability on from chat without a restart. Off by default; the embedding host
-(e.g. makeen) opts in. When `false`, `plugin_enable` is not registered at all.
+opts in. When `false`, `plugin_enable` is not registered at all.
 
 ### `remote_plugin_host` / `remote_plugin_start`
 

@@ -744,7 +744,7 @@ func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string
 	//
 	// Cleared rather than corrected. The paths this stage gets right are the ones
 	// it copies out of the previous answer — the turn that produced
-	// /home/sites/uinloop/docs/architecture.html had that path verbatim in its
+	// /srv/app/docs/architecture.html had that path verbatim in its
 	// prior context — and on a first turn there is no previous answer to copy
 	// from. What the plan needs instead is one step that looks, which is a thing
 	// it does in a single call.

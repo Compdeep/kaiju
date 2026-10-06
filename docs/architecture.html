@@ -684,7 +684,7 @@ url = <span class="val">"https://acme.io/status"</span></pre></div>
       <div class="tnode"><span class="peri">embedded</span><div class="tp">SQLite</div><div class="tport">file · WAL</div><div class="tdesc">Sessions, messages, memory, the audit log, intents and scopes — one embedded database file, no server.</div></div>
       <div class="tnode ext"><span class="peri">external</span><div class="tp">Providers</div><div class="tport">OpenAI · Anthropic · …</div><div class="tdesc">The models. Keys are held by kaiju, never the browser; a request carries only a selection.</div></div>
     </div>
-    <p class="note">Everything with a side effect is inside the core process and passes the gate; the audit log is the record of what it was permitted to do. Kaiju runs standalone, or embedded as the reasoning engine behind a compliance host such as <b>makeen</b>, which fronts it with identity, redaction, and oversight. Either way the contract is the same: <b>identity and control on the outside, gated execution on the inside.</b></p>
+    <p class="note">Everything with a side effect is inside the core process and passes the gate; the audit log is the record of what it was permitted to do. Kaiju runs standalone, or embedded as the reasoning engine behind a host application, which fronts it with identity, redaction, and oversight. Either way the contract is the same: <b>identity and control on the outside, gated execution on the inside.</b></p>
   </section>
 
   <footer>

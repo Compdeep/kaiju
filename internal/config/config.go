@@ -30,7 +30,7 @@ type Config struct {
 	Chat ChatConfig `json:"chat,omitempty"`
 	// Providers is the credential catalog for per-request model routing. Each
 	// entry is a named provider (openai, anthropic, openrouter, selfhosted, …)
-	// holding the endpoint + key. The host (e.g. makeen) selects a provider +
+	// holding the endpoint + key. The host selects a provider +
 	// model per request; kaiju resolves the name to the keyed client here. The
 	// KEYS live only here — callers never supply a key, only a selection.
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`

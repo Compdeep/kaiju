@@ -12,7 +12,7 @@ debugged one from the other knows why both exist.
 Here:
 
     VERSION            0.4            this engine's own number
-    Enbarr's VERSION   0.0.2          one product built on it
+    a product's VERSION 0.0.2         one product built on it
 
 ## The engine's number
 
@@ -48,6 +48,6 @@ such a binary matches no commit, so nothing can rebuild it.
 
 ## Who reads this file
 
-`Enbarr/OmamoriNet/build.sh` reads it and stamps `version.Kaiju`. `cmd/kaiju`
+A product's build script reads it and stamps `version.Kaiju`. `cmd/kaiju`
 stamps its own `version` variable from it. Nothing reads it at run time — a
 version is decided when a binary is made, not while it runs.

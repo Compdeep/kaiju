@@ -261,5 +261,5 @@ python3 preflight_bench.py      # ~576 calls, 8-way concurrent, ~3 min
 ```
 
 The harness pulls the prompts live from
-`/home/sites/kaiju/kaiju/agent/prompt/prompts.md`, so it re-tests whatever
+`agent/prompt/prompts.md`, so it re-tests whatever
 ROUTE/PREFLIGHT prompt is current. Edit `MODELS` / `QUERIES` to extend.

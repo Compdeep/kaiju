@@ -13,8 +13,8 @@ import (
 // The coder decides between editing and rewriting by whether it can read the file
 // it was given. That read used filepath.Join(workspace, taskFile), and Join does not
 // honour an absolute second argument — it concatenates. So a file at
-// /home/sites/uinloop/platform/main.ts was looked for at
-// <workspace>/home/sites/uinloop/platform/main.ts, was not found, and the coder was
+// /srv/app/platform/main.ts was looked for at
+// <workspace>/srv/app/platform/main.ts, was not found, and the coder was
 // told to write from scratch a file it was never shown.
 //
 // Measured on one session: 38 coder calls, not one of them shown the file it was

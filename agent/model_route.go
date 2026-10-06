@@ -49,7 +49,7 @@ func IsVisionModel(id string) bool {
 /*
  * Per-request model routing.
  *
- * kaiju is a stateless REST engine; the host (makeen) owns policy — which
+ * kaiju is a stateless REST engine; the host owns policy — which
  * organization may use which model, and the default. Every LLM call in the
  * engine flows through one of two lanes:
  *
@@ -224,8 +224,8 @@ func (a *Agent) routeLane(ctx context.Context) (*llm.Client, string) {
 
 // OneShot runs a single provider-routed LLM completion with NO agent machinery —
 // no preflight, planner, DAG, tools, reflection, or aggregator. It is the raw
-// passthrough for hosts that need a plain completion (e.g. makeen's compliance
-// LLM-detection stage). The provider selects one of the configured provider
+// passthrough for hosts that need a plain completion (a classification stage,
+// say). The provider selects one of the configured provider
 // clients (falling back to the reasoning client); token counting still fires via
 // Complete. Returns the assistant content and the total tokens used.
 func (a *Agent) OneShot(ctx context.Context, provider, model string, messages []llm.Message, temperature float64, maxTokens int) (string, int, error) {

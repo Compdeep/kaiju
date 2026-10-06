@@ -388,7 +388,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// Attribute this run to the calling principal (JWT sub) and open a per-run
 	// token counter; both ride the ctx through SubmitSync into every LLM call on
 	// the sync path, so RunTotal(ctx) below is this request's exact token cost —
-	// the value the host (makeen) persists per user for durable billing.
+	// the value the host persists per user for durable billing.
 	ctx = tokens.WithRun(tokens.WithPrincipal(ctx, userID))
 
 	// Vision routing. When the session has image uploads:
@@ -402,7 +402,7 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 		visionImgs = a.uploadProc.SessionImageDataURIs(req.SessionID)
 	}
 
-	// Vision precedence over chat mode. makeen marks plain conversation with
+	// Vision precedence over chat mode. A host marks plain conversation with
 	// chat_mode=true, but the chat model may be a tool-less roleplay fine-tune that
 	// can't see images (e.g. Euryale). If this turn carries images and the chat
 	// model isn't vision-capable, don't let chat_mode shadow the vision lane — hand
@@ -852,7 +852,7 @@ type OneShotRequest struct {
 
 /*
  * handleOneShot runs a single provider-routed LLM completion, bypassing the
- * agent entirely. For hosts (e.g. makeen's compliance LLM-detection stage) that
+ * agent entirely. For hosts (a classification stage, say) that
  * need a raw completion routed through kaiju's provider keys, without paying for
  * the reasoning pipeline. Token usage is still attributed to the caller.
  */

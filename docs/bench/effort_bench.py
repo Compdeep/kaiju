@@ -13,7 +13,7 @@ import json, os, statistics, sys, time
 from concurrent.futures import ThreadPoolExecutor
 import urllib.request, urllib.error
 
-KEY = json.load(open("/home/sites/makeen/kaiju.config.json"))["providers"]["openrouter"]["api_key"]
+KEY = os.environ["OPENROUTER_API_KEY"]  # an OpenRouter key; never committed
 URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Bounded on purpose: enough steps that a model has something to think about,
@@ -103,7 +103,7 @@ def measure(model, efforts, test_budget):
 
 def main():
     orm = {m["id"]: m for m in json.load(open("or_models.json"))["data"]}
-    cat = json.load(open("/home/sites/kaiju/kaiju/models/models.json"))["models"]
+    cat = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "models", "models.json")))["models"]
     jobs = []
     for m in cat:
         if not (m.get("thinking") or m.get("reasoning_optional")):

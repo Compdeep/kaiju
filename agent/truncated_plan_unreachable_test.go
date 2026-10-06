@@ -11,7 +11,7 @@ import (
 
 // theCutPlan is a real reply, captured from a run that failed: the planner was
 // asked for a plan over a strict schema, fell into a repetition loop, and the
-// provider cut it at the cap mid-string. 21,137 characters, 66 complete steps
+// provider cut it at the cap mid-string. 20,363 characters, 66 complete steps
 // before the cut.
 func theCutPlan(t *testing.T) string {
 	t.Helper()

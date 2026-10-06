@@ -24,7 +24,7 @@ import (
 // Parts instead: it carries an OpenAI content-parts array (text + image_url) and,
 // when non-empty, is what gets serialized as `content`. Parts is marshal-only
 // (json:"-") and never persisted — the agent's session stores text, and images
-// are re-supplied per request by the host (Makeen), never held in kaiju.
+// are re-supplied per request by the host, never held in kaiju.
 type Message struct {
 	Role      string        `json:"role"` // "system", "user", "assistant", "tool"
 	Content   string        `json:"content,omitempty"`

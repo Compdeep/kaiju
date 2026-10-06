@@ -30,8 +30,9 @@ import (
 // declarations and their vocabulary actually found here. See
 // kaiju-leakage.md for the count behind each.
 var foreignWords = []string{
-	// The application itself, and its machine roles.
-	"enbarr", "omamori",
+	// The application's machine roles. Its own names are not written here, so
+	// that this public file does not name a private product: they are read from
+	// testdata/foreign_words.local, which is not committed (see localForeignWords).
 	"queen", "pawn", "knight",
 	"security_triage",
 
@@ -122,9 +123,21 @@ func componentsOf(line string) []string {
 	return out
 }
 
+// localForeignWords are the words in testdata/foreign_words.local, one or more
+// per line, when the file exists. It holds the names of the embedding
+// application itself, which a public repository should not carry; where the file
+// is absent the rest of the list still runs.
+func localForeignWords() []string {
+	b, err := os.ReadFile(filepath.Join("testdata", "foreign_words.local"))
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(b))
+}
+
 func TestNoContaminationFromTheEmbeddingApplication(t *testing.T) {
 	forbidden := make(map[string]bool, len(foreignWords))
-	for _, w := range foreignWords {
+	for _, w := range append(append([]string{}, foreignWords...), localForeignWords()...) {
 		forbidden[strings.ToLower(w)] = true
 	}
 

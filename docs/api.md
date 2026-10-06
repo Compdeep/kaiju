@@ -1,6 +1,6 @@
 # Kaiju API Reference
 
-Kaiju exposes a REST API and an SSE event stream. The API powers the web UI and is available to external consumers — custom frontends, automation scripts, external agents, or domain-specific control systems (makeen is one such host).
+Kaiju exposes a REST API and an SSE event stream. The API powers the web UI and is available to external consumers — custom frontends, automation scripts, external agents, or domain-specific control systems that embed it as a host.
 
 ## Base URL & ports
 
@@ -107,7 +107,7 @@ The keys for each provider live in kaiju's config, never in the request — the 
 
 ### POST `/api/v1/oneshot`
 
-A single provider-routed LLM completion that bypasses the agent entirely — no preflight, planner, DAG, tools, reflection, or aggregator. For hosts that need a raw completion routed through kaiju's provider keys (e.g. makeen's compliance LLM-detection stage). Token usage is still attributed to the caller.
+A single provider-routed LLM completion that bypasses the agent entirely — no preflight, planner, DAG, tools, reflection, or aggregator. For hosts that need a raw completion routed through kaiju's provider keys, such as a classification stage that needs one call and nothing else. Token usage is still attributed to the caller.
 
 **Request:**
 ```json
@@ -180,7 +180,7 @@ List all registered tools and skills.
     "description": "Coding workflows...",
     "default_impact": 0,
     "enabled": true,
-    "source": "skillmd:/home/sites/kaiju/skills/bundled/kaiju_coder/SKILL.md"
+    "source": "skillmd:/opt/kaiju/skills/bundled/kaiju_coder/SKILL.md"
   }
 ]
 ```

@@ -31,10 +31,10 @@ func TestProjectPrefix_CLIModeAddsNothing(t *testing.T) {
 }
 
 // An absolute root names a real place, so there is nothing to prepend. Without
-// this the two concatenate into project/<session>//home/sites/uinloop/docs.
+// this the two concatenate into project/<session>//srv/app/docs.
 func TestProjectPrefix_AnAbsoluteRootIsNotPrefixed(t *testing.T) {
 	a := webAgent()
-	got := a.projectPrefix(&Graph{ProjectRoot: "/home/sites/uinloop/docs"}, nil)
+	got := a.projectPrefix(&Graph{ProjectRoot: "/srv/app/docs"}, nil)
 	if got != "" {
 		t.Errorf("prefix = %q, want none — the root is already a path", got)
 	}
@@ -64,26 +64,26 @@ func TestProjectScanRoot_ComesFromTheWork(t *testing.T) {
 	}{
 		{
 			name: "the architect's own absolute root",
-			root: "/home/sites/uinloop/docs",
-			want: "/home/sites/uinloop/docs",
+			root: "/srv/app/docs",
+			want: "/srv/app/docs",
 		},
 		{
 			name:  "a root already on the graph",
-			graph: &Graph{ProjectRoot: "/home/sites/uinloop"},
-			want:  "/home/sites/uinloop",
+			graph: &Graph{ProjectRoot: "/srv/app"},
+			want:  "/srv/app",
 		},
 		{
 			name:  "one task file gives its own directory",
-			tasks: []computeWorkItem{{TaskFiles: flexStringArray{"/home/sites/uinloop/docs/src/backdrop.py"}}},
-			want:  "/home/sites/uinloop/docs/src",
+			tasks: []computeWorkItem{{TaskFiles: flexStringArray{"/srv/app/docs/src/backdrop.py"}}},
+			want:  "/srv/app/docs/src",
 		},
 		{
 			name: "two task files give what holds both",
 			tasks: []computeWorkItem{
-				{TaskFiles: flexStringArray{"/home/sites/uinloop/docs/src/backdrop.py"}},
-				{TaskFiles: flexStringArray{"/home/sites/uinloop/platform/web/index.html"}},
+				{TaskFiles: flexStringArray{"/srv/app/docs/src/backdrop.py"}},
+				{TaskFiles: flexStringArray{"/srv/app/platform/web/index.html"}},
 			},
-			want: "/home/sites/uinloop",
+			want: "/srv/app",
 		},
 		{
 			name:  "nothing absolute falls back to the workspace",

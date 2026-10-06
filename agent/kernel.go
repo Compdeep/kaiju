@@ -147,7 +147,7 @@ func (k *Kernel) Agent() *Agent {
 
 // schedulePolicy maps a trigger to its scheduler priority and session key. Both
 // key on the trigger's SessionID — an opaque conversation/thread identifier the
-// host assigns (for makeen, derived from the caller principal). Interactive chat
+// host assigns (for an API caller, derived from its principal). Interactive chat
 // outranks background work and a newer message steers the running query;
 // everything else is background and a repeat dedupes a still-queued copy. An
 // empty SessionID means no dedupe/steer key. The kernel stays ignorant of what a

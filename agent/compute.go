@@ -277,7 +277,7 @@ func computeSessionID(g *Graph) string {
 // put under project/<session>/ inside the very directory it was pointed at.
 //
 // And an absolute project root names a real place, so there is nothing to prepend.
-// Without this the two concatenate: project/<session>//home/sites/uinloop/docs.
+// Without this the two concatenate: project/<session>//srv/app/docs.
 func (a *Agent) projectPrefix(g *Graph, taskFiles []string) string {
 	if a.cfg.CLIMode {
 		return ""

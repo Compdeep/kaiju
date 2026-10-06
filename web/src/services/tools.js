@@ -2,6 +2,7 @@ import { useDagStore } from '../stores/dag'
 import { useSessionsStore } from '../stores/sessions'
 import { usePanelStore } from '../stores/panel'
 import api from '../api/client'
+import { nextRenderKey, safeTrace } from './chat'
 
 /**
  * Tools service — SSE connection and event routing.
@@ -96,6 +97,18 @@ function resync() {
   }).catch(() => {})
 }
 
+/**
+ * desc: Note that a run is in progress for this session, which is what puts the
+ *       stop button on screen. Called from any event that only a live run sends.
+ * @param {string} sid - the session the event belongs to
+ * @returns {void}
+ */
+function markLive(sid) {
+  if (!sid) return
+  const ss = useSessionsStore().getSession(sid)
+  if (ss && !ss.loading) ss.loading = true
+}
+
 export function connect() {
   if (eventSource) return
 
@@ -138,6 +151,11 @@ export function connect() {
               ds.interjectMode = true
               ds.interjections = []
             }
+            // loading is what puts the stop button on screen, and it was set
+            // nowhere but send(). So a tab that loaded while a run was already
+            // going had no way to stop it, and switchSession guessed from the
+            // message order instead — see the note there.
+            markLive(sid)
           }
           break
 
@@ -165,6 +183,10 @@ export function connect() {
           break
 
         case 'node':
+          // Evidence rather than inference: an event arriving for this session
+          // is a run in progress, whatever the stored messages happen to look
+          // like. A tab that missed 'start' recovers on the next node.
+          markLive(sid)
           if (ev.node) {
             const ds = dag.getSession(sid)
             if (ds) {
@@ -210,19 +232,24 @@ export function connect() {
           // server, dropping the trace from the rendered message).
           const ss = sessions.getSession(sid)
           if (ss && ss.loading && !ss.sendInFlight) {
-            const lastMsg = ss.messages.length ? ss.messages[ss.messages.length - 1] : null
-            if (lastMsg && lastMsg.role === 'user') {
-              ss.loading = false
-              api.get(`/api/v1/sessions/${sid}/messages`).then(msgs => {
-                ss.messages = (msgs || []).map(m => {
-                  const msg = { role: m.role, content: m.content }
-                  if (m.dag_trace) {
-                    try { msg.trace = JSON.parse(m.dag_trace) } catch {}
-                  }
-                  return msg
-                })
-              }).catch(() => {})
-            }
+            // Unconditionally. This used to require the last message to be a
+            // user one, the same guess switchSession made, so a run that ended
+            // with anything else left the stop button on screen for good.
+            ss.loading = false
+            api.get(`/api/v1/sessions/${sid}/messages`).then(msgs => {
+              // Every field the view needs, not just role and content: without
+              // id a message cannot be edited, without compactedInto a summary
+              // stops folding what it stands for, and without a key the list
+              // falls back to indexes.
+              ss.messages = (msgs || []).map(m => ({
+                _k: nextRenderKey(),
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                compactedInto: m.compacted_into || 0,
+                ...(m.dag_trace ? { trace: safeTrace(m.dag_trace) } : {}),
+              }))
+            }).catch(() => {})
           }
           // Clean up mapping
           if (ev.run_id) runToSession.delete(ev.run_id)

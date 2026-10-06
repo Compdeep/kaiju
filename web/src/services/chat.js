@@ -16,9 +16,19 @@ import { useDagStore } from '../stores/dag'
 // an assistant message falls back to 0 when the reply carried no message_id. Two
 // zeroes are a duplicate key, which is the bug the index was avoiding.
 let keySeq = 0
+export function nextRenderKey() { return ++keySeq }
 function withKey(m) {
-  if (m && m._k === undefined) m._k = ++keySeq
+  if (m && m._k === undefined) m._k = nextRenderKey()
   return m
+}
+
+/**
+ * desc: Parse a stored dag_trace, or nothing when it will not parse.
+ * @param {string} raw - the trace as the server stored it
+ * @returns {Array|undefined}
+ */
+export function safeTrace(raw) {
+  try { return JSON.parse(raw) } catch { return undefined }
 }
 
 /** Chat service — session CRUD, send, interject. Writes to per-session stores. */
@@ -154,15 +164,22 @@ export async function switchSession(id) {
         }
         return msg
       })
-      // Detect inflight query: last message is user with no assistant reply
-      if (ss.messages.length > 0 && ss.messages[ss.messages.length - 1].role === 'user') {
-        ss.loading = true
-        const ds = dag.getSession(id)
-        if (ds) {
-          ds.running = true
-          ds.interjectMode = true
-        }
-      }
+      // Nothing is inferred about whether a run is in flight.
+      //
+      // This read the last message's role: a user message with no reply after it
+      // meant a query was still going. It is not a question the stored messages
+      // can answer. GetFullTranscript returned the OLDEST 200 rows, so a session
+      // past 200 messages served its opening — and this conversation's 200th
+      // message happened to be "can you research it to find out", so the view
+      // showed a stop button for a run that had finished hours earlier, beside a
+      // history that stopped before the day's work. Nothing was running.
+      //
+      // The same shape would appear whenever the last stored message is a user
+      // one: a stopped run, a crashed run, a reply the server never saved.
+      //
+      // tools.js sets it from events instead, which is evidence rather than
+      // inference — a run in progress is a run sending node events, and a tab
+      // that missed 'start' recovers on the next one.
     } catch {
       ss.messages = []
     }

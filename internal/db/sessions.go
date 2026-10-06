@@ -393,15 +393,31 @@ func (d *DB) MarkCompacted(sessionID string, keepNewest int, summaryID int64) er
 }
 
 /*
- * GetFullTranscript returns every message of a session, compacted ones included.
+ * GetFullTranscript returns a session's most recent messages, compacted ones
+ * included.
  * desc: The reader for anyone showing the conversation rather than sending it to
  *       a model — each row carries compacted_into, so a summary can be shown in
- *       place with the messages it stands for. Ordered oldest first, with offset
- *       for paging, since a long session is more than a view wants at once.
+ *       place with the messages it stands for. Returned oldest first, which is
+ *       reading order.
+ *
+ *       The TAIL, not the head. `ORDER BY created_at LIMIT 200` returns the
+ *       OLDEST 200, so a session that passed 200 messages served its opening and
+ *       never its present: a 257-message conversation showed everything up to its
+ *       200th message and nothing after, and since the 200th happened to be a
+ *       question from the user, the view's "last message is a user message" test
+ *       for a query in flight read it as one still running. Nothing was running
+ *       and nothing was lost; the newest 57 messages were simply never asked for.
+ *
+ *       memory/manager.go carries this same correction for what a model is sent.
+ *       It was found there and not here.
+ *
+ *       offset pages BACKWARDS from the end, so 0 is the most recent page and a
+ *       larger offset reaches further back, which is the direction a reader
+ *       scrolling up asks in.
  * param: sessionID - the session to read
  * param: limit - maximum rows (defaults to 200 when not positive)
- * param: offset - rows to skip, for paging
- * return: the messages, or an error
+ * param: offset - rows to skip, counting back from the newest
+ * return: the messages, oldest first, or an error
  */
 func (d *DB) GetFullTranscript(sessionID string, limit, offset int) ([]Message, error) {
 	if limit <= 0 {
@@ -410,9 +426,11 @@ func (d *DB) GetFullTranscript(sessionID string, limit, offset int) ([]Message, 
 	if offset < 0 {
 		offset = 0
 	}
+	// Taken newest-first so the limit cuts the old end, then turned back into
+	// reading order below.
 	rows, err := d.conn.Query(
 		`SELECT id, session_id, role, content, dag_trace, created_at, compacted_into FROM messages
-		  WHERE session_id = ? ORDER BY created_at LIMIT ? OFFSET ?`,
+		  WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
 		sessionID, limit, offset,
 	)
 	if err != nil {
@@ -428,7 +446,15 @@ func (d *DB) GetFullTranscript(sessionID string, limit, offset int) ([]Message, 
 		}
 		msgs = append(msgs, m)
 	}
-	return msgs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Back into reading order. The query took the newest first so the limit would
+	// cut the old end; a reader wants them the way they were written.
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
 }
 
 // ErrNoSuchMessage is returned when a trace names a message that is not in the

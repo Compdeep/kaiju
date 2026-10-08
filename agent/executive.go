@@ -952,6 +952,15 @@ func (a *Agent) executivePlanSchema(shown ...[]string) llm.ToolDef {
 		}
 	}
 	schema := json.RawMessage(fmt.Sprintf(executivePlanSchemaTemplate, intentProp, string(step)))
+	// The outer object's own required list is "steps" and nothing else, which is
+	// a statement: answer is for a message that needs no operation at all, and
+	// intent can be inferred. Closed without that being honoured, answer became
+	// a required field with no empty value the model would use, so a plan came
+	// back with no steps and a paragraph of prose where the plan should be —
+	// three providers in six did exactly that. See llm.AuthoredRequired.
+	if marked, err := withAuthoredRequired(schema); err == nil {
+		schema = marked
+	}
 	return llm.ToolDef{
 		Type: "function",
 		Function: llm.FunctionDef{

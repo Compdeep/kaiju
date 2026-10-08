@@ -12,7 +12,7 @@ import (
 func forced(maxTokens int) *ChatRequest {
 	return &ChatRequest{
 		Messages:   []Message{{Role: "user", Content: "x"}},
-		Tools:      []ToolDef{{Type: "function", Function: FunctionDef{Name: "one", Parameters: json.RawMessage(`{"type":"object"}`)}}},
+		Tools:      []ToolDef{{Type: "function", Function: FunctionDef{Name: "one", Parameters: json.RawMessage(`{"type":"object","properties":{}}`)}}},
 		ToolChoice: "required",
 		MaxTokens:  maxTokens,
 	}

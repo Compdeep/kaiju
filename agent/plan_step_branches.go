@@ -43,7 +43,13 @@ func planStepBranches(names []string, registry *toolapi.Registry) (json.RawMessa
 		if !ok {
 			continue
 		}
-		params := tool.Parameters()
+		params, err := withAuthoredRequired(tool.Parameters())
+		if err != nil {
+			return nil, false
+		}
+		// Asked of the MARKED document, because that is the one that will be
+		// sent: checking the bare schema would refuse every tool with an
+		// optional parameter and take the whole union down with it.
 		if !closeableParams(params) {
 			// One tool that strict cannot express costs the whole document,
 			// because strict is all-or-nothing per schema. Leaving that tool out
@@ -126,4 +132,32 @@ func closeableParams(raw json.RawMessage) bool {
 		return false
 	}
 	return len(llm.StrictProblems(sent)) == 0
+}
+
+/*
+ * withAuthoredRequired marks a tool's parameters as owning their required list.
+ * desc: The closer widens an optional field into a required one that may be
+ *       null, which is how strict writes "optional" and is correct wherever a
+ *       stage declares one shape. Here it is not. params is written before the
+ *       tool is named, so a field the model is forced to fill chooses a branch
+ *       — and a tool that genuinely takes no arguments is then the only thing
+ *       an empty params object can be, whatever the model meant.
+ *
+ *       Measured on qwen/qwen3.6-35b-a3b with the same plan request: widened,
+ *       36 steps whose tags named six tools and whose tool field named one
+ *       no-argument tool in all 36, and a second provider that wrote the same
+ *       step 103 times. With each tool's own list, the tools matched their tags.
+ *
+ *       Only this function sets the marker, and llm strips it before the
+ *       document is sent — see llm.AuthoredRequired.
+ * param: raw - the tool's declared parameter schema.
+ * return: the schema with the marker, or an error when it is not an object.
+ */
+func withAuthoredRequired(raw json.RawMessage) (json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	doc[llm.AuthoredRequired] = json.RawMessage("true")
+	return json.Marshal(doc)
 }

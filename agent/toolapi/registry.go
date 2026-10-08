@@ -119,6 +119,12 @@ func (r *Registry) Register(t Tool) error {
  * return: an error if a tool with the same name is already registered
  */
 func (r *Registry) RegisterWithSource(t Tool, source string) error {
+	// Before the lock, because it reads only the tool. A schema that does not
+	// describe its own tool is refused here rather than misbehaving later in
+	// the dispatcher and in the planner's document — see ValidateParameters.
+	if err := ValidateParameters(t.Name(), t.Parameters()); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.tools[t.Name()]; exists {

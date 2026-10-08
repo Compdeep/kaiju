@@ -21,7 +21,7 @@ type chainTool struct {
 
 func (t chainTool) Name() string                { return t.name }
 func (t chainTool) Description() string         { return t.name }
-func (t chainTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t chainTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (t chainTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
 func (t chainTool) RequiresTarget() bool        { return t.requires }
 func (t chainTool) Execute(context.Context, map[string]any) (string, error) {

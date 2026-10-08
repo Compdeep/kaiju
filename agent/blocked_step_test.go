@@ -57,7 +57,7 @@ func (f *failingTool) Name() string                { return f.name }
 func (f *failingTool) Description() string         { return "fails, for the end-to-end tests" }
 func (f *failingTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
 func (f *failingTool) RequiresTarget() bool        { return false }
-func (f *failingTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (f *failingTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (f *failingTool) Execute(context.Context, map[string]any) (string, error) {
 	return "", errors.New("the listing could not be read")
 }

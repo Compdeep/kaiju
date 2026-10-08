@@ -120,7 +120,13 @@ type stubBash struct{}
 func (stubBash) Name() string                { return "bash" }
 func (stubBash) Description() string         { return "the application's own" }
 func (stubBash) Impact(map[string]any) int   { return toolapi.ImpactObserve }
-func (stubBash) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (stubBash) Parameters() json.RawMessage {
+	// Declares its key list, empty, because that is what a tool taking no
+	// arguments says — ValidateParameters refuses the bare {"type":"object"}
+	// this used to carry, since an absent properties key is an omission rather
+	// than a statement.
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
 func (stubBash) Execute(context.Context, map[string]any) (string, error) {
 	return "from the application", nil
 }

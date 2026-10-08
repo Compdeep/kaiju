@@ -28,7 +28,7 @@ func (s *shellTool) Name() string                { return "bash" }
 func (s *shellTool) Description() string         { return "runs a command, for the end-to-end tests" }
 func (s *shellTool) Impact(map[string]any) int   { return toolapi.ImpactAffect }
 func (s *shellTool) RequiresTarget() bool        { return false }
-func (s *shellTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (s *shellTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (s *shellTool) Execute(ctx context.Context, p map[string]any) (string, error) {
 	s.calls++
 	cmd, _ := p["command"].(string)

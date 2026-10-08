@@ -18,7 +18,7 @@ type reachTool struct{ name string }
 func (t reachTool) Name() string                { return t.name }
 func (t reachTool) Description() string         { return "for the reach tests" }
 func (t reachTool) Impact(map[string]any) int   { return ImpactObserve }
-func (t reachTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t reachTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (t reachTool) Execute(context.Context, map[string]any) (string, error) {
 	return "ran", nil
 }

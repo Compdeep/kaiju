@@ -22,7 +22,7 @@ func (e *envelopeFailingTool) Description() string       { return "for the end-t
 func (e *envelopeFailingTool) Impact(map[string]any) int { return toolapi.ImpactAffect }
 func (e *envelopeFailingTool) RequiresTarget() bool      { return false }
 func (e *envelopeFailingTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{"type":"object"}`)
+	return json.RawMessage(`{"type":"object","properties":{}}`)
 }
 func (e *envelopeFailingTool) Execute(ctx context.Context, p map[string]any) (string, error) {
 	return toolapi.StringResult(e.ExecuteTyped(ctx, p))

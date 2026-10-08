@@ -61,13 +61,13 @@ func inertShapes() map[string]*ChatRequest {
 		},
 		"a forced call in a small budget": {
 			Messages:   []Message{{Role: "system", Content: "route"}, {Role: "user", Content: "hi"}},
-			Tools:      []ToolDef{{Type: "function", Function: FunctionDef{Name: "route", Parameters: json.RawMessage(`{"type":"object"}`)}}},
+			Tools:      []ToolDef{{Type: "function", Function: FunctionDef{Name: "route", Parameters: json.RawMessage(`{"type":"object","properties":{}}`)}}},
 			ToolChoice: "required",
 			MaxTokens:  128,
 		},
 		"a large forced call": {
 			Messages:   []Message{{Role: "system", Content: "plan"}, {Role: "user", Content: "do the thing"}},
-			Tools:      []ToolDef{{Type: "function", Function: FunctionDef{Name: "plan", Parameters: json.RawMessage(`{"type":"object"}`)}}},
+			Tools:      []ToolDef{{Type: "function", Function: FunctionDef{Name: "plan", Parameters: json.RawMessage(`{"type":"object","properties":{}}`)}}},
 			ToolChoice: "required",
 			MaxTokens:  8192,
 		},

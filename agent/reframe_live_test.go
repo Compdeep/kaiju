@@ -206,7 +206,7 @@ type livewebsearch struct{}
 func (livewebsearch) Name() string                { return "web_search" }
 func (livewebsearch) Description() string         { return "search" }
 func (livewebsearch) Impact(map[string]any) int   { return 0 }
-func (livewebsearch) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (livewebsearch) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (livewebsearch) Execute(context.Context, map[string]any) (string, error) {
 	return "", nil
 }

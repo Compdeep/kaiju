@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
 	"strings"
@@ -159,6 +160,10 @@ func asSchemaRequest(req *ChatRequest, provider, model string) *ToolDef {
 		return nil
 	}
 
+	// The checker has had its look, so the private marker comes off before the
+	// document goes anywhere near a provider.
+	schema = withoutAuthoredMarks(schema)
+
 	replaced := tool
 	req.ResponseFormat = &ResponseFormat{
 		Type: "json_schema",
@@ -301,13 +306,47 @@ func dropOutsideStrict(m map[string]any) {
 	}
 }
 
+// AuthoredRequired marks a node whose required list is the author's own and is
+// not to be widened.
+//
+// closeOne's widening is right for a stage that declares one shape: a field
+// nobody filled arrives as null and the stage reads it as absent. It is wrong
+// for a tool's parameters inside the plan's per-tool branches, where params is
+// written before the tool is named — so a parameter the model was forced to
+// invent does not merely add noise, it decides which branch it is in, and can
+// eliminate the tool it meant. Measured on qwen/qwen3.6-35b-a3b: 36 steps whose
+// tags named six different tools and whose tool field named the same
+// no-argument tool in every one, because an empty params object was the only
+// thing left that fitted.
+//
+// Only the closer and the checker see this key. asSchemaRequest removes it
+// before the document is sent, so nothing on the wire carries a keyword no
+// provider knows.
+const AuthoredRequired = "x-kaiju-authored-required"
+
 func closeOne(_ string, m map[string]any) {
+	authored := false
+	if v, ok := m[AuthoredRequired]; ok {
+		authored, _ = v.(bool)
+	}
 	dropOutsideStrict(m)
 	if !declaresShape(m) {
 		return
 	}
 	props := m["properties"].(map[string]any)
 	m["additionalProperties"] = false
+
+	// The author said which of these are required and meant it, including when
+	// the answer is none of them. One rule, so a tool that names one required
+	// parameter and a tool that names none are treated the same way — the
+	// alternative was silence meaning "all of them", which is the opposite of
+	// what anybody writing a tool would expect.
+	if authored {
+		if _, stated := m["required"]; !stated {
+			m["required"] = []string{}
+		}
+		return
+	}
 
 	// Strict requires every declared key in required, so an optional field has
 	// to become required. A field that is required and has nothing to say needs
@@ -468,4 +507,30 @@ func rejectsSchemas(err error) bool {
 	return strings.Contains(msg, "structured output") ||
 		strings.Contains(msg, "response_format") ||
 		strings.Contains(msg, "json_schema")
+}
+
+/*
+ * withoutAuthoredMarks removes the AuthoredRequired marker from every node.
+ * desc: The marker is a conversation between the builder of a schema and the
+ *       two functions that judge it. A provider has no meaning for it, and a
+ *       strict decoder is entitled to refuse a keyword it does not know, so it
+ *       never leaves this package.
+ * param: schema - the closed document.
+ * return: the same document without the marker, or the input unchanged when it
+ *         carried none.
+ */
+func withoutAuthoredMarks(schema json.RawMessage) json.RawMessage {
+	if !bytes.Contains(schema, []byte(AuthoredRequired)) {
+		return schema
+	}
+	var m map[string]any
+	if err := json.Unmarshal(schema, &m); err != nil {
+		return schema
+	}
+	eachSchemaNode(m, "", func(_ string, n map[string]any) { delete(n, AuthoredRequired) })
+	out, err := json.Marshal(m)
+	if err != nil {
+		return schema
+	}
+	return out
 }

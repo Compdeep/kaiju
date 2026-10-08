@@ -30,7 +30,7 @@ func (s *slowTool) Name() string                { return s.name }
 func (s *slowTool) Description() string         { return "takes longer than the run is allowed" }
 func (s *slowTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
 func (s *slowTool) RequiresTarget() bool        { return false }
-func (s *slowTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (s *slowTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (s *slowTool) Execute(ctx context.Context, _ map[string]any) (string, error) {
 	select {
 	case s.started <- struct{}{}:

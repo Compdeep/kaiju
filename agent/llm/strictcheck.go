@@ -136,7 +136,15 @@ func checkOne(path string, m map[string]any, out *[]StrictProblem) {
 		}
 	}
 
-	if hasProps {
+	// A node whose required list the author owns — see AuthoredRequired. The
+	// rule below is the provider's and it is real, but it cannot be obeyed and
+	// also leave a tool's optional parameters optional, and for the plan's
+	// per-tool branches the second matters more: a forced parameter there
+	// chooses a different tool. So the exemption is narrow and deliberate, and
+	// the only thing that sets the marker is the builder of those branches.
+	authored, _ := m[AuthoredRequired].(bool)
+
+	if hasProps && !authored {
 		declared := requiredSet(m["required"])
 		var missing []string
 		for k := range props {

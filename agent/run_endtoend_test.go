@@ -40,7 +40,7 @@ func (c *countingTool) Name() string                { return c.name }
 func (c *countingTool) Description() string         { return "for the end-to-end tests" }
 func (c *countingTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
 func (c *countingTool) RequiresTarget() bool        { return false }
-func (c *countingTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (c *countingTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (c *countingTool) Execute(_ context.Context, p map[string]any) (string, error) {
 	c.calls++
 	c.got = p
@@ -494,7 +494,7 @@ type runAwareTool struct{ sawRun string }
 func (r *runAwareTool) Name() string                { return "process_list" }
 func (r *runAwareTool) Description() string         { return "for the end-to-end tests" }
 func (r *runAwareTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
-func (r *runAwareTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (r *runAwareTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (r *runAwareTool) Execute(ctx context.Context, _ map[string]any) (string, error) {
 	r.sawRun = RunIDFrom(ctx)
 	return toolapi.ToolOK("listing", "2 processes", map[string]any{"count": 2}).JSON(), nil
@@ -514,7 +514,7 @@ func (p *pointerTool) Name() string                { return p.name }
 func (p *pointerTool) Description() string         { return "returns ids another tool reads" }
 func (p *pointerTool) Impact(map[string]any) int   { return toolapi.ImpactObserve }
 func (p *pointerTool) RequiresTarget() bool        { return false }
-func (p *pointerTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (p *pointerTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (p *pointerTool) Execute(context.Context, map[string]any) (string, error) {
 	p.calls++
 	return toolapi.ToolOK("listing", "2 rows",

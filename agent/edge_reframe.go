@@ -249,14 +249,54 @@ func stepLabel(n *Node) string {
 type ReframeEdge struct {
 	Name   string // what this edge is called in the trace
 	Prompt string // the section that writes it
+
+	// Reason is whether this edge's model may think before it writes.
+	//
+	// False is the right answer for an edge in general: it rewrites what it was
+	// handed, and the thinking comes out of the same cap as the paragraph. It is
+	// the wrong answer for the one edge whose reader acts on what it says.
+	//
+	// Measured on qwen/qwen3.6-35b-a3b, one real payload replayed: with the
+	// reasoning switched off, three briefings in three asserted the run had
+	// established a conclusion it had not, and two of those three cited a
+	// corroborating fact that no step in the run had checked. With it on, two in
+	// two said the trigger could not be determined, which is what the evidence
+	// supported. A stage that does nothing but rewrite still has to decide what
+	// the evidence will carry, and that decision is where the reasoning goes.
+	//
+	// Costs about half as much again rather than several times as much: 6,083
+	// total tokens off against 8,888 and 10,246 on, because a 5,770-token prompt
+	// dominates either way.
+	Reason bool
 }
 
 // The three edges. Each names the section in prompts.md that belongs to it.
+//
+// Only the reflector's reasons. It is the edge whose reader decides whether the
+// run continues and what the verdict is, so a briefing that overstates there
+// becomes a verdict that overstates; the planner's reader is going to ask for
+// more work anyway, and the writer's is told the wording is its own.
 var (
 	ReframeToPlanner   = ReframeEdge{Name: "plan", Prompt: prompt.ReframePlan}
-	ReframeToReflector = ReframeEdge{Name: "reflect", Prompt: prompt.ReframeReflect}
+	ReframeToReflector = ReframeEdge{Name: "reflect", Prompt: prompt.ReframeReflect, Reason: true}
 	ReframeToAnswer    = ReframeEdge{Name: "answer", Prompt: prompt.ReframeAnswer}
 )
+
+/*
+ * reasoning states this edge's thinking on a request.
+ * desc: Said explicitly either way rather than left to the provider. An
+ *       unstated reasoning parameter means ON on every model line released
+ *       since early 2026, so saying nothing is not a neutral position — it is
+ *       the expensive one, chosen by omission.
+ * param: req - the request, modified in place.
+ * return: the same request, so this reads as part of the call.
+ */
+func (e ReframeEdge) reasoning(req *llm.ChatRequest) *llm.ChatRequest {
+	if e.Reason {
+		return llm.WithReasoning(req)
+	}
+	return llm.WithoutReasoning(req)
+}
 
 func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, edge ReframeEdge) string {
 	material := a.reframeMaterial(ctx, graph, request, edge)
@@ -277,7 +317,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		NodeType: "reframe",
 		Tag:      "reframe:" + edge.Name,
 		Input:    map[string]string{"edge": edge.Name},
-	}), Light, llm.WithoutReasoning(&llm.ChatRequest{
+	}), Light, edge.reasoning(&llm.ChatRequest{
 		ToolChoice: "none",
 		// The arcs, not only the prose about them. This stage carries: it takes
 		// what the nodes produced and forms it for the next one to read, and its
@@ -293,19 +333,22 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 			edge.Prompt, material, nil, graph.Arcs()),
 		Temperature: 0.2,
 		MaxTokens:   a.replyBudget(ctx, Light, replyEdgeBudget),
-		// Thinking off. This stage has no judgement to make: the nodes have run,
-		// the evidence is in the material above, and its job is to form what is
-		// already there for the next stage to read. Left at the provider's
-		// default — which on every model line since early 2026 means thinking is
-		// ON — it spent the whole reply budget reasoning and returned an empty
-		// content field, so the only thing recoverable was the tail of an
-		// unfinished argument and the edge fell back to passing the material
-		// through. Measured on qwen3.6-35b-a3b: in one run, this edge and the
-		// stage it feeds both died this way, back to back.
+		// Thinking is stated either way, per edge — see ReframeEdge.Reason for
+		// which one reasons and what was measured.
 		//
-		// The reasoning lane is a separate question. A stage that weighs evidence
-		// and calibrates a verdict wants its thinking; a stage that rewrites what
-		// it was handed does not.
+		// It has to be stated. Left at the provider's default, which on every
+		// model line since early 2026 means ON, this edge spent the whole reply
+		// budget reasoning and returned an empty content field: the only thing
+		// recoverable was the tail of an unfinished argument, and the edge fell
+		// back to passing the material through. Measured on qwen3.6-35b-a3b, in
+		// one run this edge and the stage it feeds both died this way, back to
+		// back.
+		//
+		// Where it does reason, an empty reply is not the end: the client's
+		// recovery asks again with the reasoning switched off, starting from the
+		// thinking already paid for — see llm/recover.go askDifferently. That is
+		// why reasoning here is affordable and was not before, and it needs the
+		// application's catalog to say the model can be asked to stop.
 	}))
 	// An edge carries; this is what it carried. Recorded whether the model
 	// answered or not, because a reframe that fell back to passing the material

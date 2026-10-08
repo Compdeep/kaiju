@@ -277,7 +277,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		NodeType: "reframe",
 		Tag:      "reframe:" + edge.Name,
 		Input:    map[string]string{"edge": edge.Name},
-	}), Light, &llm.ChatRequest{
+	}), Light, llm.WithoutReasoning(&llm.ChatRequest{
 		ToolChoice: "none",
 		// The arcs, not only the prose about them. This stage carries: it takes
 		// what the nodes produced and forms it for the next one to read, and its
@@ -293,7 +293,20 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 			edge.Prompt, material, nil, graph.Arcs()),
 		Temperature: 0.2,
 		MaxTokens:   a.replyBudget(ctx, Light, replyEdgeBudget),
-	})
+		// Thinking off. This stage has no judgement to make: the nodes have run,
+		// the evidence is in the material above, and its job is to form what is
+		// already there for the next stage to read. Left at the provider's
+		// default — which on every model line since early 2026 means thinking is
+		// ON — it spent the whole reply budget reasoning and returned an empty
+		// content field, so the only thing recoverable was the tail of an
+		// unfinished argument and the edge fell back to passing the material
+		// through. Measured on qwen3.6-35b-a3b: in one run, this edge and the
+		// stage it feeds both died this way, back to back.
+		//
+		// The reasoning lane is a separate question. A stage that weighs evidence
+		// and calibrates a verdict wants its thinking; a stage that rewrites what
+		// it was handed does not.
+	}))
 	// An edge carries; this is what it carried. Recorded whether the model
 	// answered or not, because a reframe that fell back to passing the material
 	// through is exactly the case a reader of these records wants to see — see

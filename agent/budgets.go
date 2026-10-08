@@ -200,20 +200,39 @@ var (
 	// resolve.go declines to send an instruction it cannot know will be
 	// honoured, and the edge reasons inside a cap meant for a paragraph.
 	//
-	// At 2,000 that cut one framing in three off mid-sentence, and a cut framing
-	// is worse than a short one — the recovery then answers off a reasoning
-	// tail, which is how an edge whose own prompt tells it not to conclude
-	// produced a conclusion. Measured on qwen/qwen3.6-35b-a3b: three framings at
-	// 2,000, one truncated; three at 8,192, none. 4,096 leaves about 2,048 for
-	// the reasoning after withThinkingRoom doubles, against the longest observed
-	// on a comparable stage, 2,449 tokens.
+	// How much room that needs is a measurement, and the measurement is a
+	// spread rather than a number. One real framing payload, 5,770 prompt
+	// tokens, replayed 30 times on qwen/qwen3.6-35b-a3b across the ten
+	// providers serving it: reasoning ran 957 to 3,465 tokens on the calls that
+	// answered, median 2,257, a factor of three on identical input at
+	// temperature 0.2. Four of the thirty spent the whole cap reasoning and
+	// returned nothing at all.
 	//
-	// Share widened with the ceiling and not after it. 256 put a 262,144-token
-	// window at 1,024, which withThinkingRoom doubled to 2,000 and the old
-	// ceiling pinned there, so raising the ceiling alone would have moved
-	// nothing on the deployment that found this.
+	// What each candidate cap would have cost on those thirty:
+	//
+	//	2,000   20 of 30 at or over it
+	//	2,500   13 of 30
+	//	3,000   10 of 30
+	//	4,096    4 of 30
+	//	5,000    0 of 30
+	//
+	// It is not the provider. The four empty replies came from four different
+	// providers, and each of those four also answered cleanly twice on the same
+	// payload; the six that never failed reasoned in the same range as the four
+	// that did. So nothing here can be fixed by choosing a provider — only by
+	// leaving room for the long tail of a distribution.
+	//
+	// Hence 8,192, and Share 64 to reach it: a 262,144-token window resolves to
+	// 4,096, which withThinkingRoom doubles. Share had to move with the ceiling
+	// both times this changed — at 256 the window resolved to 1,024 and doubled
+	// to the old 2,000 ceiling, so raising the ceiling alone moved nothing.
+	//
+	// The cap is therefore no longer sized by what an edge writes. A framing is
+	// a few hundred tokens and always was; this is sized by what the model
+	// spends before writing one, which is twenty times larger and not under the
+	// edge's control.
 	replyEdgeBudget = budgetSpec{
-		Base: 600, Share: 128, Ceiling: 4096,
+		Base: 600, Share: 64, Ceiling: 8192,
 		Bounds: "one edge's framing paragraph",
 		// Base is still the smallest in the engine at 600 tokens, and a reply
 		// this size is not what makes a prompt too large.

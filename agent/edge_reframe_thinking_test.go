@@ -48,23 +48,25 @@ func TestReasoningCanStillBeAskedFor(t *testing.T) {
  * instruction it cannot know will be honoured and the edge reasons anyway. The
  * cap is then the only thing standing between the reasoning and the paragraph.
  *
- * Measured on qwen/qwen3.6-35b-a3b at the old 2,000: one framing in three cut
- * off mid-sentence, and the recovery wrote its answer off the tail. The two
+ * One real framing payload replayed 30 times on qwen/qwen3.6-35b-a3b spent
+ * between 957 and 3,465 tokens reasoning, median 2,257, and four of the thirty
+ * spent the whole cap and returned nothing. A 2,000 cap sat under 20 of those
+ * 30 and a 4,096 cap under 4; nothing in the thirty reached 5,000. The two
  * numbers below are the whole of the fix — a 262,144-token window reaching
- * 2,048 for a model that does not reason, doubled to the ceiling for one that
+ * 4,096 for a model that does not reason, doubled to the ceiling for one that
  * does.
  */
 func TestTheEdgeCapLeavesRoomForReasoningItCannotSwitchOff(t *testing.T) {
 	const window = 262144
 
 	agentOn := edgeCapAgent(window, true)
-	if got := agentOn.replyBudget(context.Background(), Light, replyEdgeBudget); got != 4096 {
-		t.Errorf("a reasoning model got %d tokens for reasoning and a paragraph, want 4096", got)
+	if got := agentOn.replyBudget(context.Background(), Light, replyEdgeBudget); got != 8192 {
+		t.Errorf("a reasoning model got %d tokens for reasoning and a paragraph, want 8192", got)
 	}
 
 	agentOff := edgeCapAgent(window, false)
-	if got := agentOff.replyBudget(context.Background(), Light, replyEdgeBudget); got != 2048 {
-		t.Errorf("a model that does not reason got %d, want 2048 — the paragraph's p90 is 242", got)
+	if got := agentOff.replyBudget(context.Background(), Light, replyEdgeBudget); got != 4096 {
+		t.Errorf("a model that does not reason got %d, want 4096 — the paragraph's p90 is 242", got)
 	}
 
 	// A deployment that supplies no catalog keeps the number this engine was

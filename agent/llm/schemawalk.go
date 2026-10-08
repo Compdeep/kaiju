@@ -135,3 +135,25 @@ func declaresProperties(m map[string]any) bool {
 	props, ok := m["properties"].(map[string]any)
 	return ok && len(props) > 0
 }
+
+// declaresShape reports whether a node states its own key list, empty or not.
+//
+// One case separates this from declaresProperties, and it is the case that cost
+// the planner its enforcement. A tool taking no arguments writes
+// "properties": {}. It is not declining to say what it permits — it is saying
+// it permits nothing, and closing that so {} is the only legal value is exactly
+// what it meant. A node carrying no properties key at all is the other thing
+// entirely: a map whose keys are not known in advance, where closing narrows it
+// against its author's intent.
+//
+// Answering no to both left every no-argument tool inexpressible, and one
+// inexpressible tool costs a whole plan schema, because strict is
+// all-or-nothing per document — see planStepBranches. So sysinfo and
+// check_kernel_drivers, which a run merely SHOWS to the planner and which that
+// run's plan never called, held it on unconstrained tool calling. The model
+// then wrote five step objects and closed none of them, and the investigation
+// was lost to a reply nothing had been able to refuse.
+func declaresShape(m map[string]any) bool {
+	_, ok := m["properties"].(map[string]any)
+	return ok
+}

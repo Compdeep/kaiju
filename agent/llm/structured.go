@@ -229,7 +229,7 @@ func closedSchema(raw json.RawMessage) json.RawMessage {
 	if t, _ := m["type"].(string); t != "object" {
 		return nil
 	}
-	if !declaresProperties(m) {
+	if !declaresShape(m) {
 		return nil
 	}
 
@@ -303,7 +303,7 @@ func dropOutsideStrict(m map[string]any) {
 
 func closeOne(_ string, m map[string]any) {
 	dropOutsideStrict(m)
-	if !declaresProperties(m) {
+	if !declaresShape(m) {
 		return
 	}
 	props := m["properties"].(map[string]any)

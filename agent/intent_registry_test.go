@@ -32,14 +32,14 @@ var _ toolapi.Tool = (*mockTool)(nil)
 // testLadder is a three-tier intent fixture used across registry tests.
 // The names are deliberately generic — Go production code has no
 // knowledge of specific intent names and tests should prove that by
-// working with any arbitrary ladder.
-var testLadder = []db.Intent{
+// working with any arbitrary set of intent levels.
+var testLevels = []db.Intent{
 	{Name: "low", Rank: 0, Description: "read-only", PromptDescription: "read-only", IsBuiltin: true},
 	{Name: "mid", Rank: 100, Description: "normal", PromptDescription: "normal", IsBuiltin: true, IsDefault: true},
 	{Name: "high", Rank: 200, Description: "destructive", PromptDescription: "destructive", IsBuiltin: true},
 }
 
-// newTestRegistry opens a fresh DB, seeds the three-tier ladder, and
+// newTestRegistry opens a fresh DB, seeds the three-tier intent levels, and
 // returns a loaded IntentRegistry.
 func newTestRegistry(t *testing.T) (*IntentRegistry, *db.DB) {
 	t.Helper()
@@ -50,7 +50,7 @@ func newTestRegistry(t *testing.T) (*IntentRegistry, *db.DB) {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	if err := database.SeedIntentsFromConfig(testLadder); err != nil {
+	if err := database.SeedIntentsFromConfig(testLevels); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -286,7 +286,7 @@ func TestRegistryDefaultRank(t *testing.T) {
 }
 
 func TestRegistryDefaultRankStableWithCustomIntents(t *testing.T) {
-	// Adding custom intents biased to one end of the ladder must NOT shift
+	// Adding custom intents biased to one end of the range must NOT shift
 	// the default rank — the flag is what matters, not list position.
 	reg, database := newTestRegistry(t)
 	// Add two custom intents below the default (biasing "middle position" downward)

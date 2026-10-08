@@ -1260,14 +1260,14 @@ func validatePlanDeps(steps []PlanStep) []string {
  * desc: A plan is asked for as one shape and comes back as four. It parses as
  *       sent; or it is wrapped in a markdown fence; or its steps are
  *       double-encoded as a JSON string; or the reply ran into the token cap
- *       and never closed. Each of those is a rung below, tried in order, and
+ *       and never closed. Each of those is a repair below, tried in order, and
  *       the first that yields a payload wins.
  *
- *       A rung that does not apply says so and the next one runs — that
+ *       A repair that does not apply says so and the next one runs — that
  *       fall-through is the robustness, and it is why a plan that is BOTH
- *       fenced and cut still reaches the salvager. A rung that applies and
- *       cannot finish stops the ladder, because the shape was recognised and
- *       running a later rung's parser over it would be guessing.
+ *       fenced and cut still reaches the salvager. A repair that applies and
+ *       cannot finish stops the sequence, because the shape was recognised and
+ *       running a later repair's parser over it would be guessing.
  *
  *       Every failure leaves by the same door, saying which recovery it was
  *       attempting. What used to come back was the first parser's complaint
@@ -1275,29 +1275,29 @@ func validatePlanDeps(steps []PlanStep) []string {
  *       neither the stage nor the fact that three recoveries were tried.
  * param: raw - the tool-call arguments as they arrived.
  * param: payload - filled in on success; untouched meaningfully on failure.
- * return: nil when a plan was read, else why no rung could produce one.
+ * return: nil when a plan was read, else why no repair could produce one.
  */
 func parseExecutivePayload(raw string, payload *executiveCallPayload) error {
-	// Held for the final error: when no rung applies this is the closest thing
+	// Held for the final error: when no repair applies this is the closest thing
 	// to a reason, and it is what the caller used to receive on its own.
 	asSent := adoptPlan(raw, payload)
 	if asSent == nil {
 		return nil
 	}
 
-	for _, rung := range planRecoveries {
-		recovered, err := rung.try(raw, payload)
+	for _, repair := range planRecoveries {
+		recovered, err := repair.try(raw, payload)
 		if recovered {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("failed to recover %s: %w", rung.what, err)
+			return fmt.Errorf("failed to recover %s: %w", repair.what, err)
 		}
 	}
 	return fmt.Errorf("failed to recover a plan from the reply: %w", asSent)
 }
 
-// planRecoveries is the ladder, in the order it is climbed. `what` completes the
+// planRecoveries is the sequence, in the order it is tried. `what` completes the
 // sentence "failed to recover ...", so a failure names the stage it reached.
 //
 // Order is not arbitrary: unwrapping comes before salvaging, because a fenced
@@ -1318,7 +1318,7 @@ var planRecoveries = []struct {
  * desc: The unmarshal and the depends_on tag linking, which have to happen
  *       together: linkDependsOnTags reads the steps as TEXT, before FlexInts
  *       has turned a tag into a position, so it must see the same document the
- *       payload was filled from. Three rungs produce a different document from
+ *       payload was filled from. Three repairs produce a different document from
  *       the one that arrived — unfenced, unwrapped, trimmed — and each was
  *       writing out this pairing by hand.
  * param: source - JSON to read the plan from.
@@ -1354,8 +1354,8 @@ func adoptPlan(source string, payload *executiveCallPayload) error {
  *
  *       A fence that unwraps to something still broken falls THROUGH rather than
  *       stopping: a plan can be fenced and cut at the cap at once, and the
- *       salvager below is the rung that reads that.
- * return: whether the plan was recovered; no error, this rung never stops the ladder.
+ *       salvager below is the repair that reads that.
+ * return: whether the plan was recovered; no error, this repair never stops the sequence.
  */
 func recoverFencedPlan(raw string, payload *executiveCallPayload) (bool, error) {
 	if !strings.HasPrefix(strings.TrimSpace(raw), "```") {
@@ -1388,9 +1388,9 @@ func recoverFencedPlan(raw string, payload *executiveCallPayload) (bool, error) 
  *       under it either way. Nothing is invented here — a field the model did
  *       not send stays unset and the code that reads it already knows how.
  *
- *       Runs after the fence rung because the one reply seen was both: fenced
+ *       Runs after the fence repair because the one reply seen was both: fenced
  *       AND bare. Unwrapping leaves the array, and this is what reads it.
- * return: whether the plan was recovered; no error, this rung never stops the ladder.
+ * return: whether the plan was recovered; no error, this repair never stops the sequence.
  */
 func recoverBareStepsArray(raw string, payload *executiveCallPayload) (bool, error) {
 	source := strings.TrimSpace(raw)
@@ -1414,9 +1414,9 @@ func recoverBareStepsArray(raw string, payload *executiveCallPayload) (bool, err
  * recoverStringEncodedSteps reads steps that arrived as a JSON string.
  * desc: Some models answer the steps array by encoding it a second time, so the
  *       field holds a string of JSON rather than the array. The outer document
- *       is well-formed, which is what separates this from the rung below.
+ *       is well-formed, which is what separates this from the repair below.
  *
- *       This one DOES stop the ladder when it fails. The shape was recognised —
+ *       This one DOES stop the sequence when it fails. The shape was recognised —
  *       steps really is a string — so the reply is not a truncation, and handing
  *       it to a salvager written for unterminated JSON would have it walk brace
  *       depth through escaped text and answer for a document it never saw.
@@ -1454,7 +1454,7 @@ func recoverStringEncodedSteps(raw string, payload *executiveCallPayload) (bool,
  *       the ones that closed. Here the wrapper is the only thing in the way, so
  *       the wrapper is the only thing that comes off.
  *
- *       Gated on the first bytes, like the fence rung, so a reply that never had
+ *       Gated on the first bytes, like the fence repair, so a reply that never had
  *       a wrapper is handed back exactly as it arrived.
  * param: raw - the reply as it arrived.
  * return: the reply without its fence, or unchanged when it had none.
@@ -1485,9 +1485,9 @@ func stripFence(raw string) string {
  *       trims to the last one.
  *
  *       Falls through rather than stopping: when the trim still will not parse
- *       there is nothing left to try, and the ladder's own error is the better
+ *       there is nothing left to try, and the sequence's own error is the better
  *       one to report.
- * return: whether the plan was recovered; no error, this rung never stops the ladder.
+ * return: whether the plan was recovered; no error, this repair never stops the sequence.
  */
 func recoverTruncatedPlan(raw string, payload *executiveCallPayload) (bool, error) {
 	trimmed := salvageTruncatedPlan(stripFence(raw))

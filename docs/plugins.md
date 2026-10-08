@@ -158,7 +158,7 @@ best-effort: a down host logs and contributes nothing (the agent runs without
 those tools) rather than failing boot — the same graceful degradation kaiju
 applies to any missing tool.
 
-A manifest tool's `impact` string maps to the IGX ladder — `""`/`observe`/`read` →
+A manifest tool's `impact` string maps to the IGX intent levels — `""`/`observe`/`read` →
 Observe, `control`/`destroy`/`delete`/`irreversible` → Control, anything else →
 Affect (unknown side effects treated as reversible-write).
 

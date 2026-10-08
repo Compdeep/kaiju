@@ -18,7 +18,7 @@ func openTestDB(t *testing.T) *DB {
 	return d
 }
 
-// seedThreeTier populates the DB with a three-tier test ladder. Test fixture
+// seedThreeTier populates the DB with three test intent levels. Test fixture
 // names are deliberately arbitrary — Go production code never references
 // any specific intent name.
 func seedThreeTier(t *testing.T, d *DB) {

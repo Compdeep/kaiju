@@ -606,7 +606,7 @@ func (a *Agent) openToolIndex() toolfind.Index {
  *       intents are in place. Requires restart to pick up DB changes.
  *       When the config did not explicitly set NodeClearance, this also
  *       resolves the default clearance to the registry's default rank
- *       (the middle of the ladder).
+ *       (the middle level).
  * param: src - where the intent table is read from.
  * return: error if loading fails.
  */

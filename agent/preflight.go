@@ -893,7 +893,7 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
  *       starts rather than adjusted; that is validatePlanIntent's job.
  *
  *       Asks the registry what compute costs rather than naming a number: the
- *       ladder is the deployment's, and a rank written here would be a second
+ *       levels are the deployment's, and a rank written here would be a second
  *       copy of it.
  * param: trigger - what started the run, for whether the intent is the
  *        caller's or this engine's to decide.

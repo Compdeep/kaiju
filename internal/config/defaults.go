@@ -83,7 +83,7 @@ func Default() *Config {
 			DataDir:           "~/.kaiju",
 			Workspace:         "", // defaults to ~/.kaiju/workspace (resolved in config.resolve)
 			ClassifierEnabled: &classifierOn,
-			// Default intent ladder. Admins may replace this entirely via
+			// Default intent levels. Admins may replace this entirely via
 			// kaiju.json or the admin UI. Go code only ever sees ranks —
 			// names are purely presentation/config data.
 			Intents: []IntentSeed{

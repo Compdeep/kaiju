@@ -216,7 +216,7 @@ func newSchemaTestAgent(t *testing.T) *Agent {
 	return a
 }
 
-// staticIntents is the default ladder, so the test does not need a database.
+// staticIntents is the default set of intent levels, so the test does not need a database.
 type staticIntents struct{}
 
 func (staticIntents) ListIntents() ([]Intent, error) {

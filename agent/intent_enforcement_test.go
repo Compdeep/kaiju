@@ -38,7 +38,7 @@ func newTestStack(t *testing.T) (*IntentRegistry, *gates.Gate, *db.DB) {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	if err := database.SeedIntentsFromConfig(testLadder); err != nil {
+	if err := database.SeedIntentsFromConfig(testLevels); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 

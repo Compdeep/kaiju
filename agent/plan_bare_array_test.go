@@ -26,8 +26,8 @@ func TestABareStepsArrayIsAdopted(t *testing.T) {
 	}
 }
 
-// Fenced and bare at once — the shape actually observed. The fence rung strips
-// the wrapper and fails to adopt an array as the payload, so this rung reads
+// Fenced and bare at once — the shape actually observed. The fence repair strips
+// the wrapper and fails to adopt an array as the payload, so this repair reads
 // what is left rather than the run dying between the two.
 func TestAFencedBareStepsArrayIsAdopted(t *testing.T) {
 	raw := "```json\n" + `[{"tool":"web_search","tag":"find","params":{"query":"x"}}]` + "\n```"
@@ -41,7 +41,7 @@ func TestAFencedBareStepsArrayIsAdopted(t *testing.T) {
 	}
 }
 
-// depends_on written as a tag still resolves, as it does through every rung.
+// depends_on written as a tag still resolves, as it does through every repair.
 func TestABareStepsArrayStillLinksItsTags(t *testing.T) {
 	raw := `[{"tool":"web_search","tag":"find","params":{"query":"x"},"depends_on":[]},
 	         {"tool":"web_fetch","tag":"read","params":{"url":"y"},"depends_on":["find"]}]`

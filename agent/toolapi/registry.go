@@ -250,7 +250,7 @@ func (r *Registry) List() []string {
 type ToolInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Impact      int    `json:"impact"` // IGX impact tier index (0/1/2); registry maps to ranks on the configured ladder
+	Impact      int    `json:"impact"` // IGX impact tier index (0/1/2); registry maps to the configured intent levels
 	IsBuiltin   bool   `json:"isBuiltin"`
 	Enabled     bool   `json:"enabled"`
 	Reach       string `json:"reach"` // off | local | everywhere

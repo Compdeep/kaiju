@@ -312,7 +312,7 @@ Four steps, in `agent/llm/resolve.go`, and the order is the design.
 4. **Then the clock.** The ordinary deadline, doubled when the reply will carry
    reasoning, multiplied by the model's measured pace.
 
-The **effort ladder does not scale this deadline**. It answers "has the provider
+The **effort level does not scale this deadline**. It answers "has the provider
 stopped answering", which is the same question at any effort — and widening it
 would loosen the connection ceiling, which is the only bound a streamed call
 has. How long a piece of *work* may take is the round deadline, above this

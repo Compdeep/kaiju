@@ -49,8 +49,8 @@ func TestAFencedPlanIsUnwrappedWithoutALanguageTag(t *testing.T) {
 	}
 }
 
-// depends_on written as a tag must still resolve after unwrapping — the rung
-// links tags like every other rung, against the CLEANED text rather than the
+// depends_on written as a tag must still resolve after unwrapping — the repair
+// links tags like every other repair, against the CLEANED text rather than the
 // fenced original, which parses to nothing.
 func TestAFencedPlanStillLinksItsTags(t *testing.T) {
 	raw := "```json\n" + `{"intent":"operate","answer":"","steps":[
@@ -70,7 +70,7 @@ func TestAFencedPlanStillLinksItsTags(t *testing.T) {
 	}
 }
 
-// A reply that is simply malformed must still fail. The rung reads the first
+// A reply that is simply malformed must still fail. The repair reads the first
 // bytes so it only runs on a fence; a broken reply that never had one must not
 // be quietly rescued by a text cleaner into something it did not say.
 func TestAMalformedPlanWithoutAFenceStillFails(t *testing.T) {

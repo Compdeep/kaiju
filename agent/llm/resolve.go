@@ -30,11 +30,11 @@ type resolved struct {
 // slowest model the catalog carries. The connection ceiling is set from it, so
 // a deadline this package allows is never cut short by the transport under it.
 //
-// The EFFORT ladder is deliberately not part of this. The deadline here answers
+// The EFFORT levels are deliberately not part of this. The deadline here answers
 // "has the provider stopped answering", and 300 or 600 seconds is that question
 // whatever effort was asked for. How long a piece of WORK may take is a
 // different question with a different owner — the round deadline, above this
-// package — and putting the ladder here would also loosen the ceiling for every
+// package — and putting them here would also loosen the ceiling for every
 // streamed call, which is bounded by it alone.
 const maxWait = 2
 

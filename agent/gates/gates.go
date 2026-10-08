@@ -12,8 +12,8 @@ import (
 
 // ─── Intent-Gated Execution (IGX) ───────────────────────────────────────────
 
-// Intent is a rank on the configurable intent ladder. The ladder itself
-// lives in the intent registry (loaded from config/DB); this type is just
+// Intent is one level on the configurable intent scale. The levels themselves
+// live in the intent registry (loaded from config/DB); this type is just
 // the integer rank that flows through the gate. Go code never translates
 // ranks back to names — naming is the registry's job.
 type Intent int

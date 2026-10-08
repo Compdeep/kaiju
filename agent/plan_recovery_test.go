@@ -8,10 +8,10 @@ import (
 
 // A reply can be malformed in two ways at once. The provider that wraps a plan
 // in a markdown fence is not a different provider from the one that runs into
-// the token cap, and when both happen the fence rung cannot finish and the
-// salvager is the only rung left that can.
+// the token cap, and when both happen the fence repair cannot finish and the
+// salvager is the only repair left that can.
 //
-// The ladder falls through for exactly this, so the salvager has to read past
+// The sequence falls through for exactly this, so the salvager has to read past
 // the fence rather than choke on the backticks it starts with.
 func TestAFencedAndCutPlanKeepsItsFinishedSteps(t *testing.T) {
 	raw := "```json\n" +
@@ -34,7 +34,7 @@ func TestAFencedAndCutPlanKeepsItsFinishedSteps(t *testing.T) {
 	}
 }
 
-// A rung that recognised the shape and could not finish stops the ladder, and
+// A repair that recognised the shape and could not finish stops the sequence, and
 // the error says which recovery it was in the middle of. The caller used to get
 // the first parser's opinion of a byte, which named neither.
 func TestAFailureNamesTheRecoveryItWasAttempting(t *testing.T) {
@@ -51,7 +51,7 @@ func TestAFailureNamesTheRecoveryItWasAttempting(t *testing.T) {
 	}
 }
 
-// When no rung applies, the failure still speaks in the same terms rather than
+// When no repair applies, the failure still speaks in the same terms rather than
 // handing back the raw parser complaint on its own — and it keeps that
 // complaint underneath, where it is still the detail worth having.
 func TestAnUnrecoverableReplySaysWhatItFailedToDo(t *testing.T) {

@@ -28,7 +28,7 @@ This directory holds the detailed reference docs behind that overview.
 ## Security
 - **[authorization.md](authorization.md)** — the scope / intent / clearance triad
   and the gate that enforces `impact ≤ min(intent, clearance, scope)`.
-- **[intents.md](intents.md)** — the configurable intent ladder, custom intents,
+- **[intents.md](intents.md)** — the configurable intent levels, custom intents,
   and per-tool assignment.
 - **[examples-igx.md](examples-igx.md)** — worked IGX scenarios.
 

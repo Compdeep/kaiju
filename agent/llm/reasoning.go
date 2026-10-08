@@ -24,10 +24,10 @@ const (
 	WantOn
 )
 
-// Effort is how hard to think, on an ordered ladder.
+// Effort is how hard to think, as one of an ordered set of levels.
 //
 // The words are the providers' and not ours — minimal, low, medium, high,
-// xhigh, max — and no model takes all six. Ordered because the ladder has to
+// xhigh, max — and no model takes all six. Ordered because the order has to
 // mean something on the models that ignore the parameter entirely: the deadline
 // moves with the ordinal whether or not the provider honours the word.
 type Effort int
@@ -70,7 +70,7 @@ func ParseEffort(s string) (Effort, bool) {
 	return EffortUnset, false
 }
 
-// Efforts is the whole ladder, weakest first — for a picker that has to offer
+// Efforts is every level, weakest first — for a picker that has to offer
 // them in an order rather than in whatever order a catalog listed them.
 func Efforts() []Effort {
 	return []Effort{EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}

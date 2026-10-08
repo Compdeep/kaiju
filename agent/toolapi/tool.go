@@ -62,7 +62,7 @@ type Tool interface {
 	 *       word this package uses for the idea everywhere else.
 	 * param: params - the parameters that will be passed to Execute
 	 * return: impact tier integer (0, 1, or 2; the intent registry maps
-	 *         these to ranks on the configured ladder)
+	 *         these to the configured intent levels)
 	 */
 	Impact(params map[string]any) int
 

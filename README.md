@@ -81,7 +81,7 @@ Minimal configuration:
 }
 ```
 
-`safety_level` is the node's IGX clearance rank on the same `0` / `100` / `200` ladder as intents (observe / operate / override) — the ceiling on how impactful any tool call may be. Default is `100`.
+`safety_level` is the node's IGX clearance rank on the same `0` / `100` / `200` levels as intents (observe / operate / override) — the ceiling on how impactful any tool call may be. Default is `100`.
 
 ### LLM providers
 

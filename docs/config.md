@@ -330,7 +330,7 @@ so this list can be replaced wholesale.
 | `builtin` | `true` for the shipped observe/operate/override trio |
 | `default` | Exactly one intent should be marked `default` (the operate seed is) |
 
-Seed ladder:
+Seed levels:
 
 | Rank | Name | Default | Meaning |
 |------|------|---------|---------|

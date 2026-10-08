@@ -188,13 +188,35 @@ var (
 		Weight: 0,
 	}
 
-	// replyEdgeBudget bounds an edge. It carries; it does not add, so it should
-	// be the smallest of these — and a paragraph that ran into the cap is short
-	// rather than wrong, which is why this stage does not report truncation.
+	// replyEdgeBudget bounds an edge. It carries; it does not add, so the
+	// paragraph itself is the smallest of these — p50 188 tokens, max 351 in the
+	// table above — and one that ran into the cap is short rather than wrong,
+	// which is why this stage does not report truncation.
+	//
+	// The cap is not sized for the paragraph, though. max_tokens bounds the
+	// whole completion, so on a model that reasons the reasoning comes out of
+	// the same number, and an edge asking not to reason is obeyed only where the
+	// application's catalog says the model can stop: where nothing answers,
+	// resolve.go declines to send an instruction it cannot know will be
+	// honoured, and the edge reasons inside a cap meant for a paragraph.
+	//
+	// At 2,000 that cut one framing in three off mid-sentence, and a cut framing
+	// is worse than a short one — the recovery then answers off a reasoning
+	// tail, which is how an edge whose own prompt tells it not to conclude
+	// produced a conclusion. Measured on qwen/qwen3.6-35b-a3b: three framings at
+	// 2,000, one truncated; three at 8,192, none. 4,096 leaves about 2,048 for
+	// the reasoning after withThinkingRoom doubles, against the longest observed
+	// on a comparable stage, 2,449 tokens.
+	//
+	// Share widened with the ceiling and not after it. 256 put a 262,144-token
+	// window at 1,024, which withThinkingRoom doubled to 2,000 and the old
+	// ceiling pinned there, so raising the ceiling alone would have moved
+	// nothing on the deployment that found this.
 	replyEdgeBudget = budgetSpec{
-		Base: 600, Share: 256, Ceiling: 2000,
+		Base: 600, Share: 128, Ceiling: 4096,
 		Bounds: "one edge's framing paragraph",
-		// The smallest cap in the engine at 600 tokens. Not the problem.
+		// Base is still the smallest in the engine at 600 tokens, and a reply
+		// this size is not what makes a prompt too large.
 		Weight: 0,
 	}
 

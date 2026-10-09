@@ -52,3 +52,19 @@ func TestResolveToolScope(t *testing.T) {
 		t.Fatalf("wildcard grant must set the * allow-all, got %+v", s)
 	}
 }
+
+// The ceiling rides with the scope. A token that grants tools also says how far
+// a run may go; a scope that left that at zero would, now that the engine lowers
+// a pinned intent to the scope's ceiling, hold every token-based caller to
+// observe. A request granted nothing keeps a ceiling of zero: it fails closed on
+// tools and on intent alike.
+func TestResolveToolScope_CarriesTheTokensCeiling(t *testing.T) {
+	s := resolveToolScope(&auth.Claims{Username: "org1:u1", MaxIntent: 100, Tools: []string{"web_search"}}, nil)
+	if s == nil || s.MaxIntent != 100 {
+		t.Fatalf("a Tools-claim scope must carry the token's ceiling of 100, got %+v", s)
+	}
+	s = resolveToolScope(&auth.Claims{Username: "org1:u1", MaxIntent: 200}, nil)
+	if s == nil || s.MaxIntent != 0 || len(s.AllowedTools) != 0 {
+		t.Fatalf("a no-grant scope must stay at zero tools and zero ceiling whatever the token claims, got %+v", s)
+	}
+}

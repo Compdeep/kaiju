@@ -214,9 +214,12 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 
 		// DENY-BY-DEFAULT tool scope from the signed token (see resolveToolScope).
 		scope = resolveToolScope(claims, a.db)
-		// Cap intent by a provisioned DB scope's ceiling. A token Tools-claim scope
-		// leaves MaxIntent at 0, so this only bites for a real DB-user scope.
-		if scope != nil && scope.MaxIntent > 0 && scope.MaxIntent < intent {
+		// Lower the requested intent to the scope's ceiling. Zero is a ceiling —
+		// it is what the readonly scope says — and the old "> 0" guard treated
+		// it as "none stated", so a readonly user could pin 100 here and get
+		// it. Trigger.Intent now lowers a pin to the ceiling regardless, so
+		// this is the same answer given earlier, where the reply can say so.
+		if scope != nil && scope.MaxIntent < intent {
 			intent = scope.MaxIntent
 		}
 	}

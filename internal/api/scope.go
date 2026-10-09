@@ -28,7 +28,15 @@ func resolveToolScope(claims *auth.Claims, database *db.DB) *agent.ResolvedScope
 		for _, t := range claims.Tools {
 			allowed[t] = true // "*" here still means "everything"
 		}
-		return &agent.ResolvedScope{Username: claims.Username, AllowedTools: allowed}
+		// The token's own ceiling rides with the tools it grants. It used to be
+		// left at zero, which read as "unstated" only because nothing in the
+		// engine compared a PINNED intent against a scope's ceiling. Now that
+		// Trigger.Intent lowers a pin to the ceiling it is handed, a zero here
+		// would hold every token-based caller to observe. The host stamped
+		// MaxIntent into the claims for exactly this purpose, and the execute
+		// handler already lowers a requested intent by it; carrying it on the
+		// scope says the same thing in the one place the engine reads.
+		return &agent.ResolvedScope{Username: claims.Username, AllowedTools: allowed, MaxIntent: claims.MaxIntent}
 	}
 	if database != nil {
 		if user, err := database.GetUser(claims.Username); err == nil {

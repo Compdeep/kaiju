@@ -254,20 +254,25 @@ func withStepName(payload json.RawMessage, name string) string {
  * return: the resolved IGX Intent value.
  */
 func (t Trigger) Intent() gates.Intent {
-	// Chat queries default to auto-inference unless the caller pinned a rank.
-	if t.Type == "chat_query" {
-		if t.MaxIntent != nil {
-			return gates.Intent(*t.MaxIntent)
-		}
+	// No pin: a chat is left to the planner, and so is anything else that did
+	// not say. Go has no knowledge of which rank suits which trigger type —
+	// that policy lives in the caller or its config — so there is nothing to
+	// return here but auto.
+	if t.MaxIntent == nil {
 		return gates.IntentAuto
 	}
-	// Non-chat triggers must carry an explicit rank set by the trigger
-	// creator. Go has no knowledge of which rank is appropriate for which
-	// trigger type — that policy lives in the caller/config.
-	if t.MaxIntent != nil {
-		return gates.Intent(*t.MaxIntent)
+	// A pin never takes a run past the ceiling its scope allows. The field
+	// says it "can only lower intent, never escalate", and the scheduler holds
+	// an INFERRED intent to the ceiling — but a pinned one was returned as
+	// given, so a caller that pinned above the ceiling was trusted outright.
+	// kaiju's own API clamps before it builds the trigger; the dashboard did
+	// not; and the engine must not depend on every caller remembering to. A
+	// nil scope is a local caller with full access, and the pin stands.
+	pinned := gates.Intent(*t.MaxIntent)
+	if t.Scope != nil && gates.Intent(t.Scope.MaxIntent) < pinned {
+		return gates.Intent(t.Scope.MaxIntent)
 	}
-	return gates.IntentAuto
+	return pinned
 }
 
 /*

@@ -19,7 +19,7 @@ type dummyTool struct{ name string }
 
 func (d dummyTool) Name() string                { return d.name }
 func (d dummyTool) Description() string         { return "a tool for the tests" }
-func (d dummyTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (d dummyTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (d dummyTool) Impact(map[string]any) int   { return 0 }
 func (d dummyTool) Execute(ctx context.Context, p map[string]any) (string, error) {
 	return "", nil

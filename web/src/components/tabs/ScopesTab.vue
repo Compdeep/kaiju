@@ -49,17 +49,28 @@
           <div v-if="!cappableTools.length" class="hint">Select tools above to set caps</div>
         </div>
 
+        <!-- The scope's own ceiling: how far any run may go for someone holding
+             it, whatever the tools allow. A person's own ceiling still applies
+             on top, and the lower of the two wins. -->
+        <div class="form-group">
+          <label>ceiling <span class="hint-inline">(the highest level a run under this scope may reach)</span></label>
+          <select v-model.number="form.intentCap" class="cap-select">
+            <option v-for="i in intentOptions" :key="i.name" :value="i.rank">{{ i.name }} ({{ i.rank }})</option>
+          </select>
+        </div>
+
         <button class="btn btn-sm btn-primary" @click="save">{{ editing ? 'update' : 'create' }}</button>
       </div>
     </transition>
 
     <table v-if="scopes.length">
-      <thead><tr><th>name</th><th>tools</th><th>caps</th><th></th></tr></thead>
+      <thead><tr><th>name</th><th>tools</th><th>caps</th><th>ceiling</th><th></th></tr></thead>
       <tbody>
         <tr v-for="p in scopes" :key="p.name">
           <td><code>{{ p.name }}</code><br><span class="dim">{{ p.description }}</span></td>
           <td><code class="dim">{{ fmtTools(p.tools) }}</code></td>
           <td><code class="dim">{{ fmtCap(p.cap) }}</code></td>
+          <td><code class="dim">{{ impactLabel(p.intentCap) }}</code></td>
           <td class="actions">
             <button class="btn-icon" @click="edit(p)" title="Edit"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
             <button class="btn-icon del" @click="remove(p.name)" title="Delete"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
@@ -82,7 +93,13 @@ const availableTools = ref([])
 const intentOptions = ref([])
 const showForm = ref(false)
 const editing = ref(false)
-const form = ref({ name: '', description: '' })
+// intentCap is the ceiling on how far any run under this scope may go, on the
+// same 0-200 line as a tool's impact. It is part of the form because a PUT
+// without it is decoded as 0 on the server — observe-only — so a form that
+// left it out silently dropped everyone holding the scope to read-only the
+// moment anybody edited its description. New scopes start at the top of the
+// line, which is what the database gives a scope that never said.
+const form = ref({ name: '', description: '', intentCap: 200 })
 const selectedTools = ref([])
 const allTools = ref(false)
 const caps = ref({})
@@ -186,7 +203,7 @@ function impactBadgeClass(rank) {
  */
 async function edit(p) {
   if (!availableTools.value.length) await loadTools()
-  form.value = { name: p.name, description: p.description }
+  form.value = { name: p.name, description: p.description, intentCap: p.intentCap ?? topRank() }
   if (p.tools && p.tools.length === 1 && p.tools[0] === '*') {
     allTools.value = true
     selectedTools.value = []
@@ -232,7 +249,7 @@ async function save() {
       : await api.post('/api/v1/scopes', d)
     showForm.value = false
     editing.value = false
-    form.value = { name: '', description: '' }
+    form.value = { name: '', description: '', intentCap: topRank() }
     selectedTools.value = []
     allTools.value = false
     caps.value = {}
@@ -266,6 +283,13 @@ function fmtTools(s) {
  * @param {Object} c - Map of tool names to impact levels
  * @returns {string} Formatted caps summary
  */
+// The highest rank the registry knows, for a scope that has not chosen a
+// ceiling. Falls back to 200 — the scale's top and the column's default —
+// when the registry has not loaded yet.
+function topRank() {
+  const ranks = intentOptions.value.map(o => o.rank)
+  return ranks.length ? Math.max(...ranks) : 200
+}
 function fmtCap(c) {
   if (!c || !Object.keys(c).length) return '\u2014'
   return Object.entries(c).map(([k, v]) => `${k}: ${impactLabel(v)}`).join(', ')

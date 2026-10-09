@@ -18,6 +18,7 @@ import (
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/docs"
+	"github.com/Compdeep/kaiju/internal/api"
 	"github.com/Compdeep/kaiju/internal/channels"
 	"github.com/Compdeep/kaiju/internal/channels/cli"
 	"github.com/Compdeep/kaiju/internal/channels/web"
@@ -666,7 +667,7 @@ func runChat() {
 	chatDB, dbErr := kaijudb.Open(filepath.Join(cfg.Agent.DataDir, "kaiju.db"))
 	if dbErr == nil {
 		defer chatDB.Close()
-		if err := ag.LoadIntentRegistry(intentsFrom(chatDB)); err != nil {
+		if err := ag.LoadIntentRegistry(api.IntentsFrom(chatDB)); err != nil {
 			log.Printf("[chat] intent registry load failed: %v", err)
 		}
 		// message_search, now there is a transcript to search. Registered here rather
@@ -927,7 +928,7 @@ func runServe() {
 	}
 
 	// Load intent registry from DB (seeded with defaults on first run)
-	if err := ag.LoadIntentRegistry(intentsFrom(kaijuDB)); err != nil {
+	if err := ag.LoadIntentRegistry(api.IntentsFrom(kaijuDB)); err != nil {
 		log.Fatalf("[kaiju] load intent registry: %v", err)
 	}
 	log.Printf("[kaiju] intent registry loaded (%d intents)", len(ag.Intents().List()))
@@ -1172,7 +1173,7 @@ func intentStringToRank(s string, registry *agent.IntentRegistry) int {
 // Used by CLI commands that need to parse intent names without standing up a full agent.
 func loadIntentRegistry(database *kaijudb.DB) *agent.IntentRegistry {
 	reg := agent.NewIntentRegistry()
-	_ = reg.Load(intentsFrom(database)) // errors are logged inside; fall back to empty registry
+	_ = reg.Load(api.IntentsFrom(database)) // errors are logged inside; fall back to empty registry
 	return reg
 }
 

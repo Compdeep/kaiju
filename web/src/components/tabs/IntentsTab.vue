@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="tab-explainer">
-      Intents define the safety levels the agent operates under. Ships with three default tiers loaded from kaiju.json; add more with sparse ranks (e.g. 50, 300). Each tool can be pinned to an intent — DB assignments win over the tool's compiled default. <strong>Restart kaiju after changes.</strong>
+      Intents are the levels a run may be held to, on one line from 0 to 200. Three are seeded from kaiju.json; add more at any rank in between or beyond (50, 300). A tool can be pinned to a level as a ceiling on its own impact. Changes take effect at once.
     </div>
 
     <!-- Intents section -->
@@ -47,7 +47,7 @@
     <!-- Tool assignments section -->
     <div class="section-title" style="margin-top: 24px;">Tool assignments</div>
     <div class="sub-explainer">
-      Set a maximum intent rank for a tool. The assignment acts as a ceiling — the tool's per-invocation impact is still checked, but cannot exceed the assigned rank. Tools without an assignment use their compiled default.
+      Pin a tool to a level. The pin is a ceiling: the impact of each call is still read, but cannot be counted above the pinned level. A tool with no pin is judged on its own impact alone.
     </div>
     <table v-if="toolIntents.length" class="intent-table">
       <thead><tr><th>tool</th><th>intent</th><th>default</th><th></th></tr></thead>

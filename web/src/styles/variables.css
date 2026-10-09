@@ -1,4 +1,9 @@
 :root {
+  /* Tells the browser which scheme the page is in, so the parts it paints
+     itself — a <select>'s option list above all — follow the theme. Without
+     this the box is themed and the list that drops out of it is white, with
+     the theme's light text on it. */
+  color-scheme: light;
   /* ── Light — softened: warm off-white, calm blue accent (was neon cyan) ── */
   --bg: #F6F5F3;
   --surface: #FFFFFF;
@@ -78,6 +83,7 @@
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
   /* ── Dark — architecture-aligned: #050506, blue primary, indigo/pink logo ── */
   --bg: #050506;
   --surface: #0C0C11;

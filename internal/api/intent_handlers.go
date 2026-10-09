@@ -30,6 +30,43 @@ func NewIntentAPI(database *db.DB, ag *agent.Agent) *IntentAPI {
 }
 
 /*
+ * reload hands the engine the intent table as it now stands.
+ * desc: Every write below ends here. Before this, each handler answered
+ *       "restart required for changes to take effect", and meant it: the row
+ *       was written and the engine kept comparing against the registry it
+ *       loaded at startup. The chat's picker reads the table, so a new rank
+ *       appeared there at once while the planner's list of levels and every
+ *       tool pin stayed as they were — the screen and the engine disagreed
+ *       until somebody restarted the daemon.
+ *
+ *       LoadIntentRegistry is the same call startup makes, so the schema the
+ *       plan is held to is rebuilt as well as the ranks. It leaves a clearance
+ *       the operator set alone (clearanceExplicit) and only re-derives one
+ *       that was still on the bootstrap default.
+ * return: the error the engine gave, so the caller can say the row is written
+ *         but the engine is not yet using it.
+ */
+func (a *IntentAPI) reload() error {
+	if a.agent == nil {
+		return nil
+	}
+	return a.agent.LoadIntentRegistry(IntentsFrom(a.db))
+}
+
+/*
+ * written answers a successful write. The row is in; if the engine then
+ * refused to load the table, that is said rather than hidden, because a 200
+ * that leaves the engine on the old ranks is the exact fault this replaces.
+ */
+func (a *IntentAPI) written(w http.ResponseWriter, status string) {
+	if err := a.reload(); err != nil {
+		jsonError(w, status+", but the engine could not reload the intent table: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonResponse(w, map[string]string{"status": status}, http.StatusOK)
+}
+
+/*
  * RegisterRoutes mounts CRUD routes for intents and tool_intents.
  */
 func (a *IntentAPI) RegisterRoutes(mux *http.ServeMux) {
@@ -73,6 +110,10 @@ func (a *IntentAPI) handleCreateIntent(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
 	}
+	if err := a.reload(); err != nil {
+		jsonError(w, "created, but the engine could not reload the intent table: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	jsonResponse(w, intent, http.StatusCreated)
 }
 
@@ -87,7 +128,7 @@ func (a *IntentAPI) handleUpdateIntent(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	jsonResponse(w, map[string]string{"status": "updated", "note": "restart required for changes to take effect"}, http.StatusOK)
+	a.written(w, "updated")
 }
 
 func (a *IntentAPI) handleDeleteIntent(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +141,7 @@ func (a *IntentAPI) handleDeleteIntent(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), status)
 		return
 	}
-	jsonResponse(w, map[string]string{"status": "deleted", "note": "restart required for changes to take effect"}, http.StatusOK)
+	a.written(w, "deleted")
 }
 
 // ── Tool intent assignments ──
@@ -180,7 +221,7 @@ func (a *IntentAPI) handleSetToolIntent(w http.ResponseWriter, r *http.Request) 
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonResponse(w, map[string]string{"status": "updated", "note": "restart required for changes to take effect"}, http.StatusOK)
+	a.written(w, "updated")
 }
 
 func (a *IntentAPI) handleDeleteToolIntent(w http.ResponseWriter, r *http.Request) {
@@ -189,5 +230,5 @@ func (a *IntentAPI) handleDeleteToolIntent(w http.ResponseWriter, r *http.Reques
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonResponse(w, map[string]string{"status": "deleted", "note": "restart required for changes to take effect"}, http.StatusOK)
+	a.written(w, "deleted")
 }

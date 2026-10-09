@@ -69,7 +69,7 @@ var sample = []*fakeTool{
 	{name: "servicenow_open_case", desc: "Raise a ticket for an outage or a fault."},
 	{name: "workday_absence_balance", desc: "Read how much leave a worker has left."},
 	{name: "s3_put_object", desc: "Upload a file to a bucket.",
-		params: json.RawMessage(`{"properties":{"bucket":{"description":"target bucket name"},"key":{"description":"object key"}}}`)},
+		params: json.RawMessage(`{"type":"object","properties":{"bucket":{"description":"target bucket name"},"key":{"description":"object key"}}}`)},
 	{name: "stripe_refund_charge", desc: "Return money taken from a customer."},
 }
 

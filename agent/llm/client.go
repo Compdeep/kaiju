@@ -269,9 +269,17 @@ type StreamOptions struct {
 
 // ChatResponse is the response from POST /v1/chat/completions.
 type ChatResponse struct {
-	ID      string   `json:"id"`
-	Choices []Choice `json:"choices"`
-	Usage   Usage    `json:"usage"`
+	ID string `json:"id"`
+	// Provider is the host that served the call, when the endpoint is a gateway
+	// that routes one model to several hosts and says which it chose. Empty from
+	// an endpoint that serves the model itself.
+	//
+	// Kept because the hosts behind one model do not behave alike: empty replies
+	// on a live deployment could not be traced to the host that returned them,
+	// since nothing recorded which one it was.
+	Provider string   `json:"provider,omitempty"`
+	Choices  []Choice `json:"choices"`
+	Usage    Usage    `json:"usage"`
 	// Error is what a provider says went wrong in a body it still returned 200
 	// with. OpenAI-compatible gateways do this for an upstream failure, a rate
 	// limit or a filtered request: the status is 200, choices is empty, usage is
@@ -943,6 +951,9 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 	var order []int // tool-call indices in first-seen order
 	var usage Usage
 	finish := "stop"
+	// Which call this was and which host served it. Every frame repeats them,
+	// so the first that carries each is kept.
+	var genID, provider string
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // tool-arg frames can be long
@@ -957,7 +968,9 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 		}
 
 		var chunk struct {
-			Choices []struct {
+			ID       string `json:"id"`
+			Provider string `json:"provider"`
+			Choices  []struct {
 				Delta struct {
 					Content   string `json:"content"`
 					Reasoning string `json:"reasoning"`
@@ -977,6 +990,12 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 		}
 		if json.Unmarshal([]byte(payload), &chunk) != nil {
 			continue
+		}
+		if genID == "" {
+			genID = chunk.ID
+		}
+		if provider == "" {
+			provider = chunk.Provider
 		}
 		if chunk.Usage != nil {
 			usage = *chunk.Usage
@@ -1046,6 +1065,8 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 			reasonStr += think
 		}
 		return &ChatResponse{
+			ID:       genID,
+			Provider: provider,
 			Choices: []Choice{{
 				Index:        0,
 				Message:      Message{Role: "assistant", Content: finalContent, Reasoning: reasonStr, ToolCalls: toolCalls},

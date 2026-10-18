@@ -1522,11 +1522,12 @@ func recoverTruncatedPlan(raw string, payload *executiveCallPayload) (bool, erro
  *       one and closes the array and the object. What comes back parses, and the
  *       caller's own parser handles it like any other plan.
  *
- *       The alternative was asking the model for a shorter plan, which is what
- *       used to happen: a second call at seventeen thousand input tokens, to
- *       re-derive steps already sitting in the reply. That call is still there
- *       for the case this cannot help — a reply cut before the first step
- *       closed — and it now fires only then.
+ *       Asking the model for a shorter plan comes first — see the planner's
+ *       cut-reply branch. A reply cut at the cap is read as a planner that
+ *       did not stop, because on every live cut reply the closed steps were a
+ *       real plan followed by one tool repeated to the cap; this trims what
+ *       the SECOND reply holds when it is cut too, or the first when no second
+ *       came, so a run still has something to execute.
  * param: raw - the tool-call arguments as they arrived, cut.
  * return: valid JSON carrying the whole steps, or "" when none closed.
  */
@@ -1821,8 +1822,14 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		return nil, fmt.Errorf("planner LLM returned no choices")
 	}
 	planRec.TokensIn, planRec.TokensOut = resp.Usage.PromptTokens, resp.Usage.CompletionTokens
+	if resp.Usage.Details != nil {
+		planRec.TokensThink = resp.Usage.Details.ReasoningTokens
+	}
 
 	choice := resp.Choices[0]
+	// The reply the plan is read from: the first, or the shorter one asked for
+	// when the first was cut. The measurement line below reports this one.
+	used := resp
 	if len(choice.Message.ToolCalls) > 0 {
 		planRec.Reply = choice.Message.ToolCalls[0].Function.Arguments
 	} else {
@@ -1840,15 +1847,21 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// had chosen to answer in prose — or as "tool_calls" with truncated
 	// arguments, where the parse retry fires and blames the wrong thing. Neither
 	// tells the model what happened, and both retry under the same cap.
-	// A cut reply is asked for again ONLY when there is nothing to salvage from
-	// it. The steps that closed before the cut are whole and already paid for,
-	// and re-asking re-derives them at seventeen thousand input tokens a time —
-	// see salvageTruncatedPlan, which the parser applies below.
-	if choice.FinishReason == "length" && salvageTruncatedPlan(planArguments(choice)) != "" {
-		log.Printf("[dag] executive plan cut off at %d tokens — salvaging the steps that finished",
-			a.planMaxTokens(ctx))
-	} else if choice.FinishReason == "length" {
-		log.Printf("[dag] executive plan cut off at %d tokens with nothing to salvage — asking for a shorter plan", a.planMaxTokens(ctx))
+	// A reply that ran into its cap is not a plan. The steps that closed before
+	// the cut are whole, and salvaging them looked like thrift — but a plan
+	// long enough to be cut was not planning. Every live reply that reached the
+	// cap opened with 10 to 35 distinct steps and then wrote one tool again and
+	// again with a counter in the tag until the tokens ran out; salvage kept the
+	// first thirty of those and ran them, and one cut reply became a 30-step
+	// investigation that spent the tool rate limit on reading /proc.
+	//
+	// So a cut reply is asked for again first, once, told plainly what
+	// happened. Salvage is the last answer rather than the first: the parser
+	// below applies it when the second reply is cut too, or never came.
+	first := choice.FinishReason
+	cut, retryFinish := first == "length", ""
+	if cut {
+		log.Printf("[dag] executive plan cut off at %d tokens — asking for a shorter plan", a.planMaxTokens(ctx))
 		shorter := append(append([]llm.Message{}, messages...), llm.Message{
 			Role: "user",
 			Content: "Your previous plan was cut off before it finished — it ran past the reply limit. " +
@@ -1861,8 +1874,19 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			Temperature: a.cfg.Temperature,
 			MaxTokens:   a.planMaxTokens(ctx),
 		})
-		if retryErr == nil && len(retryResp.Choices) > 0 {
-			choice = retryResp.Choices[0]
+		switch {
+		case retryErr != nil:
+			retryFinish = "error"
+			log.Printf("[dag] executive shorter plan failed (%v) — salvaging the first reply's finished steps", retryErr)
+		case len(retryResp.Choices) == 0:
+			retryFinish = "no_choices"
+			log.Printf("[dag] executive shorter plan returned no choices — salvaging the first reply's finished steps")
+		default:
+			choice, used = retryResp.Choices[0], retryResp
+			retryFinish = choice.FinishReason
+			if retryFinish == "length" {
+				log.Printf("[dag] executive shorter plan cut off too — salvaging the steps that finished")
+			}
 		}
 	}
 
@@ -1875,10 +1899,10 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// which reads Content: emptied by that same move. Every step already
 	// generated was thrown away, and the run answered with nothing.
 	//
-	// The branch above has already decided what a cut reply is worth: it asks
-	// for a shorter plan when nothing salvages, and falls through to here when
-	// something does. This is where that salvage happens — parseExecutivePayload
-	// applies it. Refusing the reply here made that branch a dead end.
+	// The branch above has already asked once for a shorter plan. What reaches
+	// here cut is the second reply, or the first when no second came, and this
+	// is where its finished steps are salvaged — parseExecutivePayload applies
+	// it. Refusing the reply here made that branch a dead end.
 	if len(choice.Message.ToolCalls) > 0 && (choice.FinishReason == "tool_calls" || choice.FinishReason == "length") {
 		tc := choice.Message.ToolCalls[0]
 
@@ -1955,6 +1979,10 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 		}
 
 		steps := payload.Steps
+
+		// One line per plan, left on, so the planner can be measured from the
+		// log alone — see planMeasureLine.
+		log.Print(planMeasureLine(graph.Round(), used, first, retryFinish, choice.FinishReason, steps))
 
 		// Empty steps = trivial query, planner answered directly.
 		//

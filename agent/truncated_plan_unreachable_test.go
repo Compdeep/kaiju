@@ -101,8 +101,11 @@ func TestACutPlanRecoversTheStepsThatFinished(t *testing.T) {
 // The whole path, on a reply that really came back cut.
 //
 // The stub answers plan() with the captured 21KB fragment and reports
-// finish_reason "length", which is what the endpoint said. The steps that
-// finished before the cut have to reach the graph and run.
+// finish_reason "length", which is what the endpoint said. A cut reply is asked
+// for again, shorter, before anything is salvaged — a planner that ran into
+// the cap was repeating itself, not planning — so the stub answers the shorter
+// ask with the same fragment, cut too. The steps that finished before the cut
+// then have to reach the graph and run.
 //
 // Before the gate admitted a cut reply this asserted zero calls: the fragment
 // was refused, execution fell to the prose branch, and a run that had a
@@ -122,7 +125,8 @@ func TestARealCutPlanRunsItsFinishedSteps(t *testing.T) {
 			"decision": "conclude", "summary": "looked at the process", "outcome": "benign",
 		}},
 	})
-	model.answerNth("plan", stubReply{RawArgs: theCutPlan(t), Cut: true})
+	real := stubReply{RawArgs: theCutPlan(t), Cut: true}
+	model.answerNth("plan", real, real)
 
 	a := agentOnStub(t, model, procs, inspect, conns, sh)
 	res, err := a.RunDAGSync(context.Background(), Trigger{

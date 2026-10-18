@@ -65,8 +65,16 @@ func planStepBranches(names []string, registry *toolapi.Registry) (json.RawMessa
 		if err != nil {
 			return nil, false
 		}
+		// The branch owns its required list, like the plan root and the tool's
+		// params. Without the marker the closer adds "type" to it and widens it
+		// to allow null; the model, which under strict never sees the schema, is
+		// then made to write a value there and writes "compute" — every step of
+		// every live plan did — and a step meant to run a tool on a remote
+		// machine runs as a compute node on this one, target ignored. "type" is
+		// optional because a step is a tool step unless it says otherwise.
 		branches = append(branches, fmt.Sprintf(`{
 			"type": "object",
+			"%s": true,
 			"required": ["tool", "params", "tag", "depends_on"],
 			"properties": {
 				"tool": {"const": %s},
@@ -75,7 +83,7 @@ func planStepBranches(names []string, registry *toolapi.Registry) (json.RawMessa
 				"type": {"type": "string", "enum": ["tool","compute"]},
 				"depends_on": {"type": "array", "items": {"type": ["integer", "string"]}, "description": "Which earlier steps must finish before this one starts, by position. STEPS RUN IN PARALLEL: every step whose depends_on is [] is dispatched at once, so [] means \"nothing is holding this step back\" — correct for independent work, wrong the moment one step acts on what another produces. Using another step's OUTPUT needs nothing here: the ${step.tag.field} reference orders it for you. This field is for the other kind, where no value passes but the order still matters — a step that writes a file and a command that runs it, an install and the thing that needs it. Leave it out there and both start together, the second reads the state from before the first, and the plan reports success on a wrong result. An unnecessary dependency costs a little time; a missing one breaks the plan silently."}
 			}
-		}`, nameJSON, params))
+		}`, llm.AuthoredRequired, nameJSON, params))
 	}
 	if len(branches) == 0 {
 		return nil, false

@@ -50,6 +50,10 @@ type DebugRecord struct {
 	Gate      map[string]string `json:"gate,omitempty"`   // what the context gate returned, by source
 	TokensIn  int               `json:"tokens_in,omitempty"`
 	TokensOut int               `json:"tokens_out,omitempty"`
+	// TokensThink is the part of TokensOut the model spent reasoning before it
+	// wrote, as the provider reports it. Zero when it did not think, or when
+	// the provider does not say.
+	TokensThink int `json:"tokens_think,omitempty"`
 }
 
 // debugLog is a run's records. Its own lock, like capAccount: a record is

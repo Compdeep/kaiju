@@ -127,6 +127,47 @@ func TestPlanSchema_EachBranchPinsItsToolAndCarriesItsParams(t *testing.T) {
 	}
 }
 
+// A step's "type" stays optional on the wire. The closer used to add it to every
+// branch's required list, and a model that never sees the schema under strict
+// was made to write a value there: it wrote "compute" on every step of every
+// live plan, and each ran as a compute node on the local machine with the
+// remote target ignored. The branch owns its required list, like the root.
+func TestPlanSchema_ABranchDoesNotRequireType(t *testing.T) {
+	a := branchAgent(t)
+	sent := llm.SchemaAsSent(a.executivePlanSchema(a.registry.List()))
+	if sent == nil {
+		t.Fatal("the plan schema would not be sent")
+	}
+	var doc struct {
+		Properties struct {
+			Steps struct {
+				Items struct {
+					AnyOf []struct {
+						Required   []string       `json:"required"`
+						Properties map[string]any `json:"properties"`
+					} `json:"anyOf"`
+				} `json:"items"`
+			} `json:"steps"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(sent, &doc); err != nil {
+		t.Fatalf("the sent schema is not the shape expected: %v", err)
+	}
+	for _, b := range doc.Properties.Steps.Items.AnyOf {
+		for _, k := range b.Required {
+			if k == "type" {
+				t.Errorf("a branch requires \"type\": %v", b.Required)
+			}
+		}
+		if _, has := b.Properties["type"]; !has {
+			t.Error("a branch lost its \"type\" property; it is optional, not absent")
+		}
+		if len(b.Required) != 4 {
+			t.Errorf("a branch requires %v, want exactly tool, params, tag and depends_on", b.Required)
+		}
+	}
+}
+
 // Only the tools the planner was SHOWN. A branch for one it cannot see would
 // let it name a tool it was never offered, which is the narrowing undone.
 func TestPlanStepBranches_OnlyTheToolsShown(t *testing.T) {

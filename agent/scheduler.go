@@ -2374,6 +2374,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// own, so the graph and the traces agree.
 	runID := newRunID(trigger.ID)
 	ctx = withRunID(ctx, runID)
+	ctx = withRunTokens(ctx, &runTokens{})
 	startTime := time.Now()
 
 	// Run admission before any work or model call, and before the branch below,
@@ -2668,8 +2669,11 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	if report := graph.CapReport(); report != "" {
 		log.Printf("[dag] caps: %s", report)
 	}
-	log.Printf("[dag] sync run complete in %s (id=%s, nodes=%d, llm=%d)",
-		elapsed.Round(time.Millisecond), trigger.ID, graph.NodeCount(), budget.LLMCount())
+	// With what it spent, so the per-run cost is read off this line and not
+	// summed from llm_debug afterwards. Counted as the lanes saw the replies: a
+	// first attempt the client retried inside one call is not in it.
+	log.Printf("[dag] sync run complete in %s (id=%s, nodes=%d, llm=%d, %s)",
+		elapsed.Round(time.Millisecond), trigger.ID, graph.NodeCount(), budget.LLMCount(), runTokensFrom(ctx))
 
 	// Record investigation in event store
 	if recordLine == "" {

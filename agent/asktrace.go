@@ -116,6 +116,12 @@ func traceFault(ctx context.Context, why string) {
 func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 	resp *llm.ChatResponse, err error, started time.Time) {
 
+	// The run's account first, before the trace decides whether it has a name
+	// to write under: a call without one still cost tokens.
+	if resp != nil {
+		runTokensFrom(ctx).add(resp.Usage)
+	}
+
 	id, named := traceIDFrom(ctx)
 	if !named {
 		return

@@ -257,14 +257,16 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
  * desc: The precedence, stated once: the lane's own rule, then the run's
  *       choice, then the operator's, then nothing.
  *
- *       "Nothing" is a real answer and the common one. It leaves the model's
- *       own default alone, which is what every deployment had before any of
- *       this and what a stage with no opinion should not be able to change.
+ *       "Nothing" is a real answer and, off the reasoning lane, the common one.
+ *       It leaves the model's own default alone, which is what every deployment
+ *       had before any of this and what a stage with no opinion should not be
+ *       able to change. The reasoning lane is the exception: it asks for
+ *       thinking unless the operator switched it off, because the client
+ *       otherwise reads its forced-shape calls as ones that must not think.
  *
- *       What this does NOT decide is whether a forced single-shape call may
- *       think. That is a property of the call rather than of the lane — the
- *       planner forces one shape too — and it is settled in the client, where
- *       the callers that never reach this function are also covered.
+ *       What this does NOT decide is whether a forced single-shape call made
+ *       outside the lanes may think. That is settled in the client, where the
+ *       callers that never reach this function are covered.
  * param: ctx - the run context, carrying this run's own choice.
  * param: l - the lane.
  * param: stated - what the caller already decided, or nil. A conversational
@@ -289,9 +291,6 @@ func (a *Agent) thinkingFor(ctx context.Context, l Lane, stated *llm.Reasoning) 
 		return &llm.Reasoning{Want: llm.WantOff}
 	}
 
-	// Heavy is the one lane an operator has a view on. Reasoning helps the
-	// planning and costs time, and which of those a deployment wants is not
-	// something the engine can know.
 	// What the caller stated, where it stated anything. A conversational turn's
 	// need for reasoning is a property of the message, and only the stage that
 	// read the message knows it.
@@ -299,12 +298,28 @@ func (a *Agent) thinkingFor(ctx context.Context, l Lane, stated *llm.Reasoning) 
 	if stated != nil {
 		want = stated.Want
 	}
+
+	// Heavy thinks unless the operator says otherwise. The planner, the
+	// reflector and the aggregator run on it, and each forces a single shape —
+	// which the client reads, when the lane says nothing, as a call that must
+	// not think (resolveReasoning, rule 1). So an empty setting here did not
+	// leave the model's default alone: it switched thinking OFF on the three
+	// calls the engine depends on reasoning for, on every model whose catalog
+	// entry says the switch exists. Measured on a live deployment on
+	// qwen/qwen3.6-35b-a3b: 56 of 57 planner calls, 79 of 79 reflector calls
+	// and 5 of 5 verdict calls carried no reasoning tokens, and the planner
+	// wrote steps to the token cap on 20 of 34 first plans; the same request
+	// with thinking on finished 3 of 3, in 4 to 10 steps.
+	//
+	// "off" is the operator's and still wins — a deployment that would rather
+	// finish sooner than plan better says so. "on" and empty now mean the same.
+	// Whether the model CAN think is the client's question, answered from the
+	// catalog, and a model with nothing to switch is asked nothing.
 	if want == llm.WantAuto && l == Heavy {
-		switch a.llmReasoning {
-		case "on":
-			want = llm.WantOn
-		case "off":
+		if a.llmReasoning == "off" {
 			want = llm.WantOff
+		} else {
+			want = llm.WantOn
 		}
 	}
 

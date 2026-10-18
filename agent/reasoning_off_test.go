@@ -26,18 +26,25 @@ func TestTheSmallForcedCallLanesTurnReasoningOff(t *testing.T) {
 	}
 }
 
-// Heavy and Answer are deliberately untouched. Heavy forces a call too, but it
-// has the budget and the thinking earns it — on one planner prompt a thinking
-// model returned complete plans three times of three where a non-thinking one
-// ran the cap out three times of three. Answer writes prose, where it is better.
+// Answer is deliberately untouched: it writes prose, where the model's own
+// default is better. Heavy asks for thinking. It forces a call too, but it has
+// the budget and the thinking earns it — on one planner prompt a thinking model
+// returned complete plans three times of three where a non-thinking one ran the
+// cap out three times of three — and left alone it would NOT be left alone: the
+// client reads a forced shape with no word from the lane as a call that must
+// not think, and sends the off switch.
 func TestTheReasoningAndAnswerLanesAreLeftAlone(t *testing.T) {
-	for _, l := range []Lane{Heavy, Answer} {
-		req := &llm.ChatRequest{}
-		a := &Agent{llm: llm.NewClient("http://127.0.0.1:1", "", "m")}
-		a.prepare(t.Context(), l, req)
-		if req.Think != nil {
-			t.Errorf("%s lane overrode the operator's model choice", l)
-		}
+	req := &llm.ChatRequest{}
+	a := &Agent{llm: llm.NewClient("http://127.0.0.1:1", "", "m")}
+	a.prepare(t.Context(), Answer, req)
+	if req.Think != nil {
+		t.Errorf("Answer lane overrode the operator's model choice with %+v", req.Think)
+	}
+
+	req = &llm.ChatRequest{}
+	a.prepare(t.Context(), Heavy, req)
+	if !req.Think.On() {
+		t.Errorf("Heavy lane asked for %+v, want thinking on", req.Think)
 	}
 }
 

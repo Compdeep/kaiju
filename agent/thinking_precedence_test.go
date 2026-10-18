@@ -44,13 +44,34 @@ func TestTheOperatorsSwitchReachesTheReasoningLane(t *testing.T) {
 	}
 }
 
-// Saying nothing is a real answer and the common one: it leaves the model's own
-// default alone, which a stage with no opinion must not be able to change.
+// Saying nothing is a real answer and, off the reasoning lane, the common one:
+// it leaves the model's own default alone, which a stage with no opinion must
+// not be able to change.
 func TestNothingSetAsksNothing(t *testing.T) {
-	for _, l := range []Lane{Heavy, Answer} {
-		if got := effortAgent("", "").thinkingFor(context.Background(), l, nil); got != nil {
-			t.Errorf("%s lane asked for %+v with nothing configured, want nothing said", l, got)
+	if got := effortAgent("", "").thinkingFor(context.Background(), Answer, nil); got != nil {
+		t.Errorf("Answer lane asked for %+v with nothing configured, want nothing said", got)
+	}
+}
+
+// The reasoning lane is the exception. Its calls — the planner, the reflector,
+// the aggregator — each force one shape, and the client reads a forced shape
+// with no word from the lane as a call that must not think. So "nothing" here
+// was never the model's default; it was off. The lane asks for thinking unless
+// the operator switched it off.
+func TestTheReasoningLaneThinksUnlessSwitchedOff(t *testing.T) {
+	for _, c := range []struct {
+		setting string
+		want    llm.Want
+	}{{"", llm.WantOn}, {"on", llm.WantOn}, {"off", llm.WantOff}} {
+		got := effortAgent("", c.setting).thinkingFor(context.Background(), Heavy, nil)
+		if got == nil || got.Want != c.want {
+			t.Errorf("Heavy with reasoning %q gave %+v, want %v", c.setting, got, c.want)
 		}
+	}
+	// What the caller stated still wins over the lane's default.
+	got := effortAgent("", "").thinkingFor(context.Background(), Heavy, &llm.Reasoning{Want: llm.WantOff})
+	if got == nil || !got.Off() {
+		t.Errorf("a caller that said off on Heavy got %+v, want off", got)
 	}
 }
 

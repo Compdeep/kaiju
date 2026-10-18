@@ -49,7 +49,10 @@ const maxWait = 2
  *          tail fits none, so this cannot be decided by comparing the cap to a
  *          number — whatever number is chosen, the tail beats it. It is decided
  *          by what the call is: a forced shape wants a small exact answer, and
- *          a stage that wants it reasoned about says WantOn. The planner does.
+ *          a stage that wants it reasoned about says WantOn. The reasoning
+ *          lane does, for the planner, the reflector and the aggregator — see
+ *          thinkingFor — so this rule reaches the forced calls made outside
+ *          the lanes, and any lane that stays silent.
  *
  *       2. Then what the caller asked for.
  *
@@ -96,7 +99,13 @@ func resolveReasoning(req *ChatRequest, f ModelFacts, known bool) resolved {
 			out.Say, out.Think = true, false
 		}
 	case WantOn:
-		out.Say, out.Think = true, true
+		// Asked only of a model with a reasoning phase to switch on. One the
+		// catalog marks as neither thinking by default nor switchable has
+		// nothing to switch; it would accept the instruction and do nothing,
+		// which reads as a setting that works. It is asked nothing instead.
+		if f.Thinking.Default || f.Thinking.Optional {
+			out.Say, out.Think = true, true
+		}
 	}
 
 	thinking := out.Say && out.Think || !out.Say && f.Thinking.Default

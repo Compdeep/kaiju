@@ -132,7 +132,20 @@ func (a *Agent) heavyThinks(model string) bool {
 	case "off":
 		return false
 	}
-	return a.cfg.Thinks != nil && model != "" && a.cfg.Thinks(model)
+	// Empty means the lane asks for thinking (thinkingFor), and the client sends
+	// the instruction wherever the catalog says the model has a reasoning phase,
+	// by default or by switch. The room and the clocks ask the same question of
+	// the same catalog, so they follow what was asked rather than what the
+	// model would have done unasked.
+	if model == "" {
+		return false
+	}
+	if a.cfg.Catalog != nil {
+		if f, known := a.cfg.Catalog(model); known {
+			return f.Thinking.Default || f.Thinking.Optional
+		}
+	}
+	return a.cfg.Thinks != nil && a.cfg.Thinks(model)
 }
 
 func (a *Agent) wallClock() time.Duration {

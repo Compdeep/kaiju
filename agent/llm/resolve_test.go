@@ -44,7 +44,8 @@ func TestAForcedShapeDoesNotThinkByDefault(t *testing.T) {
 	}
 }
 
-// And a stage that wants it reasoned about says so. The planner does.
+// And a stage that wants it reasoned about says so. The reasoning lane does, for
+// the planner, the reflector and the aggregator — see agent.thinkingFor.
 func TestAForcedShapeThinksWhenItAsks(t *testing.T) {
 	req := forced(8192)
 	req.Think = &Reasoning{Want: WantOn}
@@ -77,6 +78,26 @@ func TestOffIsNotSentToAModelThatCannotStop(t *testing.T) {
 	req.Think = &Reasoning{Want: WantOn}
 	if got := resolveReasoning(req, locked, true); !got.Say || !got.Think {
 		t.Error("a locked model was not told to think, which it can honour")
+	}
+}
+
+// Telling a model with no reasoning phase to think is the same kind of
+// instruction: accepted, ignored, and indistinguishable from one that worked.
+// It is not sent. A model that can be switched, whichever way it defaults, is.
+func TestOnIsNotSentToAModelWithNothingToSwitch(t *testing.T) {
+	none := hybrid
+	none.Thinking = Thinking{}
+
+	req := forced(8192)
+	req.Think = &Reasoning{Want: WantOn}
+	if got := resolveReasoning(req, none, true); got.Say {
+		t.Errorf("a model with nothing to switch was sent %+v; nothing should be said", got)
+	}
+
+	switchable := hybrid
+	switchable.Thinking = Thinking{Default: false, Optional: true}
+	if got := resolveReasoning(req, switchable, true); !got.Say || !got.Think {
+		t.Errorf("a switchable model got %+v, want thinking on", got)
 	}
 }
 

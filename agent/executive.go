@@ -1597,8 +1597,9 @@ func salvageTruncatedPlan(raw string) string {
 
 /*
  * objective is what this run is trying to do, in the words it was given.
- * desc: The user's request verbatim, then preflight's framing of it — which is
- *       where the URLs, paths and identifiers from the conversation are — then
+ * desc: The user's request verbatim and what came with it, then preflight's
+ *       framing of it — which is where the URLs, paths and identifiers from
+ *       the conversation are — then
  *       the re-plan frame when the reflector asked for one, which says what the
  *       plan so far did not achieve.
  *
@@ -1612,7 +1613,7 @@ func salvageTruncatedPlan(raw string) string {
  * return: the objective text.
  */
 func (a *Agent) objective(trigger Trigger, graph *Graph, replanFrame ...string) string {
-	out := a.formatTrigger(trigger)
+	out := a.formatTriggerWithBackground(trigger)
 	if graph != nil && graph.Preflight != nil && !graph.Preflight.Context.Empty() {
 		out += "\n\n## Context\n" + graph.Preflight.Context.Text()
 	}

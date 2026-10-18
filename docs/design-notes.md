@@ -199,7 +199,9 @@ callback.
 **4. Empty return means "not mine" — fall through to the built-in.**
 `DescribeTrigger` returning `""` uses the default. An application handles only
 the cases it recognises and leaves everything else alone, so adding a callback
-never obliges anyone to reimplement what already worked.
+never obliges anyone to reimplement what already worked. `DescribeBackground`
+returning `""` means there is none, and the stages that would have read it read
+the request alone.
 
 **5. Nil capability means the feature is off, not broken.**
 No executor and targets run locally. No validator and any target is accepted. No

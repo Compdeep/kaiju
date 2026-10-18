@@ -395,7 +395,11 @@ type Agent struct {
 	// own kinds of work for the planner. Nil falls back to the built-in
 	// rendering, so this is additive for every existing caller.
 	describeTrigger func(Trigger) string
-	intentRegistry  *IntentRegistry // DB-backed intent registry; loaded at startup
+	// describeBackground is Config.DescribeBackground: what came with the
+	// trigger that only the stages that plan and answer need to read. Nil
+	// means there is none.
+	describeBackground func(Trigger) string
+	intentRegistry     *IntentRegistry // DB-backed intent registry; loaded at startup
 	// Per-investigation state (active skill cards, preflight result) lives on the
 	// Graph (Graph.ActiveCards / Graph.Preflight), not on the Agent — concurrent
 	// investigations each carry their own Graph, so nothing here is shared or raced.
@@ -849,7 +853,7 @@ func (a *Agent) InitEmbeddings(context.Context) error { return nil }
 func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger, objective string) ([]string, []string) {
 	scope := trigger.Scope
 	if objective == "" {
-		objective = a.formatTrigger(trigger)
+		objective = a.formatTriggerWithBackground(trigger)
 	}
 
 	// How the registry becomes the list, step by step.

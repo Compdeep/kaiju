@@ -99,6 +99,7 @@ place.
   preflight has decided   ──► Refine           correct my reading of it
   a prompt is assembled   ──► Environment      describe the surroundings
                           ──► DescribeTrigger  say what started this
+                          ──► DescribeBackground  what came with it (planner and answer only)
   a step is about to run  ──► ValidateTarget   is that machine name real
                           ──► AllowTool        your rules, after my gate
                           ──► Clearance        has this principal the authority

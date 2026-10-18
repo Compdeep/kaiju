@@ -59,14 +59,14 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	// and it keeps seeing every tool, exactly as before.
 	// The ReAct loop builds no graph, so nothing tallies what its caps cut.
 	// The ReAct loop keeps no trace, so the narrowing record has nowhere to go.
-	relevant, _ := a.relevantTools(ctx, nil, trigger, a.formatTrigger(trigger))
+	relevant, _ := a.relevantTools(ctx, nil, trigger, a.formatTriggerWithBackground(trigger))
 	toolDefs := a.registry.ToolDefsForNames(relevant)
 
 	// Build initial messages — no skill guidance injection (same as native planner).
 	// Skills are available as tool descriptions in the API tools array.
 	messages := BuildMessagesWithHistory(
 		a.systemPrompt(nil),
-		a.formatTrigger(trigger),
+		a.formatTriggerWithBackground(trigger),
 		trigger.History,
 	)
 
@@ -318,6 +318,47 @@ func (a *Agent) formatTrigger(t Trigger) (out string) {
 		}
 	}
 	return defaultFormatTrigger(t)
+}
+
+/*
+ * formatBackground is what came with the trigger, for the stages that plan and
+ * answer.
+ * desc: Asks the application through Config.DescribeBackground. The classifier
+ *       and the reflector never call this: they decide from the request and the
+ *       results, and the background is the expensive part of a prompt. A
+ *       description that crashed is treated as none — the request itself is
+ *       still rendered, so a stage without background still has its subject.
+ * param: t - the trigger.
+ * return: the text, or "" when there is none.
+ */
+func (a *Agent) formatBackground(t Trigger) (out string) {
+	if a == nil || a.describeBackground == nil {
+		return ""
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[dag] the background description panicked, going on without it: %v", r)
+			out = ""
+		}
+	}()
+	return a.describeBackground(t)
+}
+
+/*
+ * formatTriggerWithBackground is the request and what came with it, in that
+ * order.
+ * desc: For the planner, the answer and the stages that investigate. The
+ *       request first, so what the run is about is stated before the material
+ *       it is about.
+ * param: t - the trigger.
+ * return: the request, then the background when there is one.
+ */
+func (a *Agent) formatTriggerWithBackground(t Trigger) string {
+	out := a.formatTrigger(t)
+	if bg := a.formatBackground(t); bg != "" {
+		out += "\n\n" + bg
+	}
+	return out
 }
 
 /*

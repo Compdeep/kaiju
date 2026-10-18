@@ -163,6 +163,7 @@ func TestEveryCallIntoApplicationCodeIsGuarded(t *testing.T) {
 		{"RunTargets", "remote.go", "runTargets"},
 		{"Remote", "remote.go", "remoteExecute"},
 		{"DescribeTrigger", "loop_react.go", "formatTrigger"},
+		{"DescribeBackground", "loop_react.go", "formatBackground"},
 		{"Refine", "refine.go", "refinePreflight"},
 		{"Clearance", "clearance.go", "checkClearance"},
 		{"Store", "runrecord.go", "storeRun"},

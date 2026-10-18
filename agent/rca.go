@@ -634,7 +634,7 @@ func assembleHolmesPrompt(state *HolmesState, trigger Trigger, a *Agent, intent 
 	var sb strings.Builder
 
 	sb.WriteString("## Original Request\n\n")
-	sb.WriteString(a.formatTrigger(trigger))
+	sb.WriteString(a.formatTriggerWithBackground(trigger))
 	sb.WriteString("\n\n")
 
 	sb.WriteString("## The Problem\n\n")

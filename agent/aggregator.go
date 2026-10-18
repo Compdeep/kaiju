@@ -124,7 +124,7 @@ func (a *Agent) assembleAggregatorPrompt(trigger Trigger, graph *Graph, gateCtx 
 	// dominates the worklog, which can include entries from prior investigations
 	// in the same session. The worklog stays as secondary context (cross-query
 	// continuity matters), but the query is the primary signal.
-	if q := a.formatTrigger(trigger); q != "" {
+	if q := a.formatTriggerWithBackground(trigger); q != "" {
 		sb.WriteString("## Original Request\n\n")
 		sb.WriteString(q)
 		sb.WriteString("\n\n")

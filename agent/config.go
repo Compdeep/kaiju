@@ -402,4 +402,16 @@ type Handlers struct {
 	//
 	// Nil behaves the same as returning "" for everything.
 	DescribeTrigger func(Trigger) string
+
+	// DescribeBackground renders what came with the run's starting point and
+	// is too long for every stage to read: a host's state, a document, a log.
+	// The stages that plan and that answer read it after DescribeTrigger's
+	// text. The stage that classifies the request and the stage that decides
+	// whether to go on read the request alone: they decide nothing from the
+	// background, and measured on one application it was 7.7 KB on every call
+	// and a fifth of everything sent.
+	//
+	// Returning "" or nil means there is none, and every stage reads
+	// DescribeTrigger's text as before.
+	DescribeBackground func(Trigger) string
 }

@@ -64,6 +64,9 @@ func (a *Agent) applyHandlers(cfg Config) {
 	if cfg.DescribeTrigger != nil {
 		a.describeTrigger = cfg.DescribeTrigger
 	}
+	if cfg.DescribeBackground != nil {
+		a.describeBackground = cfg.DescribeBackground
+	}
 }
 
 /*

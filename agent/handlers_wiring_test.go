@@ -98,6 +98,10 @@ var wiredTo = map[string]struct {
 		func(c *Handlers) { c.DescribeTrigger = func(Trigger) string { return "because" } },
 		func(a *Agent) bool { return a.describeTrigger != nil },
 	},
+	"DescribeBackground": {
+		func(c *Handlers) { c.DescribeBackground = func(Trigger) string { return "around it" } },
+		func(a *Agent) bool { return a.describeBackground != nil },
+	},
 }
 
 type wiringClearance struct{}

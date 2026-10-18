@@ -6,8 +6,8 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// The vocabulary. Nothing narrows on it now, but a tool declaring a word
-// outside it is declaring something nobody agreed the meaning of.
+// The vocabulary preflight emits. Nothing narrows on it now, but a tool
+// declaring a word outside it is declaring something preflight never says.
 var validCategories = map[string]bool{
 	"network": true, "filesystem": true, "compute": true, "process": true, "info": true,
 }

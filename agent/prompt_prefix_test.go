@@ -14,14 +14,15 @@ func TestPlannerPrompt_SharesItsStartAcrossRuns(t *testing.T) {
 	a := &Agent{skillGuidance: loadBuiltinSkills(nil)}
 	g1, g2 := NewGraph(), NewGraph()
 	g1.ActiveCards = []string{"data_retrieval"}
+	g1.Preflight = &PreflightResult{RequiredCategories: []string{"network"}}
 	g2.ActiveCards = []string{"system_operations"}
 
 	p1 := a.executiveSystemPrompt(context.Background(), g1, nil, "", "observe", "")
 	p2 := a.executiveSystemPrompt(context.Background(), g2, nil, "", "execute", "")
 
-	cut := strings.Index(p1, "## Skill Guidance")
+	cut := strings.Index(p1, "## Required Tool Categories")
 	if cut < 0 {
-		t.Fatal("the prompt has no Skill Guidance section")
+		t.Fatal("the prompt has no Required Tool Categories section")
 	}
 	shared := p1[:cut]
 	if !strings.HasPrefix(p2, shared) {
@@ -30,7 +31,7 @@ func TestPlannerPrompt_SharesItsStartAcrossRuns(t *testing.T) {
 	if !strings.Contains(shared, "## Rules") {
 		t.Error("the rules are not in the shared start")
 	}
-	for _, own := range []string{"Intent: **observe**", "### data_retrieval", "Current time:"} {
+	for _, own := range []string{"## Skill Guidance", "Intent: **observe**", "### data_retrieval", "Current time:"} {
 		if i := strings.Index(p1, own); i < cut {
 			t.Errorf("%q belongs to this run and sits before the shared start ends (at %d, cut %d)", own, i, cut)
 		}

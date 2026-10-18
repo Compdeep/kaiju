@@ -513,9 +513,9 @@ type executiveOutput struct {
  * executiveSystemPrompt returns the system prompt for the initial planner LLM call.
  * desc: Two halves, and the order is the point. First everything that reads the
  *       same on every run: the planning contract, the rules, the identity, the
- *       tool index and the compute doctrine. Then what this run adds: its skill
- *       guidance, its intent, its compute depth, its workspace, the budget and
- *       the time.
+ *       tool index and the compute doctrine. Then what this run adds: the
+ *       categories it must reach for, its skill guidance, its intent, its
+ *       compute depth, its workspace, the budget and the time.
  *
  *       A model host caches a prompt it has just seen and bills the matching
  *       start of the next one at a fraction of the price — measured on two
@@ -526,10 +526,9 @@ type executiveOutput struct {
  *       behind them were read in full every time. Written in this order, every
  *       run shares the first sixty thousand.
  *
- *       The categories preflight once named are gone from here and from
- *       preflight: measured over twenty-eight runs, the first plan met half of
- *       them only because the shell counted for every kind, and the planner
- *       chose its tools without them.
+ *       The categories preflight names open the run's half. The step that
+ *       dropped tools of other kinds from the index is gone: it made the index
+ *       differ between runs, which is the one thing the shared start cannot do.
  * param: relevant - slice of tool names visible to the planner.
  * param: dagMode - the DAG execution mode string.
  * param: intent - the intent level string ("auto" or a specific level).
@@ -665,6 +664,38 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			sb.WriteString("```\n")
 			sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
 		}
+	}
+
+	// What this query must reach for, before anything it may reach with.
+	//
+	// Preflight decides this, and it is the first of the run's own sections:
+	// after the shared start, so the cache match above it holds, and ahead of
+	// the skill guidance rather than at the very end, where it was once written
+	// and nobody applied it. Measured over twenty-eight runs the first plan met
+	// about half of the categories named, so this is a hint the planner weighs,
+	// not a rule it keeps.
+	if graph != nil && graph.Preflight != nil && len(graph.Preflight.RequiredCategories) > 0 {
+		sb.WriteString("## Required Tool Categories\n")
+		sb.WriteString(fmt.Sprintf("This query needs tools from: %s. Your plan MUST include at least one tool from each of these categories.\n",
+			strings.Join(graph.Preflight.RequiredCategories, ", ")))
+		// bash appears under network as well as process, because a shell running
+		// curl reaches the network — and listing it only under process made this
+		// block contradict a skill.
+		//
+		// The weather skill names the tool and the URL: bash, curl wttr.in, and
+		// "don't use web_search for weather". Preflight categorised a weather
+		// question as network. bash was not a network tool here, so a plan of
+		// five curl calls satisfied the skill and named no network tool, which
+		// this block forbids in the one line of the prompt that says MUST. The
+		// planner obeyed the MUST: five web_search calls, twenty-five results,
+		// not one temperature among them, and three planning rounds to arrive
+		// where the skill had pointed in the first.
+		sb.WriteString("Category → common tools:\n")
+		sb.WriteString("- network: web_fetch, web_search, bash (curl, wget)\n")
+		sb.WriteString("- filesystem: file_read, file_write, file_list, bash\n")
+		sb.WriteString("- compute: compute\n")
+		sb.WriteString("- process: process_list, process_kill, bash\n")
+		sb.WriteString("- info: sysinfo, env_list, disk_usage, net_info, bash\n\n")
 	}
 
 	// Skill Planning Guidance sections. These are authoritative — if a skill

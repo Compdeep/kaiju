@@ -23,9 +23,10 @@ import (
  *       classifier.
  */
 type PreflightResult struct {
-	Skills []string     // which guidance cards/skills apply (union of capabilities + skillGuidance)
-	Mode   string       // "chat" | "agent"
-	Intent gates.Intent // inferred intent rank from the registry (used when trigger intent is Auto)
+	Skills             []string     // which guidance cards/skills apply (union of capabilities + skillGuidance)
+	Mode               string       // "chat" | "agent"
+	Intent             gates.Intent // inferred intent rank from the registry (used when trigger intent is Auto)
+	RequiredCategories []string     // tool categories the plan must include (network/filesystem/compute/process/info)
 	// Context is what the run is about, and every concrete thing it needs.
 	//
 	// Framing is a sentence and belongs in one. Identifiers are not: a URL with
@@ -59,6 +60,11 @@ type PreflightResult struct {
 	// the field, leaves the model's own default alone.
 	Thinking llm.Want
 }
+
+// preflightCategories is the fixed set of tool categories the preflight
+// call can name. The planner receives the list as a prompt hint and picks
+// specific tools that satisfy the named categories.
+var preflightCategories = []string{"network", "filesystem", "compute", "process", "info"}
 
 // preflightSystemPromptWithContext is built at call time when prior context
 // is available — appended after the base prompt. Kept separate so the base
@@ -201,12 +207,13 @@ func isWebURL(s string) bool {
  * preflightRaw mirrors the JSON shape emitted by the LLM. Parsed into PreflightResult.
  */
 type preflightRaw struct {
-	Skills         []string            `json:"skills"`
-	Mode           string              `json:"mode"`
-	Intent         string              `json:"intent"`
-	Context        preflightContextRaw `json:"context"`
-	ComputeMode    string              `json:"compute_mode"`
-	NeedsSynthesis bool                `json:"needs_synthesis"`
+	Skills             []string            `json:"skills"`
+	Mode               string              `json:"mode"`
+	Intent             string              `json:"intent"`
+	RequiredCategories []string            `json:"required_categories"`
+	Context            preflightContextRaw `json:"context"`
+	ComputeMode        string              `json:"compute_mode"`
+	NeedsSynthesis     bool                `json:"needs_synthesis"`
 }
 
 // mentionsLiveInventory reports whether the query asks about the actual plugins
@@ -653,7 +660,8 @@ func routeContext(history []llm.Message) []llm.Message {
 
 /*
  * classifyInvestigate runs one executor-model LLM call to answer the pre-plan
- * questions for an AGENTIC query: skills, intent, context, compute mode. The skill manifest is built here — only reached on the
+ * questions for an AGENTIC query: skills, intent, required categories, context,
+ * compute mode. The skill manifest is built here — only reached on the
  * investigate path. Any missing/malformed field falls back to a safe default.
  */
 func (a *Agent) classifyInvestigate(ctx context.Context, triggerID, query string, history []llm.Message) *PreflightResult {
@@ -772,8 +780,9 @@ func (a *Agent) buildSkillManifest() string {
 
 /*
  * validatePreflight normalizes and validates the raw preflight output.
- * desc: Filters skills to ones that exist in either registry and clamps mode
- *       and intent to known values. Invalid fields fall back to safe defaults.
+ * desc: Filters skills to ones that exist in either registry, clamps mode
+ *       and intent to known values, and filters required_categories to the
+ *       canonical enum. Invalid fields fall back to safe defaults.
  * param: raw - unvalidated preflight output from the LLM.
  * return: validated PreflightResult.
  */
@@ -823,6 +832,20 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 			out.Intent = gates.Intent(i.Rank)
 		} else {
 			log.Printf("[dag] preflight: unknown intent %q, defaulting to rank 0", raw.Intent)
+		}
+	}
+
+	// Required categories — keep only canonical enum values
+	validCat := make(map[string]bool, len(preflightCategories))
+	for _, c := range preflightCategories {
+		validCat[c] = true
+	}
+	for _, c := range raw.RequiredCategories {
+		normalized := strings.ToLower(strings.TrimSpace(c))
+		if validCat[normalized] {
+			out.RequiredCategories = append(out.RequiredCategories, normalized)
+		} else if normalized != "" {
+			log.Printf("[dag] preflight: unknown category %q, dropping", c)
 		}
 	}
 
@@ -963,6 +986,7 @@ func parsePreflight(raw string) (*preflightRaw, error) {
 	get("mode", &out.Mode)
 	get("intent", &out.Intent)
 	get("skills", &out.Skills)
+	get("required_categories", &out.RequiredCategories)
 	get("context", &out.Context)
 	get("compute_mode", &out.ComputeMode)
 	get("needs_synthesis", &out.NeedsSynthesis)

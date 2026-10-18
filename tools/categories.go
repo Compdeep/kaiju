@@ -4,13 +4,13 @@ package tools
  * What kind of work each tool does: network, filesystem, compute, process or
  * info.
  *
- * Nothing in the engine narrows on these any more. Preflight named the kinds a
- * run needed and scopeToWork dropped tools of other kinds from the planner's
- * index; both went on 2026-10-18, because measured over twenty-eight runs the
- * planner met the named kinds half the time and chose its tools without them,
- * and the narrowing changed the tool index from run to run, which stopped the
- * model host from caching it. The declarations stay: applications make them
- * through toolapi.Categorised, and a reader of a registry still wants to know.
+ * Preflight names the kinds a run needs and the planner is told, in the
+ * Required Tool Categories section of its prompt. Nothing narrows on these any
+ * more: scopeToWork, which dropped tools of other kinds from the planner's
+ * index, went on 2026-10-18 because it changed the index from run to run, and
+ * an index that differs between runs is one the model host cannot cache. The
+ * declarations stay: applications make them through toolapi.Categorised, and a
+ * reader of a registry still wants to know.
  *
  * Declared generously. A tool named by either preflight or the ranking
  * survives, and the cost of a second category is that a tool is offered when it

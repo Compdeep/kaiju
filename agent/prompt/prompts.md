@@ -164,8 +164,8 @@ Return ONLY the raw JSON object. No commentary or Markdown.
 
 ## Classification scope
 
-Classify `mode`, top-level `intent`, `compute_mode`, and `needs_synthesis` from
-the CURRENT query.
+Classify `mode`, top-level `intent`, `required_categories`, `compute_mode`, and
+`needs_synthesis` from the CURRENT query.
 
 Use Prior Context, if present, only to:
 
@@ -182,6 +182,7 @@ unrelated current query must not inherit the classification of prior work.
   "skills": ["skill_key", ...],
   "mode": "chat" | "agent",
   "intent": %s,
+  "required_categories": [one or more of "network", "filesystem", "compute", "process", "info"],
   "context": {
     "intent": "...",
     "urls": [...],
@@ -277,6 +278,22 @@ for.
 Choose one:
 
 %s
+
+### required_categories
+
+Exactly these five words and nothing else. This is not the `skills` list and
+never contains a skill name — a value outside the five is dropped, so naming a
+skill here leaves the field empty and the planner is told nothing.
+
+Include only categories that the plan must use, and leave it empty when you
+cannot tell:
+
+- `"network"`: web search, web retrieval, or external APIs;
+- `"filesystem"`: reading, writing, or listing files;
+- `"compute"`: executing code, creating programs, or processing data;
+- `"process"`: managing processes, services, or daemons;
+- `"info"`: inspecting system state, environment variables, disks, or network
+  configuration.
 
 ### compute_mode
 
@@ -511,6 +528,12 @@ Create new work in the workspace unless the user specifies another destination o
 When modifying an existing file, repository, service, configuration, or other resource, operate on the actual target rather than creating an unrelated workspace copy.
 
 If multiple possible targets exist and choosing incorrectly could affect the wrong resource, do not guess.
+
+## Preflight requirements
+
+If preflight supplies `required_categories`, they are authoritative.
+
+The plan must contain at least one step satisfying every required category. Tool or skill guidance may determine how that requirement is fulfilled but may not silently remove it.
 
 ## Validity rules
 

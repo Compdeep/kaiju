@@ -476,7 +476,7 @@ function pushNode(items, n, depth, last) {
     items.push({ type: 'tools', key: `tl-${n.id}`, node: n, depth: sub })
   }
   // What a classifying node settled — the categories among them, which is what
-  // the tool index is then narrowed by. See NodeInfo.Decided.
+  // the planner is told the plan must reach for. See NodeInfo.Decided.
   if (n.decided && n.decided.length) {
     items.push({ type: 'decided', key: `dc-${n.id}`, node: n, depth: sub })
   }
@@ -575,11 +575,11 @@ function errLabel(t) { return { gate: '\u26D4 GATE', clearance: '\uD83D\uDD12 CL
 function indent(d) { return { paddingLeft: (d || 0) * 13 + 'px' } }
 
 // A narrowing entry is "<step> <before>-><after>[, why]". Split for display so
-// the counts can be coloured when a step actually removed something — four of
-// the six steps normally do not, and telling them apart at a glance is the
-// point of showing this at all.
-// The categories first when there are any — they are what the tool index is
-// narrowed by, and the reason anyone opens this row.
+// the counts can be coloured when a step actually removed something — most
+// steps normally do not, and telling them apart at a glance is the point of
+// showing this at all.
+// The categories first when there are any — they are what the planner is told
+// to reach for, and the reason anyone opens this row.
 function decidedPeek(decided) {
   const cats = (decided || []).find(d => d.startsWith('categories: '))
   if (cats) return cats

@@ -511,10 +511,25 @@ type executiveOutput struct {
 
 /*
  * executiveSystemPrompt returns the system prompt for the initial planner LLM call.
- * desc: Builds the complete planner system prompt including role description,
- *       planning guidance from skill card and skills, tool definitions
- *       with parameter and output schemas, IGX section, budget limits, and
- *       expanded planner rules. Only the provided tool names are included.
+ * desc: Two halves, and the order is the point. First everything that reads the
+ *       same on every run: the planning contract, the rules, the identity, the
+ *       tool index and the compute doctrine. Then what this run adds: its skill
+ *       guidance, its intent, its compute depth, its workspace, the budget and
+ *       the time.
+ *
+ *       A model host caches a prompt it has just seen and bills the matching
+ *       start of the next one at a fraction of the price — measured on two
+ *       hosts, which cached 20,064 of 20,213 tokens of this prompt on the second
+ *       send without being asked. The match ends at the first byte that differs.
+ *       With the run's own sections written first, it ended after ten thousand
+ *       characters of sixty-six, and the forty-five thousand of tool index
+ *       behind them were read in full every time. Written in this order, every
+ *       run shares the first sixty thousand.
+ *
+ *       The categories preflight once named are gone from here and from
+ *       preflight: measured over twenty-eight runs, the first plan met half of
+ *       them only because the shell counted for every kind, and the planner
+ *       chose its tools without them.
  * param: relevant - slice of tool names visible to the planner.
  * param: dagMode - the DAG execution mode string.
  * param: intent - the intent level string ("auto" or a specific level).
@@ -535,37 +550,25 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	sb.WriteString(prompt.Executive)
 	sb.WriteString("\n\n")
 
-	// What this query must reach for, before anything it may reach with.
-	//
-	// Preflight decides this and it is the one line in the prompt that binds:
-	// a plan that names no network tool for a question about the present is
-	// wrong, and this says so. It used to be written last — after the tool
-	// index, the compute doctrine, the rules and a workspace listing, at the
-	// end of a document of nearly sixty thousand characters. A constraint
-	// nobody reaches is a constraint nobody applies.
-	if graph != nil && graph.Preflight != nil && len(graph.Preflight.RequiredCategories) > 0 {
-		sb.WriteString("## Required Tool Categories\n")
-		sb.WriteString(fmt.Sprintf("This query needs tools from: %s. Your plan MUST include at least one tool from each of these categories.\n",
-			strings.Join(graph.Preflight.RequiredCategories, ", ")))
-		// bash appears under network as well as process, because a shell running
-		// curl reaches the network — and listing it only under process made this
-		// block contradict a skill.
-		//
-		// The weather skill names the tool and the URL: bash, curl wttr.in, and
-		// "don't use web_search for weather". Preflight categorised a weather
-		// question as network. bash was not a network tool here, so a plan of
-		// five curl calls satisfied the skill and named no network tool, which
-		// this block forbids in the one line of the prompt that says MUST. The
-		// planner obeyed the MUST: five web_search calls, twenty-five results,
-		// not one temperature among them, and three planning rounds to arrive
-		// where the skill had pointed in the first.
-		sb.WriteString("Category → common tools:\n")
-		sb.WriteString("- network: web_fetch, web_search, bash (curl, wget)\n")
-		sb.WriteString("- filesystem: file_read, file_write, file_list, bash\n")
-		sb.WriteString("- compute: compute\n")
-		sb.WriteString("- process: process_list, process_kill, bash\n")
-		sb.WriteString("- info: sysinfo, env_list, disk_usage, net_info, bash\n\n")
-	}
+	sb.WriteString("## Rules\n")
+	sb.WriteString("NEVER guess values you don't know. Only use names, paths, and parameters that are visible in the evidence (workspace files, blueprint, conversation). If you don't know the exact service name, file path, or port — plan a diagnostic step first (file_read, service list, bash ls) to discover it.\n")
+	sb.WriteString("NEVER interpret, judge, or refuse requests.\n")
+	sb.WriteString("ALWAYS write a step reference as `${step.<tag>.<path>}`, naming the step by its tag — never by its position, and never a literal value you do not have. It works as a whole parameter value and inside a longer string, such as a shell command.\n")
+	sb.WriteString("NEVER write code in bash params.\n")
+	sb.WriteString("NEVER use bash for complex multi-step tasks.\n")
+	sb.WriteString("NEVER use interactive commands.\n")
+	sb.WriteString("Use compute (type:\"compute\") for coding, development, and analytics work that the aggregator can't do — see the Compute Nodes decision rules below. Provide the GOAL, not the code.\n")
+	sb.WriteString("ALWAYS use the compute mode preflight selected — see the Compute Nodes section below. Workspace contents do NOT influence this choice.\n")
+	sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\", port=NNNN) spawns in the background and returns immediately. ALWAYS include the port parameter so health checks know which port to verify.\n")
+	sb.WriteString("ALWAYS use bash only for commands that terminate: ls, grep, git, npm install, curl, node script.js, etc.\n")
+	sb.WriteString("ALWAYS gather current data from the web when the question needs it, using whichever tool in the index below does that. Never answer a question about the present from memory.\n")
+	sb.WriteString("ALWAYS gather required data before grafting compute. Every compute node must have its inputs supplied by prior gathering steps, wired with `${step.<tag>.<path>}` — never compute over inputs that don't exist yet.\n")
+	sb.WriteString("ALWAYS plan and complete the full action the user asked for. A worklog showing prior failures is NOT a reason to plan a timid probe (e.g. just file_read) instead of the real edit/build — the user is asking again, plan the action. Imperatives ('do it', 'fix it', 'just do it') force action; never stop partway or ask for permission.\n")
+	sb.WriteString("ALWAYS settle what you do not know BEFORE you plan around it. Read the objective and name the concrete values the plan needs — a path, a directory, a host, a user, a port, a process id, a version, a filename, an address — then ask of each one: have I been given this, or am I supplying it myself? A value you have not seen is a guess. It will look right and the step built on it fails on the value, not on the tool, so the failure teaches nothing and the retry guesses again.\n")
+	sb.WriteString("ALWAYS treat this machine as unknown. You do not know its user, its home directory, its working directory, what is installed, what is running, what any path contains, or what any of its addresses answer — unless a step in THIS plan returned it, or it is stated above. A default that is usually right elsewhere is still a guess here. When the objective names something you cannot see (\"the home directory\", \"the config\", \"the service\", \"the latest one\"), that name is the question, not the answer.\n")
+	sb.WriteString("ALWAYS plan the lookup as its own first step and wire its result forward with `${step.<tag>.<path>}`. The tool list holds tools that report the environment, the filesystem and the process table; choosing one costs a step and settles the value for the whole plan.\n")
+	sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
+	sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
 
 	// The identity and the persistence litany, AFTER the planning contract
 	// rather than before it.
@@ -581,57 +584,6 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("\n\n")
 	}
 
-	// Inject skill Planning Guidance sections. These are authoritative —
-	// if a skill says "use compute deep", the planner must follow that,
-	// not substitute file_list/file_read.
-	var guidance []string
-	plannerHeadings := skillmd.PlannerHeadings
-	// The keys this run selected, or every key when it selected none — the
-	// planner has always fallen back to all of them rather than to nothing.
-	//
-	// Resolved through lookupGuidanceBody, so a skill card counts as well
-	// as a SKILL.md. This loop read one of the two stores, which meant every
-	// "## Planning Guidance" section in a skill card was written for a
-	// planner that never saw it. Iterating the keys rather than a map also
-	// fixes the order, which varied between runs.
-	keys := cards
-	if len(keys) == 0 {
-		keys = a.guidanceKeys()
-	}
-	for _, key := range keys {
-		body, name := a.lookupGuidanceBody(key)
-		if body == "" {
-			continue
-		}
-		var parts []string
-		for _, heading := range plannerHeadings {
-			if section := Text.ExtractSection(body, heading); section != "" {
-				parts = append(parts, section)
-			}
-		}
-		if len(parts) > 0 {
-			guidance = append(guidance, fmt.Sprintf("### %s\n%s", name, strings.Join(parts, "\n\n")))
-		}
-	}
-	if len(guidance) > 0 {
-		sb.WriteString("## Skill Guidance (authoritative — follow these instructions)\n\n")
-		sb.WriteString("Skill guidance is authoritative. If a skill says \"use compute deep\", use compute deep. Don't inspect — build.\n\n")
-		sb.WriteString(strings.Join(guidance, "\n\n"))
-		sb.WriteString("\n\n")
-		log.Printf("[dag] executive injected %d skill guidance sections", len(guidance))
-	} else {
-		log.Printf("[dag] executive no skill guidance matched (activeCards=%v, skillGuidance=%d)", cards, len(a.skillGuidance))
-	}
-
-	// IGX section
-	var igxSection string
-	if intent == "auto" {
-		igxSection = `Intent is auto-determined. Tools exceeding intent are blocked at execution time.`
-	} else {
-		igxSection = fmt.Sprintf(`Intent: **%s**. Tools exceeding intent are blocked at execution time.`, intent)
-	}
-
-	sb.WriteString(fmt.Sprintf("%s\n", igxSection))
 	sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time.\n")
 	if toolIndex == "" {
 		toolIndex = compileToolIndex(a.registry, relevant)
@@ -691,14 +643,6 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			sb.WriteString("]\n")
 			sb.WriteString("```\n")
 			sb.WriteString("The aggregator reads `fetch_alt.content` and reports the altitude. No compute needed.\n\n")
-			// Preflight owns the compute-depth decision. Inject it here so the
-			// planner treats it as authoritative rather than re-deriving deep vs
-			// shallow from workspace residue.
-			if graph != nil && graph.Preflight != nil && graph.Preflight.ComputeMode != "" {
-				sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", graph.Preflight.ComputeMode))
-			} else {
-				sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss astrodynamics / financial / statistical / ephemeris queries that *sound* like lookups. If the question requires a library (sgp4, pandas, scipy, skyfield, ephem) or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — where a script could produce the answer, a compute step costs far less than refusing the task. Where one could not, it costs more than doing nothing: compute writes a program and runs it, and a program cannot tell you what a page says. Reading sources and reporting what they hold is the aggregator's work, and it already sees every result this run gathered.\n\n")
-			}
 			sb.WriteString("Level reference:\n")
 			sb.WriteString("- **Direct tools** (bash, service, file_read): default for downloads, searches, restarts, reads.\n")
 			sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or wired from an upstream step with `${step.<tag>.<path>}`).\n")
@@ -721,77 +665,124 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			sb.WriteString("```\n")
 			sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
 		}
-		sb.WriteString("## Rules\n")
-		sb.WriteString("NEVER guess values you don't know. Only use names, paths, and parameters that are visible in the evidence (workspace files, blueprint, conversation). If you don't know the exact service name, file path, or port — plan a diagnostic step first (file_read, service list, bash ls) to discover it.\n")
-		sb.WriteString("NEVER interpret, judge, or refuse requests.\n")
-		sb.WriteString("ALWAYS write a step reference as `${step.<tag>.<path>}`, naming the step by its tag — never by its position, and never a literal value you do not have. It works as a whole parameter value and inside a longer string, such as a shell command.\n")
-		sb.WriteString("NEVER write code in bash params.\n")
-		sb.WriteString("NEVER use bash for complex multi-step tasks.\n")
-		sb.WriteString("NEVER use interactive commands.\n")
-		sb.WriteString("Use compute (type:\"compute\") for coding, development, and analytics work that the aggregator can't do — see the Compute Nodes decision rules above. Provide the GOAL, not the code.\n")
-		sb.WriteString("ALWAYS use the compute mode preflight selected — see the Compute Nodes section above. Workspace contents do NOT influence this choice.\n")
-		sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\", port=NNNN) spawns in the background and returns immediately. ALWAYS include the port parameter so health checks know which port to verify.\n")
-		sb.WriteString("ALWAYS use bash only for commands that terminate: ls, grep, git, npm install, curl, node script.js, etc.\n")
-		sb.WriteString("ALWAYS gather current data from the web when the question needs it, using whichever tool in the index above does that. Never answer a question about the present from memory.\n")
-		sb.WriteString("ALWAYS gather required data before grafting compute. Every compute node must have its inputs supplied by prior gathering steps, wired with `${step.<tag>.<path>}` — never compute over inputs that don't exist yet.\n")
-		sb.WriteString("ALWAYS plan and complete the full action the user asked for. A worklog showing prior failures is NOT a reason to plan a timid probe (e.g. just file_read) instead of the real edit/build — the user is asking again, plan the action. Imperatives ('do it', 'fix it', 'just do it') force action; never stop partway or ask for permission.\n")
-		sb.WriteString("ALWAYS settle what you do not know BEFORE you plan around it. Read the objective and name the concrete values the plan needs — a path, a directory, a host, a user, a port, a process id, a version, a filename, an address — then ask of each one: have I been given this, or am I supplying it myself? A value you have not seen is a guess. It will look right and the step built on it fails on the value, not on the tool, so the failure teaches nothing and the retry guesses again.\n")
-		sb.WriteString("ALWAYS treat this machine as unknown. You do not know its user, its home directory, its working directory, what is installed, what is running, what any path contains, or what any of its addresses answer — unless a step in THIS plan returned it, or it is stated above. A default that is usually right elsewhere is still a guess here. When the objective names something you cannot see (\"the home directory\", \"the config\", \"the service\", \"the latest one\"), that name is the question, not the answer.\n")
-		sb.WriteString("ALWAYS plan the lookup as its own first step and wire its result forward with `${step.<tag>.<path>}`. The tool list holds tools that report the environment, the filesystem and the process table; choosing one costs a step and settles the value for the whole plan.\n")
-		sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
-		sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
-		// The workspace layout describes where compute puts what it builds, so
-		// it belongs with compute — see above.
-		if slices.Contains(relevant, computeToolName) {
-			sb.WriteString("\n## Workspace Layout\n")
-			sb.WriteString("- project/ — source code, application files\n")
-			sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
-			sb.WriteString("- blueprints/ — architecture blueprints (auto-managed by compute)\n")
-			sb.WriteString("- canvas/ — visual output that RENDERS LIVE in the UI (HTML pages, charts, images). Put any chart, plot, diagram, or interactive view here so the user actually SEES it.\n")
-			sb.WriteString("- uploads/<session-id>/ — user-uploaded attachments. When the query has an [attached files] preamble, the paths land here. Each file may have <name>.meta.json (preview) and <name>.summary.md (LLM summary) sidecars.\n")
-			// Written by tools rather than by a plan, and named here because a
-			// step that chains on one of them should reference the field that
-			// holds the path, not guess the path. Kept out of the list above:
-			// that list is the five zones a plan may WRITE to, and it mirrors
-			// internal/workspace.AllowedZones.
-			sb.WriteString("\nThese are written FOR you and are read-only. Never guess a path in them — reference the field of the step that produced it:\n")
-			sb.WriteString("- fetched/ — the whole page each web_fetch retrieved. Reach it through that step's `full_content_path`.\n")
-			sb.WriteString("- output/ — the whole output each bash command printed. Reach it through that step's `output_path`.\n")
-			sb.WriteString("- sessions/<session-id>/ — working files from earlier turns of a conversation. Not listed below; name the path directly when an earlier turn's material is needed.\n")
-			// Workspace tree for orientation (what files exist in the workspace).
-			// We do NOT inject existing blueprints here — the mere presence of
-			// a blueprint in the workspace must not bias the planner toward
-			// compute(deep). Whether this query needs architecture is the
-			// preflight's call based on the user's actual request, not workspace
-			// residue from prior runs.
-			if graph != nil && graph.Context != nil {
-				gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
-					// Depth 5 shows typical nested projects (e.g. workdir/project/<app>/<component>/src/<file>)
-					// up front so the Executive doesn't have to probe for entrypoints. The
-					// scanWorkspaceTree cap at 120 entries (round-robin across buckets) prevents
-					// runaway on monorepo-sized trees; MaxBudget:10000 is the secondary byte cap.
-					ReturnSources: Sources(WorkspaceTree(5)),
-					MaxBudget:     10000,
-				})
-				if gerr != nil {
-					log.Printf("[dag] executive context build failed: %v", gerr)
-				} else if tree := gateResp.Sources[SourceWorkspaceTree]; tree != "" {
-					sb.WriteString("\n### Current files\n")
-					sb.WriteString(tree)
-					sb.WriteString("\n")
-				}
-			}
+	}
 
+	// Skill Planning Guidance sections. These are authoritative — if a skill
+	// says "use compute deep", the planner must follow that, not substitute
+	// file_list/file_read. Written after the tool index because the set of
+	// skills is this run's; see the doc comment on the order.
+	var guidance []string
+	plannerHeadings := skillmd.PlannerHeadings
+	// The keys this run selected, or every key when it selected none — the
+	// planner has always fallen back to all of them rather than to nothing.
+	//
+	// Resolved through lookupGuidanceBody, so a skill card counts as well
+	// as a SKILL.md. This loop read one of the two stores, which meant every
+	// "## Planning Guidance" section in a skill card was written for a
+	// planner that never saw it. Iterating the keys rather than a map also
+	// fixes the order, which varied between runs.
+	keys := cards
+	if len(keys) == 0 {
+		keys = a.guidanceKeys()
+	}
+	for _, key := range keys {
+		body, name := a.lookupGuidanceBody(key)
+		if body == "" {
+			continue
+		}
+		var parts []string
+		for _, heading := range plannerHeadings {
+			if section := Text.ExtractSection(body, heading); section != "" {
+				parts = append(parts, section)
+			}
+		}
+		if len(parts) > 0 {
+			guidance = append(guidance, fmt.Sprintf("### %s\n%s", name, strings.Join(parts, "\n\n")))
+		}
+	}
+	if len(guidance) > 0 {
+		sb.WriteString("## Skill Guidance (authoritative — follow these instructions)\n\n")
+		sb.WriteString("Skill guidance is authoritative. If a skill says \"use compute deep\", use compute deep. Don't inspect — build.\n\n")
+		sb.WriteString(strings.Join(guidance, "\n\n"))
+		sb.WriteString("\n\n")
+		log.Printf("[dag] executive injected %d skill guidance sections", len(guidance))
+	} else {
+		log.Printf("[dag] executive no skill guidance matched (activeCards=%v, skillGuidance=%d)", cards, len(a.skillGuidance))
+	}
+
+	// IGX section
+	var igxSection string
+	if intent == "auto" {
+		igxSection = `Intent is auto-determined. Tools exceeding intent are blocked at execution time.`
+	} else {
+		igxSection = fmt.Sprintf(`Intent: **%s**. Tools exceeding intent are blocked at execution time.`, intent)
+	}
+
+	sb.WriteString(fmt.Sprintf("%s\n", igxSection))
+
+	if slices.Contains(relevant, computeToolName) {
+		// Preflight owns the compute-depth decision; the planner treats it as
+		// authoritative rather than re-deriving deep vs shallow from workspace
+		// residue. Here and not in the Compute Nodes section because it changes
+		// with the run.
+		if graph != nil && graph.Preflight != nil && graph.Preflight.ComputeMode != "" {
+			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", graph.Preflight.ComputeMode))
+		} else {
+			sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss astrodynamics / financial / statistical / ephemeris queries that *sound* like lookups. If the question requires a library (sgp4, pandas, scipy, skyfield, ephem) or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — where a script could produce the answer, a compute step costs far less than refusing the task. Where one could not, it costs more than doing nothing: compute writes a program and runs it, and a program cannot tell you what a page says. Reading sources and reporting what they hold is the aggregator's work, and it already sees every result this run gathered.\n\n")
+		}
+	}
+
+	// The workspace layout describes where compute puts what it builds, so
+	// it belongs with compute — see above.
+	if slices.Contains(relevant, computeToolName) {
+		sb.WriteString("\n## Workspace Layout\n")
+		sb.WriteString("- project/ — source code, application files\n")
+		sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
+		sb.WriteString("- blueprints/ — architecture blueprints (auto-managed by compute)\n")
+		sb.WriteString("- canvas/ — visual output that RENDERS LIVE in the UI (HTML pages, charts, images). Put any chart, plot, diagram, or interactive view here so the user actually SEES it.\n")
+		sb.WriteString("- uploads/<session-id>/ — user-uploaded attachments. When the query has an [attached files] preamble, the paths land here. Each file may have <name>.meta.json (preview) and <name>.summary.md (LLM summary) sidecars.\n")
+		// Written by tools rather than by a plan, and named here because a
+		// step that chains on one of them should reference the field that
+		// holds the path, not guess the path. Kept out of the list above:
+		// that list is the five zones a plan may WRITE to, and it mirrors
+		// internal/workspace.AllowedZones.
+		sb.WriteString("\nThese are written FOR you and are read-only. Never guess a path in them — reference the field of the step that produced it:\n")
+		sb.WriteString("- fetched/ — the whole page each web_fetch retrieved. Reach it through that step's `full_content_path`.\n")
+		sb.WriteString("- output/ — the whole output each bash command printed. Reach it through that step's `output_path`.\n")
+		sb.WriteString("- sessions/<session-id>/ — working files from earlier turns of a conversation. Not listed below; name the path directly when an earlier turn's material is needed.\n")
+		// Workspace tree for orientation (what files exist in the workspace).
+		// We do NOT inject existing blueprints here — the mere presence of
+		// a blueprint in the workspace must not bias the planner toward
+		// compute(deep). Whether this query needs architecture is the
+		// preflight's call based on the user's actual request, not workspace
+		// residue from prior runs.
+		if graph != nil && graph.Context != nil {
+			gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
+				// Depth 5 shows typical nested projects (e.g. workdir/project/<app>/<component>/src/<file>)
+				// up front so the Executive doesn't have to probe for entrypoints. The
+				// scanWorkspaceTree cap at 120 entries (round-robin across buckets) prevents
+				// runaway on monorepo-sized trees; MaxBudget:10000 is the secondary byte cap.
+				ReturnSources: Sources(WorkspaceTree(5)),
+				MaxBudget:     10000,
+			})
+			if gerr != nil {
+				log.Printf("[dag] executive context build failed: %v", gerr)
+			} else if tree := gateResp.Sources[SourceWorkspaceTree]; tree != "" {
+				sb.WriteString("\n### Current files\n")
+				sb.WriteString(tree)
+				sb.WriteString("\n")
+			}
 		}
 
-		// A ceiling stated on its own reads as an allowance to spend: every
-		// recorded plan on a 30-step ceiling came back with 30 or 31 steps, and
-		// the surplus steps were filled with whatever the context happened to
-		// mention rather than with the objective, which is what the answer was
-		// then written from. The limits still hold; the wording asks for a plan
-		// sized to the work.
-		sb.WriteString(budgetLine(a.cfg.MaxNodes, a.cfg.MaxLLMCalls))
 	}
+
+	// A ceiling stated on its own reads as an allowance to spend: every
+	// recorded plan on a 30-step ceiling came back with 30 or 31 steps, and
+	// the surplus steps were filled with whatever the context happened to
+	// mention rather than with the objective, which is what the answer was
+	// then written from. The limits still hold; the wording asks for a plan
+	// sized to the work.
+	sb.WriteString(budgetLine(a.cfg.MaxNodes, a.cfg.MaxLLMCalls))
 
 	rolePrompt := sb.String() + a.environmentSection()
 	return rolePrompt

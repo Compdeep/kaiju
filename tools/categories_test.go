@@ -6,9 +6,8 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// The vocabulary preflight emits. A category outside it is dropped before
-// scopeToWork sees it, so a tool declaring one is never narrowed in — it
-// survives on the ranking's first thirty or not at all, and nothing says so.
+// The vocabulary. Nothing narrows on it now, but a tool declaring a word
+// outside it is declaring something nobody agreed the meaning of.
 var validCategories = map[string]bool{
 	"network": true, "filesystem": true, "compute": true, "process": true, "info": true,
 }

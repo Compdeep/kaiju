@@ -854,7 +854,7 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 
 	// How the registry becomes the list, step by step.
 	//
-	// Written whether or not a step changes anything: four of the six leave the
+	// Written whether or not a step changes anything: most of them leave the
 	// list alone in the ordinary case, and a step that changed nothing is the
 	// answer most of the time. Reading "why was the planner shown all of them"
 	// used to mean reading five functions.
@@ -942,11 +942,6 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 		step("scope", len(base), len(base), "no scope set, all allowed")
 	}
 
-	// Narrowed by what the run is FOR, before it is narrowed by what fits.
-	beforeWork := len(base)
-	base = a.scopeToWork(graph, base)
-	step("categories", beforeWork, len(base), a.scopeToWorkReason(graph, beforeWork))
-
 	// Last, and only here, does the list get shorter for reasons of size. The
 	// planner is shown a signature and a return shape per tool, and that is what
 	// stops fitting once a registry is large. Trimming after the visibility
@@ -955,137 +950,6 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 	base = a.fitToolIndex(graph, base)
 	step("fit-budget", beforeFit, len(base), "trimmed from the bottom only if over budget")
 	return base, narrowing
-}
-
-/*
- * scopeToWorkReason says why the category step did what it did.
- * desc: The step returns the list unchanged in four different circumstances,
- *       and which one it was is the whole answer when a planner was shown
- *       everything. Reported alongside the counts rather than inferred from
- *       them, because "54->54" is the same number for all four.
- * param: graph - for the preflight result the step reads.
- * param: n - how many tools the step was given.
- * return: a short phrase for the narrowing record.
- */
-func (a *Agent) scopeToWorkReason(graph *Graph, n int) string {
-	if n <= scopeFloor {
-		return fmt.Sprintf("below the floor of %d, nothing considered", scopeFloor)
-	}
-	if graph == nil || graph.Preflight == nil || len(graph.Preflight.RequiredCategories) == 0 {
-		return "preflight named no categories"
-	}
-	return fmt.Sprintf("categories %v, floor %d keeps the first %d whatever their category",
-		graph.Preflight.RequiredCategories, scopeFloor, scopeFloor)
-}
-
-// scopeFloor is how many of the ranking's best are kept whatever their
-// category, and it is deliberately above what a plan is known to need.
-//
-// The number is a margin over how WIDE a plan is, which is a fact about the
-// work and not about how many tools happen to be registered. A plan that names
-// three tools needs those three present whether the registry holds fifty or
-// five hundred, so this does not scale with the registry — and scaling it that
-// way would keep most on the large registries where cutting matters most.
-//
-// Thirty came from twenty-four plans on a large registry: 15 distinct tools at
-// the median, 21 at p90, 22 at most. Seventy-eight plans from a narrower application are a
-// different shape entirely — 3 at the median, 6 at p90, 8 at p95, and 9 the
-// widest genuine plan. The only one above ten used 32, and it was a planner
-// repeating itself into the token cap rather than a plan.
-//
-// Twelve was tried and put back, and why is the useful part.
-//
-// The argument for it was plan WIDTH: three tools at the median, nine in the
-// widest. But the floor does not protect a count, it protects the tools at the
-// TOP of the ranking — so what matters is whether a needed tool is ranked
-// there, which is a different question and had never been measured.
-//
-// Measured since, on seventy real plans, against the tools each one actually
-// used: every used tool inside the first twelve for 11 of them, inside twenty
-// for 22, inside thirty for 44. A floor of twelve would leave fifty-nine of
-// seventy plans with a used tool outside the protected band, and the misses are
-// ordinary — get_connections at 51, process_list at 49, get_process at 35 on an
-// investigation that needed it.
-//
-// The reason is visible in the objectives. They describe a situation, and tool
-// descriptions state a capability; a vector search over those two is weak, and
-// that does not improve by lowering what depends on it. So thirty stands until
-// the ranking is measured against the objective string the planner really uses
-// (a.objective, not the plan's own answer text, which is what was measured
-// here) and found to be better than this.
-const scopeFloor = 30
-
-/*
- * scopeToWork keeps the tools this run is plausibly for, generously.
- * desc: A union of two opinions, because neither is trustworthy alone. Preflight
- *       names the KINDS of work the request needs, which is a categorical
- *       judgement a person would stand behind but which knows nothing of an
- *       application's more esoteric tools. The ranking scores every tool against
- *       the objective, which reaches the esoteric ones but answers confidently
- *       when it is guessing. A tool named by either survives.
- *
- *       Every way this can fail leaves the list whole. No categories from
- *       preflight, no tool declaring one, or a union no smaller than the floor —
- *       each returns everything, which is what this engine did before the
- *       narrowing existed. It can remove a tool only when the classifier did not
- *       ask for its kind AND the ranking placed it below thirty others, and even
- *       then the shell is already pinned at the front by shellFirst.
- *
- *       Order is the ranking's throughout: this decides membership, never
- *       priority.
- * param: graph - the run, carrying preflight's classification.
- * param: base - the ranked names, best first.
- * return: the names to show, in the same order.
- */
-func (a *Agent) scopeToWork(graph *Graph, base []string) []string {
-	if a == nil || a.registry == nil || len(base) <= scopeFloor {
-		return base
-	}
-	if graph == nil || graph.Preflight == nil || len(graph.Preflight.RequiredCategories) == 0 {
-		return base
-	}
-	want := make(map[string]bool, len(graph.Preflight.RequiredCategories))
-	for _, c := range graph.Preflight.RequiredCategories {
-		want[c] = true
-	}
-
-	keep := make([]string, 0, len(base))
-	declared := 0
-	for i, name := range base {
-		if i < scopeFloor {
-			keep = append(keep, name)
-			continue
-		}
-		tool, ok := a.registry.Get(name)
-		if !ok {
-			keep = append(keep, name)
-			continue
-		}
-		cats := toolapi.ToolCategories(tool)
-		if len(cats) == 0 {
-			// Cannot say. A tool that has never been told to declare must not
-			// disappear because of it.
-			keep = append(keep, name)
-			continue
-		}
-		declared++
-		for _, c := range cats {
-			if want[c] {
-				keep = append(keep, name)
-				break
-			}
-		}
-	}
-	// Nothing declared anything, so nothing was decided. Say so once rather
-	// than report a narrowing that did not happen.
-	if declared == 0 {
-		return base
-	}
-	if len(keep) < len(base) {
-		log.Printf("[agent] tools scoped to %v: showing %d of %d",
-			graph.Preflight.RequiredCategories, len(keep), len(base))
-	}
-	return keep
 }
 
 // shellFirst moves the shell to the front, leaving everything else in order.

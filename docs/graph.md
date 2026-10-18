@@ -19,7 +19,7 @@ Every kaiju investigation is a DAG. Components emit nodes, the scheduler fires t
               circuit)  ▼
                  ┌───────────────────────┐
                  │  classifyInvestigate  │  skills · mode · intent ·
-                 │  (preflight)          │  required_categories · context · compute_mode
+                 │  (preflight)          │  context · compute_mode
                  └──────┬────────────────┘
                         ▼
                  ┌─────────────┐
@@ -137,7 +137,6 @@ It carries only a minimal slice of history (`routeContext` — the running conve
   "skills":              ["webdeveloper", "python"],
   "mode":                "chat" | "meta" | "investigate",
   "intent":              "<intent name from the registry>",
-  "required_categories": ["network", "filesystem", "compute", "process", "info"],
   "context":             "paragraph quoting every concrete identifier (URLs, paths, selectors, constants) verbatim",
   "compute_mode":        "" | "shallow" | "deep"
 }

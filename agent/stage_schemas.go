@@ -362,11 +362,6 @@ func preflightSchema() llm.ToolDef {
 						"items": {"type": "string"},
 						"description": "Skill keys relevant to this query."
 					},
-					"required_categories": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "Tool categories the plan MUST include."
-					},
 					"context": %s,
 					"compute_mode": {
 						"type": "string",

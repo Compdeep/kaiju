@@ -205,11 +205,11 @@ func TestRelevantTools_ReplanRanksOnWhatIsNowMissing(t *testing.T) {
 
 // The narrowing is written down whether or not it narrowed.
 //
-// Six steps stand between the registry and the planner's prompt and only one
-// removes a tool for being irrelevant. The other five leave the list alone in
-// the ordinary case, so a planner shown everything looks the same as one shown
-// a chosen everything — and the difference is the whole answer when a run is
-// being read back. Each step reports its counts and its reason.
+// Five steps stand between the registry and the planner's prompt, and in the
+// ordinary case every one leaves the list alone, so a planner shown everything
+// looks the same as one shown a chosen everything — and the difference is the
+// whole answer when a run is being read back. Each step reports its counts and
+// its reason.
 func TestRelevantTools_RecordsHowTheListWasNarrowed(t *testing.T) {
 	a := agentWithTools(t)
 	_, narrowing := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "list some records")
@@ -218,7 +218,7 @@ func TestRelevantTools_RecordsHowTheListWasNarrowed(t *testing.T) {
 		t.Fatal("nothing was recorded, so a run cannot say why the planner saw what it saw")
 	}
 	joined := strings.Join(narrowing, " | ")
-	for _, want := range []string{"rank", "shell-first", "unattended", "scope", "categories", "fit-budget"} {
+	for _, want := range []string{"rank", "shell-first", "unattended", "scope", "fit-budget"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("step %q is missing from the record: %s", want, joined)
 		}
@@ -231,56 +231,20 @@ func TestRelevantTools_RecordsHowTheListWasNarrowed(t *testing.T) {
 	}
 }
 
-// A step that changed nothing still says WHY, because "54->54" reads the same
-// for four different reasons and only one of them is the answer.
-func TestRelevantTools_ANoOpStepStillGivesItsReason(t *testing.T) {
-	a := agentWithTools(t)
-	_, narrowing := a.relevantTools(context.Background(), nil, Trigger{Type: "chat_query"}, "list some records")
-
-	var categories string
-	for _, e := range narrowing {
-		if strings.HasPrefix(e, "categories ") {
-			categories = e
-		}
-	}
-	if categories == "" {
-		t.Fatal("the category step recorded nothing")
-	}
-	// With no graph there is no preflight, so it must say so rather than leave
-	// the reader to infer it from equal counts.
-	if !strings.Contains(categories, "no categories") && !strings.Contains(categories, "below the floor") {
-		t.Errorf("the category step did not say why it did nothing: %q", categories)
-	}
-}
-
-// Preflight's decisions reach the trace, the categories among them.
-//
-// The summary line says the lane, the rank and the guidance. The categories are
-// what the tool index is then narrowed by, and they were on no line at all — so
-// a run that showed every tool and one that showed a chosen few read the same,
-// and the reason was in a field nothing rendered.
-func TestPreflightDecided_CarriesWhatNarrowsTheToolIndex(t *testing.T) {
+// Preflight's decisions reach the trace: the lane, the guidance, the compute
+// depth and whether the run ends in a synthesis.
+func TestPreflightDecided_CarriesItsDecisions(t *testing.T) {
 	pf := &PreflightResult{
-		Mode:               "agent",
-		RequiredCategories: []string{"process", "network"},
-		Skills:             []string{"security"},
-		ComputeMode:        "shallow",
-		NeedsSynthesis:     true,
+		Mode:           "agent",
+		Skills:         []string{"security"},
+		ComputeMode:    "shallow",
+		NeedsSynthesis: true,
 	}
 	got := strings.Join(preflightDecided(pf), " | ")
-	for _, want := range []string{"categories: process, network", "mode: agent", "guidance: security", "compute: shallow", "synthesis"} {
+	for _, want := range []string{"mode: agent", "guidance: security", "compute: shallow", "synthesis"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%q missing from: %s", want, got)
 		}
-	}
-}
-
-// Naming none is an answer, not an absence: it is the first thing anyone asks
-// when a planner was shown everything.
-func TestPreflightDecided_SaysWhenNoCategoriesWereNamed(t *testing.T) {
-	got := strings.Join(preflightDecided(&PreflightResult{Mode: "agent"}), " | ")
-	if !strings.Contains(got, "categories: none named") {
-		t.Errorf("an empty category list left no line: %s", got)
 	}
 }
 

@@ -1,15 +1,16 @@
 package tools
 
 /*
- * What kind of work each tool does, in the vocabulary preflight speaks.
+ * What kind of work each tool does: network, filesystem, compute, process or
+ * info.
  *
- * preflightCategories is network, filesystem, compute, process, info, and
- * scopeToWork narrows the planner's tool index to the kinds a run was
- * classified as needing. It can only do that for tools that say what kind they
- * are: a tool declaring nothing is kept, and when NOTHING declares, the whole
- * narrowing returns the list untouched. So an application with a large registry
- * and no categories shows every tool on every call, which is the state this
- * file ends.
+ * Nothing in the engine narrows on these any more. Preflight named the kinds a
+ * run needed and scopeToWork dropped tools of other kinds from the planner's
+ * index; both went on 2026-10-18, because measured over twenty-eight runs the
+ * planner met the named kinds half the time and chose its tools without them,
+ * and the narrowing changed the tool index from run to run, which stopped the
+ * model host from caching it. The declarations stay: applications make them
+ * through toolapi.Categorised, and a reader of a registry still wants to know.
  *
  * Declared generously. A tool named by either preflight or the ranking
  * survives, and the cost of a second category is that a tool is offered when it

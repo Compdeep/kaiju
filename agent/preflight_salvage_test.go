@@ -37,7 +37,7 @@ func TestParsePreflight_KeepsWhatParsed(t *testing.T) {
 // A clean reply is read exactly as before. The salvage must not change what
 // already worked.
 func TestParsePreflight_CleanReplyIsUnchanged(t *testing.T) {
-	raw := `{"mode":"agent","intent":"observe","skills":["a"],"required_categories":["network"],
+	raw := `{"mode":"agent","intent":"observe","skills":["a"],
 	         "compute_mode":"shallow","needs_synthesis":true,
 	         "context":{"intent":"do the thing","urls":["https://example.test/a"]}}`
 	out, err := parsePreflight(raw)
@@ -47,7 +47,7 @@ func TestParsePreflight_CleanReplyIsUnchanged(t *testing.T) {
 	if out.Mode != "agent" || out.Intent != "observe" || out.ComputeMode != "shallow" || !out.NeedsSynthesis {
 		t.Errorf("a clean reply came back changed: %+v", out)
 	}
-	if len(out.RequiredCategories) != 1 || len(out.Skills) != 1 {
+	if len(out.Skills) != 1 {
 		t.Errorf("lists lost: %+v", out)
 	}
 }

@@ -399,7 +399,10 @@ type Agent struct {
 	// trigger that only the stages that plan and answer need to read. Nil
 	// means there is none.
 	describeBackground func(Trigger) string
-	intentRegistry     *IntentRegistry // DB-backed intent registry; loaded at startup
+	// queueRank is Config.QueueRank, read through rankInQueue. Nil ranks
+	// every run 0.
+	queueRank      func(Trigger) int
+	intentRegistry *IntentRegistry // DB-backed intent registry; loaded at startup
 	// Per-investigation state (active skill cards, preflight result) lives on the
 	// Graph (Graph.ActiveCards / Graph.Preflight), not on the Agent — concurrent
 	// investigations each carry their own Graph, so nothing here is shared or raced.

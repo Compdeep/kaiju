@@ -17,8 +17,14 @@ type Priority int
 
 const (
 	PriorityChat       Priority = 0  // interactive, operator-facing
-	PriorityBackground Priority = 10 // fire-and-forget / non-interactive triggers
+	PriorityBackground Priority = 10 // fire-and-forget / non-interactive triggers; a ranked run adds its rank
 )
+
+// background reports whether a job is background work, of any rank. Ranked
+// runs sort below PriorityBackground (see Config.QueueRank) and are background
+// all the same: they count against the background cap and leave the chat
+// worker free.
+func (p Priority) background() bool { return p != PriorityChat }
 
 const (
 	// defaultConcurrency is the fallback worker-pool size when the config
@@ -334,7 +340,7 @@ func (s *Scheduler) pickLocked() *Job {
 	if len(s.pq) == 0 {
 		return nil
 	}
-	if top := s.pq[0]; top.priority == PriorityBackground && !s.closed && s.runningBg >= s.maxBackground {
+	if top := s.pq[0]; top.priority.background() && !s.closed && s.runningBg >= s.maxBackground {
 		return nil
 	}
 	return heap.Pop(&s.pq).(*Job)
@@ -369,7 +375,7 @@ func (s *Scheduler) worker() {
 		if job.session != "" {
 			s.running[job.session] = job
 		}
-		if job.priority == PriorityBackground {
+		if job.priority.background() {
 			s.runningBg++
 		}
 		s.mu.Unlock()
@@ -383,7 +389,7 @@ func (s *Scheduler) worker() {
 		}
 
 		s.mu.Lock()
-		if job.priority == PriorityBackground {
+		if job.priority.background() {
 			s.runningBg--
 		}
 		if job.session != "" && s.running[job.session] == job {

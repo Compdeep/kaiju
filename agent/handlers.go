@@ -67,6 +67,9 @@ func (a *Agent) applyHandlers(cfg Config) {
 	if cfg.DescribeBackground != nil {
 		a.describeBackground = cfg.DescribeBackground
 	}
+	if cfg.QueueRank != nil {
+		a.queueRank = cfg.QueueRank
+	}
 }
 
 /*

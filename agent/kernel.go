@@ -107,7 +107,7 @@ func (k *Kernel) Emit(ev KernelEvent) {
 
 // Submit queues a fire-and-forget investigation through the scheduler.
 func (k *Kernel) Submit(trigger Trigger) {
-	prio, session := schedulePolicy(trigger)
+	prio, session := k.schedulePolicy(trigger)
 	k.scheduler.Submit(trigger, prio, session)
 }
 
@@ -115,7 +115,7 @@ func (k *Kernel) Submit(trigger Trigger) {
 // completes, is preempted by a newer same-session message (ErrPreempted), or ctx
 // is cancelled. Used by the chat path.
 func (k *Kernel) SubmitSync(ctx context.Context, trigger Trigger) (*SyncResult, error) {
-	prio, session := schedulePolicy(trigger)
+	prio, session := k.schedulePolicy(trigger)
 	return k.scheduler.SubmitSync(ctx, trigger, prio, session)
 }
 
@@ -151,12 +151,13 @@ func (k *Kernel) Agent() *Agent {
 // outranks background work and a newer message steers the running query;
 // everything else is background and a repeat dedupes a still-queued copy. An
 // empty SessionID means no dedupe/steer key. The kernel stays ignorant of what a
-// session means.
-func schedulePolicy(t Trigger) (Priority, string) {
+// session means. A background run waits behind lower-ranked ones by the rank
+// the application gives it (Config.QueueRank).
+func (k *Kernel) schedulePolicy(t Trigger) (Priority, string) {
 	if t.Type == "chat_query" {
 		return PriorityChat, t.SessionID
 	}
-	return PriorityBackground, t.SessionID
+	return PriorityBackground + Priority(k.agent.rankInQueue(t)), t.SessionID
 }
 
 // ── Internal ────────────────────────────────────────────────────────────────

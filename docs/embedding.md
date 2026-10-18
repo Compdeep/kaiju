@@ -93,6 +93,7 @@ unset, and a step naming a machine is refused rather than run in the wrong
 place.
 
 ```
+  a run is queued         ──► QueueRank        how far back it waits
   a run is about to start ──► Admit            may this run at all
                           ──► Unattended       is anybody watching
                           ──► TokenCategory    whose budget is this

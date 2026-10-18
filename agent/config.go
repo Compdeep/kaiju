@@ -414,4 +414,13 @@ type Handlers struct {
 	// Returning "" or nil means there is none, and every stage reads
 	// DescribeTrigger's text as before.
 	DescribeBackground func(Trigger) string
+
+	// QueueRank places a background run behind other background work. 0, or
+	// nil, is ordinary. A run of higher rank waits while a run of lower rank
+	// is queued; runs of one rank keep their order. A chat is never ranked:
+	// it goes first as before. The engine attaches no meaning to the number.
+	// An application uses it so that one source of work, a machine sending
+	// far more than its share, waits behind everyone else's instead of
+	// delaying it. Ranks above 1000 are read as 1000, and below 0 as 0.
+	QueueRank func(Trigger) int
 }

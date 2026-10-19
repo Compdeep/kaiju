@@ -3388,9 +3388,9 @@ func isNumericPathSegment(s string) bool {
  *       step whose tool does not is stripped of one it should never have had.
  *
  *       A step needing a target when the run has none is left alone and
- *       logged. It is not quietly run here — a tool that must name a machine
- *       has no sensible default, and running it locally would produce a
- *       plausible answer about the wrong host.
+ *       logged. A tool that must name a machine has no sensible default, and
+ *       running it locally would produce a plausible answer about the wrong
+ *       host, so the dispatcher refuses it (checkMachine).
  * param: steps - the plan, modified in place.
  * param: target - the run's target, or "" when it has none.
  * param: registry - used to read each tool's target requirement.
@@ -3409,7 +3409,7 @@ func applyRunTarget(steps []PlanStep, target string, registry *toolapi.Registry)
 				continue
 			}
 			if target == "" {
-				log.Printf("[plan] step %d (%s) needs a target machine but the run has none; leaving it unset rather than running it here",
+				log.Printf("[plan] step %d (%s) needs a target machine but the run has none; leaving it unset, and the dispatcher refuses it when targets are in use",
 					i, steps[i].Tool)
 				continue
 			}

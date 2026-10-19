@@ -15,10 +15,12 @@ type machineTool struct {
 	impact int
 }
 
-func (m *machineTool) Name() string                { return m.name }
-func (m *machineTool) Description() string         { return "" }
-func (m *machineTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
-func (m *machineTool) Impact(map[string]any) int   { return m.impact }
+func (m *machineTool) Name() string        { return m.name }
+func (m *machineTool) Description() string { return "" }
+func (m *machineTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (m *machineTool) Impact(map[string]any) int { return m.impact }
 func (m *machineTool) Execute(context.Context, map[string]any) (string, error) {
 	return "", nil
 }
@@ -27,6 +29,16 @@ type lookupTool struct{ machineTool }
 
 func (l *lookupTool) RequiresTarget() bool { return false }
 
+// removeTool runs on no machine and acts on the one its "machine" argument names.
+type removeTool struct{ lookupTool }
+
+func (r *removeTool) ActsOn(p map[string]any) []string {
+	if m, _ := p["machine"].(string); m != "" {
+		return []string{m}
+	}
+	return nil
+}
+
 func machineAgent(t *testing.T, remote bool) *Agent {
 	t.Helper()
 	reg := toolapi.NewRegistry()
@@ -34,6 +46,7 @@ func machineAgent(t *testing.T, remote bool) *Agent {
 		&machineTool{name: "read_files", impact: toolapi.ImpactObserve},
 		&machineTool{name: "change_files", impact: toolapi.ImpactControl},
 		&lookupTool{machineTool{name: "look_up"}},
+		&removeTool{lookupTool{machineTool{name: "remove_machine", impact: toolapi.ImpactAffect}}},
 	} {
 		if err := reg.Register(tool); err != nil {
 			t.Fatal(err)
@@ -120,5 +133,36 @@ func TestAnUnknownToolIsHeldToTheMostImpact(t *testing.T) {
 	scope := &ResolvedScope{Machines: map[string]int{"machine-b": toolapi.ImpactObserve}}
 	if err := a.checkMachine(machineStep("not_registered_here", "machine-b"), scope); err == nil {
 		t.Error("an unknown tool ran on a machine held to observe")
+	}
+}
+
+// A machine named in a tool's arguments is held to the same list as a target,
+// at the same impact, wherever the tool runs.
+func TestAMachineAnArgumentNamesIsHeldToTheScope(t *testing.T) {
+	a := machineAgent(t, true)
+	scope := &ResolvedScope{Machines: map[string]int{
+		"machine-a": toolapi.ImpactControl,
+		"machine-b": toolapi.ImpactObserve,
+	}}
+	remove := func(machine string) *Node {
+		n := machineStep("remove_machine", "")
+		n.Params = map[string]any{"machine": machine}
+		return n
+	}
+	if err := a.checkMachine(remove("machine-a"), scope); err != nil {
+		t.Errorf("a listed machine was refused: %v", err)
+	}
+	if err := a.checkMachine(remove("machine-c"), scope); err == nil || !strings.Contains(err.Error(), "act on machine-c") {
+		t.Errorf("an unlisted machine = %v, want a refusal", err)
+	}
+	if err := a.checkMachine(remove("machine-b"), scope); err == nil {
+		t.Error("an affect tool acted on a machine held to observe")
+	}
+	// No list is no limit, and arguments naming no machine are not checked.
+	if err := a.checkMachine(remove("machine-c"), nil); err != nil {
+		t.Errorf("a run without a machine list refused: %v", err)
+	}
+	if err := a.checkMachine(remove(""), &ResolvedScope{Machines: map[string]int{}}); err != nil {
+		t.Errorf("arguments naming no machine were refused: %v", err)
 	}
 }

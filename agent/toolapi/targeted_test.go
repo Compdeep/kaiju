@@ -41,3 +41,16 @@ func TestRequiresTargetHonoursDeclaration(t *testing.T) {
 		t.Error("a tool declaring true must require a target")
 	}
 }
+
+type subjectTool struct{ plainTool }
+
+func (subjectTool) ActsOn(p map[string]any) []string { return []string{p["machine"].(string)} }
+
+func TestActsOnIsEmptyUnlessDeclared(t *testing.T) {
+	if got := ActsOn(plainTool{}, map[string]any{"machine": "x"}); got != nil {
+		t.Errorf("an undeclared tool acts on %v", got)
+	}
+	if got := ActsOn(subjectTool{}, map[string]any{"machine": "x"}); len(got) != 1 || got[0] != "x" {
+		t.Errorf("ActsOn = %v, want [x]", got)
+	}
+}

@@ -501,6 +501,34 @@ func RequiresTarget(t Tool) bool {
 	return true
 }
 
+// MachineSubject is an optional interface a tool implements to say which
+// machines its arguments make it act on.
+//
+// A step's target says where a tool runs. Some tools run in one place and act on
+// a machine named in their arguments: removing a machine from a network, or
+// changing what is recorded about one. The engine holds a run to the machines
+// its scope allows, and without this it would see only where such a tool runs,
+// never the machine it acts on.
+//
+// Same shape as Targeted: the tool author states a property, and compiled code
+// acts on it.
+type MachineSubject interface {
+	// ActsOn returns the machines these arguments make the tool act on, other
+	// than the one it runs on. Empty when they name none.
+	ActsOn(params map[string]any) []string
+}
+
+// ActsOn reports the machines a tool's arguments name for it to act on.
+//
+// Tools that do not implement MachineSubject name none: an argument is not a
+// machine unless the tool says so.
+func ActsOn(t Tool, params map[string]any) []string {
+	if v, ok := t.(MachineSubject); ok {
+		return v.ActsOn(params)
+	}
+	return nil
+}
+
 /*
  * RetryVerdict is what a tool says about a failure it just returned.
  * desc: Three answers, not two. A tool that has no opinion says so — Unknown —

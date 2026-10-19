@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 func TestWebResearch_EmptyQuery(t *testing.T) {
@@ -64,6 +66,20 @@ func TestWebResearchSourcesDoNotRepeatThePages(t *testing.T) {
 	for _, field := range []string{"chars", "trimmed", "status", "url"} {
 		if _, present := source[field]; !present {
 			t.Errorf("a source does not declare %q", field)
+		}
+	}
+}
+
+// None of the web tools asks a step to name a machine: each goes from this node
+// to the web. RequiresTarget defaults to true for a tool that does not say, so a
+// run limited to no machine, or one where a step must name its machine, would
+// refuse every search and fetch.
+func TestTheWebToolsRunOnNoMachine(t *testing.T) {
+	for _, tool := range []toolapi.Tool{
+		NewWebSearch(), NewWebFetch(), NewWebResearch(SearchConfig{}, nil),
+	} {
+		if toolapi.RequiresTarget(tool) {
+			t.Errorf("%s asks a step to name a machine, and it reads the web from this node", tool.Name())
 		}
 	}
 }

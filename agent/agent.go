@@ -28,12 +28,12 @@ type ResolvedScope struct {
 	AllowedTools map[string]bool `json:"allowed_tools,omitempty"`
 	MaxImpact    map[string]int  `json:"max_impact,omitempty"`
 	MaxIntent    int             `json:"max_intent,omitempty"`
-	// Machines are the machines this run may run tools on, each with the most
-	// impact a step there may have. A machine is named the way a target is,
-	// and this node by its own id. Nil places no limit; an empty map allows no
-	// machine, so a run that should only reason never touches one. Only tools
-	// that run on a machine are checked (see machine_scope.go).
-	Machines map[string]int `json:"machines,omitempty"`
+	// Targets are the targets this run may run tools on, each with the most
+	// impact a step there may have, named as Trigger.Target and Node.Target
+	// are, and this node by its own id. Nil places no limit; an empty map
+	// allows no target, so a run that should only reason never touches one.
+	// Only tools that require a target are checked (see target_scope.go).
+	Targets map[string]int `json:"targets,omitempty"`
 }
 
 /*

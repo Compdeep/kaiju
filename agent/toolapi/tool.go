@@ -501,29 +501,29 @@ func RequiresTarget(t Tool) bool {
 	return true
 }
 
-// MachineSubject is an optional interface a tool implements to say which
-// machines its arguments make it act on.
+// TargetSubject is an optional interface a tool implements to say which
+// targets its arguments make it act on.
 //
 // A step's target says where a tool runs. Some tools run in one place and act on
-// a machine named in their arguments: removing a machine from a network, or
-// changing what is recorded about one. The engine holds a run to the machines
+// a target named in their arguments: removing a target from a network, or
+// changing what is recorded about one. The engine holds a run to the targets
 // its scope allows, and without this it would see only where such a tool runs,
-// never the machine it acts on.
+// never the target it acts on.
 //
 // Same shape as Targeted: the tool author states a property, and compiled code
 // acts on it.
-type MachineSubject interface {
-	// ActsOn returns the machines these arguments make the tool act on, other
+type TargetSubject interface {
+	// ActsOn returns the targets these arguments make the tool act on, other
 	// than the one it runs on. Empty when they name none.
 	ActsOn(params map[string]any) []string
 }
 
-// ActsOn reports the machines a tool's arguments name for it to act on.
+// ActsOn reports the targets a tool's arguments name for it to act on.
 //
-// Tools that do not implement MachineSubject name none: an argument is not a
-// machine unless the tool says so.
+// Tools that do not implement TargetSubject name none: an argument is not a
+// target unless the tool says so.
 func ActsOn(t Tool, params map[string]any) []string {
-	if v, ok := t.(MachineSubject); ok {
+	if v, ok := t.(TargetSubject); ok {
 		return v.ActsOn(params)
 	}
 	return nil

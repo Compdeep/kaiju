@@ -212,7 +212,8 @@
                   <label>model</label>
                   <select v-model="cfg.chat.model" @change="onChatModelChange">
                     <option value="">same as reasoning</option>
-                    <optgroup v-if="unrestrictedModels.length" label="Chat / Unrestricted">
+                    <!-- LOCAL ONLY, DO NOT CHECK IN: label was "Chat / Unrestricted"; see SettingsModal.vue.orig -->
+                    <optgroup v-if="unrestrictedModels.length" label="NSFW">
                       <option v-for="m in unrestrictedModels" :key="'u-' + m.id" :value="m.id">{{ modelLabel(m) }}</option>
                     </optgroup>
                     <optgroup :label="(chatProvider || 'openrouter') + ' models'">

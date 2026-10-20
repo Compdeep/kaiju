@@ -3390,7 +3390,7 @@ func isNumericPathSegment(s string) bool {
  *       A step needing a target when the run has none is left alone and
  *       logged. A tool that must name a machine has no sensible default, and
  *       running it locally would produce a plausible answer about the wrong
- *       host, so the dispatcher refuses it (checkMachine).
+ *       host, so the dispatcher refuses it (checkTarget).
  * param: steps - the plan, modified in place.
  * param: target - the run's target, or "" when it has none.
  * param: registry - used to read each tool's target requirement.

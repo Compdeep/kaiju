@@ -265,10 +265,10 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		}
 	}
 
-	// The machine the step runs on: named, and allowed by the run's scope at
-	// the step's impact. Asked before the step goes to this machine or another,
-	// so neither path can skip it. See machine_scope.go.
-	if err := a.checkMachine(n, scope); err != nil {
+	// The target the step runs on: named, and allowed by the run's scope at
+	// the step's impact. Asked before the step goes to this node or another,
+	// so neither path can skip it. See target_scope.go.
+	if err := a.checkTarget(n, scope); err != nil {
 		log.Printf("[dag] node %s: %v", n.ID, err)
 		ch <- a.finish(n, "", nil, err)
 		return

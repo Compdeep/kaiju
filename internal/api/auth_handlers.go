@@ -114,7 +114,7 @@ func (a *AuthAPI) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Losing the password is recovered by emptying the table: `kaiju user
 	// remove <name>`, after which the next sign-in claims it again.
 	if claimed, cerr := a.nodeIsClaimed(); cerr == nil && !claimed {
-		if err := a.db.CreateUser(req.Username, req.Password, firstUserIntent, []string{"default"}); err != nil {
+		if err := a.db.CreateUser(req.Username, req.Password, firstUserIntent, []string{"admin"}); err != nil {
 			jsonError(w, "could not create the first account", http.StatusInternalServerError)
 			return
 		}

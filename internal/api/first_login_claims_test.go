@@ -66,6 +66,24 @@ func TestTheFirstSignInClaimsAnUnclaimedNode(t *testing.T) {
 	if users[0].MaxIntent != firstUserIntent {
 		t.Errorf("the claiming account has intent %d, want %d", users[0].MaxIntent, firstUserIntent)
 	}
+	// Through a scope that exists. It was created with "default", which no seed
+	// defines, so the account resolved to no tools and a ceiling of observe: the
+	// node was claimed and then could do nothing, and every step failed at the
+	// gate as "not in user scope".
+	user, err := database.GetUser("owner")
+	if err != nil {
+		t.Fatalf("reading the account back: %v", err)
+	}
+	scope, err := database.ResolveUserScope(user)
+	if err != nil {
+		t.Fatalf("resolving the account's scope: %v", err)
+	}
+	if !scope.AllowedTools["*"] && !scope.AllowedTools["bash"] {
+		t.Errorf("the claiming account may use %v; it cannot run bash on the node it owns", scope.AllowedTools)
+	}
+	if scope.MaxIntent < firstUserIntent {
+		t.Errorf("the claiming account's scope caps intent at %d, below its own %d", scope.MaxIntent, firstUserIntent)
+	}
 }
 
 // Once claimed, it is an ordinary login. A second person cannot type a new

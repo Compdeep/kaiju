@@ -27,6 +27,9 @@ func TestMain(m *testing.M) {
 func resetSetup(t *testing.T) {
 	t.Helper()
 	setupMu.Lock()
+	if tmpDir != "" {
+		os.RemoveAll(tmpDir)
+	}
 	setupDone, report, setupErr, tmpDir = false, Report{}, nil, ""
 	setupMu.Unlock()
 }

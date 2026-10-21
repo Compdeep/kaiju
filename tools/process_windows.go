@@ -50,7 +50,12 @@ var (
  * param: cmd - the command, before it is started.
  */
 func setOwnProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup}
+	// Added to, never replaced: toolapi.Command sets the token that locks the
+	// command here, and replacing SysProcAttr would start it unlocked.
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= createNewProcessGroup
 }
 
 /*

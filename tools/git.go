@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -186,7 +185,7 @@ func (g *Git) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.
 		return toolapi.ToolMessage{}, fmt.Errorf("git: unknown action %q", action)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", gitArgs...)
+	cmd := toolapi.Command(ctx, "git", gitArgs...)
 	if path != "" {
 		cmd.Dir = path
 	}

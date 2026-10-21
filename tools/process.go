@@ -98,7 +98,7 @@ func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+		cmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command",
 			"Get-Process | Sort-Object CPU -Descending | Select-Object -First "+strconv.Itoa(limit*2)+
 				" Id, ProcessName, CPU, @{N='MemMB';E={[math]::Round($_.WorkingSet64/1MB,1)}} | Format-Table -AutoSize")
 	default:
@@ -106,7 +106,7 @@ func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (
 		// terminal width, and the part that identifies a suspicious process
 		// — the script path, the flags, the connect-back address — is
 		// exactly the part that gets cut.
-		cmd = exec.CommandContext(ctx, "ps", "auxww", "--sort=-pcpu")
+		cmd = toolapi.Command(ctx, "ps", "auxww", "--sort=-pcpu")
 	}
 
 	out, err := cmd.Output()
@@ -261,13 +261,13 @@ func (p *ProcessKill) ExecuteTyped(ctx context.Context, params map[string]any) (
 		if force {
 			args = append(args, "/F")
 		}
-		cmd = exec.CommandContext(ctx, "taskkill", args...)
+		cmd = toolapi.Command(ctx, "taskkill", args...)
 	default:
 		sig := "-TERM"
 		if force {
 			sig = "-KILL"
 		}
-		cmd = exec.CommandContext(ctx, "kill", sig, strconv.Itoa(pid))
+		cmd = toolapi.Command(ctx, "kill", sig, strconv.Itoa(pid))
 	}
 
 	out, err := cmd.CombinedOutput()

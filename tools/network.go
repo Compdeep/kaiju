@@ -267,19 +267,19 @@ func netListeningPorts(ctx context.Context) (toolapi.ToolMessage, error) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+		cmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command",
 			"Get-NetTCPConnection -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess | Format-Table -AutoSize")
 	case "darwin":
-		cmd = exec.CommandContext(ctx, "lsof", "-iTCP", "-sTCP:LISTEN", "-P", "-n")
+		cmd = toolapi.Command(ctx, "lsof", "-iTCP", "-sTCP:LISTEN", "-P", "-n")
 	default:
-		cmd = exec.CommandContext(ctx, "ss", "-tlnp")
+		cmd = toolapi.Command(ctx, "ss", "-tlnp")
 	}
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// Fallback for systems without ss
 		if runtime.GOOS == "linux" {
-			cmd = exec.CommandContext(ctx, "netstat", "-tlnp")
+			cmd = toolapi.Command(ctx, "netstat", "-tlnp")
 			out, err = cmd.CombinedOutput()
 			if err != nil {
 				return toolapi.ToolMessage{}, fmt.Errorf("net_info: %w", err)
@@ -341,18 +341,18 @@ func netConnections(ctx context.Context, host string, port int) (toolapi.ToolMes
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+		cmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command",
 			"Get-NetTCPConnection | Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess | Format-Table -AutoSize")
 	case "darwin":
-		cmd = exec.CommandContext(ctx, "lsof", "-i", "-P", "-n")
+		cmd = toolapi.Command(ctx, "lsof", "-i", "-P", "-n")
 	default:
-		cmd = exec.CommandContext(ctx, "ss", "-tunap")
+		cmd = toolapi.Command(ctx, "ss", "-tunap")
 	}
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if runtime.GOOS == "linux" {
-			cmd = exec.CommandContext(ctx, "netstat", "-tunap")
+			cmd = toolapi.Command(ctx, "netstat", "-tunap")
 			out, err = cmd.CombinedOutput()
 		}
 		if err != nil {

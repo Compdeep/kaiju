@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"os/user"
 	"runtime"
 	"strings"
@@ -183,7 +182,7 @@ func platformSnapshot(ctx context.Context) (string, error) {
 	}
 	switch runtime.GOOS {
 	case "windows":
-		cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
+		cmd := toolapi.Command(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
 			"$os = Get-CimInstance Win32_OperatingSystem; "+
 				"'Uptime: ' + (((Get-Date) - $os.LastBootUpTime).ToString('d\\.hh\\:mm\\:ss')) + "+
 				"\"`nTotalMemMB: \" + [math]::Round($os.TotalVisibleMemorySize/1024,0) + "+
@@ -195,7 +194,7 @@ func platformSnapshot(ctx context.Context) (string, error) {
 		}
 		return strings.TrimSpace(string(out)), nil
 	case "linux":
-		cmd := exec.CommandContext(ctx, "sh", "-c",
+		cmd := toolapi.Command(ctx, "sh", "-c",
 			"uptime && echo '---' && head -3 /proc/meminfo")
 		out, err := cmd.Output()
 		if err != nil {
@@ -203,7 +202,7 @@ func platformSnapshot(ctx context.Context) (string, error) {
 		}
 		return strings.TrimSpace(string(out)), nil
 	case "darwin":
-		cmd := exec.CommandContext(ctx, "sh", "-c",
+		cmd := toolapi.Command(ctx, "sh", "-c",
 			"uptime && echo '---' && vm_stat | head -10")
 		out, err := cmd.Output()
 		if err != nil {

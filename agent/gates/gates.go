@@ -161,6 +161,33 @@ func (g *Gate) CheckTriad(intent Intent, skillName string, impact int) error {
 	return nil
 }
 
+/*
+ * Ceiling is the most a step may do: the lower of the run's intent, the
+ * clearance and the scope's cap for the tool (-1 for none), or 0 during
+ * lockdown. CheckTriadWithScope refuses a tool rated above it; the programs a
+ * tool starts are locked below control (toolapi.Command).
+ */
+func (g *Gate) Ceiling(intent Intent, scopeMaxImpact int) int {
+	g.mu.Lock()
+	locked := g.lockdown
+	g.mu.Unlock()
+	if locked {
+		return 0
+	}
+	clr := 0
+	if g.clearance != nil {
+		clr = g.clearance.Clearance()
+	}
+	ceiling := int(intent)
+	if clr < ceiling {
+		ceiling = clr
+	}
+	if scopeMaxImpact >= 0 && scopeMaxImpact < ceiling {
+		ceiling = scopeMaxImpact
+	}
+	return ceiling
+}
+
 // CheckTriadWithScope extends CheckTriad with a per-tool scope impact cap.
 // impact is the pre-resolved tool impact (from the intent registry).
 // scopeMaxImpact is the maximum impact allowed by the user's scope for

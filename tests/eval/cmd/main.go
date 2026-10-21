@@ -22,6 +22,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/Compdeep/kaiju/sandbox"
 	"log"
 	"os"
 	"time"
@@ -32,6 +33,8 @@ import (
 )
 
 func main() {
+	sandbox.Enter()
+	sandbox.Enable(sandbox.Options{AllowUnlocked: true})
 	kind := flag.String("kind", "", "which suite: editor | pipeline | holmes | all")
 	kaijuBin := flag.String("kaiju", "./kaiju", "path to kaiju binary (pipeline + holmes)")
 	configPath := flag.String("config", "kaiju.json", "path to kaiju.json")

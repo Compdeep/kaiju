@@ -261,10 +261,10 @@ func diskUsageAll(ctx context.Context) (toolapi.ToolMessage, error) {
 	var dfCmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		dfCmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+		dfCmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command",
 			"Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N='UsedGB';E={[math]::Round($_.Used/1GB,2)}}, @{N='FreeGB';E={[math]::Round($_.Free/1GB,2)}} | Format-Table -AutoSize")
 	default:
-		dfCmd = exec.CommandContext(ctx, "df", "-h")
+		dfCmd = toolapi.Command(ctx, "df", "-h")
 	}
 	data := diskUsageData{Complete: true}
 	if out, err := dfCmd.CombinedOutput(); err == nil {
@@ -280,7 +280,7 @@ func diskUsageAll(ctx context.Context) (toolapi.ToolMessage, error) {
 	if runtime.GOOS != "windows" {
 		timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		duCmd := exec.CommandContext(timeoutCtx, "du", "-h", "--max-depth=1", "--threshold=100M", "/")
+		duCmd := toolapi.Command(timeoutCtx, "du", "-h", "--max-depth=1", "--threshold=100M", "/")
 		out, err := duCmd.CombinedOutput()
 		if len(out) > 0 {
 			result.WriteString("\n\nTop-level directories (>100MB):\n")
@@ -316,10 +316,10 @@ func diskUsagePath(ctx context.Context, path string) (toolapi.ToolMessage, error
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.CommandContext(timeoutCtx, "powershell", "-NoProfile", "-Command",
+		cmd = toolapi.Command(timeoutCtx, "powershell", "-NoProfile", "-Command",
 			fmt.Sprintf("Get-ChildItem -Force '%s' | ForEach-Object { $size = 0; if(!$_.PSIsContainer){ $size = $_.Length } else { $size = (Get-ChildItem -Recurse -Force $_.FullName -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum }; [PSCustomObject]@{Name=$_.Name; SizeMB=[math]::Round($size/1MB,1)} } | Sort-Object SizeMB -Descending | Format-Table -AutoSize", path))
 	default:
-		cmd = exec.CommandContext(timeoutCtx, "du", "-h", "--max-depth=1", "--threshold=1M", path)
+		cmd = toolapi.Command(timeoutCtx, "du", "-h", "--max-depth=1", "--threshold=1M", path)
 	}
 
 	out, err := cmd.CombinedOutput()
@@ -487,19 +487,19 @@ func clipboardRead(ctx context.Context) (toolapi.ToolMessage, error) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.CommandContext(ctx, "pbpaste")
+		cmd = toolapi.Command(ctx, "pbpaste")
 	case "windows":
-		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", "Get-Clipboard")
+		cmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command", "Get-Clipboard")
 	default:
 		// Try xclip first, fall back to xsel
-		cmd = exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-o")
+		cmd = toolapi.Command(ctx, "xclip", "-selection", "clipboard", "-o")
 	}
 
 	out, err := cmd.Output()
 	if err != nil {
 		// Linux fallback
 		if runtime.GOOS == "linux" {
-			cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--output")
+			cmd = toolapi.Command(ctx, "xsel", "--clipboard", "--output")
 			out, err = cmd.Output()
 			if err != nil {
 				// No clipboard program on this machine. A failure to look, said as
@@ -542,17 +542,17 @@ func clipboardWrite(ctx context.Context, content string) (toolapi.ToolMessage, e
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.CommandContext(ctx, "pbcopy")
+		cmd = toolapi.Command(ctx, "pbcopy")
 	case "windows":
-		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", "Set-Clipboard -Value $input")
+		cmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command", "Set-Clipboard -Value $input")
 	default:
-		cmd = exec.CommandContext(ctx, "xclip", "-selection", "clipboard")
+		cmd = toolapi.Command(ctx, "xclip", "-selection", "clipboard")
 	}
 
 	cmd.Stdin = strings.NewReader(content)
 	if err := cmd.Run(); err != nil {
 		if runtime.GOOS == "linux" {
-			cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--input")
+			cmd = toolapi.Command(ctx, "xsel", "--clipboard", "--input")
 			cmd.Stdin = strings.NewReader(content)
 			if err := cmd.Run(); err != nil {
 				// As on the read side: a machine with no clipboard program is a

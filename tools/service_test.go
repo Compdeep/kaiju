@@ -33,7 +33,7 @@ func TestStoppingAServiceStopsTheProcess(t *testing.T) {
 	// The plainest command there is. /bin/sh forks it rather than execing it —
 	// measured, not assumed — so the shell the tool records is not the process
 	// doing the work. Nothing here is arranged to make that true.
-	msg, err := s.start(map[string]any{
+	msg, err := s.start(context.Background(), map[string]any{
 		"name": "web", "command": "sleep 300", "workdir": ws,
 	})
 	if err != nil {
@@ -85,7 +85,7 @@ func TestStoppingAServiceStopsTheProcess(t *testing.T) {
 func TestStoppingAServiceThatHasAlreadyDiedIsQuiet(t *testing.T) {
 	s, ws := newTestService(t)
 
-	msg, err := s.start(map[string]any{
+	msg, err := s.start(context.Background(), map[string]any{
 		"name": "web", "command": "sleep 300", "workdir": ws,
 	})
 	if err != nil {

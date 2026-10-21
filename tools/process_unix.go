@@ -30,7 +30,7 @@ import (
  * param: cmd - the command, before it is started.
  */
 func setOwnProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	sysProcAttr(cmd).Setpgid = true
 }
 
 /*
@@ -42,7 +42,17 @@ func setOwnProcessGroup(cmd *exec.Cmd) {
  * param: cmd - the command, before it is started.
  */
 func setOwnSession(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	sysProcAttr(cmd).Setsid = true
+}
+
+// sysProcAttr is the command's SysProcAttr, created if it has none. A setting
+// is added to it, never replaced, since toolapi.Command may already have set
+// one to lock the command.
+func sysProcAttr(cmd *exec.Cmd) *syscall.SysProcAttr {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	return cmd.SysProcAttr
 }
 
 /*

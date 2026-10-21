@@ -739,6 +739,20 @@ func walkParams(v any, fn func(string) (any, bool)) {
 	}
 }
 
+/*
+ * lockContext puts on ctx the most a step may do, so the programs its tool
+ * starts are locked below control (toolapi.Command), and names the workspace,
+ * where generated code is written and run, as writable.
+ * param: scopeCap - the scope's cap for the tool, or -1 for none.
+ */
+func (a *Agent) lockContext(ctx context.Context, intent gates.Intent, scopeCap int) context.Context {
+	ctx = toolapi.WithLevel(ctx, a.gate.Ceiling(intent, scopeCap))
+	if a.cfg.Workspace != "" {
+		ctx = toolapi.WithWritable(ctx, a.cfg.Workspace)
+	}
+	return ctx
+}
+
 // dotPrefix is a one-liner: "" → "", "x" → ".x". Pure log cosmetic.
 func dotPrefix(s string) string {
 	if s == "" {
@@ -849,6 +863,10 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		})
 		return "", nil, err
 	}
+
+	// The programs the tool starts are locked unless this step may do
+	// everything; see toolapi.Command.
+	ctx = a.lockContext(ctx, intent, scopeCap)
 
 	// Clearance: check external authorization endpoint (if configured)
 	if a.clearanceCheck != nil {

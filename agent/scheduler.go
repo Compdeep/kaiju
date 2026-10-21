@@ -3023,6 +3023,16 @@ func (a *Agent) twotimeRetry(ctx context.Context, node *Node, comp nodeCompletio
 
 	defer a.guardNodeCompletion("twotimeRetry", comp.NodeID, ch)
 
+	// The retry runs bash itself, outside executeToolNode, so it sets the
+	// step's level the same way.
+	scopeCap := -1
+	if scope != nil {
+		if c, ok := scope.MaxImpact["bash"]; ok {
+			scopeCap = c
+		}
+	}
+	ctx = a.lockContext(ctx, intent, scopeCap)
+
 	// Through the graph, not the map: the retry below rewrites this parameter
 	// from its own goroutine while the trace reads it. See Graph.SetParam.
 	rawCommand, _ := graph.Param(node.ID, "command")

@@ -358,11 +358,11 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 	var cmd *exec.Cmd
 	switch b.shell {
 	case "powershell":
-		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", command)
+		cmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command", command)
 	case "cmd":
-		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
+		cmd = toolapi.Command(ctx, "cmd", "/C", command)
 	default:
-		cmd = exec.CommandContext(ctx, "sh", "-c", command)
+		cmd = toolapi.Command(ctx, "sh", "-c", command)
 	}
 
 	if b.workDir != "" {
@@ -447,7 +447,14 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		// start, so we keep both ends.
 		stdoutStr := headTailTruncate(stdout.String(), 200, 600)
 		stderrStr := headTailTruncate(stderr.String(), 200, 600)
-		return toolapi.ToolFail("command", fmt.Sprintf("exit %d: %s", exitCode, err.Error()), bashData{
+		detail := fmt.Sprintf("exit %d: %s", exitCode, err.Error())
+		// Said with the failure, so a command refused a write is not retried
+		// as though the write might work the next time.
+		if toolapi.Locked(ctx) {
+			level, _ := toolapi.LevelOf(ctx)
+			detail += fmt.Sprintf(" (this step is read-only, level %d: the system refuses any change to a file or to another process, so a command that writes or stops a process fails)", level)
+		}
+		return toolapi.ToolFail("command", detail, bashData{
 			ExitCode:        exitCode,
 			Stdout:          stdoutStr,
 			Stderr:          stderrStr,

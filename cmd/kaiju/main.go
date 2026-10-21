@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Compdeep/kaiju/sandbox"
 	"log"
 	"net"
 	"net/http"
@@ -61,6 +62,13 @@ func nodeIsClaimed(database *kaijudb.DB) bool {
 }
 
 func main() {
+	// First, before anything else: when this program was started to lock a
+	// tool's command, Enter locks it and runs the command instead.
+	sandbox.Enter()
+	// On a developer's own computer a platform with no lock still runs commands,
+	// with a warning, rather than refusing every one.
+	sandbox.Enable(sandbox.Options{AllowUnlocked: true})
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)

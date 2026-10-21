@@ -272,7 +272,7 @@ func TestGitSaysWhenItsOutputWasCut(t *testing.T) {
 		}
 	}
 
-	msg, err := NewGit().ExecuteTyped(context.Background(), map[string]any{
+	msg, err := NewGit().ExecuteTyped(gitLevel(), map[string]any{
 		"action": "status", "path": dir})
 	if err != nil {
 		t.Fatalf("%v", err)
@@ -309,7 +309,7 @@ func TestGitDoesNotClaimShortOutputWasCut(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 
-	msg, err := NewGit().ExecuteTyped(context.Background(), map[string]any{
+	msg, err := NewGit().ExecuteTyped(gitLevel(), map[string]any{
 		"action": "status", "path": dir})
 	if err != nil {
 		t.Fatalf("%v", err)

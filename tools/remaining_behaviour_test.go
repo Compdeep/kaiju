@@ -284,7 +284,7 @@ func TestGitStatusInARepository(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msg, err := NewGit().ExecuteTyped(context.Background(),
+	msg, err := NewGit().ExecuteTyped(gitLevel(),
 		map[string]any{"action": "status", "path": dir})
 	if err != nil {
 		t.Fatalf("%v", err)
@@ -313,7 +313,7 @@ func TestGitOutsideARepository(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git on this machine")
 	}
-	msg, err := NewGit().ExecuteTyped(context.Background(),
+	msg, err := NewGit().ExecuteTyped(gitLevel(),
 		map[string]any{"action": "status", "path": t.TempDir()})
 	if err != nil {
 		t.Fatalf("returned a Go error rather than a result: %v", err)

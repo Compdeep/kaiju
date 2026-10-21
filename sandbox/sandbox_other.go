@@ -14,6 +14,8 @@ func Enter() {}
 
 func checkNotChild() {}
 
+func protectSelf() {}
+
 func detect() Report { return Report{} }
 
 func platformCommand(context.Context, bool, Report, []string, string, []string) (*exec.Cmd, error) {

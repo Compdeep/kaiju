@@ -99,6 +99,9 @@ func lock(cfg bootConfig) error {
 			return fmt.Errorf("own process group: %w", err)
 		}
 	}
+	if err := dropCapabilities(); err != nil {
+		return fmt.Errorf("capabilities: %w", err)
+	}
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("no_new_privs: %w", err)
 	}
@@ -152,6 +155,84 @@ func closeInherited() error {
 		}
 	}
 	return nil
+}
+
+// keepCapabilities are the capabilities a locked command keeps: those that only
+// read. CAP_DAC_READ_SEARCH reads and lists any file; CAP_SYSLOG reads the
+// kernel log, and the filter allows only syslog's read actions. Any other the
+// starting program holds (CAP_NET_BIND_SERVICE, to listen below 1024, or all of
+// them when it runs as root) is dropped.
+var keepCapabilities = []uint{unix.CAP_DAC_READ_SEARCH, unix.CAP_SYSLOG}
+
+// Securebits: root does not regain its capabilities when it starts a program,
+// and that cannot be undone.
+const (
+	secbitNoRoot       = 1 << 0
+	secbitNoRootLocked = 1 << 1
+)
+
+/*
+ * dropCapabilities leaves this process, and every program it starts, with
+ * only keepCapabilities, and only those it already held.
+ * desc: A capability passes to a started program when it is ambient, so each
+ *       other ambient capability is lowered, and permitted, effective and
+ *       inheritable are cut to the kept ones, which are then made ambient. As
+ *       root, a started program would get every capability back for being
+ *       root; SECBIT_NOROOT stops that.
+ */
+func dropCapabilities() error {
+	if os.Geteuid() == 0 {
+		if err := unix.Prctl(unix.PR_SET_SECUREBITS, secbitNoRoot|secbitNoRootLocked, 0, 0, 0); err != nil {
+			return fmt.Errorf("securebits: %w", err)
+		}
+	}
+	var keep [2]uint32
+	isKept := map[uint]bool{}
+	for _, c := range keepCapabilities {
+		keep[c/32] |= 1 << (c % 32)
+		isKept[c] = true
+	}
+	for c := uint(0); c <= unix.CAP_LAST_CAP; c++ {
+		if !isKept[c] {
+			// EINVAL for a capability this kernel does not know: nothing to lower.
+			_ = unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_LOWER, uintptr(c), 0, 0)
+		}
+	}
+	hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	var data [2]unix.CapUserData
+	if err := unix.Capget(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("read: %w", err)
+	}
+	for i := range data {
+		data[i].Permitted &= keep[i]
+		data[i].Effective &= keep[i]
+		data[i].Inheritable = data[i].Permitted
+	}
+	if err := unix.Capset(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("set: %w", err)
+	}
+	for _, c := range keepCapabilities {
+		if data[c/32].Permitted&(1<<(c%32)) != 0 {
+			if err := unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_RAISE, uintptr(c), 0, 0); err != nil {
+				return fmt.Errorf("keep capability %d: %w", c, err)
+			}
+		}
+	}
+	return nil
+}
+
+/*
+ * protectSelf marks this program non-dumpable, so a locked command it starts,
+ * running as the same account, cannot read its memory, environment or memory
+ * map through /proc/<pid>/mem, environ or maps. Landlock already refuses that;
+ * seccomp alone does not, and the program's memory holds what a command must
+ * not have, such as the key that signs sign-in sessions. The program can still
+ * read its own.
+ */
+func protectSelf() {
+	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
+		logf("[sandbox] could not make this program non-dumpable: %v", err)
+	}
 }
 
 func detect() Report {

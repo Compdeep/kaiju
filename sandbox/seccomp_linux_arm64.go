@@ -24,6 +24,18 @@ var table = &syscallTable{
 		unix.SYS_SWAPON, unix.SYS_SWAPOFF, unix.SYS_REBOOT,
 		unix.SYS_INIT_MODULE, unix.SYS_FINIT_MODULE, unix.SYS_DELETE_MODULE,
 		unix.SYS_KEXEC_LOAD, unix.SYS_KEXEC_FILE_LOAD,
+		unix.SYS_PROCESS_MADVISE,
+	},
+	syslog: unix.SYS_SYSLOG,
+	selfOnly: []pidCall{
+		{unix.SYS_PRLIMIT64, 0},
+		{unix.SYS_SCHED_SETAFFINITY, 0}, {unix.SYS_SCHED_SETSCHEDULER, 0},
+		{unix.SYS_SCHED_SETPARAM, 0}, {unix.SYS_SCHED_SETATTR, 0},
+		{unix.SYS_MIGRATE_PAGES, 0}, {unix.SYS_MOVE_PAGES, 0},
+	},
+	whoCalls: []whoCall{
+		{unix.SYS_SETPRIORITY, 0, 1, unix.PRIO_USER},
+		{unix.SYS_IOPRIO_SET, 0, 1, ioprioWhoUser},
 	},
 	signals: []uintptr{unix.SYS_KILL, unix.SYS_TGKILL, unix.SYS_RT_SIGQUEUEINFO, unix.SYS_RT_TGSIGQUEUEINFO},
 	fileWrites: []uintptr{

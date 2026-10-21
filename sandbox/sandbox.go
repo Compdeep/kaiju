@@ -100,9 +100,10 @@ var errNoLock = errors.New("this platform has no way to lock a command")
 func Enable(o Options) {
 	checkNotChild()
 	mu.Lock()
-	defer mu.Unlock()
 	enabled = true
 	opts = o
+	mu.Unlock()
+	protectSelf()
 }
 
 func logf(format string, args ...any) {

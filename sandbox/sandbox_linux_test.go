@@ -328,3 +328,83 @@ func TestRewriteDevNull(t *testing.T) {
 		}
 	}
 }
+
+// The program that starts locked commands is non-dumpable, so a locked command,
+// running as the same account, cannot read its memory, environment or memory
+// map, even with seccomp alone holding the lock.
+func TestALockedCommandCannotReadTheAgentsMemory(t *testing.T) {
+	eachLock(t, func(t *testing.T, landlock bool) {
+		pid := os.Getpid()
+		// The control: a same-account process that is still dumpable can be
+		// read under seccomp alone, so the refusal below is the agent's own
+		// setting and not something else. (Landlock refuses both.)
+		if !landlock {
+			other := exec.Command("sleep", "30")
+			if err := other.Start(); err != nil {
+				t.Fatal(err)
+			}
+			defer other.Process.Kill()
+			out, _ := run(t, "", fmt.Sprintf(`head -c 1 /proc/%d/environ > /dev/null && echo GOT_IT`, other.Process.Pid))
+			if !strings.Contains(out, "GOT_IT") {
+				t.Fatalf("could not read an ordinary process either, so this test shows nothing: %q", out)
+			}
+		}
+		for _, f := range []string{"environ", "maps", "mem"} {
+			out, err := run(t, "", fmt.Sprintf(`head -c 1 /proc/%d/%s > /dev/null && echo GOT_IT`, pid, f))
+			if err == nil || strings.Contains(out, "GOT_IT") {
+				t.Errorf("read the agent's %s: %q", f, out)
+			}
+		}
+	})
+}
+
+// A locked command cannot change the starting program's limits or priority,
+// and can change its own.
+func TestALockedCommandCannotStarveTheAgent(t *testing.T) {
+	eachLock(t, func(t *testing.T, landlock bool) {
+		pid := os.Getpid()
+		var before syscall.Rlimit
+		syscall.Getrlimit(syscall.RLIMIT_NOFILE, &before)
+		prioBefore, _ := syscall.Getpriority(syscall.PRIO_PROCESS, 0)
+
+		run(t, "", fmt.Sprintf(`prlimit --pid %d --nofile=8:8`, pid))
+		run(t, "", fmt.Sprintf(`renice -n 19 -p %d`, pid))
+		run(t, "", fmt.Sprintf(`renice -n 19 -u %d`, os.Getuid()))
+
+		var after syscall.Rlimit
+		syscall.Getrlimit(syscall.RLIMIT_NOFILE, &after)
+		if after != before {
+			t.Errorf("the agent's open-file limit changed from %v to %v", before, after)
+		}
+		if p, _ := syscall.Getpriority(syscall.PRIO_PROCESS, 0); p != prioBefore {
+			t.Errorf("the agent's priority changed from %d to %d", prioBefore, p)
+		}
+
+		out, err := run(t, "", `ulimit -n 64 && nice -n 5 echo own`)
+		if err != nil || strings.TrimSpace(out) != "own" {
+			t.Errorf("could not change its own limits and priority: %q %v", out, err)
+		}
+	})
+}
+
+// A locked command keeps no capability but those that read. Here the test
+// holds none, so it has none; the installed service holds CAP_NET_BIND_SERVICE
+// as well, which this drops.
+func TestALockedCommandKeepsOnlyCapabilitiesThatRead(t *testing.T) {
+	eachLock(t, func(t *testing.T, landlock bool) {
+		out, err := run(t, "", `grep -E '^Cap(Prm|Eff|Amb):' /proc/self/status`)
+		if err != nil {
+			t.Fatalf("%q %v", out, err)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			f := strings.Fields(line)
+			if len(f) != 2 {
+				continue
+			}
+			v, _ := strconv.ParseUint(f[1], 16, 64)
+			if v&^(1<<2|1<<34) != 0 {
+				t.Errorf("%s holds a capability that is not a read: %s", f[0], f[1])
+			}
+		}
+	})
+}

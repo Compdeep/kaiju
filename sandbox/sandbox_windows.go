@@ -22,6 +22,10 @@ func Enter() {}
 
 func checkNotChild() {}
 
+// protectSelf has nothing to do: a low-integrity process cannot open a
+// higher-integrity one to read its memory.
+func protectSelf() {}
+
 var (
 	advapi32                  = windows.NewLazySystemDLL("advapi32.dll")
 	procCreateRestrictedToken = advapi32.NewProc("CreateRestrictedToken")

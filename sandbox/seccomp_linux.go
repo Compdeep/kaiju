@@ -27,6 +27,19 @@ type syscallTable struct {
 	// the command may signal nothing outside its own group instead. A program
 	// the command starts can still be stopped through the group.
 	signals []uintptr
+	// syslog is allowed only for the actions that read the kernel log, so a
+	// command holding CAP_SYSLOG to read it cannot clear it (dmesg -C) or
+	// change where it goes.
+	syslog uintptr
+	// selfOnly change a process's limits, priority or placement, and are
+	// allowed only on the command itself: the argument naming the process must
+	// be 0 or the command's id. Otherwise a command could starve the program
+	// that started it, which runs as the same account.
+	selfOnly []pidCall
+	// whoCalls name their target with a kind and an id. The kind for every
+	// process of a user (which includes the program that started the command)
+	// is refused, and the id must be 0 or the command's.
+	whoCalls []whoCall
 	// fileWrites are refused when seccomp alone holds the lock.
 	fileWrites []uintptr
 	// opens are refused, when seccomp alone holds the lock, if the flags in the
@@ -42,6 +55,22 @@ type openCall struct {
 	nr  uintptr
 	arg int
 }
+
+type pidCall struct {
+	nr  uintptr
+	arg int
+}
+
+type whoCall struct {
+	nr       uintptr
+	whichArg int
+	whoArg   int
+	userKind uint32
+}
+
+// syslogReads are the syslog(2) actions that only read: READ, READ_ALL,
+// SIZE_UNREAD and SIZE_BUFFER.
+var syslogReads = []uint32{2, 3, 9, 10}
 
 // writeFlags are the open flags that change a file.
 const writeFlags = unix.O_WRONLY | unix.O_RDWR | unix.O_CREAT | unix.O_TRUNC | unix.O_APPEND
@@ -128,6 +157,33 @@ func buildFilter(t *syscallTable, self int, fileWrites bool) ([]unix.SockFilter,
 		p.emit(jeq, -pid, "allow", "deny")
 		p.label(next)
 	}
+	if t.syslog != 0 {
+		p.emit(jeq, uint32(t.syslog), "", "syslog-done")
+		p.emit(ldW, offArg(0), "", "")
+		for _, a := range syslogReads {
+			p.emit(jeq, a, "allow", "")
+		}
+		p.emit(ret, unix.SECCOMP_RET_ERRNO|uint32(unix.EPERM), "", "")
+		p.label("syslog-done")
+	}
+	for i, c := range t.selfOnly {
+		next := fmt.Sprintf("self-%d", i)
+		p.emit(jeq, uint32(c.nr), "", next)
+		p.emit(ldW, offArg(c.arg), "", "")
+		p.emit(jeq, 0, "allow", "")
+		p.emit(jeq, pid, "allow", "deny")
+		p.label(next)
+	}
+	for i, c := range t.whoCalls {
+		next := fmt.Sprintf("who-%d", i)
+		p.emit(jeq, uint32(c.nr), "", next)
+		p.emit(ldW, offArg(c.whichArg), "", "")
+		p.emit(jeq, c.userKind, "deny", "")
+		p.emit(ldW, offArg(c.whoArg), "", "")
+		p.emit(jeq, 0, "allow", "")
+		p.emit(jeq, pid, "allow", "deny")
+		p.label(next)
+	}
 	if fileWrites {
 		for _, nr := range t.fileWrites {
 			p.emit(jeq, uint32(nr), "deny", "")
@@ -167,3 +223,7 @@ func applySeccomp(self int, fileWrites bool) error {
 	prog := unix.SockFprog{Len: uint16(len(ins)), Filter: &ins[0]}
 	return unix.Prctl(unix.PR_SET_SECCOMP, unix.SECCOMP_MODE_FILTER, uintptr(unsafe.Pointer(&prog)), 0, 0)
 }
+
+// ioprioWhoUser is IOPRIO_WHO_USER, the ioprio_set(2) kind for every process of
+// a user.
+const ioprioWhoUser = 3

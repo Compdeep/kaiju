@@ -114,3 +114,28 @@ func TestTargetIsPassedThroughUntouched(t *testing.T) {
 		t.Errorf("request fields not passed through: %+v", ex.got)
 	}
 }
+
+// A step sent to another target carries the most it may do as this side knows
+// it: the run's intent lowered by the scope's cap for the tool and by the run's
+// ceiling for that target. The far end locks the programs the tool starts below
+// control, so a cap that stayed here would leave the step unlocked there.
+func TestARemoteStepCarriesTheCapsSetHere(t *testing.T) {
+	cases := []struct {
+		name  string
+		scope *ResolvedScope
+		want  int
+	}{
+		{"no scope", nil, 200},
+		{"no caps", &ResolvedScope{}, 200},
+		{"the tool is capped", &ResolvedScope{MaxImpact: map[string]int{"bash": 100}}, 100},
+		{"another tool is capped", &ResolvedScope{MaxImpact: map[string]int{"git": 0}}, 200},
+		{"the target is capped", &ResolvedScope{Targets: map[string]int{"target-a": 100}}, 100},
+		{"the lower of both", &ResolvedScope{MaxImpact: map[string]int{"bash": 100}, Targets: map[string]int{"target-a": 0}}, 0},
+		{"a cap above the intent", &ResolvedScope{MaxImpact: map[string]int{"bash": 300}}, 200},
+	}
+	for _, c := range cases {
+		if got := remoteLevel(200, c.scope, "bash", "target-a"); got != c.want {
+			t.Errorf("%s: level %d, want %d", c.name, got, c.want)
+		}
+	}
+}

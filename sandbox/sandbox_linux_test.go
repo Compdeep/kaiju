@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -27,8 +26,9 @@ func TestMain(m *testing.M) {
 // lock and runs the self-test again.
 func resetSetup(t *testing.T) {
 	t.Helper()
-	setupOnce = sync.Once{}
-	report, setupErr, tmpDir = Report{}, nil, ""
+	setupMu.Lock()
+	setupDone, report, setupErr, tmpDir = false, Report{}, nil, ""
+	setupMu.Unlock()
 }
 
 // eachLock runs f under every lock this kernel can apply: Landlock with
@@ -407,4 +407,86 @@ func TestALockedCommandKeepsOnlyCapabilitiesThatRead(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A failed setup is run again after retryAfter, so a failure that passes does
+// not refuse every locked command until the program restarts.
+func TestAFailedSetupIsTriedAgain(t *testing.T) {
+	savedRetry := retryAfter
+	retryAfter = time.Hour
+	probeCommand = func(ctx context.Context, _ bool, _ Report, _ []string, name string, args []string) (*exec.Cmd, error) {
+		return exec.CommandContext(ctx, name, args...), nil
+	}
+	resetSetup(t)
+	t.Cleanup(func() { retryAfter = savedRetry; probeCommand = platformCommand; resetSetup(t) })
+
+	if err := Command(context.Background(), true, nil, "true").Run(); err == nil {
+		t.Fatal("a setup whose self-test failed let a command run")
+	}
+	probeCommand = platformCommand // the cause has passed
+	if err := Command(context.Background(), true, nil, "true").Run(); err == nil {
+		t.Fatal("the failure was not kept for retryAfter")
+	}
+	retryAfter = 0
+	if err := Command(context.Background(), true, nil, "true").Run(); err != nil {
+		t.Fatalf("the setup was not run again after retryAfter: %v", err)
+	}
+}
+
+// A temporary folder removed while the program runs is made again.
+func TestARemovedTemporaryFolderIsMadeAgain(t *testing.T) {
+	resetSetup(t)
+	t.Cleanup(func() { resetSetup(t) })
+	if err := Command(context.Background(), true, nil, "true").Run(); err != nil {
+		t.Fatal(err)
+	}
+	_, first, _ := setup()
+	os.RemoveAll(first)
+	if err := Command(context.Background(), true, nil, "true").Run(); err != nil {
+		t.Fatalf("a locked command failed after its temporary folder was removed: %v", err)
+	}
+	_, second, err := setup()
+	if err != nil || second == first {
+		t.Fatalf("no new folder: %q %v", second, err)
+	}
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("the new folder does not exist: %v", err)
+	}
+}
+
+// Locked commands started at the same time, including the first ones, while
+// the check has not run yet: each is locked on its own, every write is refused,
+// every read works, and the shared check result is read safely (go test -race).
+func TestLockedCommandsInParallel(t *testing.T) {
+	resetSetup(t)
+	t.Cleanup(func() { resetSetup(t) })
+	dir := fixture(t)
+	const n = 20
+	type result struct {
+		write bool
+		out   string
+		err   error
+	}
+	results := make(chan result, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			if i%2 == 0 {
+				out, err := run(t, dir, fmt.Sprintf(`echo x > "$1/new-%d"`, i))
+				results <- result{true, out, err}
+				return
+			}
+			out, err := run(t, dir, `cat "$1/in"`)
+			results <- result{false, out, err}
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		r := <-results
+		if !r.write && (r.err != nil || strings.TrimSpace(r.out) != "probe") {
+			t.Errorf("a read in parallel failed: %q %v", r.out, r.err)
+		}
+	}
+	for i := 0; i < n; i += 2 {
+		absent(t, filepath.Join(dir, fmt.Sprintf("new-%d", i)))
+	}
+	unchanged(t, dir)
 }

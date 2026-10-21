@@ -47,6 +47,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 // Name is the name this program is started under to lock a command. An
@@ -71,11 +72,23 @@ var (
 	enabled bool
 	opts    Options
 
-	setupOnce sync.Once
+	// What setup found, guarded by setupMu. Locked commands read it through
+	// setup; the platform's self-test reads report and tmpDir while setup
+	// holds the lock.
+	setupMu   sync.Mutex
+	setupDone bool
+	setupAt   time.Time
 	report    Report
 	setupErr  error
 	tmpDir    string
 )
+
+// retryAfter is how long a failed setup stands before the next locked command
+// runs it again. A failure can pass — a full /tmp, a fork refused under load —
+// and a setup that ran once and kept its failure refused every locked command
+// until the program restarted. "No lock on this machine" is not retried: it
+// does not change while the program runs.
+var retryAfter = 30 * time.Second
 
 // Report is what the sandbox found on this machine.
 type Report struct {
@@ -122,34 +135,59 @@ func logf(format string, args ...any) {
  * return: the report.
  */
 func Status() Report {
-	setup()
-	return report
+	r, _, _ := setup()
+	return r
 }
 
-// setup detects the lock and runs the self-test, once.
-func setup() {
-	setupOnce.Do(func() {
-		report = detect()
-		if report.Lock == "" {
-			setupErr = errNoLock
-			logf("[sandbox] no lock is available on this machine")
-			return
+/*
+ * setup detects the lock, makes the temporary folder and runs the self-test,
+ * and returns what it found.
+ * desc: A setup that passed is kept, and only its temporary folder is made
+ *       again if something removed it (a clean-up of /tmp). One that found no
+ *       lock is kept. Any other failure is kept for retryAfter, then run again.
+ */
+func setup() (Report, string, error) {
+	setupMu.Lock()
+	defer setupMu.Unlock()
+	if setupDone {
+		switch {
+		case setupErr == nil:
+			if _, err := os.Stat(tmpDir); err == nil {
+				return report, tmpDir, nil
+			}
+			if dir, err := os.MkdirTemp("", "sandbox-tmp-"); err == nil {
+				logf("[sandbox] the temporary folder %s was removed; using %s", tmpDir, dir)
+				tmpDir = dir
+				return report, tmpDir, nil
+			}
+		case errors.Is(setupErr, errNoLock), time.Since(setupAt) < retryAfter:
+			return report, tmpDir, setupErr
 		}
+	}
+	setupDone, setupAt = true, time.Now()
+	report, setupErr = detect(), nil
+	if report.Lock == "" {
+		setupErr = errNoLock
+		logf("[sandbox] no lock is available on this machine")
+		return report, tmpDir, setupErr
+	}
+	if tmpDir == "" {
 		dir, err := os.MkdirTemp("", "sandbox-tmp-")
 		if err != nil {
 			setupErr = fmt.Errorf("create the sandbox's temporary folder: %w", err)
-			logf("[sandbox] %v", setupErr)
-			return
+			logf("[sandbox] %v; tried again after %v", setupErr, retryAfter)
+			return report, tmpDir, setupErr
 		}
 		tmpDir = dir
-		report.SelfTest = selfTest()
-		if report.SelfTest != nil {
-			setupErr = fmt.Errorf("self-test failed, so no locked command will run: %w", report.SelfTest)
-			logf("[sandbox] %v", setupErr)
-			return
-		}
-		logf("[sandbox] lock in use: %s (landlock version %d); self-test passed", report.Lock, report.LandlockABI)
-	})
+	}
+	report.SelfTest = selfTest()
+	if report.SelfTest != nil {
+		setupErr = fmt.Errorf("self-test failed, so no locked command will run: %w", report.SelfTest)
+		logf("[sandbox] %v; tried again after %v", setupErr, retryAfter)
+		return report, tmpDir, setupErr
+	}
+	logf("[sandbox] lock in use: %s (landlock version %d); self-test passed", report.Lock, report.LandlockABI)
+	return report, tmpDir, nil
 }
 
 /*
@@ -196,7 +234,7 @@ func lockedCommand(ctx context.Context, cancel bool, writable []string, name str
 	if !on {
 		return refuse(errors.New("this program does not call sandbox.Enter and sandbox.Enable"))
 	}
-	setup()
+	r, dir, setupErr := setup()
 	if errors.Is(setupErr, errNoLock) && allowUnlocked {
 		logf("[sandbox] %s runs without a lock: none is available and AllowUnlocked is set", name)
 		if cancel {
@@ -207,7 +245,7 @@ func lockedCommand(ctx context.Context, cancel bool, writable []string, name str
 	if setupErr != nil {
 		return refuse(setupErr)
 	}
-	cmd, err := platformCommand(ctx, cancel, report, append([]string{tmpDir}, writable...), name, args)
+	cmd, err := platformCommand(ctx, cancel, r, append([]string{dir}, writable...), name, args)
 	if err != nil {
 		return refuse(err)
 	}

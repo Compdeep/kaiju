@@ -375,7 +375,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			Target:        n.Target,
 			Tool:          n.ToolName,
 			Params:        n.Params,
-			Intent:        int(intent),
+			Intent:        remoteLevel(intent, scope, n.ToolName, n.Target),
 			CorrelationID: triggerID,
 		})
 		// Parse the envelope the far end returned, so a result that ran
@@ -737,6 +737,29 @@ func walkParams(v any, fn func(string) (any, bool)) {
 			}
 		}
 	}
+}
+
+/*
+ * remoteLevel is the most a step sent to another target may do, as far as this
+ * side knows: the run's intent, lowered by the scope's cap for the tool and by
+ * the run's ceiling for that target. The far end lowers it again by its own
+ * clearance and gates the tool against it, and below control it locks the
+ * programs the tool starts (toolapi.Command), so a cap set here has to travel
+ * with the request: the run's intent alone would leave a step this side would
+ * have locked unlocked there.
+ */
+func remoteLevel(intent gates.Intent, scope *ResolvedScope, tool, target string) int {
+	level := int(intent)
+	if scope == nil {
+		return level
+	}
+	if c, ok := scope.MaxImpact[tool]; ok && c < level {
+		level = c
+	}
+	if c, ok := scope.Targets[target]; ok && c < level {
+		level = c
+	}
+	return level
 }
 
 /*

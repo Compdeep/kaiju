@@ -78,7 +78,7 @@ func check(t *testing.T, label string, prog []unix.SockFilter, cases []call) {
 
 func build(t *testing.T, allow map[Effect]bool, fileWrites bool) []unix.SockFilter {
 	t.Helper()
-	prog, err := buildFilter(table, 4000, allow, fileWrites)
+	prog, err := buildFilter(table, 4000, allow, fileWrites, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +208,26 @@ func TestTheFilterFollowsTheEffects(t *testing.T) {
 	})
 }
 
+// A command run as its own account leaves writes and signals to that account's
+// permissions; the rest of the filter is the same.
+func TestAnOwnAccountLeavesWritesAndSignalsToPermissions(t *testing.T) {
+	const other = 4001
+	prog, err := buildFilter(table, 4000, readOnlyAllow(), false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(t, "own account", prog, []call{
+		{"open to write", unix.SYS_OPENAT, []uint64{0, 0, unix.O_WRONLY}, allow},
+		{"kill another", unix.SYS_KILL, []uint64{other}, allow},
+		{"tkill", unix.SYS_TKILL, nil, allow},
+		{"prlimit another", unix.SYS_PRLIMIT64, []uint64{other}, allow},
+		{"chmod", unix.SYS_FCHMODAT, nil, eperm},
+		{"syslog clear (dmesg -C)", unix.SYS_SYSLOG, []uint64{5}, eperm},
+		{"ptrace poke data", unix.SYS_PTRACE, []uint64{unix.PTRACE_POKEDATA}, eperm},
+		{"mount", unix.SYS_MOUNT, nil, eperm},
+	})
+}
+
 // Every combination of effects builds: no jump in the filter is out of reach.
 func TestEveryCombinationBuilds(t *testing.T) {
 	for mask := 0; mask < 1<<len(lockEffects); mask++ {
@@ -216,8 +236,10 @@ func TestEveryCombinationBuilds(t *testing.T) {
 			a[e] = mask&(1<<i) != 0
 		}
 		for _, fw := range []bool{false, true} {
-			if _, err := buildFilter(table, 4000, a, fw); err != nil {
-				t.Fatalf("%v fileWrites=%v: %v", a, fw, err)
+			for _, own := range []bool{false, true} {
+				if _, err := buildFilter(table, 4000, a, fw, own); err != nil {
+					t.Fatalf("%v fileWrites=%v ownAccount=%v: %v", a, fw, own, err)
+				}
 			}
 		}
 	}

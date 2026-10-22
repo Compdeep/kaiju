@@ -5,6 +5,7 @@ package sandbox
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -534,7 +535,7 @@ func TestALockedCommandCannotStarveTheAgent(t *testing.T) {
 // A locked command keeps no capability but those that read. Here the test
 // holds none, so it has none; an installed service holds CAP_NET_BIND_SERVICE
 // as well, which this drops.
-func TestALockedCommandKeepsOnlyCapabilitiesThatRead(t *testing.T) {
+func TestALockedCommandKeepsOnlyCapabilitiesOfItsEffects(t *testing.T) {
 	eachLock(t, func(t *testing.T, landlock bool) {
 		out, err := run(t, "", `grep -E '^Cap(Prm|Eff|Amb):' /proc/self/status`)
 		if err != nil {
@@ -546,8 +547,8 @@ func TestALockedCommandKeepsOnlyCapabilitiesThatRead(t *testing.T) {
 				continue
 			}
 			v, _ := strconv.ParseUint(f[1], 16, 64)
-			if v&^(1<<unix.CAP_DAC_READ_SEARCH|1<<unix.CAP_SYS_PTRACE|1<<unix.CAP_SYSLOG) != 0 {
-				t.Errorf("%s holds a capability that is not a read: %s", f[0], f[1])
+			if v&^(1<<unix.CAP_DAC_READ_SEARCH|1<<unix.CAP_SYS_PTRACE|1<<unix.CAP_SYSLOG|1<<unix.CAP_KILL) != 0 {
+				t.Errorf("%s holds a capability no effect gives: %s", f[0], f[1])
 			}
 		}
 	})
@@ -739,5 +740,104 @@ func TestRootGoesToTheRootRunner(t *testing.T) {
 	Command(context.Background(), 100, nil, "true").Run()
 	if gotName != "" {
 		t.Fatal("the root runner was used below root")
+	}
+}
+
+// useAccount makes commands that may not change files run as name until the
+// test ends.
+func useAccount(t *testing.T, name string) {
+	t.Helper()
+	Enable(Options{Account: name, Logf: func(string, ...any) {}})
+	resetSetup(t)
+	t.Cleanup(func() { quiet(); resetSetup(t) })
+}
+
+// A command started as the account carries its ids to Enter, with its home and
+// /tmp for temporary files, and neither the write rule nor /dev/null passed in.
+func TestACommandIsStartedAsTheAccount(t *testing.T) {
+	r := Report{Lock: "seccomp", account: &accountIDs{UID: 4242, GID: 4343, Home: "/nonexistent"}}
+	cmd, err := platformCommand(context.Background(), true, r, readOnly(true), nil, "sh", []string{"-c", "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg bootConfig
+	if err := json.Unmarshal([]byte(cmd.Args[1]), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Account == nil || cfg.Account.UID != 4242 || cfg.Account.GID != 4343 {
+		t.Fatalf("account not passed: %+v", cfg.Account)
+	}
+	if cfg.NullFD || cfg.LandlockABI != 0 {
+		t.Fatalf("a command run as the account got the write lock: %+v", cfg)
+	}
+	env := strings.Join(cmd.Env, "\n")
+	if !strings.Contains(env, "\nHOME=/nonexistent") || !strings.Contains(env, "\nTMPDIR=/tmp") {
+		t.Fatalf("home or temporary folder not set: %s", env)
+	}
+
+	// A command that may change files runs as this program's account.
+	a := readOnly(true)
+	a[ChangeFiles] = true
+	cmd, _ = platformCommand(context.Background(), true, r, a, nil, "sh", []string{"-c", "true"})
+	cfg = bootConfig{}
+	json.Unmarshal([]byte(cmd.Args[1]), &cfg)
+	if cfg.Account != nil {
+		t.Fatal("a command that may change files was started as the account")
+	}
+}
+
+// An account this program cannot switch to leaves commands locked as before:
+// the lock is never lost for want of the account.
+func TestAnAccountThatCannotBeUsedKeepsTheLock(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can switch to any account")
+	}
+	useAccount(t, "nobody")
+	r := Status()
+	if r.SelfTest != nil {
+		t.Fatalf("self-test: %v", r.SelfTest)
+	}
+	if r.Account != "" {
+		t.Fatalf("switched to %s without CAP_SETUID", r.Account)
+	}
+	dir := fixture(t)
+	if out, err := run(t, dir, `echo x > "$1/new"`); err == nil {
+		t.Fatalf("a write succeeded: %q", out)
+	}
+	absent(t, filepath.Join(dir, "new"))
+}
+
+// As root (sudo go test -run Account ./sandbox/): a command runs as the
+// account, can write a temporary file and read, and cannot change a file it
+// does not own.
+func TestACommandRunsAsTheAccount(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("switching account needs root, or CAP_SETUID and CAP_SETGID")
+	}
+	useAccount(t, "nobody")
+	r := Status()
+	if r.SelfTest != nil || r.Account != "nobody" {
+		t.Fatalf("account %q, self-test %v", r.Account, r.SelfTest)
+	}
+	dir := fixture(t)
+	os.Chmod(dir, 0o755)
+	os.Chmod(filepath.Join(dir, "in"), 0o644)
+	out, err := run(t, dir, `id -u; cat "$1/in"; echo; t=$(mktemp) && echo y > "$t" && cat "$t" && rm "$t"; cat <<X
+here
+X`)
+	if err != nil {
+		t.Fatalf("%q %v", out, err)
+	}
+	if want := "65534\nprobe\ny\nhere\n"; out != want {
+		t.Fatalf("got %q, want %q", out, want)
+	}
+	for _, script := range []string{`echo x > "$1/in"`, `echo x > "$1/new"`, `rm -f "$1/in"`, `chmod 777 "$1/in"`, `kill -0 1`} {
+		if out, err := run(t, dir, script); err == nil {
+			t.Errorf("%s succeeded: %q", script, out)
+		}
+	}
+	absent(t, filepath.Join(dir, "new"))
+	if b, _ := os.ReadFile(filepath.Join(dir, "in")); string(b) != "probe" {
+		t.Fatalf("the file was changed: %q", b)
 	}
 }

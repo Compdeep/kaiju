@@ -188,8 +188,10 @@ func offArg(i int) uint32 { return uint32(16 + 8*i) }
  * param: self - the command's process id, which is also its group's.
  * param: allow - the effects the command may have.
  * param: fileWrites - refuse writing files here, because Landlock does not.
+ * param: ownAccount - the command runs as Options.Account, whose permissions
+ *        already keep its signals to its own programs.
  */
-func buildFilter(t *syscallTable, self int, allow map[Effect]bool, fileWrites bool) ([]unix.SockFilter, error) {
+func buildFilter(t *syscallTable, self int, allow map[Effect]bool, fileWrites, ownAccount bool) ([]unix.SockFilter, error) {
 	p := &program{labels: map[string]int{}}
 	p.emit(ldW, offArch, "", "")
 	p.emit(jeq, t.arch, "", "deny")
@@ -233,7 +235,7 @@ func buildFilter(t *syscallTable, self int, allow map[Effect]bool, fileWrites bo
 		p.label("socket-done")
 	}
 
-	if !allow[SignalPrograms] {
+	if !allow[SignalPrograms] && !ownAccount {
 		deny(t.threadSignals...)
 		for i, nr := range t.signals {
 			next := fmt.Sprintf("signal-%d", i)
@@ -307,11 +309,11 @@ func buildFilter(t *syscallTable, self int, allow map[Effect]bool, fileWrites bo
 }
 
 // applySeccomp installs the filter on this thread. no_new_privs is already set.
-func applySeccomp(self int, allow map[Effect]bool, fileWrites bool) error {
+func applySeccomp(self int, allow map[Effect]bool, fileWrites, ownAccount bool) error {
 	if table == nil {
 		return fmt.Errorf("no system call table for this processor")
 	}
-	ins, err := buildFilter(table, self, allow, fileWrites)
+	ins, err := buildFilter(table, self, allow, fileWrites, ownAccount)
 	if err != nil {
 		return err
 	}

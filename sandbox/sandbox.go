@@ -14,9 +14,15 @@
 // sees the name, locks the process and replaces it with the command (execve),
 // which keeps the lock:
 //
-//   - capabilities: only those of the allowed reading effects are kept
-//     (CAP_DAC_READ_SEARCH, CAP_SYS_PTRACE, CAP_SYSLOG), and only when this
-//     program holds them.
+//   - the account, when ChangeFiles is refused and the application names one
+//     (Options.Account): the command runs as that account, which owns
+//     nothing, so file permissions refuse its changes to anyone else's files
+//     and its signals to anyone else's programs. It writes where any user
+//     may (/tmp, /dev/null), so temporary files, caches and git work, and no
+//     seccomp rule on writes or signals is needed.
+//   - capabilities: only those of the allowed effects are kept
+//     (CAP_DAC_READ_SEARCH, CAP_SYS_PTRACE, CAP_SYSLOG, CAP_KILL), and only
+//     when this program holds them.
 //   - seccomp, always: mounts, modules, kexec, reboot, swap, io_uring (which
 //     would make system calls seccomp does not see), open_by_handle_at,
 //     pidfd_getfd, process_vm_writev; and for each refused effect the calls
@@ -24,12 +30,13 @@
 //     request: the requests that read, stop or resume a program, never those
 //     that change it.
 //   - Landlock (5.13 and later), when both ChangeFiles and ReadPrograms are
-//     refused: no file may be written, created, removed or renamed, except
+//     refused and there is no account: no file may be written, created, removed or renamed, except
 //     under the writable folders, the sandbox's temporary folder and
 //     /dev/null. Landlock refuses ptrace to any program outside the lock,
 //     whatever the capabilities, so it cannot be used while ReadPrograms is
 //     allowed; seccomp refuses the writes instead.
-//   - seccomp, when ChangeFiles is refused without Landlock: every system call
+//   - seccomp, when ChangeFiles is refused with neither an account nor
+//     Landlock: every system call
 //     that writes a file. It cannot tell files apart, so /dev/null is passed
 //     in already open instead (devNullFD) and a shell's redirections to it are
 //     rewritten to use it.
@@ -69,6 +76,13 @@ type Options struct {
 	// applies to the next one. DefaultEffects when nil.
 	Effects func() Effects
 
+	// Account names the account a command runs as when ChangeFiles is
+	// refused (Linux). It should own nothing this program or the system
+	// needs, and this program needs CAP_SETUID and CAP_SETGID to switch to
+	// it. Empty, missing, or failing the self-test, commands run as this
+	// program's own account under the lock that refuses every write.
+	Account string
+
 	// Root starts a program at a level that allows Root. Without it the
 	// program runs as this program's own account, unlocked.
 	Root func(ctx context.Context, cancel bool, name string, args []string) (*exec.Cmd, error)
@@ -106,6 +120,9 @@ type Report struct {
 	// Lock is the lock in use: "landlock+seccomp", "seccomp",
 	// "restricted-token", or "" when there is none.
 	Lock string
+	// Account is the account a command that may not change files runs as,
+	// or "" when it runs as this program's own.
+	Account string
 	// LandlockABI is the kernel's Landlock version, 0 when it has none.
 	LandlockABI int
 	// SelfTest is nil when a locked probe could read and could not write.
@@ -114,6 +131,15 @@ type Report struct {
 	// level refuses one runs with it anyway. Every effect, when there is no
 	// lock.
 	Unenforced []Effect
+
+	account *accountIDs
+}
+
+// accountIDs are Options.Account's ids and home folder.
+type accountIDs struct {
+	UID  int    `json:"uid"`
+	GID  int    `json:"gid"`
+	Home string `json:"-"`
 }
 
 // errNoLock is returned for a locked command on a platform without a lock.
@@ -168,11 +194,14 @@ func Status() Report {
 }
 
 /*
- * setup detects the lock, makes the temporary folder and runs the self-test,
- * and returns what it found.
+ * setup detects the lock, finds the account, makes the temporary folder when
+ * there is no account, and runs the self-test, and returns what it found.
  * desc: A setup that passed is kept, and only its temporary folder is made
  *       again if something removed it (a clean-up of /tmp). One that found no
  *       lock is kept. Any other failure is kept for retryAfter, then run again.
+ *       An account that fails the self-test is dropped, and the self-test run
+ *       again without it, so a missing capability or account costs git and
+ *       temporary files, never the lock.
  */
 func setup() (Report, string, error) {
 	setupMu.Lock()
@@ -180,6 +209,9 @@ func setup() (Report, string, error) {
 	if setupDone {
 		switch {
 		case setupErr == nil:
+			if report.account != nil {
+				return report, "", nil
+			}
 			if _, err := os.Stat(tmpDir); err == nil {
 				return report, tmpDir, nil
 			}
@@ -199,6 +231,23 @@ func setup() (Report, string, error) {
 		setupErr = errNoLock
 		logf("[sandbox] no lock is available on this system: commands run with every effect their account has")
 		return report, tmpDir, setupErr
+	}
+	mu.Lock()
+	name := opts.Account
+	mu.Unlock()
+	if name != "" {
+		if a, err := accountFor(name); err != nil {
+			logf("[sandbox] commands that may not change files run as this program's account, without temporary files: %v", err)
+		} else if a != nil {
+			report.Account, report.account = name, a
+			report.SelfTest = selfTest()
+			if report.SelfTest == nil {
+				logf("[sandbox] lock in use: %s, commands that may not change files run as %s; self-test passed", report.Lock, name)
+				return report, "", nil
+			}
+			logf("[sandbox] running commands as %s failed the self-test, so they run as this program's account: %v", name, report.SelfTest)
+			report.Account, report.account = "", nil
+		}
 	}
 	if tmpDir == "" {
 		dir, err := os.MkdirTemp("", "sandbox-tmp-")
@@ -228,7 +277,8 @@ func setup() (Report, string, error) {
  * param: ctx - ends the command when done, as for exec.CommandContext.
  * param: level - the most the step that starts it may do.
  * param: writable - folders it may still write under when ChangeFiles is
- *        refused (where the lock can tell folders apart).
+ *        refused (where the lock can tell folders apart). A command run as
+ *        Options.Account writes where that account may.
  * param: name - the program.
  * param: args - its arguments.
  * return: the command, used exactly as one from exec.CommandContext.
@@ -292,7 +342,10 @@ func start(ctx context.Context, cancel bool, level int, writable []string, name 
 	if setupErr != nil {
 		return refuse(setupErr)
 	}
-	cmd, err := platformCommand(ctx, cancel, r, allow, append([]string{dir}, writable...), name, args)
+	if dir != "" {
+		writable = append([]string{dir}, writable...)
+	}
+	cmd, err := platformCommand(ctx, cancel, r, allow, writable, name, args)
 	if err != nil {
 		return refuse(err)
 	}

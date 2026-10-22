@@ -34,12 +34,15 @@ const (
 	// ChangeFiles writes, creates, removes, renames, truncates or changes the
 	// permissions, owner or times of a file.
 	ChangeFiles Effect = "change_files"
-	// SignalPrograms signals programs outside the command's own process
-	// group, or changes their limits, priority or memory placement — only
-	// those its account may, unless it runs as root. Refused, a command may
-	// signal only its whole group or itself: seccomp cannot tell whether a
-	// process id is in the group, so a program that stops a child by its id
-	// (strace's start-up check, timeout, a shell's kill $!) fails.
+	// SignalPrograms signals programs other than the command's own, or
+	// changes their limits, priority or memory placement (CAP_KILL, when the
+	// starting program holds it). Refused, a command run as Options.Account
+	// signals only that account's programs, which its permissions hold, so
+	// timeout, strace and a shell's kill $! work. A command run as this
+	// program's own account may signal only its whole group or itself:
+	// seccomp cannot tell whether a process id is in the group, so a program
+	// that stops a child by its id (strace's start-up check, timeout, kill $!)
+	// fails.
 	SignalPrograms Effect = "signal_programs"
 	// Root runs the program with every right: through Options.Root, or as
 	// this program's own account when there is none.

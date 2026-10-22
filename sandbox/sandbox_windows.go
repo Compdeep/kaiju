@@ -254,3 +254,7 @@ func selfTest() error {
 	}
 	return nil
 }
+
+// accountFor: a command runs at low integrity on Windows, not as another
+// account, so Options.Account is not used.
+func accountFor(string) (*accountIDs, error) { return nil, nil }

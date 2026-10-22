@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -38,6 +39,7 @@ const exitLockFailed = 125
 // arguments are not.
 type bootConfig struct {
 	Allow       map[Effect]bool `json:"allow"`
+	Account     *accountIDs     `json:"account,omitempty"`
 	LandlockABI int             `json:"landlock_abi"`
 	Writable    []string        `json:"writable"`
 	NullFD      bool            `json:"null_fd"`
@@ -96,6 +98,11 @@ func lock(cfg bootConfig) error {
 			return fmt.Errorf("own process group: %w", err)
 		}
 	}
+	if cfg.Account != nil {
+		if err := switchAccount(*cfg.Account); err != nil {
+			return fmt.Errorf("account: %w", err)
+		}
+	}
 	if err := dropCapabilities(capabilitiesFor(cfg.Allow)); err != nil {
 		return fmt.Errorf("capabilities: %w", err)
 	}
@@ -122,7 +129,7 @@ func lock(cfg bootConfig) error {
 			return fmt.Errorf("landlock: %w", err)
 		}
 	}
-	if err := applySeccomp(self, cfg.Allow, cfg.NullFD); err != nil {
+	if err := applySeccomp(self, cfg.Allow, cfg.NullFD, cfg.Account != nil); err != nil {
 		return fmt.Errorf("seccomp: %w", err)
 	}
 	return nil
@@ -154,24 +161,26 @@ func closeInherited() error {
 	return nil
 }
 
-// readCapabilities are the capabilities a locked command may keep, each for the
-// reading effect it serves: CAP_DAC_READ_SEARCH reads and lists any file;
+// effectCapabilities are the capabilities a locked command may keep, each for
+// the effect it serves: CAP_DAC_READ_SEARCH reads and lists any file;
 // CAP_SYS_PTRACE traces and reads any program, and the filter refuses the
 // ptrace requests that change one; CAP_SYSLOG reads the kernel log, and the
-// filter allows only syslog's read actions. Any other the starting program
-// holds (CAP_NET_BIND_SERVICE, to listen below 1024, or all of them when it
-// runs as root) is dropped.
-var readCapabilities = map[Effect]uint{
-	ReadFiles:     unix.CAP_DAC_READ_SEARCH,
-	ReadPrograms:  unix.CAP_SYS_PTRACE,
-	ReadKernelLog: unix.CAP_SYSLOG,
+// filter allows only syslog's read actions; CAP_KILL signals any program. Any
+// other the starting program holds (CAP_SETUID and CAP_SETGID, to switch to
+// the account; CAP_NET_BIND_SERVICE, to listen below 1024; all of them when
+// it runs as root) is dropped.
+var effectCapabilities = map[Effect]uint{
+	ReadFiles:      unix.CAP_DAC_READ_SEARCH,
+	ReadPrograms:   unix.CAP_SYS_PTRACE,
+	ReadKernelLog:  unix.CAP_SYSLOG,
+	SignalPrograms: unix.CAP_KILL,
 }
 
-// capabilitiesFor are the capabilities of the allowed reading effects.
+// capabilitiesFor are the capabilities of the allowed effects.
 func capabilitiesFor(allow map[Effect]bool) []uint {
 	var keep []uint
 	for _, e := range lockEffects {
-		if c, ok := readCapabilities[e]; ok && allow[e] {
+		if c, ok := effectCapabilities[e]; ok && allow[e] {
 			keep = append(keep, c)
 		}
 	}
@@ -231,6 +240,66 @@ func dropCapabilities(keep []uint) error {
 				return fmt.Errorf("keep capability %d: %w", c, err)
 			}
 		}
+	}
+	return nil
+}
+
+/*
+ * accountFor finds the account a command that may not change files runs as.
+ * return: its ids, or why it cannot be used: it does not exist, it is root or
+ *         this program's own, or this program cannot switch to it.
+ */
+func accountFor(name string) (*accountIDs, error) {
+	u, err := user.Lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	uid, err1 := strconv.Atoi(u.Uid)
+	gid, err2 := strconv.Atoi(u.Gid)
+	if err1 != nil || err2 != nil {
+		return nil, fmt.Errorf("account %s has ids %q and %q", name, u.Uid, u.Gid)
+	}
+	if uid == 0 || uid == os.Getuid() {
+		return nil, fmt.Errorf("account %s is root or this program's own", name)
+	}
+	if os.Geteuid() != 0 {
+		hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+		var data [2]unix.CapUserData
+		if err := unix.Capget(&hdr, &data[0]); err != nil {
+			return nil, fmt.Errorf("read capabilities: %w", err)
+		}
+		for _, c := range []uint{unix.CAP_SETUID, unix.CAP_SETGID} {
+			if data[c/32].Effective&(1<<(c%32)) == 0 {
+				return nil, fmt.Errorf("switching to %s needs CAP_SETUID and CAP_SETGID, which this program does not hold", name)
+			}
+		}
+	}
+	return &accountIDs{UID: uid, GID: gid, Home: u.HomeDir}, nil
+}
+
+/*
+ * switchAccount makes this thread the account's, keeping its capabilities
+ * for dropCapabilities to cut.
+ * desc: Raw calls change this thread only, and execve starts the command from
+ *       it; Go's and the C library's own change every thread of the program.
+ *       Root would lose its capabilities on becoming another account, so it
+ *       keeps them (PR_SET_KEEPCAPS) until dropCapabilities.
+ */
+func switchAccount(a accountIDs) error {
+	if os.Geteuid() == 0 {
+		if err := unix.Prctl(unix.PR_SET_KEEPCAPS, 1, 0, 0, 0); err != nil {
+			return fmt.Errorf("keep capabilities: %w", err)
+		}
+	}
+	if _, _, e := unix.RawSyscall(unix.SYS_SETGROUPS, 0, 0, 0); e != 0 {
+		return fmt.Errorf("groups: %w", e)
+	}
+	g, u := uintptr(a.GID), uintptr(a.UID)
+	if _, _, e := unix.RawSyscall(unix.SYS_SETRESGID, g, g, g); e != 0 {
+		return fmt.Errorf("group %d: %w", a.GID, e)
+	}
+	if _, _, e := unix.RawSyscall(unix.SYS_SETRESUID, u, u, u); e != 0 {
+		return fmt.Errorf("user %d: %w", a.UID, e)
 	}
 	return nil
 }
@@ -358,13 +427,15 @@ func rewriteDevNull(script string) (string, bool) {
 
 func platformCommand(ctx context.Context, cancel bool, r Report, allow map[Effect]bool, writable []string, name string, args []string) (*exec.Cmd, error) {
 	cfg := bootConfig{Allow: allow, Writable: writable}
-	if !allow[ChangeFiles] {
-		// Landlock would refuse tracing any program outside the lock.
-		if r.LandlockABI > 0 && !allow[ReadPrograms] {
-			cfg.LandlockABI = r.LandlockABI
-		} else {
-			cfg.NullFD = true
-		}
+	switch {
+	case allow[ChangeFiles]:
+	case r.account != nil:
+		cfg.Account = r.account
+	// Landlock would refuse tracing any program outside the lock.
+	case r.LandlockABI > 0 && !allow[ReadPrograms]:
+		cfg.LandlockABI = r.LandlockABI
+	default:
+		cfg.NullFD = true
 	}
 	if cfg.NullFD && shells[filepath.Base(name)] && len(args) >= 2 && args[0] == "-c" {
 		if s, changed := rewriteDevNull(args[1]); changed {
@@ -384,7 +455,13 @@ func platformCommand(ctx context.Context, cancel bool, r Report, allow map[Effec
 		cmd = exec.Command(self)
 	}
 	cmd.Args = append([]string{Name, string(b), name}, args...)
-	cmd.Env = append(os.Environ(), childEnv+"=1", "TMPDIR="+writable[0])
+	cmd.Env = append(os.Environ(), childEnv+"=1")
+	switch {
+	case cfg.Account != nil:
+		cmd.Env = append(cmd.Env, "HOME="+cfg.Account.Home, "TMPDIR=/tmp")
+	case len(writable) > 0:
+		cmd.Env = append(cmd.Env, "TMPDIR="+writable[0])
+	}
 	return cmd, nil
 }
 
@@ -392,9 +469,9 @@ func platformCommand(ctx context.Context, cancel bool, r Report, allow map[Effec
 // does not lock, to show the self-test catches a lock that does not hold.
 var probeCommand = platformCommand
 
-// readOnly is a command that may read and may not change files: seccomp holds
-// the writes, and with ReadPrograms refused, Landlock does where the kernel
-// has it.
+// readOnly is a command that may read and may not change files: the account
+// holds the writes when there is one; otherwise seccomp does, and with
+// ReadPrograms refused, Landlock does where the kernel has it.
 func readOnly(readPrograms bool) map[Effect]bool {
 	a := DefaultEffects().allowedAt(0)
 	a[ChangeFiles], a[ReadPrograms] = false, readPrograms
@@ -410,7 +487,7 @@ func selfTest() error {
 	if err := probe(readOnly(true)); err != nil {
 		return err
 	}
-	if report.LandlockABI > 0 {
+	if report.LandlockABI > 0 && report.account == nil {
 		return probe(readOnly(false))
 	}
 	return nil
@@ -422,11 +499,15 @@ func probe(allow map[Effect]bool) error {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	in, out, keep := filepath.Join(dir, "in"), filepath.Join(dir, "out"), filepath.Join(dir, "keep")
-	if err := os.WriteFile(in, []byte("probe"), 0o600); err != nil {
+	// Readable by the account, which may not hold CAP_DAC_READ_SEARCH.
+	if err := os.Chmod(dir, 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(keep, []byte("keep"), 0o600); err != nil {
+	in, out, keep := filepath.Join(dir, "in"), filepath.Join(dir, "out"), filepath.Join(dir, "keep")
+	if err := os.WriteFile(in, []byte("probe"), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(keep, []byte("keep"), 0o644); err != nil {
 		return err
 	}
 	cmd, err := probeCommand(context.Background(), true, report, allow, []string{tmpDir}, "sh",
@@ -445,7 +526,7 @@ func probe(allow map[Effect]bool) error {
 	if err != nil {
 		return errors.New("a locked command removed a file")
 	}
-	if st.Mode().Perm() != 0o600 {
+	if st.Mode().Perm() != 0o644 {
 		return errors.New("a locked command changed a file's permissions")
 	}
 	return nil

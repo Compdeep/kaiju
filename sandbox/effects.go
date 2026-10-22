@@ -44,7 +44,7 @@ const (
 	// that stops a child by its id (strace's start-up check, timeout, kill $!)
 	// fails.
 	SignalPrograms Effect = "signal_programs"
-	// Root runs the program with every right: through Options.Root, or as
+	// Root runs the program with every right: through Options.Start, or as
 	// this program's own account when there is none.
 	Root Effect = "root"
 )

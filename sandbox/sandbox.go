@@ -48,6 +48,14 @@
 // rights. The writable folders are labelled low integrity, so it can write
 // there. Network, ReadPrograms and SignalPrograms cannot be refused on Windows.
 //
+// Elsewhere. An application whose own program should not hold the rights a
+// lock hands out (switching account, tracing) gives Options.Start: every
+// command that needs the lock or root goes to a privileged program of its
+// own, which decides the effects from its own policy and starts this program
+// under Name already as the account and holding only the allowed
+// capabilities; Enter then applies the rest. When that program cannot be
+// reached, the command is locked here.
+//
 // A missing kernel feature does not stop a command: it runs with what this
 // system can enforce, and Report says what cannot be. A lock that fails to
 // apply does stop it, since an attacker could cause the failure on purpose,
@@ -83,9 +91,15 @@ type Options struct {
 	// program's own account under the lock that refuses every write.
 	Account string
 
-	// Root starts a program at a level that allows Root. Without it the
-	// program runs as this program's own account, unlocked.
-	Root func(ctx context.Context, cancel bool, name string, args []string) (*exec.Cmd, error)
+	// Start hands a command to another program that holds the rights and
+	// applies the effects itself — an application's privileged service —
+	// for every command this package would lock or run as root. level is the
+	// step's; that program decides from its own policy, never from this one.
+	// When it returns an error wrapping ErrUnavailable the command is locked
+	// here instead, and refused if it needed Root; any other error refuses
+	// it. Without Start, a command is locked here, and one allowed Root runs
+	// as this program's own account, unlocked.
+	Start func(ctx context.Context, cancel bool, level int, name string, args []string) (*exec.Cmd, error)
 
 	// Logf receives what the sandbox reports: which lock is in use, the
 	// self-test's result, and each refusal. log.Printf when nil.
@@ -141,6 +155,10 @@ type accountIDs struct {
 	GID  int    `json:"gid"`
 	Home string `json:"-"`
 }
+
+// ErrUnavailable is wrapped by Options.Start when the program it hands
+// commands to cannot be reached.
+var ErrUnavailable = errors.New("the program that starts commands cannot be reached")
 
 // errNoLock is returned for a locked command on a platform without a lock.
 var errNoLock = errors.New("this platform has no way to lock a command")
@@ -270,10 +288,12 @@ func setup() (Report, string, error) {
 
 /*
  * Command builds a command to start a program with the effects level allows.
- * desc: Everything allowed but root, it is exec.CommandContext. Root allowed,
- *       it is Options.Root's command. Otherwise it is started locked; when the
- *       lock cannot be applied the command's Err is set, so Start returns the
- *       reason and nothing runs.
+ * desc: With Options.Start, a command that needs the lock or root is that
+ *       program's. Otherwise, everything allowed but root, it is
+ *       exec.CommandContext; root allowed, it runs unlocked; else it is
+ *       started locked here. When the lock cannot be applied, or the command
+ *       is refused, its Err is set, so Start returns the reason and nothing
+ *       runs.
  * param: ctx - ends the command when done, as for exec.CommandContext.
  * param: level - the most the step that starts it may do.
  * param: writable - folders it may still write under when ChangeFiles is
@@ -310,26 +330,27 @@ func start(ctx context.Context, cancel bool, level int, writable []string, name 
 	}
 
 	mu.Lock()
-	on, root := enabled, opts.Root
+	on, startElsewhere := enabled, opts.Start
 	mu.Unlock()
 	eff := currentEffects()
-
-	if eff.Allows(Root, level) {
-		if root == nil {
-			return plain()
-		}
-		cmd, err := root(ctx, cancel, name, args)
-		if err != nil {
-			return refuse(err)
-		}
-		return cmd
-	}
+	root := eff.Allows(Root, level)
 	allow := eff.allowedAt(level)
 	refused := false
 	for _, e := range lockEffects {
 		refused = refused || !allow[e]
 	}
-	if !refused {
+
+	if startElsewhere != nil && (root || refused) {
+		cmd, err := startElsewhere(ctx, cancel, level, name, args)
+		switch {
+		case err == nil:
+			return cmd
+		case root || !errors.Is(err, ErrUnavailable):
+			return refuse(err)
+		}
+		logf("[sandbox] %v; %s is locked here instead", err, name)
+	}
+	if root || !refused {
 		return plain()
 	}
 	if !on {

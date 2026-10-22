@@ -722,24 +722,59 @@ func TestChangeFilesMovedBelowTheLevel(t *testing.T) {
 	}
 }
 
-// Root goes to Options.Root, given the command as asked.
-func TestRootGoesToTheRootRunner(t *testing.T) {
+// startWith hands commands to start until the test ends.
+func startWith(t *testing.T, e Effects, start func(ctx context.Context, cancel bool, level int, name string, args []string) (*exec.Cmd, error)) {
+	t.Helper()
+	Enable(Options{Effects: func() Effects { return e }, Logf: func(string, ...any) {}, Start: start})
+	t.Cleanup(quiet)
+}
+
+// Every command that needs the lock or root goes to Options.Start, with its
+// level, as asked; one with everything allowed but root does not.
+func TestCommandsGoToTheStarter(t *testing.T) {
+	var gotLevel int
 	var gotName string
 	var gotArgs []string
-	Enable(Options{Logf: func(string, ...any) {}, Root: func(ctx context.Context, cancel bool, name string, args []string) (*exec.Cmd, error) {
-		gotName, gotArgs = name, args
-		return exec.CommandContext(ctx, "echo", "as-root"), nil
-	}})
-	t.Cleanup(quiet)
-	out, err := Command(context.Background(), 200, nil, "id", "-u").Output()
-	if err != nil || strings.TrimSpace(string(out)) != "as-root" || gotName != "id" || len(gotArgs) != 1 || gotArgs[0] != "-u" {
-		t.Fatalf("root runner not used as asked: %q %v %q %v", out, err, gotName, gotArgs)
+	startWith(t, DefaultEffects(), func(ctx context.Context, cancel bool, level int, name string, args []string) (*exec.Cmd, error) {
+		gotLevel, gotName, gotArgs = level, name, args
+		return exec.CommandContext(ctx, "echo", "started"), nil
+	})
+	for _, level := range []int{0, 100, 200} {
+		gotName = ""
+		out, err := Command(context.Background(), level, nil, "id", "-u").Output()
+		if err != nil || strings.TrimSpace(string(out)) != "started" || gotLevel != level || gotName != "id" || len(gotArgs) != 1 || gotArgs[0] != "-u" {
+			t.Fatalf("level %d: not handed over as asked: %q %v %d %q %v", level, out, err, gotLevel, gotName, gotArgs)
+		}
 	}
-	// Below root it is not asked.
-	gotName = ""
-	Command(context.Background(), 100, nil, "true").Run()
-	if gotName != "" {
-		t.Fatal("the root runner was used below root")
+	startWith(t, with(Effects{ChangeFiles: 0, SignalPrograms: 0}), func(context.Context, bool, int, string, []string) (*exec.Cmd, error) {
+		t.Fatal("a command with nothing to lock was handed over")
+		return nil, nil
+	})
+	if err := Command(context.Background(), 100, nil, "true").Run(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A starter that cannot be reached leaves a command locked here, never
+// unlocked, and refuses one that needed root; a refusal refuses.
+func TestAnUnreachableStarterLocksHere(t *testing.T) {
+	unreachable := func(context.Context, bool, int, string, []string) (*exec.Cmd, error) {
+		return nil, fmt.Errorf("no connection: %w", ErrUnavailable)
+	}
+	startWith(t, DefaultEffects(), unreachable)
+	dir := fixture(t)
+	if out, err := run(t, dir, `cat "$1/in"; echo x > "$1/new"`); err == nil || !strings.Contains(out, "probe") {
+		t.Fatalf("not run locked here: %q %v", out, err)
+	}
+	absent(t, filepath.Join(dir, "new"))
+	if err := Command(context.Background(), 200, nil, "true").Run(); err == nil {
+		t.Fatal("a root command ran with the starter unreachable")
+	}
+	startWith(t, DefaultEffects(), func(context.Context, bool, int, string, []string) (*exec.Cmd, error) {
+		return nil, errors.New("the policy refuses it")
+	})
+	if err := Command(context.Background(), 100, nil, "true").Run(); err == nil {
+		t.Fatal("a refused command ran")
 	}
 }
 

@@ -279,13 +279,17 @@ func accountFor(name string) (*accountIDs, error) {
 
 /*
  * switchAccount makes this thread the account's, keeping its capabilities
- * for dropCapabilities to cut.
+ * for dropCapabilities to cut. A process already started as the account (by
+ * a privileged program, Options.Start) is left as it is.
  * desc: Raw calls change this thread only, and execve starts the command from
  *       it; Go's and the C library's own change every thread of the program.
  *       Root would lose its capabilities on becoming another account, so it
  *       keeps them (PR_SET_KEEPCAPS) until dropCapabilities.
  */
 func switchAccount(a accountIDs) error {
+	if unix.Getuid() == a.UID && unix.Getgid() == a.GID {
+		return nil
+	}
 	if os.Geteuid() == 0 {
 		if err := unix.Prctl(unix.PR_SET_KEEPCAPS, 1, 0, 0, 0); err != nil {
 			return fmt.Errorf("keep capabilities: %w", err)

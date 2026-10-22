@@ -448,11 +448,10 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		stdoutStr := headTailTruncate(stdout.String(), 200, 600)
 		stderrStr := headTailTruncate(stderr.String(), 200, 600)
 		detail := fmt.Sprintf("exit %d: %s", exitCode, err.Error())
-		// Said with the failure, so a command refused a write is not retried
-		// as though the write might work the next time.
-		if toolapi.Locked(ctx) {
-			level, _ := toolapi.LevelOf(ctx)
-			detail += fmt.Sprintf(" (this step is read-only, level %d: the system refuses any change to a file or to another process, so a command that writes or stops a process fails)", level)
+		// Said with the failure, so a refused command is not retried as
+		// though it might work the next time.
+		if limits := toolapi.Limits(ctx); limits != "" {
+			detail += " (" + limits + ")"
 		}
 		return toolapi.ToolFail("command", detail, bashData{
 			ExitCode:        exitCode,

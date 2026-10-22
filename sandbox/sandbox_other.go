@@ -7,8 +7,8 @@ import (
 	"os/exec"
 )
 
-// No lock is implemented on this platform: a locked command is refused, or runs
-// unlocked under Options.AllowUnlocked.
+// No lock is implemented on this platform: a command runs with every effect its
+// account has, and Report lists every effect as unenforced.
 
 func Enter() {}
 
@@ -18,7 +18,7 @@ func protectSelf() {}
 
 func detect() Report { return Report{} }
 
-func platformCommand(context.Context, bool, Report, []string, string, []string) (*exec.Cmd, error) {
+func platformCommand(context.Context, bool, Report, map[Effect]bool, []string, string, []string) (*exec.Cmd, error) {
 	return nil, errNoLock
 }
 

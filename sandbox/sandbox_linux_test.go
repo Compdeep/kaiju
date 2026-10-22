@@ -3,23 +3,158 @@
 package sandbox
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
+
+// helperEnv makes this test program, started as a locked command, do one
+// thing and report what the kernel allowed, instead of running the tests.
+const helperEnv = "SANDBOX_TEST_HELPER"
 
 func TestMain(m *testing.M) {
 	Enter()
-	Enable(Options{Logf: func(string, ...any) {}})
+	switch os.Getenv(helperEnv) {
+	case "ptrace":
+		ptraceHelper()
+		os.Exit(0)
+	case "listen":
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		fmt.Println("listen=" + result(err))
+		if ln != nil {
+			ln.Close()
+		}
+		os.Exit(0)
+	}
+	quiet()
 	os.Exit(m.Run())
+}
+
+func quiet() { Enable(Options{Logf: func(string, ...any) {}}) }
+
+func result(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, unix.EPERM):
+		return "EPERM"
+	}
+	return err.Error()
+}
+
+// ptraceHelper traces a child of its own (so the kernel's rule that a program
+// may trace only its descendants plays no part) and tries each kind of ptrace
+// request.
+func ptraceHelper() {
+	runtime.LockOSThread()
+	child := exec.Command("sleep", "30")
+	// Left unset, Go opens /dev/null to write, which seccomp alone refuses;
+	// the output pipe would be held open until the child ended. This
+	// program's input is /dev/null, open to read, and sleep writes nothing.
+	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdin, os.Stdin
+	if err := child.Start(); err != nil {
+		fmt.Println("start=" + err.Error())
+		return
+	}
+	// By process id: Process.Kill signals through a pidfd, which the lock
+	// refuses, since it cannot tell which program a pidfd names.
+	defer syscall.Kill(child.Process.Pid, syscall.SIGKILL)
+	pid := child.Process.Pid
+
+	err := unix.PtraceAttach(pid)
+	fmt.Println("attach=" + result(err))
+	if err != nil {
+		return
+	}
+	var ws unix.WaitStatus
+	unix.Wait4(pid, &ws, 0, nil)
+	addr := firstMapping(pid)
+	word := make([]byte, 8)
+	_, err = unix.PtracePeekData(pid, addr, word)
+	fmt.Println("peek=" + result(err))
+	_, err = unix.PtracePokeData(pid, addr, word)
+	fmt.Println("poke=" + result(err))
+	fmt.Println("exitkill=" + result(unix.PtraceSetOptions(pid, unix.PTRACE_O_EXITKILL)))
+	fmt.Println("options=" + result(unix.PtraceSetOptions(pid, unix.PTRACE_O_TRACESYSGOOD)))
+	local := []unix.Iovec{{Base: &word[0], Len: 8}}
+	remote := []unix.RemoteIovec{{Base: addr, Len: 8}}
+	_, err = unix.ProcessVMReadv(pid, local, remote, 0)
+	fmt.Println("vmread=" + result(err))
+	_, err = unix.ProcessVMWritev(pid, local, remote, 0)
+	fmt.Println("vmwrite=" + result(err))
+	unix.PtraceDetach(pid)
+}
+
+func firstMapping(pid int) uintptr {
+	f, err := os.Open(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	if !sc.Scan() {
+		return 0
+	}
+	start, _ := strconv.ParseUint(strings.SplitN(sc.Text(), "-", 2)[0], 16, 64)
+	return uintptr(start)
+}
+
+// helper runs this test program as a locked command at level 100 and returns
+// what it reported, one "name=result" per line.
+func helper(t *testing.T, kind string) map[string]string {
+	t.Helper()
+	cmd := Command(context.Background(), 100, nil, os.Args[0])
+	cmd.Env = append(os.Environ(), helperEnv+"="+kind)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper %s: %v: %s", kind, err, out)
+	}
+	got := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok {
+			got[k] = v
+		}
+	}
+	return got
+}
+
+// refuseSignals moves SignalPrograms above the tests' level, keeping what
+// eachLock chose for ReadPrograms.
+func refuseSignals(t *testing.T, landlock bool) {
+	e := with(Effects{SignalPrograms: 200})
+	if landlock {
+		e[ReadPrograms] = Never
+	}
+	setEffects(t, e)
+}
+
+// setEffects makes every command use e until the test ends.
+func setEffects(t *testing.T, e Effects) {
+	t.Helper()
+	Enable(Options{Effects: func() Effects { return e }, Logf: func(string, ...any) {}})
+	t.Cleanup(quiet)
+}
+
+// with returns the default table with some effects moved.
+func with(changes Effects) Effects {
+	e := DefaultEffects()
+	for k, v := range changes {
+		e[k] = v
+	}
+	return e
 }
 
 // resetSetup forgets what setup found, so the next locked command detects the
@@ -34,8 +169,10 @@ func resetSetup(t *testing.T) {
 	setupMu.Unlock()
 }
 
-// eachLock runs f under every lock this kernel can apply: Landlock with
-// seccomp when the kernel has Landlock, and seccomp alone always.
+// eachLock runs f under every way this kernel can hold a read-only command:
+// seccomp alone, as the default effects do because they allow reading other
+// programs, and Landlock with seccomp, when reading programs is refused and
+// the kernel has Landlock.
 func eachLock(t *testing.T, f func(t *testing.T, landlock bool)) {
 	for _, landlock := range []bool{true, false} {
 		name := "seccomp-only"
@@ -46,9 +183,11 @@ func eachLock(t *testing.T, f func(t *testing.T, landlock bool)) {
 			if landlock && landlockABI() == 0 {
 				t.Skipf("kernel %s has no Landlock", kernel())
 			}
-			forceSeccompOnly = !landlock
+			if landlock {
+				setEffects(t, with(Effects{ReadPrograms: Never}))
+			}
 			resetSetup(t)
-			t.Cleanup(func() { forceSeccompOnly = false; resetSetup(t) })
+			t.Cleanup(func() { resetSetup(t) })
 			if r := Status(); r.SelfTest != nil {
 				t.Fatalf("self-test: %v", r.SelfTest)
 			}
@@ -77,7 +216,7 @@ func run(t *testing.T, dir, script string, extra ...string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cmd := Command(ctx, true, nil, "sh", append([]string{"-c", script, "sh", dir}, extra...)...)
+	cmd := Command(ctx, 100, nil, "sh", append([]string{"-c", script, "sh", dir}, extra...)...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -190,8 +329,10 @@ func TestALockedCommandCannotRunAScriptThatWrites(t *testing.T) {
 	})
 }
 
+// SignalPrograms refused: a command can stop only its own group.
 func TestALockedCommandCannotStopAnotherProcess(t *testing.T) {
 	eachLock(t, func(t *testing.T, landlock bool) {
+		refuseSignals(t, landlock)
 		other := exec.Command("sleep", "30")
 		if err := other.Start(); err != nil {
 			t.Fatal(err)
@@ -254,9 +395,9 @@ func TestTheTemporaryFolderIsWritableWithLandlock(t *testing.T) {
 	})
 }
 
-func TestAnUnlockedCommandCanWrite(t *testing.T) {
+func TestACommandAtRootCanWrite(t *testing.T) {
 	dir := fixture(t)
-	cmd := Command(context.Background(), false, nil, "sh", "-c", `echo x > "$1/new"`, "sh", dir)
+	cmd := Command(context.Background(), 200, nil, "sh", "-c", `echo x > "$1/new"`, "sh", dir)
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -265,29 +406,28 @@ func TestAnUnlockedCommandCanWrite(t *testing.T) {
 	}
 }
 
-func TestWithNoLockACommandIsRefusedNotRunUnlocked(t *testing.T) {
+// A system with no lock is a missing feature, not an error: the command runs
+// with what its account has, and the report says every effect is unenforced.
+func TestWithNoLockACommandRunsAndIsReported(t *testing.T) {
 	saved := table
 	table = nil
 	resetSetup(t)
 	t.Cleanup(func() { table = saved; resetSetup(t) })
 
 	dir := fixture(t)
-	cmd := Command(context.Background(), true, nil, "sh", "-c", `echo x > "$1/new"`, "sh", dir)
-	if err := cmd.Run(); err == nil || !strings.Contains(err.Error(), "no way to lock") {
-		t.Fatalf("want a refusal, got %v", err)
+	if err := Command(context.Background(), 100, nil, "sh", "-c", `echo x > "$1/new"`, "sh", dir).Run(); err != nil {
+		t.Fatalf("not run: %v", err)
 	}
-	absent(t, filepath.Join(dir, "new"))
-
-	// Only an application that asks for it runs such a command unlocked.
-	Enable(Options{AllowUnlocked: true, Logf: func(string, ...any) {}})
-	t.Cleanup(func() { Enable(Options{Logf: func(string, ...any) {}}) })
-	if err := Command(context.Background(), true, nil, "true").Run(); err != nil {
-		t.Fatalf("AllowUnlocked did not run it: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "new")); err != nil {
+		t.Fatal("did not run")
+	}
+	if r := Status(); r.Lock != "" || len(r.Unenforced) != len(lockEffects) {
+		t.Fatalf("want no lock and every effect unenforced, got %+v", r)
 	}
 }
 
 func TestTheSelfTestCatchesALockThatDoesNotHold(t *testing.T) {
-	probeCommand = func(ctx context.Context, _ bool, _ Report, _ []string, name string, args []string) (*exec.Cmd, error) {
+	probeCommand = func(ctx context.Context, _ bool, _ Report, _ map[Effect]bool, _ []string, name string, args []string) (*exec.Cmd, error) {
 		return exec.CommandContext(ctx, name, args...), nil
 	}
 	resetSetup(t)
@@ -296,7 +436,7 @@ func TestTheSelfTestCatchesALockThatDoesNotHold(t *testing.T) {
 	if Status().SelfTest == nil {
 		t.Fatal("the self-test passed a command that was not locked")
 	}
-	err := Command(context.Background(), true, nil, "true").Run()
+	err := Command(context.Background(), 100, nil, "true").Run()
 	if err == nil || !strings.Contains(err.Error(), "self-test failed") {
 		t.Fatalf("want every locked command refused, got %v", err)
 	}
@@ -306,8 +446,8 @@ func TestAProgramThatHasNotEnabledTheSandboxRefuses(t *testing.T) {
 	mu.Lock()
 	enabled = false
 	mu.Unlock()
-	t.Cleanup(func() { Enable(Options{Logf: func(string, ...any) {}}) })
-	err := Command(context.Background(), true, nil, "true").Run()
+	t.Cleanup(quiet)
+	err := Command(context.Background(), 100, nil, "true").Run()
 	if err == nil || !errors.Is(err, err) || !strings.Contains(err.Error(), "sandbox.Enter") {
 		t.Fatalf("want a refusal naming sandbox.Enter, got %v", err)
 	}
@@ -361,10 +501,11 @@ func TestALockedCommandCannotReadTheAgentsMemory(t *testing.T) {
 	})
 }
 
-// A locked command cannot change the starting program's limits or priority,
-// and can change its own.
+// SignalPrograms refused: a locked command cannot change the starting
+// program's limits or priority, and can change its own.
 func TestALockedCommandCannotStarveTheAgent(t *testing.T) {
 	eachLock(t, func(t *testing.T, landlock bool) {
+		refuseSignals(t, landlock)
 		pid := os.Getpid()
 		var before syscall.Rlimit
 		syscall.Getrlimit(syscall.RLIMIT_NOFILE, &before)
@@ -391,7 +532,7 @@ func TestALockedCommandCannotStarveTheAgent(t *testing.T) {
 }
 
 // A locked command keeps no capability but those that read. Here the test
-// holds none, so it has none; the installed service holds CAP_NET_BIND_SERVICE
+// holds none, so it has none; an installed service holds CAP_NET_BIND_SERVICE
 // as well, which this drops.
 func TestALockedCommandKeepsOnlyCapabilitiesThatRead(t *testing.T) {
 	eachLock(t, func(t *testing.T, landlock bool) {
@@ -405,7 +546,7 @@ func TestALockedCommandKeepsOnlyCapabilitiesThatRead(t *testing.T) {
 				continue
 			}
 			v, _ := strconv.ParseUint(f[1], 16, 64)
-			if v&^(1<<2|1<<34) != 0 {
+			if v&^(1<<unix.CAP_DAC_READ_SEARCH|1<<unix.CAP_SYS_PTRACE|1<<unix.CAP_SYSLOG) != 0 {
 				t.Errorf("%s holds a capability that is not a read: %s", f[0], f[1])
 			}
 		}
@@ -417,21 +558,21 @@ func TestALockedCommandKeepsOnlyCapabilitiesThatRead(t *testing.T) {
 func TestAFailedSetupIsTriedAgain(t *testing.T) {
 	savedRetry := retryAfter
 	retryAfter = time.Hour
-	probeCommand = func(ctx context.Context, _ bool, _ Report, _ []string, name string, args []string) (*exec.Cmd, error) {
+	probeCommand = func(ctx context.Context, _ bool, _ Report, _ map[Effect]bool, _ []string, name string, args []string) (*exec.Cmd, error) {
 		return exec.CommandContext(ctx, name, args...), nil
 	}
 	resetSetup(t)
 	t.Cleanup(func() { retryAfter = savedRetry; probeCommand = platformCommand; resetSetup(t) })
 
-	if err := Command(context.Background(), true, nil, "true").Run(); err == nil {
+	if err := Command(context.Background(), 100, nil, "true").Run(); err == nil {
 		t.Fatal("a setup whose self-test failed let a command run")
 	}
 	probeCommand = platformCommand // the cause has passed
-	if err := Command(context.Background(), true, nil, "true").Run(); err == nil {
+	if err := Command(context.Background(), 100, nil, "true").Run(); err == nil {
 		t.Fatal("the failure was not kept for retryAfter")
 	}
 	retryAfter = 0
-	if err := Command(context.Background(), true, nil, "true").Run(); err != nil {
+	if err := Command(context.Background(), 100, nil, "true").Run(); err != nil {
 		t.Fatalf("the setup was not run again after retryAfter: %v", err)
 	}
 }
@@ -440,12 +581,12 @@ func TestAFailedSetupIsTriedAgain(t *testing.T) {
 func TestARemovedTemporaryFolderIsMadeAgain(t *testing.T) {
 	resetSetup(t)
 	t.Cleanup(func() { resetSetup(t) })
-	if err := Command(context.Background(), true, nil, "true").Run(); err != nil {
+	if err := Command(context.Background(), 100, nil, "true").Run(); err != nil {
 		t.Fatal(err)
 	}
 	_, first, _ := setup()
 	os.RemoveAll(first)
-	if err := Command(context.Background(), true, nil, "true").Run(); err != nil {
+	if err := Command(context.Background(), 100, nil, "true").Run(); err != nil {
 		t.Fatalf("a locked command failed after its temporary folder was removed: %v", err)
 	}
 	_, second, err := setup()
@@ -492,4 +633,111 @@ func TestLockedCommandsInParallel(t *testing.T) {
 		absent(t, filepath.Join(dir, fmt.Sprintf("new-%d", i)))
 	}
 	unchanged(t, dir)
+}
+
+// ReadPrograms allowed (the default): a command can attach to a program, read
+// its memory and follow it, and cannot change it, kill it through the tracer's
+// options, or write its memory.
+func TestReadProgramsAllowsReadingAndRefusesChanging(t *testing.T) {
+	resetSetup(t)
+	t.Cleanup(func() { resetSetup(t) })
+	got := helper(t, "ptrace")
+	want := map[string]string{
+		"attach": "ok", "peek": "ok", "options": "ok", "vmread": "ok",
+		"poke": "EPERM", "exitkill": "EPERM", "vmwrite": "EPERM",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: want %s, got %q (all: %v)", k, v, got[k], got)
+		}
+	}
+}
+
+func TestReadProgramsRefusedRefusesTracing(t *testing.T) {
+	setEffects(t, with(Effects{ReadPrograms: Never}))
+	resetSetup(t)
+	t.Cleanup(func() { resetSetup(t) })
+	if got := helper(t, "ptrace"); got["attach"] != "EPERM" {
+		t.Fatalf("attached with ReadPrograms refused: %v", got)
+	}
+}
+
+// strace itself, the tool the agent reaches for, follows a program.
+func TestStraceWorksInALockedCommand(t *testing.T) {
+	if _, err := exec.LookPath("strace"); err != nil {
+		t.Skip("no strace")
+	}
+	resetSetup(t)
+	t.Cleanup(func() { resetSetup(t) })
+	out, _ := run(t, "", `sleep 1 & strace -p $! -e trace=none 2>&1; echo done`)
+	if !strings.Contains(out, "attached") {
+		t.Fatalf("strace could not attach: %q", out)
+	}
+}
+
+func TestNetworkAllowedListensAndRefusedDoesNot(t *testing.T) {
+	resetSetup(t)
+	t.Cleanup(func() { resetSetup(t) })
+	if got := helper(t, "listen"); got["listen"] != "ok" {
+		t.Fatalf("could not listen with Network allowed: %v", got)
+	}
+	setEffects(t, with(Effects{Network: Never}))
+	if got := helper(t, "listen"); got["listen"] == "ok" {
+		t.Fatalf("listened with Network refused: %v", got)
+	}
+	// A local socket is not the network.
+	out, err := run(t, "", `ls / | wc -l`)
+	if err != nil || strings.TrimSpace(out) == "0" {
+		t.Fatalf("an ordinary pipe failed with Network refused: %q %v", out, err)
+	}
+}
+
+func TestSignalProgramsAllowedStopsAnotherProcess(t *testing.T) {
+	resetSetup(t)
+	t.Cleanup(func() { resetSetup(t) })
+	other := exec.Command("sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer other.Process.Kill()
+	out, err := run(t, "", "kill -0 "+strconv.Itoa(other.Process.Pid)+" && echo signalled")
+	if err != nil || !strings.Contains(out, "signalled") {
+		t.Fatalf("could not signal with SignalPrograms allowed: %q %v", out, err)
+	}
+}
+
+// An effect moved below the step's level applies: change_files at 100 lets a
+// step at 100 write, while root stays at 200.
+func TestChangeFilesMovedBelowTheLevel(t *testing.T) {
+	setEffects(t, with(Effects{ChangeFiles: 100}))
+	resetSetup(t)
+	t.Cleanup(func() { resetSetup(t) })
+	dir := fixture(t)
+	if _, err := run(t, dir, `echo x > "$1/new"`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new")); err != nil {
+		t.Fatal("could not write with ChangeFiles allowed")
+	}
+}
+
+// Root goes to Options.Root, given the command as asked.
+func TestRootGoesToTheRootRunner(t *testing.T) {
+	var gotName string
+	var gotArgs []string
+	Enable(Options{Logf: func(string, ...any) {}, Root: func(ctx context.Context, cancel bool, name string, args []string) (*exec.Cmd, error) {
+		gotName, gotArgs = name, args
+		return exec.CommandContext(ctx, "echo", "as-root"), nil
+	}})
+	t.Cleanup(quiet)
+	out, err := Command(context.Background(), 200, nil, "id", "-u").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "as-root" || gotName != "id" || len(gotArgs) != 1 || gotArgs[0] != "-u" {
+		t.Fatalf("root runner not used as asked: %q %v %q %v", out, err, gotName, gotArgs)
+	}
+	// Below root it is not asked.
+	gotName = ""
+	Command(context.Background(), 100, nil, "true").Run()
+	if gotName != "" {
+		t.Fatal("the root runner was used below root")
+	}
 }

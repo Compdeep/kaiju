@@ -33,17 +33,14 @@ const devNullFD = 9
 // exitLockFailed is the exit status of a command whose lock could not be applied.
 const exitLockFailed = 125
 
-// forceSeccompOnly makes detect report no Landlock, so the seccomp-only lock can
-// be tested on a kernel that has Landlock.
-var forceSeccompOnly bool
-
 // bootConfig is what the starting program tells the bootstrap, as its first
 // argument: the command's environment may be replaced by the caller, the
 // arguments are not.
 type bootConfig struct {
-	LandlockABI int      `json:"landlock_abi"`
-	Writable    []string `json:"writable"`
-	NullFD      bool     `json:"null_fd"`
+	Allow       map[Effect]bool `json:"allow"`
+	LandlockABI int             `json:"landlock_abi"`
+	Writable    []string        `json:"writable"`
+	NullFD      bool            `json:"null_fd"`
 }
 
 /*
@@ -99,7 +96,7 @@ func lock(cfg bootConfig) error {
 			return fmt.Errorf("own process group: %w", err)
 		}
 	}
-	if err := dropCapabilities(); err != nil {
+	if err := dropCapabilities(capabilitiesFor(cfg.Allow)); err != nil {
 		return fmt.Errorf("capabilities: %w", err)
 	}
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
@@ -125,7 +122,7 @@ func lock(cfg bootConfig) error {
 			return fmt.Errorf("landlock: %w", err)
 		}
 	}
-	if err := applySeccomp(self, cfg.LandlockABI == 0); err != nil {
+	if err := applySeccomp(self, cfg.Allow, cfg.NullFD); err != nil {
 		return fmt.Errorf("seccomp: %w", err)
 	}
 	return nil
@@ -157,12 +154,29 @@ func closeInherited() error {
 	return nil
 }
 
-// keepCapabilities are the capabilities a locked command keeps: those that only
-// read. CAP_DAC_READ_SEARCH reads and lists any file; CAP_SYSLOG reads the
-// kernel log, and the filter allows only syslog's read actions. Any other the
-// starting program holds (CAP_NET_BIND_SERVICE, to listen below 1024, or all of
-// them when it runs as root) is dropped.
-var keepCapabilities = []uint{unix.CAP_DAC_READ_SEARCH, unix.CAP_SYSLOG}
+// readCapabilities are the capabilities a locked command may keep, each for the
+// reading effect it serves: CAP_DAC_READ_SEARCH reads and lists any file;
+// CAP_SYS_PTRACE traces and reads any program, and the filter refuses the
+// ptrace requests that change one; CAP_SYSLOG reads the kernel log, and the
+// filter allows only syslog's read actions. Any other the starting program
+// holds (CAP_NET_BIND_SERVICE, to listen below 1024, or all of them when it
+// runs as root) is dropped.
+var readCapabilities = map[Effect]uint{
+	ReadFiles:     unix.CAP_DAC_READ_SEARCH,
+	ReadPrograms:  unix.CAP_SYS_PTRACE,
+	ReadKernelLog: unix.CAP_SYSLOG,
+}
+
+// capabilitiesFor are the capabilities of the allowed reading effects.
+func capabilitiesFor(allow map[Effect]bool) []uint {
+	var keep []uint
+	for _, e := range lockEffects {
+		if c, ok := readCapabilities[e]; ok && allow[e] {
+			keep = append(keep, c)
+		}
+	}
+	return keep
+}
 
 // Securebits: root does not regain its capabilities when it starts a program,
 // and that cannot be undone.
@@ -173,23 +187,23 @@ const (
 
 /*
  * dropCapabilities leaves this process, and every program it starts, with
- * only keepCapabilities, and only those it already held.
+ * only the capabilities in keep, and only those it already held.
  * desc: A capability passes to a started program when it is ambient, so each
  *       other ambient capability is lowered, and permitted, effective and
  *       inheritable are cut to the kept ones, which are then made ambient. As
  *       root, a started program would get every capability back for being
  *       root; SECBIT_NOROOT stops that.
  */
-func dropCapabilities() error {
+func dropCapabilities(keep []uint) error {
 	if os.Geteuid() == 0 {
 		if err := unix.Prctl(unix.PR_SET_SECUREBITS, secbitNoRoot|secbitNoRootLocked, 0, 0, 0); err != nil {
 			return fmt.Errorf("securebits: %w", err)
 		}
 	}
-	var keep [2]uint32
+	var mask [2]uint32
 	isKept := map[uint]bool{}
-	for _, c := range keepCapabilities {
-		keep[c/32] |= 1 << (c % 32)
+	for _, c := range keep {
+		mask[c/32] |= 1 << (c % 32)
 		isKept[c] = true
 	}
 	for c := uint(0); c <= unix.CAP_LAST_CAP; c++ {
@@ -204,14 +218,14 @@ func dropCapabilities() error {
 		return fmt.Errorf("read: %w", err)
 	}
 	for i := range data {
-		data[i].Permitted &= keep[i]
-		data[i].Effective &= keep[i]
+		data[i].Permitted &= mask[i]
+		data[i].Effective &= mask[i]
 		data[i].Inheritable = data[i].Permitted
 	}
 	if err := unix.Capset(&hdr, &data[0]); err != nil {
 		return fmt.Errorf("set: %w", err)
 	}
-	for _, c := range keepCapabilities {
+	for _, c := range keep {
 		if data[c/32].Permitted&(1<<(c%32)) != 0 {
 			if err := unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_RAISE, uintptr(c), 0, 0); err != nil {
 				return fmt.Errorf("keep capability %d: %w", c, err)
@@ -223,11 +237,11 @@ func dropCapabilities() error {
 
 /*
  * protectSelf marks this program non-dumpable, so a locked command it starts,
- * running as the same account, cannot read its memory, environment or memory
- * map through /proc/<pid>/mem, environ or maps. Landlock already refuses that;
- * seccomp alone does not, and the program's memory holds what a command must
- * not have, such as the key that signs sign-in sessions. The program can still
- * read its own.
+ * running as the same account without CAP_SYS_PTRACE, cannot read its memory,
+ * environment or memory map through /proc/<pid>/mem, environ or maps. A
+ * command allowed ReadPrograms with CAP_SYS_PTRACE can, so an application
+ * that grants it keeps no secret only in memory. The program can still read
+ * its own.
  */
 func protectSelf() {
 	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
@@ -243,9 +257,6 @@ func detect() Report {
 		return Report{}
 	}
 	abi := landlockABI()
-	if forceSeccompOnly {
-		abi = 0
-	}
 	if abi > 0 {
 		return Report{Lock: "landlock+seccomp", LandlockABI: abi}
 	}
@@ -345,8 +356,16 @@ func rewriteDevNull(script string) (string, bool) {
 	return out, out != script
 }
 
-func platformCommand(ctx context.Context, cancel bool, r Report, writable []string, name string, args []string) (*exec.Cmd, error) {
-	cfg := bootConfig{LandlockABI: r.LandlockABI, Writable: writable, NullFD: r.LandlockABI == 0}
+func platformCommand(ctx context.Context, cancel bool, r Report, allow map[Effect]bool, writable []string, name string, args []string) (*exec.Cmd, error) {
+	cfg := bootConfig{Allow: allow, Writable: writable}
+	if !allow[ChangeFiles] {
+		// Landlock would refuse tracing any program outside the lock.
+		if r.LandlockABI > 0 && !allow[ReadPrograms] {
+			cfg.LandlockABI = r.LandlockABI
+		} else {
+			cfg.NullFD = true
+		}
+	}
 	if cfg.NullFD && shells[filepath.Base(name)] && len(args) >= 2 && args[0] == "-c" {
 		if s, changed := rewriteDevNull(args[1]); changed {
 			logf("[sandbox] seccomp only, so /dev/null cannot be opened to write; ran %q as %q", args[1], s)
@@ -373,11 +392,31 @@ func platformCommand(ctx context.Context, cancel bool, r Report, writable []stri
 // does not lock, to show the self-test catches a lock that does not hold.
 var probeCommand = platformCommand
 
+// readOnly is a command that may read and may not change files: seccomp holds
+// the writes, and with ReadPrograms refused, Landlock does where the kernel
+// has it.
+func readOnly(readPrograms bool) map[Effect]bool {
+	a := DefaultEffects().allowedAt(0)
+	a[ChangeFiles], a[ReadPrograms] = false, readPrograms
+	return a
+}
+
 /*
- * selfTest runs one locked command that reads a file and tries to change
- * others, and fails unless the read worked and every change was refused.
+ * selfTest runs a locked command that reads a file and tries to change others,
+ * under each way of holding the writes this system has, and fails unless the
+ * read worked and every change was refused.
  */
 func selfTest() error {
+	if err := probe(readOnly(true)); err != nil {
+		return err
+	}
+	if report.LandlockABI > 0 {
+		return probe(readOnly(false))
+	}
+	return nil
+}
+
+func probe(allow map[Effect]bool) error {
 	dir, err := os.MkdirTemp("", "sandbox-selftest-")
 	if err != nil {
 		return err
@@ -390,7 +429,7 @@ func selfTest() error {
 	if err := os.WriteFile(keep, []byte("keep"), 0o600); err != nil {
 		return err
 	}
-	cmd, err := probeCommand(context.Background(), true, report, []string{tmpDir}, "sh",
+	cmd, err := probeCommand(context.Background(), true, report, allow, []string{tmpDir}, "sh",
 		[]string{"-c", `cat "$1"; echo x > "$2"; chmod 777 "$3"; rm -f "$3"`, "sh", in, out, keep})
 	if err != nil {
 		return err

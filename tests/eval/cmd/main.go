@@ -34,7 +34,7 @@ import (
 
 func main() {
 	sandbox.Enter()
-	sandbox.Enable(sandbox.Options{AllowUnlocked: true})
+	sandbox.Enable(sandbox.Options{})
 	kind := flag.String("kind", "", "which suite: editor | pipeline | holmes | all")
 	kaijuBin := flag.String("kaiju", "./kaiju", "path to kaiju binary (pipeline + holmes)")
 	configPath := flag.String("config", "kaiju.json", "path to kaiju.json")

@@ -210,6 +210,10 @@ type IdentityConfig struct {
 	//
 	// Set at run time: SetClearance.
 	NodeClearance int
+	// ClearanceCeiling, when set, is asked on every read of the clearance,
+	// which is never more than it returns: a limit set outside the program,
+	// which SetClearance cannot raise past.
+	ClearanceCeiling func() int
 }
 
 // DAGConfig governs the optimistic parallel execution engine: how large a plan

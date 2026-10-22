@@ -237,11 +237,7 @@ func (s *Service) reapDead() {
 
 	for _, r := range revive {
 		log.Printf("[service] %s (pid %d) died — auto-restarting", r.Name, r.PID)
-		level := toolapi.ImpactObserve
-		if r.Unlocked {
-			level = toolapi.ImpactControl
-		}
-		if _, err := s.start(toolapi.WithLevel(context.Background(), level), map[string]any{
+		if _, err := s.start(r.restartContext(), map[string]any{
 			"name": r.Name, "command": r.Command, "workdir": r.Workdir,
 			"port": float64(r.Port), "auto_restart": true,
 		}); err != nil {
@@ -255,9 +251,10 @@ func (s *Service) reapDead() {
 // the service tool — tracked, logged, health-checked, respawned on crash — so a
 // plugin host is never an unmanaged orphan again.
 //
-// The engine starts these itself, from its own command, so they are not locked.
+// The engine starts these itself, from its own command, so they run as this
+// program, neither locked nor as root.
 func (s *Service) StartManaged(name, command, workdir string, port int) error {
-	_, err := s.start(toolapi.WithLevel(context.Background(), toolapi.ImpactControl), map[string]any{
+	_, err := s.start(toolapi.ForEngine(context.Background()), map[string]any{
 		"name": name, "command": command, "workdir": workdir,
 		"port": float64(port), "auto_restart": true,
 	})
@@ -319,11 +316,26 @@ type ServiceRecord struct {
 	LogOut      string    `json:"log_out"`
 	LogErr      string    `json:"log_err"`
 	AutoRestart bool      `json:"auto_restart,omitempty"` // health loop respawns this on crash
-	// Unlocked is true when the service was started by a step allowed to
-	// change the machine, or by the engine itself, so a restart outside any
-	// step starts it the same way (toolapi.Command). A record from before the
-	// field existed restarts locked.
+	// Level is the level of the step that started the service, and Engine is
+	// true when the engine started it itself, so a restart outside any step
+	// starts it the same way (toolapi.Command). Unlocked is the field before
+	// Level: true meant started at control.
+	Level    int  `json:"level,omitempty"`
+	Engine   bool `json:"engine,omitempty"`
 	Unlocked bool `json:"unlocked,omitempty"`
+}
+
+// restartContext starts a service again as it was first started.
+func (r ServiceRecord) restartContext() context.Context {
+	ctx := context.Background()
+	if r.Engine {
+		return toolapi.ForEngine(ctx)
+	}
+	level := r.Level
+	if r.Unlocked && level < toolapi.ImpactControl {
+		level = toolapi.ImpactControl
+	}
+	return toolapi.WithLevel(ctx, level)
 }
 
 // Execute satisfies the Tool interface for callers outside the DAG.
@@ -565,6 +577,7 @@ func (s *Service) start(ctx context.Context, params map[string]any) (toolapi.Too
 	pid := cmd.Process.Pid
 	_ = cmd.Process.Release() // don't hold a reaper reference
 
+	level, _ := toolapi.LevelOf(ctx)
 	record := ServiceRecord{
 		Name:        name,
 		Command:     command,
@@ -576,7 +589,8 @@ func (s *Service) start(ctx context.Context, params map[string]any) (toolapi.Too
 		LogOut:      logOut,
 		LogErr:      logErr,
 		AutoRestart: autoRestart,
-		Unlocked:    !toolapi.Locked(ctx),
+		Level:       level,
+		Engine:      toolapi.IsEngine(ctx),
 	}
 
 	if idx >= 0 {

@@ -27,7 +27,7 @@ func fixture(t *testing.T) string {
 
 func runCmd(t *testing.T, args ...string) string {
 	t.Helper()
-	out, _ := Command(context.Background(), true, nil, "cmd", append([]string{"/C"}, args...)...).CombinedOutput()
+	out, _ := Command(context.Background(), 100, nil, "cmd", append([]string{"/C"}, args...)...).CombinedOutput()
 	return string(out)
 }
 
@@ -81,10 +81,27 @@ func TestALockedCommandCannotWriteTheRegistry(t *testing.T) {
 
 func TestAnUnlockedCommandCanWrite(t *testing.T) {
 	dir := fixture(t)
-	if err := Command(context.Background(), false, nil, "cmd", "/C", "echo", "x", ">", filepath.Join(dir, "new")).Run(); err != nil {
+	if err := Command(context.Background(), 200, nil, "cmd", "/C", "echo", "x", ">", filepath.Join(dir, "new")).Run(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "new")); err != nil {
 		t.Fatal("an unlocked command could not write")
+	}
+}
+
+// A writable folder is labelled low integrity, so a locked command can write
+// there and nowhere else.
+func TestALockedCommandCanWriteAWritableFolder(t *testing.T) {
+	work, other := t.TempDir(), fixture(t)
+	cmd := Command(context.Background(), 100, []string{work}, "cmd", "/C", "echo", "x", ">", filepath.Join(work, "new"))
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("could not write its writable folder: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "new")); err != nil {
+		t.Fatal("no file in the writable folder")
+	}
+	runCmd(t, "echo", "x", ">", filepath.Join(other, "new"))
+	if _, err := os.Stat(filepath.Join(other, "new")); err == nil {
+		t.Fatal("wrote outside the writable folder")
 	}
 }

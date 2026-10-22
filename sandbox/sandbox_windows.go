@@ -30,81 +30,105 @@ var (
 	advapi32                  = windows.NewLazySystemDLL("advapi32.dll")
 	procCreateRestrictedToken = advapi32.NewProc("CreateRestrictedToken")
 
-	tokenOnce sync.Once
-	lowToken  windows.Token
-	tokenErr  error
+	tokenMu sync.Mutex
+	tokens  = map[tokenKind]windows.Token{}
+
+	labelled sync.Map // folders already labelled low integrity
 )
 
-// keepPrivileges are the privileges a locked command keeps: the ones that only
-// read. Every other privilege of this program's rights is removed.
-var keepPrivileges = map[string]bool{
-	"SeChangeNotifyPrivilege": true, // walk folders the command may read
-	"SeBackupPrivilege":       true, // read any file
-	"SeSecurityPrivilege":     true, // read the Security event log
+// tokenKind is what a command's rights are cut to.
+type tokenKind struct {
+	low        bool // low integrity: no change to files, other programs or the registry
+	readFiles  bool // keep SeBackupPrivilege: read any file
+	readSecLog bool // keep SeSecurityPrivilege: read the Security event log
+}
+
+// keeps reports whether a command keeps a privilege, each kept for the effect
+// it serves. SeChangeNotifyPrivilege, to walk folders, is always kept; every
+// other privilege of this program's rights is removed.
+func (k tokenKind) keeps(name string) bool {
+	switch name {
+	case "SeChangeNotifyPrivilege":
+		return true
+	case "SeBackupPrivilege":
+		return k.readFiles
+	case "SeSecurityPrivilege":
+		return k.readSecLog
+	}
+	return false
 }
 
 /*
- * readOnlyToken is a copy of this program's rights at low integrity, with
- * every privilege removed except keepPrivileges.
- * desc: Low integrity is what refuses writes: a low-integrity process cannot
+ * restrictedToken is a copy of this program's rights with every privilege
+ * removed except those k keeps, at low integrity when k.low.
+ * desc: Low integrity is what refuses changes: a low-integrity process cannot
  *       write to a file, registry key or process at a higher level, which is
  *       nearly all of them, and cannot raise its own level. Everything it
  *       starts inherits the same rights, so no job object is needed to hold
  *       its children: they carry the same token.
  */
-func readOnlyToken() (windows.Token, error) {
-	tokenOnce.Do(func() {
-		var self windows.Token
-		if err := windows.OpenProcessToken(windows.CurrentProcess(),
-			windows.TOKEN_DUPLICATE|windows.TOKEN_QUERY|windows.TOKEN_ASSIGN_PRIMARY|windows.TOKEN_ADJUST_DEFAULT, &self); err != nil {
-			tokenErr = fmt.Errorf("open this program's rights: %w", err)
-			return
-		}
-		defer self.Close()
+func restrictedToken(k tokenKind) (windows.Token, error) {
+	tokenMu.Lock()
+	defer tokenMu.Unlock()
+	if t, ok := tokens[k]; ok {
+		return t, nil
+	}
+	t, err := makeToken(k)
+	if err != nil {
+		return 0, err
+	}
+	tokens[k] = t
+	return t, nil
+}
 
-		var drop []windows.LUIDAndAttributes
-		if privs, err := tokenPrivileges(self); err == nil {
-			for _, p := range privs {
-				name, err := privilegeName(p.Luid)
-				if err != nil || !keepPrivileges[name] {
-					drop = append(drop, windows.LUIDAndAttributes{Luid: p.Luid})
-				}
-			}
-		} else {
-			tokenErr = fmt.Errorf("list privileges: %w", err)
-			return
-		}
-		var dropPtr *windows.LUIDAndAttributes
-		if len(drop) > 0 {
-			dropPtr = &drop[0]
-		}
-		var restricted windows.Token
-		r, _, e := procCreateRestrictedToken.Call(uintptr(self), 0,
-			0, 0,
-			uintptr(len(drop)), uintptr(unsafe.Pointer(dropPtr)),
-			0, 0,
-			uintptr(unsafe.Pointer(&restricted)))
-		if r == 0 {
-			tokenErr = fmt.Errorf("remove privileges: %w", e)
-			return
-		}
+func makeToken(k tokenKind) (windows.Token, error) {
+	var self windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(),
+		windows.TOKEN_DUPLICATE|windows.TOKEN_QUERY|windows.TOKEN_ASSIGN_PRIMARY|windows.TOKEN_ADJUST_DEFAULT, &self); err != nil {
+		return 0, fmt.Errorf("open this program's rights: %w", err)
+	}
+	defer self.Close()
 
-		low, err := windows.CreateWellKnownSid(windows.WinLowLabelSid)
-		if err != nil {
-			restricted.Close()
-			tokenErr = fmt.Errorf("low integrity identifier: %w", err)
-			return
+	privs, err := tokenPrivileges(self)
+	if err != nil {
+		return 0, fmt.Errorf("list privileges: %w", err)
+	}
+	var drop []windows.LUIDAndAttributes
+	for _, p := range privs {
+		name, err := privilegeName(p.Luid)
+		if err != nil || !k.keeps(name) {
+			drop = append(drop, windows.LUIDAndAttributes{Luid: p.Luid})
 		}
-		label := windows.Tokenmandatorylabel{Label: windows.SIDAndAttributes{Sid: low, Attributes: windows.SE_GROUP_INTEGRITY}}
-		if err := windows.SetTokenInformation(restricted, windows.TokenIntegrityLevel,
-			(*byte)(unsafe.Pointer(&label)), uint32(unsafe.Sizeof(label))+windows.GetLengthSid(low)); err != nil {
-			restricted.Close()
-			tokenErr = fmt.Errorf("set low integrity: %w", err)
-			return
-		}
-		lowToken = restricted
-	})
-	return lowToken, tokenErr
+	}
+	var dropPtr *windows.LUIDAndAttributes
+	if len(drop) > 0 {
+		dropPtr = &drop[0]
+	}
+	var restricted windows.Token
+	r, _, e := procCreateRestrictedToken.Call(uintptr(self), 0,
+		0, 0,
+		uintptr(len(drop)), uintptr(unsafe.Pointer(dropPtr)),
+		0, 0,
+		uintptr(unsafe.Pointer(&restricted)))
+	if r == 0 {
+		return 0, fmt.Errorf("remove privileges: %w", e)
+	}
+	if !k.low {
+		return restricted, nil
+	}
+
+	low, err := windows.CreateWellKnownSid(windows.WinLowLabelSid)
+	if err != nil {
+		restricted.Close()
+		return 0, fmt.Errorf("low integrity identifier: %w", err)
+	}
+	label := windows.Tokenmandatorylabel{Label: windows.SIDAndAttributes{Sid: low, Attributes: windows.SE_GROUP_INTEGRITY}}
+	if err := windows.SetTokenInformation(restricted, windows.TokenIntegrityLevel,
+		(*byte)(unsafe.Pointer(&label)), uint32(unsafe.Sizeof(label))+windows.GetLengthSid(low)); err != nil {
+		restricted.Close()
+		return 0, fmt.Errorf("set low integrity: %w", err)
+	}
+	return restricted, nil
 }
 
 func tokenPrivileges(t windows.Token) ([]windows.LUIDAndAttributes, error) {
@@ -133,26 +157,72 @@ func privilegeName(luid windows.LUID) (string, error) {
 	return windows.UTF16ToString(buf[:n]), nil
 }
 
+// detect: low integrity refuses ChangeFiles, and with it reading and
+// signalling programs above it, which are nearly all; nothing refuses Network,
+// and ReadPrograms and SignalPrograms cannot be refused apart from
+// ChangeFiles.
 func detect() Report {
-	if _, err := readOnlyToken(); err != nil {
+	if _, err := restrictedToken(tokenKind{low: true}); err != nil {
 		return Report{}
 	}
-	return Report{Lock: "restricted-token"}
+	return Report{Lock: "restricted-token", Unenforced: []Effect{Network}}
 }
 
-func platformCommand(ctx context.Context, cancel bool, r Report, writable []string, name string, args []string) (*exec.Cmd, error) {
-	tok, err := readOnlyToken()
-	if err != nil {
-		return nil, err
-	}
+func platformCommand(ctx context.Context, cancel bool, r Report, allow map[Effect]bool, writable []string, name string, args []string) (*exec.Cmd, error) {
+	k := tokenKind{low: !allow[ChangeFiles], readFiles: allow[ReadFiles], readSecLog: allow[ReadKernelLog]}
 	var cmd *exec.Cmd
 	if cancel {
 		cmd = exec.CommandContext(ctx, name, args...)
 	} else {
 		cmd = exec.Command(name, args...)
 	}
+	if !k.low && k.readFiles && k.readSecLog {
+		return cmd, nil // nothing left to refuse here
+	}
+	tok, err := restrictedToken(k)
+	if err != nil {
+		return nil, err
+	}
+	if k.low {
+		for _, dir := range writable {
+			if err := labelLow(dir); err != nil {
+				logf("[sandbox] %s stays unwritable to a locked command: %v", dir, err)
+			}
+		}
+		if len(writable) > 0 {
+			cmd.Env = append(os.Environ(), "TEMP="+writable[0], "TMP="+writable[0])
+		}
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Token: syscall.Token(tok)}
 	return cmd, nil
+}
+
+/*
+ * labelLow gives a folder, and everything made in it from now on, a
+ * low-integrity label, so a low-integrity command can write there and
+ * nowhere else.
+ */
+func labelLow(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	if _, done := labelled.Load(dir); done {
+		return nil
+	}
+	sd, err := windows.SecurityDescriptorFromString("S:(ML;OICI;NW;;;LW)")
+	if err != nil {
+		return err
+	}
+	sacl, _, err := sd.SACL()
+	if err != nil {
+		return err
+	}
+	if err := windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
+		windows.LABEL_SECURITY_INFORMATION, nil, nil, nil, sacl); err != nil {
+		return err
+	}
+	labelled.Store(dir, true)
+	return nil
 }
 
 /*
@@ -169,7 +239,9 @@ func selfTest() error {
 	if err := os.WriteFile(in, []byte("probe"), 0o600); err != nil {
 		return err
 	}
-	cmd, err := platformCommand(context.Background(), true, report, nil, "cmd", []string{"/C", "type", in, "&", "echo", "x", ">", out})
+	readOnly := DefaultEffects().allowedAt(0)
+	readOnly[ChangeFiles] = false
+	cmd, err := platformCommand(context.Background(), true, report, readOnly, nil, "cmd", []string{"/C", "type", in, "&", "echo", "x", ">", out})
 	if err != nil {
 		return err
 	}

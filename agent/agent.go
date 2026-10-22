@@ -286,19 +286,26 @@ func (t Trigger) Intent() gates.Intent {
  * desc: Thread-safe wrapper around the node's IGX clearance level.
  */
 type localClearance struct {
-	mu    sync.RWMutex
-	value int
+	mu      sync.RWMutex
+	value   int
+	ceiling func() int // IdentityConfig.ClearanceCeiling; nil for none
 }
 
 /*
  * Clearance returns the current clearance level.
- * desc: Thread-safe read of the clearance value.
+ * desc: Thread-safe read of the clearance value, never above the ceiling.
  * return: the current clearance integer.
  */
 func (lc *localClearance) Clearance() int {
 	lc.mu.RLock()
-	defer lc.mu.RUnlock()
-	return lc.value
+	v := lc.value
+	lc.mu.RUnlock()
+	if lc.ceiling != nil {
+		if c := lc.ceiling(); c < v {
+			v = c
+		}
+	}
+	return v
 }
 
 /*
@@ -505,7 +512,7 @@ func New(cfg Config) (*Agent, error) {
 	if clearanceExplicit {
 		clrValue = cfg.NodeClearance
 	}
-	clr := &localClearance{value: clrValue}
+	clr := &localClearance{value: clrValue, ceiling: cfg.ClearanceCeiling}
 
 	agentDir := cfg.DataDir + "/agent"
 	gate, err := gates.NewGate(gates.GateConfig{

@@ -1,11 +1,11 @@
-// Package sandbox starts a tool's programs so that they can read and cannot
-// change anything.
+// Package sandbox starts a tool's programs with only the effects the step's
+// level allows (effects.go): by default reading, tracing, the network and
+// signalling programs at every level, and changing files and root from 200.
 //
-// A step allowed less than the most a run may do should not change the machine
-// it runs on, and a tool cannot be trusted to say whether a command changes
-// anything: bash rates a command by matching its text, and a script or a chmod
-// it does not recognise is rated as a read. So the operating system holds the
-// line instead, on the program itself, whatever the command is.
+// A tool cannot be trusted to say what a command does: bash rates a command
+// by matching its text, and a script or a chmod it does not recognise is rated
+// as a read. So the operating system holds the line instead, on the program
+// itself, whatever the command is.
 //
 // Linux. The kernel lets a process lock itself, never unlock, and passes the
 // lock to every process it starts. Go starts a program in one step, with no
@@ -14,29 +14,37 @@
 // sees the name, locks the process and replaces it with the command (execve),
 // which keeps the lock:
 //
-//   - Landlock (5.13 and later): no file may be written, created, removed or
-//     renamed, except under the writable folders, the sandbox's temporary
-//     folder and /dev/null.
-//   - seccomp, always: no signal outside the command's own process group (so
-//     a shell cannot stop its own child by process id, and timeout(1) cannot
-//     stop its command; the tool's own time limit stops it instead), no
-//     ptrace, no reading or writing another process's memory, no
-//     change to permissions, owners, times or extended attributes, no
-//     truncate, no io_uring (which would open files without a system call
-//     seccomp sees), no mounts or modules. Landlock does not cover these.
-//   - seccomp, when the kernel has no Landlock: also every system call that
-//     writes a file. It cannot tell files apart, so /dev/null is passed in
-//     already open instead (devNullFD) and a shell's redirections to it are
+//   - capabilities: only those of the allowed reading effects are kept
+//     (CAP_DAC_READ_SEARCH, CAP_SYS_PTRACE, CAP_SYSLOG), and only when this
+//     program holds them.
+//   - seccomp, always: mounts, modules, kexec, reboot, swap, io_uring (which
+//     would make system calls seccomp does not see), open_by_handle_at,
+//     pidfd_getfd, process_vm_writev; and for each refused effect the calls
+//     that make it. With ReadPrograms allowed, ptrace is allowed request by
+//     request: the requests that read, stop or resume a program, never those
+//     that change it.
+//   - Landlock (5.13 and later), when both ChangeFiles and ReadPrograms are
+//     refused: no file may be written, created, removed or renamed, except
+//     under the writable folders, the sandbox's temporary folder and
+//     /dev/null. Landlock refuses ptrace to any program outside the lock,
+//     whatever the capabilities, so it cannot be used while ReadPrograms is
+//     allowed; seccomp refuses the writes instead.
+//   - seccomp, when ChangeFiles is refused without Landlock: every system call
+//     that writes a file. It cannot tell files apart, so /dev/null is passed
+//     in already open instead (devNullFD) and a shell's redirections to it are
 //     rewritten to use it.
 //
-// Windows. The command is started with a copy of this program's rights at low
-// integrity with its privileges removed except those that read
-// (sandbox_windows.go). It can read; writes to files, the registry and other
-// processes are refused, and everything it starts inherits the same rights.
+// Windows. A command that may not change files is started with a copy of this
+// program's rights at low integrity with its privileges removed except those
+// that read (sandbox_windows.go). It can read; writes to files, the registry
+// and other processes are refused, and everything it starts inherits the same
+// rights. The writable folders are labelled low integrity, so it can write
+// there. Network, ReadPrograms and SignalPrograms cannot be refused on Windows.
 //
-// When no lock can be applied, a locked command is not run. A program that has
-// not called Enable cannot start one either, and neither can one whose
-// self-test found the lock does not hold.
+// A missing kernel feature does not stop a command: it runs with what this
+// system can enforce, and Report says what cannot be. A lock that fails to
+// apply does stop it, since an attacker could cause the failure on purpose,
+// and a program that has not called Enable cannot start a locked command.
 package sandbox
 
 import (
@@ -57,10 +65,13 @@ var Name = "kaiju-sandbox"
 
 // Options configures Enable.
 type Options struct {
-	// AllowUnlocked runs a locked command without a lock on a platform that
-	// has none, logging that it did. Off, such a command is refused. For a
-	// developer's own machine only.
-	AllowUnlocked bool
+	// Effects is asked for the table on every command, so a change to it
+	// applies to the next one. DefaultEffects when nil.
+	Effects func() Effects
+
+	// Root starts a program at a level that allows Root. Without it the
+	// program runs as this program's own account, unlocked.
+	Root func(ctx context.Context, cancel bool, name string, args []string) (*exec.Cmd, error)
 
 	// Logf receives what the sandbox reports: which lock is in use, the
 	// self-test's result, and each refusal. log.Printf when nil.
@@ -99,6 +110,10 @@ type Report struct {
 	LandlockABI int
 	// SelfTest is nil when a locked probe could read and could not write.
 	SelfTest error
+	// Unenforced are the effects this system cannot refuse: a command whose
+	// level refuses one runs with it anyway. Every effect, when there is no
+	// lock.
+	Unenforced []Effect
 }
 
 // errNoLock is returned for a locked command on a platform without a lock.
@@ -117,6 +132,19 @@ func Enable(o Options) {
 	opts = o
 	mu.Unlock()
 	protectSelf()
+}
+
+// currentEffects is the application's table, or the default.
+func currentEffects() Effects {
+	mu.Lock()
+	f := opts.Effects
+	mu.Unlock()
+	if f != nil {
+		if e := f(); e != nil {
+			return e
+		}
+	}
+	return DefaultEffects()
 }
 
 func logf(format string, args ...any) {
@@ -167,8 +195,9 @@ func setup() (Report, string, error) {
 	setupDone, setupAt = true, time.Now()
 	report, setupErr = detect(), nil
 	if report.Lock == "" {
+		report.Unenforced = append([]Effect(nil), lockEffects...)
 		setupErr = errNoLock
-		logf("[sandbox] no lock is available on this machine")
+		logf("[sandbox] no lock is available on this system: commands run with every effect their account has")
 		return report, tmpDir, setupErr
 	}
 	if tmpDir == "" {
@@ -191,61 +220,79 @@ func setup() (Report, string, error) {
 }
 
 /*
- * Command builds a command to start a program, locked or not.
- * desc: Unlocked, it is exec.CommandContext. Locked, it is started so that it
- *       can read and cannot change anything; when that cannot be done the
- *       command's Err is set, so Start returns the reason and nothing runs.
+ * Command builds a command to start a program with the effects level allows.
+ * desc: Everything allowed but root, it is exec.CommandContext. Root allowed,
+ *       it is Options.Root's command. Otherwise it is started locked; when the
+ *       lock cannot be applied the command's Err is set, so Start returns the
+ *       reason and nothing runs.
  * param: ctx - ends the command when done, as for exec.CommandContext.
- * param: locked - whether to lock it.
- * param: writable - folders a locked command may still write under.
+ * param: level - the most the step that starts it may do.
+ * param: writable - folders it may still write under when ChangeFiles is
+ *        refused (where the lock can tell folders apart).
  * param: name - the program.
  * param: args - its arguments.
  * return: the command, used exactly as one from exec.CommandContext.
  */
-func Command(ctx context.Context, locked bool, writable []string, name string, args ...string) *exec.Cmd {
-	if !locked {
-		return exec.CommandContext(ctx, name, args...)
-	}
-	return lockedCommand(ctx, true, writable, name, args)
+func Command(ctx context.Context, level int, writable []string, name string, args ...string) *exec.Cmd {
+	return start(ctx, true, level, writable, name, args)
 }
 
 /*
  * Detached is Command for a program that must outlive ctx, such as a server a
  * tool starts and leaves running. ctx is not watched.
  */
-func Detached(locked bool, writable []string, name string, args ...string) *exec.Cmd {
-	if !locked {
-		return exec.Command(name, args...)
-	}
-	return lockedCommand(context.Background(), false, writable, name, args)
+func Detached(level int, writable []string, name string, args ...string) *exec.Cmd {
+	return start(context.Background(), false, level, writable, name, args)
 }
 
-func lockedCommand(ctx context.Context, cancel bool, writable []string, name string, args []string) *exec.Cmd {
-	mu.Lock()
-	on, allowUnlocked := enabled, opts.AllowUnlocked
-	mu.Unlock()
-
+func start(ctx context.Context, cancel bool, level int, writable []string, name string, args []string) *exec.Cmd {
+	plain := func() *exec.Cmd {
+		if cancel {
+			return exec.CommandContext(ctx, name, args...)
+		}
+		return exec.Command(name, args...)
+	}
 	refuse := func(err error) *exec.Cmd {
 		cmd := exec.Command(name, args...)
 		cmd.Err = fmt.Errorf("sandbox: %s was not run: %w", name, err)
 		logf("[sandbox] %v", cmd.Err)
 		return cmd
 	}
+
+	mu.Lock()
+	on, root := enabled, opts.Root
+	mu.Unlock()
+	eff := currentEffects()
+
+	if eff.Allows(Root, level) {
+		if root == nil {
+			return plain()
+		}
+		cmd, err := root(ctx, cancel, name, args)
+		if err != nil {
+			return refuse(err)
+		}
+		return cmd
+	}
+	allow := eff.allowedAt(level)
+	refused := false
+	for _, e := range lockEffects {
+		refused = refused || !allow[e]
+	}
+	if !refused {
+		return plain()
+	}
 	if !on {
 		return refuse(errors.New("this program does not call sandbox.Enter and sandbox.Enable"))
 	}
 	r, dir, setupErr := setup()
-	if errors.Is(setupErr, errNoLock) && allowUnlocked {
-		logf("[sandbox] %s runs without a lock: none is available and AllowUnlocked is set", name)
-		if cancel {
-			return exec.CommandContext(ctx, name, args...)
-		}
-		return exec.Command(name, args...)
+	if errors.Is(setupErr, errNoLock) {
+		return plain()
 	}
 	if setupErr != nil {
 		return refuse(setupErr)
 	}
-	cmd, err := platformCommand(ctx, cancel, r, append([]string{dir}, writable...), name, args)
+	cmd, err := platformCommand(ctx, cancel, r, allow, append([]string{dir}, writable...), name, args)
 	if err != nil {
 		return refuse(err)
 	}

@@ -65,9 +65,14 @@ func main() {
 	// First, before anything else: when this program was started to lock a
 	// tool's command, Enter locks it and runs the command instead.
 	sandbox.Enter()
-	// On a developer's own computer a platform with no lock still runs commands,
-	// with a warning, rather than refusing every one.
-	sandbox.Enable(sandbox.Options{AllowUnlocked: true})
+	// The command line writes generated code into the folder it runs in, so it
+	// gives up tracing other programs below root: Landlock, which keeps that
+	// folder writable while everything else is refused, refuses tracing.
+	sandbox.Enable(sandbox.Options{Effects: func() sandbox.Effects {
+		e := sandbox.DefaultEffects()
+		e[sandbox.ReadPrograms] = sandbox.Never
+		return e
+	}})
 
 	if len(os.Args) < 2 {
 		printUsage()

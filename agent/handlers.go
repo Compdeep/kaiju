@@ -52,6 +52,9 @@ func (a *Agent) applyHandlers(cfg Config) {
 	if cfg.Remote != nil {
 		a.remoteExec = cfg.Remote
 	}
+	if cfg.Privileged != nil {
+		a.privileged = cfg.Privileged
+	}
 	if cfg.ValidateTarget != nil {
 		a.targetValid = cfg.ValidateTarget
 	}

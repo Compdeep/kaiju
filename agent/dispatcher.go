@@ -13,6 +13,7 @@ import (
 
 	"github.com/Compdeep/kaiju/agent/gates"
 	"github.com/Compdeep/kaiju/agent/toolapi"
+	"github.com/Compdeep/kaiju/sandbox"
 )
 
 /*
@@ -959,7 +960,17 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 		ctx = WithExecContext(ctx, ec)
 	}
 
-	if tx, ok := tool.(toolapi.TypedExecutor); ok {
+	level, _ := toolapi.LevelOf(ctx)
+	if a.privileged != nil && toolapi.RequiresTarget(tool) && sandbox.AllowsRoot(level) {
+		// A step that acts on this target as root runs in the application's
+		// privileged program, which may check who decided it; the result
+		// comes back as a remote step's does (Handlers.Privileged).
+		log.Printf("[dag] %s at level %d runs in the privileged program", toolName, level)
+		result, err = a.privilegedExecute(ctx, toolName, params, level, triggerID)
+		if msg, ok := toolapi.ParseToolMessage(result); ok && err == nil {
+			body = toolMessageBody{msg: msg}
+		}
+	} else if tx, ok := tool.(toolapi.TypedExecutor); ok {
 		// Typed path: the tool returns a ToolMessage directly — no JSON round-trip.
 		// The node records which cards contributed guidance, so a trace shows
 		// what this run was coding against. Only the tools that consume the

@@ -87,6 +87,10 @@ func (e Effects) Level(eff Effect) int {
 	return DefaultEffects()[eff]
 }
 
+// AllowsRoot reports whether a step at level may run as root, by the
+// application's table.
+func AllowsRoot(level int) bool { return currentEffects().Allows(Root, level) }
+
 // Allows reports whether eff is allowed at level.
 func (e Effects) Allows(eff Effect, level int) bool {
 	l := e.Level(eff)

@@ -162,6 +162,7 @@ func TestEveryCallIntoApplicationCodeIsGuarded(t *testing.T) {
 		{"ValidateTarget", "remote.go", "validateTarget"},
 		{"RunTargets", "remote.go", "runTargets"},
 		{"Remote", "remote.go", "remoteExecute"},
+		{"Privileged", "remote.go", "privilegedExecute"},
 		{"DescribeTrigger", "loop_react.go", "formatTrigger"},
 		{"DescribeBackground", "loop_react.go", "formatBackground"},
 		{"QueueRank", "queue_rank.go", "rankInQueue"},

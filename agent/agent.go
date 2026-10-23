@@ -354,6 +354,7 @@ type Agent struct {
 	allowToolFn  AllowToolFunc   // nil = every call the gate allowed proceeds
 	auditFn      AuditFunc       // nil = gate decisions go to the file alone
 	remoteExec   RemoteExecutor  // nil = steps naming a machine run locally
+	privileged   RemoteExecutor  // nil = root steps on this target run here
 	targetValid  TargetValidator // nil = any non-empty target accepted
 	targetLister TargetLister    // nil = a run concerns only its own Target
 

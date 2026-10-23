@@ -370,6 +370,14 @@ type Handlers struct {
 	// inert — every step runs locally, as before targets existed.
 	Remote RemoteExecutor
 
+	// Privileged runs, somewhere other than this program, a step for this node
+	// that acts on its target (toolapi.RequiresTarget) at a level that allows
+	// root (sandbox.AllowsRoot): an application whose own program must not
+	// hold root hands the step, as decided, to a privileged program of its
+	// own, which may check who decided it before running it. Target is this
+	// node's own id. Nil runs such a step here, as before.
+	Privileged RemoteExecutor
+
 	// ValidateTarget rejects a malformed target before Remote is called. Nil
 	// accepts any non-empty target.
 	ValidateTarget TargetValidator

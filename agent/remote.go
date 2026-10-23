@@ -152,6 +152,23 @@ func (a *Agent) runTargets(t Trigger) (out []string) {
  * param: req - the call to run elsewhere.
  * return: what the far end returned, or the failure.
  */
+/*
+ * privilegedExecute hands a root step for this node to Handlers.Privileged,
+ * guarded like remoteExecute: a panic there fails the step, never the process.
+ */
+func (a *Agent) privilegedExecute(ctx context.Context, tool string, params map[string]any, level int, triggerID string) (result string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[agent] the privileged executor panicked, failing the step: %v", r)
+			result = ""
+			err = fmt.Errorf("the privileged executor failed on %s", tool)
+		}
+	}()
+	return a.privileged.Execute(ctx, RemoteRequest{
+		Target: a.cfg.NodeID, Tool: tool, Params: params, Intent: level, CorrelationID: triggerID,
+	})
+}
+
 func (a *Agent) remoteExecute(ctx context.Context, req RemoteRequest) (result string, err error) {
 	defer func() {
 		if r := recover(); r != nil {

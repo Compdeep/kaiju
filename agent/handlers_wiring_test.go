@@ -82,6 +82,10 @@ var wiredTo = map[string]struct {
 		func(c *Handlers) { c.Remote = wiringRemote{} },
 		func(a *Agent) bool { return a.remoteExec != nil },
 	},
+	"Privileged": {
+		func(c *Handlers) { c.Privileged = wiringRemote{} },
+		func(a *Agent) bool { return a.privileged != nil },
+	},
 	"ValidateTarget": {
 		func(c *Handlers) { c.ValidateTarget = func(string) error { return nil } },
 		func(a *Agent) bool { return a.targetValid != nil },

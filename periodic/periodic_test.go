@@ -179,8 +179,7 @@ func TestLate(t *testing.T) {
 func TestAddRefusesBadTasks(t *testing.T) {
 	r := New("")
 	ok := func(context.Context) error { return nil }
-	for _, tk := range []Task{{Every: time.Second, Run: ok}, {Name: "a", Every: time.Second}, {Name: "a", Run: ok},
-		{Name: "a", Every: time.Hour, Max: time.Minute, Run: ok}} {
+	for _, tk := range []Task{{Every: time.Second, Run: ok}, {Name: "a", Every: time.Second}, {Name: "a", Run: ok}} {
 		if err := r.Add(tk); err == nil {
 			t.Errorf("accepted %+v", tk)
 		}
@@ -245,4 +244,23 @@ func TestOffStartsSwitchedOffUntilASettingSaysOtherwise(t *testing.T) {
 	r2, _ := started(t, path)
 	r2.Add(task)
 	waitUntil(t, "the saved switch to win", func() bool { return n.Load() > 0 })
+}
+
+// An interval outside the task's range, as from configuration, widens the range
+// instead of the task being refused.
+func TestTheRangeIncludesTheTasksOwnInterval(t *testing.T) {
+	r := New("")
+	ok := func(context.Context) error { return nil }
+	if err := r.Add(Task{Name: "fast", Every: time.Second, Min: time.Minute, Max: time.Hour, Run: ok}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Add(Task{Name: "slow", Every: 48 * time.Hour, Min: time.Minute, Max: time.Hour, Run: ok}); err != nil {
+		t.Fatal(err)
+	}
+	if s := statusOf(r, "fast"); s.Min != time.Second || s.Max != time.Hour {
+		t.Errorf("fast range %s to %s, want 1s to 1h", s.Min, s.Max)
+	}
+	if s := statusOf(r, "slow"); s.Min != time.Minute || s.Max != 48*time.Hour {
+		t.Errorf("slow range %s to %s, want 1m to 48h", s.Min, s.Max)
+	}
 }

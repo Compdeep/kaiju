@@ -97,17 +97,17 @@ func (r *Registry) Add(t Task) error {
 	if t.Name == "" || t.Run == nil || t.Every <= 0 {
 		return fmt.Errorf("periodic: a task needs a name, a function and an interval")
 	}
-	if t.Min <= 0 {
+	// The range always includes the task's own interval: an interval that
+	// comes from configuration and falls outside the range widens it, rather
+	// than the task being refused and never running.
+	if t.Min <= 0 || t.Min > t.Every {
 		t.Min = t.Every
 	}
-	if t.Max <= 0 {
+	if t.Max <= 0 || t.Max < t.Every {
 		t.Max = t.Every
 	}
 	if t.Timeout <= 0 {
 		t.Timeout = t.Every
-	}
-	if t.Min > t.Every || t.Max < t.Every {
-		return fmt.Errorf("periodic: %s: interval %s is outside its own range %s to %s", t.Name, t.Every, t.Min, t.Max)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

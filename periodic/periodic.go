@@ -43,6 +43,7 @@ type Task struct {
 	AtStart bool          // run once when the registry starts, not only after the first interval
 	First   time.Duration // with AtStart false: the first run comes this long after start, not after Every
 	AtStop  bool          // run once more when the registry stops, to write what is kept in memory
+	Off     bool          // starts switched off; a saved setting wins
 	Run     func(ctx context.Context) error
 }
 
@@ -113,7 +114,7 @@ func (r *Registry) Add(t Task) error {
 	if _, dup := r.tasks[t.Name]; dup {
 		return fmt.Errorf("periodic: %s is already registered", t.Name)
 	}
-	k := &task{def: t, every: t.Every, enabled: true, wake: make(chan struct{}, 1)}
+	k := &task{def: t, every: t.Every, enabled: !t.Off, wake: make(chan struct{}, 1)}
 	k.st.Name = t.Name
 	r.tasks[t.Name] = k
 	r.applySavedLocked(k)

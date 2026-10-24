@@ -228,3 +228,21 @@ func TestAFailedRunIsLogged(t *testing.T) {
 		t.Errorf("log = %q", buf.String())
 	}
 }
+
+// Off starts a task switched off; a saved setting switches it on.
+func TestOffStartsSwitchedOffUntilASettingSaysOtherwise(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.json")
+	var n atomic.Int32
+	task := Task{Name: "sweep", Every: 10 * time.Millisecond, Min: 10 * time.Millisecond, Max: time.Hour, Off: true, Run: func(context.Context) error { n.Add(1); return nil }}
+	r, cancel := started(t, path)
+	r.Add(task)
+	time.Sleep(50 * time.Millisecond)
+	if n.Load() != 0 || statusOf(r, "sweep").Enabled {
+		t.Fatalf("an Off task ran %d times / enabled %v", n.Load(), statusOf(r, "sweep").Enabled)
+	}
+	r.Set("sweep", 10*time.Millisecond, true)
+	cancel()
+	r2, _ := started(t, path)
+	r2.Add(task)
+	waitUntil(t, "the saved switch to win", func() bool { return n.Load() > 0 })
+}

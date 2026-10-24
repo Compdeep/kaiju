@@ -264,3 +264,16 @@ func TestTheRangeIncludesTheTasksOwnInterval(t *testing.T) {
 		t.Errorf("slow range %s to %s, want 1m to 48h", s.Min, s.Max)
 	}
 }
+
+// Every reports the interval as currently set.
+func TestEveryIsTheCurrentInterval(t *testing.T) {
+	r := New("")
+	r.Add(Task{Name: "lane", Every: time.Hour, Min: time.Minute, Max: 24 * time.Hour, Run: func(context.Context) error { return nil }})
+	r.Set("lane", 2*time.Hour, true)
+	if got := r.Every("lane"); got != 2*time.Hour {
+		t.Errorf("Every = %s, want 2h", got)
+	}
+	if r.Every("missing") != 0 {
+		t.Error("Every of a missing task is not 0")
+	}
+}

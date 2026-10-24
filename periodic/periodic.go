@@ -193,6 +193,17 @@ func (r *Registry) Status() []Status {
 	return out
 }
 
+// Every is a task's current interval, as set, or 0 for no such task. For a
+// task whose run depends on how often it runs.
+func (r *Registry) Every(name string) time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if k, ok := r.tasks[name]; ok {
+		return k.every
+	}
+	return 0
+}
+
 // SettingsError is why the settings file could not be used, or "".
 func (r *Registry) SettingsError() string {
 	r.mu.Lock()

@@ -53,11 +53,13 @@ type Kernel struct {
 // a.RunDAGSync. Modules are registered by the caller (Agent.InitKernel) before
 // Run. Worker-pool size comes from cfg.MaxConcurrentInvestigations (0 => 1).
 func NewKernel(agent *Agent) *Kernel {
+	s := newScheduler(agent.RunDAGSync, schedulerWorkers(agent.cfg.MaxConcurrentInvestigations), maxQueueDepth)
+	s.runLimit = runCeiling(agent.cfg.DAGWallClock)
 	return &Kernel{
 		agent:     agent,
 		modules:   make(map[string]Module),
 		events:    make(chan KernelEvent, 64),
-		scheduler: newScheduler(agent.RunDAGSync, schedulerWorkers(agent.cfg.MaxConcurrentInvestigations), maxQueueDepth),
+		scheduler: s,
 	}
 }
 

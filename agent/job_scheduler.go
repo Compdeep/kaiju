@@ -136,6 +136,23 @@ type Scheduler struct {
 	liveWorkers int             // worker goroutines actually running (for live resize; workers is the target)
 	seq         uint64
 	closed      bool
+
+	// runLimit is the longest a worker waits for one run (runCeiling); zero
+	// waits as long as the run takes.
+	runLimit time.Duration
+}
+
+// runCeiling is the hard limit on one run, from the wall clock. The wall clock
+// stops planning and steps but not the answer, and is doubled for a model that
+// thinks; four times it covers both. A wall clock of zero means no limit to the
+// run itself, so the ceiling is then thirty minutes. Without a ceiling, a run
+// that outlived its clock (a tool that ignores cancellation, or no clock at
+// all) held its worker for good, and every job behind it waited too.
+func runCeiling(wallClock time.Duration) time.Duration {
+	if wallClock <= 0 {
+		return 30 * time.Minute
+	}
+	return 4 * wallClock
 }
 
 // newScheduler builds a scheduler. exec is the investigation executor
@@ -453,15 +470,41 @@ func interjectFrom(ctx context.Context) chan string {
  *       synchronous run — preflight, the planner, the aggregator and everything
  *       they call. The per-node guards cover the goroutines the run fans out to,
  *       which this one cannot reach.
+ *
+ *       The run goes on its own goroutine so the worker can stop waiting at
+ *       s.runLimit: the run is cancelled and left to unwind, the caller gets an
+ *       error, and the worker takes the next job.
  * param: job - the job to run.
  * return: the run's result, or the failure.
  */
-func (s *Scheduler) runJob(job *Job) (res *SyncResult, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[scheduler] the run panicked: %v\n%s", r, debug.Stack())
-			res, err = nil, fmt.Errorf("the run panicked: %v", r)
-		}
+func (s *Scheduler) runJob(job *Job) (*SyncResult, error) {
+	done := make(chan invResult, 1)
+	go func() {
+		var r invResult
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("[scheduler] the run panicked: %v\n%s", p, debug.Stack())
+				r = invResult{Err: fmt.Errorf("the run panicked: %v", p)}
+			}
+			done <- r
+		}()
+		res, err := s.exec(withInterject(job.ctx, job.interject), job.trigger)
+		r = invResult{Result: res, Err: err}
 	}()
-	return s.exec(withInterject(job.ctx, job.interject), job.trigger)
+	var ceiling <-chan time.Time
+	if s.runLimit > 0 {
+		t := time.NewTimer(s.runLimit)
+		defer t.Stop()
+		ceiling = t.C
+	}
+	select {
+	case r := <-done:
+		return r.Result, r.Err
+	case <-ceiling:
+		// Cancelled, and left to unwind on its own: the worker is free again.
+		job.cancel()
+		log.Printf("[scheduler] WARNING: a %s run (session %s) passed its hard limit of %s; it was cancelled and its worker released",
+			job.trigger.Type, job.session, s.runLimit)
+		return nil, fmt.Errorf("the run passed its hard limit of %s", s.runLimit)
+	}
 }

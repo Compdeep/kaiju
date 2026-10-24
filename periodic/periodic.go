@@ -309,6 +309,9 @@ func (r *Registry) runOnce(ctx context.Context, k *task) {
 		k.st.LastError = err.Error()
 	}
 	r.mu.Unlock()
+	if err != nil {
+		log.Printf("[periodic] %s: %v", k.def.Name, err) // the loops this replaced logged their failures
+	}
 }
 
 type saved struct {

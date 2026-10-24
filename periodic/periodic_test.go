@@ -1,8 +1,10 @@
 package periodic
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -211,4 +213,18 @@ func TestAtStopRunsOnceMoreOnStop(t *testing.T) {
 	r.Add(Task{Name: "flush", Every: time.Hour, AtStop: true, Run: func(context.Context) error { n.Add(1); return nil }})
 	cancel()
 	waitUntil(t, "the last run", func() bool { return n.Load() == 1 })
+}
+
+// A failed run is logged with the task's name, as the loops it replaced logged
+// their failures.
+func TestAFailedRunIsLogged(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	r, _ := started(t, "")
+	r.Add(Task{Name: "cert-renew", Every: time.Hour, AtStart: true, Run: func(context.Context) error { return errors.New("no fleet key") }})
+	waitUntil(t, "the failure", func() bool { return statusOf(r, "cert-renew").Failures == 1 })
+	if !bytes.Contains(buf.Bytes(), []byte("[periodic] cert-renew: no fleet key")) {
+		t.Errorf("log = %q", buf.String())
+	}
 }

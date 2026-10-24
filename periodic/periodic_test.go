@@ -190,3 +190,25 @@ func TestAddRefusesBadTasks(t *testing.T) {
 		t.Error("accepted a second task with the same name")
 	}
 }
+
+// First delays the first run; later runs follow the interval.
+func TestFirstDelaysTheFirstRun(t *testing.T) {
+	r, _ := started(t, "")
+	var n atomic.Int32
+	r.Add(Task{Name: "settle", Every: time.Hour, First: 30 * time.Millisecond, Run: func(context.Context) error { n.Add(1); return nil }})
+	time.Sleep(10 * time.Millisecond)
+	if n.Load() != 0 {
+		t.Fatal("ran before its first delay")
+	}
+	waitUntil(t, "the first run", func() bool { return n.Load() == 1 })
+}
+
+// AtStop gives a task one last run when the registry stops, so state kept in
+// memory is written.
+func TestAtStopRunsOnceMoreOnStop(t *testing.T) {
+	r, cancel := started(t, "")
+	var n atomic.Int32
+	r.Add(Task{Name: "flush", Every: time.Hour, AtStop: true, Run: func(context.Context) error { n.Add(1); return nil }})
+	cancel()
+	waitUntil(t, "the last run", func() bool { return n.Load() == 1 })
+}

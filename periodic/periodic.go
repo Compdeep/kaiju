@@ -41,6 +41,8 @@ type Task struct {
 	Max     time.Duration // longest; zero means Every
 	Timeout time.Duration // limit on one run; zero means Every
 	AtStart bool          // run once when the registry starts, not only after the first interval
+	First   time.Duration // with AtStart false: the first run comes this long after start, not after Every
+	AtStop  bool          // run once more when the registry stops, to write what is kept in memory
 	Run     func(ctx context.Context) error
 }
 
@@ -208,16 +210,21 @@ func (r *Registry) loop(ctx context.Context, k *task) {
 	r.mu.Lock()
 	first := k.def.AtStart && k.enabled
 	r.mu.Unlock()
+	wait := k.def.First
 	for {
 		if !first {
 			r.mu.Lock()
-			wait := k.every
+			if wait <= 0 {
+				wait = k.every
+			}
 			k.st.NextRun = time.Now().Add(wait)
 			r.mu.Unlock()
 			t := time.NewTimer(wait)
+			wait = 0
 			select {
 			case <-ctx.Done():
 				t.Stop()
+				r.atStop(k)
 				return
 			case <-k.wake:
 				t.Stop()
@@ -240,6 +247,17 @@ func (r *Registry) loop(ctx context.Context, k *task) {
 		first = false
 		r.runOnce(ctx, k)
 	}
+}
+
+// atStop gives a task its last run when the registry stops, with a fresh time
+// limit: the registry's own context has ended.
+func (r *Registry) atStop(k *task) {
+	if !k.def.AtStop {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), k.def.Timeout)
+	defer cancel()
+	r.runOnce(ctx, k)
 }
 
 // runOnce runs the task once with its time limit. A run that does not return

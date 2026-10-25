@@ -1,4 +1,19 @@
 BINARY=kaiju
+# Windows will not run a file with no extension, so the native build has to
+# name one. The cross targets below already spell their own out, and this is
+# empty everywhere else, so $(BINARY)$(EXE) is the right name on all three.
+ifeq ($(OS),Windows_NT)
+EXE=.exe
+# Run from PowerShell or cmd, make finds no sh and falls back to cmd.exe, which
+# has no tr, touch or /dev/null; Git for Windows' sh and the tools beside it in
+# usr/bin bring all three. make runs a plain line such as touch itself, without
+# the shell, so usr/bin goes on PATH as well.
+GIT_SH:=$(wildcard C:/Program\ Files/Git/bin/sh.exe)
+ifneq ($(GIT_SH),)
+SHELL:=C:/Program Files/Git/bin/sh.exe
+export PATH:=C:\Program Files\Git\usr\bin;$(PATH)
+endif
+endif
 # The engine's number comes from the VERSION file, not from this line. See
 # VERSIONING.md. COMMIT is which build of that release this is, and carries
 # -dirty when the checkout held edits nobody committed.
@@ -16,7 +31,7 @@ web:
 
 build: web
 	touch internal/gateway/embed.go
-	go build $(LDFLAGS) -o $(BINARY) ./cmd/kaiju
+	go build $(LDFLAGS) -o $(BINARY)$(EXE) ./cmd/kaiju
 
 # The same binary without the interface compiled into it.
 #
@@ -29,7 +44,7 @@ build: web
 # programs, and a build that served the interface yesterday should not still be
 # sitting there after this one runs.
 build-noui:
-	go build $(LDFLAGS) -tags noui -o $(BINARY) ./cmd/kaiju
+	go build $(LDFLAGS) -tags noui -o $(BINARY)$(EXE) ./cmd/kaiju
 
 build-linux: web
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY)-linux-amd64 ./cmd/kaiju
@@ -45,7 +60,7 @@ build-windows: web
 all: build-linux build-darwin build-windows
 
 clean:
-	rm -f $(BINARY) $(BINARY)-*
+	rm -f $(BINARY) $(BINARY)$(EXE) $(BINARY)-*
 
 test:
 	go test ./...

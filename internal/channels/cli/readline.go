@@ -10,7 +10,6 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -427,15 +426,6 @@ func (lr *LineReader) appendHistory(line string) {
 	}
 	defer f.Close()
 	f.WriteString(line + "\n")
-}
-
-func enableOPOST(fd int) error {
-	t, err := unix.IoctlGetTermios(fd, tcGetAttr)
-	if err != nil {
-		return err
-	}
-	t.Oflag |= unix.OPOST | unix.ONLCR
-	return unix.IoctlSetTermios(fd, tcSetAttr, t)
 }
 
 // HistoryFilePath returns ~/.kaiju/history, or "" if home dir is unavailable.

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Kaiju Browser Relay — Options</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    main { max-width: 640px; margin: 32px auto; padding: 0 16px; display: grid; gap: 16px; }
+    .hint { font-size: 12px; margin-top: 4px; }
+    .saved { color: var(--ok); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Kaiju Browser Relay</h1>
+      <p class="muted">Connects this browser to your Kaiju agent, so it can see and work in your tabs when you ask it to.</p>
+    </header>
+
+    <section class="panel status" id="status">
+      <span class="dot"></span>
+      <div>
+        <div class="status-title">Starting…</div>
+        <div class="status-detail"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Pair with Kaiju</h2>
+      <p class="muted">In a Kaiju chat, ask it to <em>connect my browser</em>. It gives you a code that starts with <span class="mono">kjp-</span>. Paste it here. The code works once and expires after 10 minutes.</p>
+      <label for="pairCode">Pairing code</label>
+      <input type="text" id="pairCode" class="mono" placeholder="kjp-…" autocomplete="off" spellcheck="false">
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="pair">Pair</button>
+        <span id="pairMsg" class="saved"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Connection</h2>
+      <label for="server">Kaiju server</label>
+      <input type="text" id="server" class="mono" spellcheck="false">
+      <p class="hint muted">Usually <span class="mono">ws://127.0.0.1:8080/api/v1/browser/ws</span>. Use <span class="mono">wss://</span> for a Kaiju on another machine.</p>
+      <label for="name">Name for this browser</label>
+      <input type="text" id="name" placeholder="Chrome on Windows">
+      <p class="hint muted">How Kaiju refers to this browser when you have more than one connected.</p>
+      <div class="row" style="margin-top:10px">
+        <button id="save">Save</button>
+        <span id="saveMsg" class="saved"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>This browser's pairing</h2>
+      <p class="muted" id="pairing"></p>
+      <button id="forget">Forget pairing</button>
+      <p class="hint muted">Removes the secret from this browser. To stop Kaiju accepting it as well, revoke it in Kaiju.</p>
+    </section>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

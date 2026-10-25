@@ -192,6 +192,24 @@ func (d *DB) migrate() error {
 			tool_name   TEXT PRIMARY KEY,
 			intent_name TEXT NOT NULL
 		)`,
+		// Browser pairing (see browser.go). A code is pasted into the extension
+		// once and traded for a device secret; neither is kept in the clear.
+		`CREATE TABLE IF NOT EXISTS browser_pair_codes (
+			code_hash   TEXT PRIMARY KEY,
+			username    TEXT NOT NULL DEFAULT '',
+			created_at  INTEGER NOT NULL,
+			expires_at  INTEGER NOT NULL,
+			used_at     INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS browser_devices (
+			id          TEXT PRIMARY KEY,
+			username    TEXT NOT NULL DEFAULT '',
+			name        TEXT NOT NULL DEFAULT '',
+			secret_hash TEXT NOT NULL,
+			created_at  INTEGER NOT NULL,
+			last_seen   INTEGER NOT NULL DEFAULT 0,
+			revoked_at  INTEGER NOT NULL DEFAULT 0
+		)`,
 	}
 
 	for _, m := range migrations {

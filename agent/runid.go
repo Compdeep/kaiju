@@ -76,6 +76,21 @@ func triggerFrom(ctx context.Context, g *Graph) *Trigger {
 	return t
 }
 
+// UsernameFrom returns who a run acts for, for a tool whose resources belong to
+// one person — a paired browser, say — rather than to the machine. Empty when
+// the run has no principal: a local CLI run, or a call made outside a run.
+func UsernameFrom(ctx context.Context) string {
+	var g *Graph
+	if ec := ExecContextFrom(ctx); ec != nil {
+		g = ec.Graph
+	}
+	t := triggerFrom(ctx, g)
+	if t == nil {
+		return ""
+	}
+	return usernameOf(t.Scope)
+}
+
 // RunIDFrom returns the run a context belongs to, for an application writing
 // its own stage.
 //

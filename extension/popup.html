@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Kaiju Browser Relay</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    body { width: 320px; padding: 14px; }
+    .actions { margin-top: 12px; }
+    .meta { margin-top: 10px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Kaiju Browser Relay</h1>
+  <div class="panel status" id="status">
+    <span class="dot"></span>
+    <div>
+      <div class="status-title">Starting…</div>
+      <div class="status-detail"></div>
+    </div>
+  </div>
+  <div class="row actions">
+    <button id="reconnect">Reconnect</button>
+    <button id="pause">Pause</button>
+    <button id="options">Options</button>
+  </div>
+  <p class="meta muted" id="meta"></p>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

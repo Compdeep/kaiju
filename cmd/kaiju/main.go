@@ -20,6 +20,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/docs"
 	"github.com/Compdeep/kaiju/internal/api"
+	"github.com/Compdeep/kaiju/internal/browserbridge"
 	"github.com/Compdeep/kaiju/internal/channels"
 	"github.com/Compdeep/kaiju/internal/channels/cli"
 	"github.com/Compdeep/kaiju/internal/channels/web"
@@ -911,6 +912,25 @@ func runServe() {
 	// side needs no such wiring: message_search above is a tool it can call.
 	ag.SetMessageStore(kaijuDB)
 
+	// The person's own browser, through the Kaiju Browser Relay extension. Here
+	// for the same reason as message_search: pairings live in the database. The
+	// tools are there whether or not a browser is connected, and say so when one
+	// is not, so a planner learns to pair one rather than never hearing of them.
+	browsers := browserbridge.New(kaijuDB)
+	ag.Registry().Replace(tools.NewBrowserPair(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserStatus(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserTabs(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserTabAction(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserNavigate(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserRead(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserScreenshot(browsers, cfg.Agent.Workspace), "builtin")
+	ag.Registry().Replace(tools.NewBrowserClick(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserType(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserKey(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserSelect(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserScroll(browsers), "builtin")
+	ag.Registry().Replace(tools.NewBrowserWait(browsers), "builtin")
+
 	// Safeguard: a run killed by a restart/crash leaves a user turn with no reply,
 	// which the UI reads as "still running" and spins a progress bar forever. On
 	// startup, close out any such dangling turn so no session comes back stuck.
@@ -1032,6 +1052,16 @@ func runServe() {
 	for _, path := range configapi.Paths {
 		mux.Handle(path, protect(configMux))
 	}
+
+	// The browser bridge: its websocket, open because the extension proves who
+	// it is in its first frame, and the status, pair and revoke routes behind
+	// the same token check as the configuration above.
+	browsers.Routes(mux, protect, func(r *http.Request) string {
+		if claims, ok := gateway.ClaimsFromContext(r.Context()); ok {
+			return claims.Username
+		}
+		return ""
+	})
 
 	// Health check
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {

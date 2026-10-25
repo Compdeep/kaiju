@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Kaiju Browser Relay",
+  "version": "0.3.0",
+  "description": "Connects this browser to your Kaiju agent, so it can see and work in your tabs when you ask it to.",
+  "minimum_chrome_version": "116",
+  "permissions": ["tabs", "storage", "alarms", "scripting", "debugger"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Kaiju Browser Relay", "default_popup": "popup.html" },
+  "options_ui": { "page": "options.html", "open_in_tab": true }
+}

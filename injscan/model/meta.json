@@ -1,0 +1,31 @@
+{
+ "version": "7",
+ "ft": {
+  "bucket": 100000,
+  "wordNgrams": 2
+ },
+ "tagger": {
+  "dim": 100,
+  "hidden": 128
+ },
+ "combine": {
+  "tagger_spread": 1.5479255527809817,
+  "ft_spread": 15.083054450019228
+ },
+ "cutoffs": {
+  "telemetry": {
+   "loose": 0.9344277315066764,
+   "strict": 1.737974536133602,
+   "run_loose": 2.2703028772607494,
+   "run_strict": 2.2703028772607494
+  },
+  "file": {
+   "loose": 2.395613275125345,
+   "strict": 3.2470474891850434,
+   "run_loose": 3.0759619924672554,
+   "run_strict": 3.5735400472452423
+  }
+ },
+ "block": 4,
+ "outright": false
+}

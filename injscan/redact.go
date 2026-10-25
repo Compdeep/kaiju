@@ -89,3 +89,28 @@ func Note(flags []Flag) string {
 	}
 	return b.String()
 }
+
+// Tag marks a flagged line where it stands, for text that is kept rather than
+// withheld. Worded so a model reads what was found and is not told what to
+// conclude: the check can confirm an innocent line, and a tag that called it
+// an attack would push the reader toward one.
+func Tag(line string) string {
+	return "[flagged as possibly written to instruct an AI agent: " + line + "]"
+}
+
+/*
+ * TagLines checks consecutive lines and tags the flagged ones in place.
+ * return: the lines, flagged ones tagged (Tag), and the flags; the lines
+ *         unchanged and nil when none was flagged.
+ */
+func (c *Checker) TagLines(ctx context.Context, lines []string, k Kind) ([]string, []Flag) {
+	flags := c.Check(ctx, lines, k)
+	if len(flags) == 0 {
+		return lines, nil
+	}
+	out := append([]string(nil), lines...)
+	for _, f := range flags {
+		out[f.Index] = Tag(out[f.Index])
+	}
+	return out, flags
+}

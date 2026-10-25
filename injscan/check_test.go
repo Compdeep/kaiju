@@ -126,3 +126,17 @@ func TestRedact(t *testing.T) {
 		t.Errorf("clean text came back as %q, %q, %v", out, note, flags)
 	}
 }
+
+// TagLines keeps every line, tagging only the flagged one, and leaves the
+// caller's slice alone.
+func TestTagLines(t *testing.T) {
+	c := plantedOnly(t)
+	lines := []string{"kernel: eth0: link up", planted}
+	out, flags := c.TagLines(context.Background(), lines, Log)
+	if len(flags) != 1 || out[0] != lines[0] || out[1] != Tag(planted) || lines[1] != planted {
+		t.Fatalf("out = %q, lines = %q, %d flags", out, lines, len(flags))
+	}
+	if !strings.Contains(Tag("x"), "possibly written to instruct an AI agent") {
+		t.Error("the tag does not say what was found")
+	}
+}

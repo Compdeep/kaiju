@@ -16,6 +16,7 @@ import { onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useSettingsStore } from './stores/settings'
+import { signInEnabled } from './uiconfig'
 
 const auth = useAuthStore()
 const settings = useSettingsStore()
@@ -23,6 +24,9 @@ const router = useRouter()
 
 onMounted(() => {
   settings.loadTheme()
+  // Where the server has no sign-in there is no account to fetch and nowhere to
+  // send anyone, so the page goes straight to the chat.
+  if (!signInEnabled()) return
   if (auth.isAuthenticated) {
     auth.fetchMe()
   } else {
@@ -30,8 +34,8 @@ onMounted(() => {
   }
 })
 
-// Watch for logout — redirect immediately
+// Watch for logout — redirect immediately, unless there is no sign-in to return to
 watch(() => auth.isAuthenticated, (authed) => {
-  if (!authed) router.replace('/login')
+  if (!authed && signInEnabled()) router.replace('/login')
 })
 </script>

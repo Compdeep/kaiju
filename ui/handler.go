@@ -109,7 +109,12 @@ func Handler(opts Options) (http.Handler, error) {
 
 	// What the page reads before it draws anything. Outside the token check:
 	// the sign-in page carries the brand and is drawn before anyone has one.
-	cfgHandler, err := ConfigHandler(opts.Config)
+	// What the server built, not what the caller declared: a page that is told
+	// there is a sign-in when there is none sends people to a form that posts
+	// nowhere, and one told the opposite hides a form that works.
+	served := opts.Config
+	served.SignIn = opts.Auth != nil
+	cfgHandler, err := ConfigHandler(served)
 	if err != nil {
 		return nil, err
 	}

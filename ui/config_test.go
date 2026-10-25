@@ -107,6 +107,12 @@ func TestServedConfig_CarriesNothingButBrandThemeAndSections(t *testing.T) {
 	for k := range raw {
 		switch k {
 		case "brand", "theme", "sections":
+		// Whether this mount has a sign-in. Not a secret: a page that shows a
+		// sign-in form already tells anyone looking that one exists, and a mount
+		// without one answers 404 on the auth routes, which says the same thing
+		// to anyone who asks. What it buys is the page not having to find out by
+		// posting to a route that is not there.
+		case "sign_in":
 		default:
 			t.Errorf("an unauthenticated response carries %q; if that field is ever secret this endpoint leaks it", k)
 		}
@@ -124,5 +130,40 @@ func TestConfigHandler_RefusesAnythingButGET(t *testing.T) {
 		if rec.Code != http.StatusMethodNotAllowed {
 			t.Errorf("%s = %d, want 405 — a theme that a request can set is a stylesheet a request can set", m, rec.Code)
 		}
+	}
+}
+
+// The page is told what the server built, not what the caller declared.
+//
+// Without an Authenticator the auth routes are never registered, but the page
+// assumed a sign-in always existed: it saw no token, redirected to its sign-in,
+// and that page posted to /api/v1/auth/login — a route this mount does not have,
+// answering 404. The flag is how it knows, so it is derived here and an
+// application cannot set it wrongly.
+func TestSignInReportsWhatTheMountActuallyHas(t *testing.T) {
+	// An application claiming a sign-in it did not configure is overruled.
+	h, err := Handler(Options{Agent: testAgent(t), Config: Config{SignIn: true}})
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, ConfigPath, nil))
+
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if v, ok := got["sign_in"]; !ok {
+		t.Fatal("sign_in absent — false is the answer that matters and must reach the page")
+	} else if v != false {
+		t.Errorf("sign_in = %v, want false: no Authenticator was given", v)
+	}
+
+	// And the route the page would have posted to genuinely is not there, which
+	// is why the flag exists.
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader("{}")))
+	if rec2.Code != http.StatusNotFound {
+		t.Errorf("POST /api/v1/auth/login = %d, want 404 on a mount with no sign-in", rec2.Code)
 	}
 }

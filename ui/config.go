@@ -34,6 +34,22 @@ type Config struct {
 	Brand    Brand    `json:"brand,omitempty"`
 	Theme    Theme    `json:"theme,omitempty"`
 	Sections Sections `json:"sections,omitempty"`
+
+	// SignIn reports whether this mount has a sign-in at all.
+	//
+	// Derived, not configured: Handler overwrites whatever is here with whether
+	// it was given an Authenticator, because the page must be told what the
+	// server actually built rather than what an application believes. An
+	// application cannot turn a sign-in on by declaring one, and cannot turn one
+	// off while the routes are still mounted.
+	//
+	// It exists because the page assumed one always existed. With no
+	// Authenticator the auth routes are never registered, but the page still saw
+	// no token, still redirected to its sign-in, and that page still posted to
+	// /api/v1/auth/login — a door the server had not installed, answering 404.
+	// Deliberately without omitempty: false is the answer that matters and it
+	// has to reach the page.
+	SignIn bool `json:"sign_in"`
 }
 
 /*

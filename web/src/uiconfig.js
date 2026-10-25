@@ -14,7 +14,12 @@
 // sections empty means every optional part is off, which is the same fail-safe
 // the Go side applies. A failed fetch therefore hides buttons rather than
 // showing ones whose routes may not be there.
-const FALLBACK = { brand: {}, theme: {}, sections: {} }
+//
+// sign_in falls back to TRUE, which is the opposite direction and deliberately
+// so. Every other value fails safe by hiding something; this one fails safe by
+// keeping the sign-in. Guessing "no sign-in" from a failed fetch would walk
+// past a sign-in that exists.
+const FALLBACK = { brand: {}, theme: {}, sections: {}, sign_in: true }
 
 let config = FALLBACK
 
@@ -29,6 +34,19 @@ export function brandLogo() { return config.brand?.logo_url || '' }
 
 /** desc: Whether to show the "powered by Kaiju" line. @returns {boolean} */
 export function brandAttribution() { return !!config.brand?.attribution }
+
+/**
+ * desc: Whether this server has a sign-in at all.
+ *
+ * The server mounts its auth routes only when it was given an authenticator,
+ * but the page used to assume one always existed: no token meant redirect to
+ * the sign-in, and that page posted to /api/v1/auth/login — which, on a mount
+ * without one, was never registered and answered 404. So the page showed a door
+ * the server had not installed. This is how it knows.
+ *
+ * @returns {boolean}
+ */
+export function signInEnabled() { return config.sign_in !== false }
 
 /**
  * desc: Whether an optional part of the interface exists.

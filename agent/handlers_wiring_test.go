@@ -60,6 +60,12 @@ var wiredTo = map[string]struct {
 		},
 		func(a *Agent) bool { return a.answer != nil },
 	},
+	"OutputCheck": {
+		func(c *Handlers) {
+			c.OutputCheck = func(_ context.Context, _, _, r string) (string, string) { return r, "" }
+		},
+		func(a *Agent) bool { return a.outputCheck != nil },
+	},
 	"AllowTool": {
 		func(c *Handlers) {
 			c.AllowTool = func(context.Context, ToolCallRequest) (bool, string) { return true, "" }

@@ -137,7 +137,29 @@ func (st *toolThrottle) waitThrottle(ctx context.Context, key string, cooldown t
  * param: err - why it failed, nil on success.
  * return: the completion to send.
  */
-func (a *Agent) finish(n *Node, result string, body NodeBody, err error) nodeCompletion {
+func (a *Agent) finish(ctx context.Context, n *Node, result string, body NodeBody, err error) nodeCompletion {
+	// The result is checked before any model reads it, here because both
+	// paths, the step run here and the step run on a target, end here.
+	// Withheld parts replace the originals; the note goes above them, and
+	// the typed body is read again from the checked result so a field
+	// reference cannot reach what was withheld.
+	if err == nil && a.outputCheck != nil && result != "" {
+		target := ""
+		if a.remoteFor(n) {
+			target = n.Target
+		}
+		if checked, note := a.checkOutput(ctx, n.ToolName, target, result); checked != result || note != "" {
+			body = nil
+			if msg, ok := toolapi.ParseToolMessage(checked); ok {
+				body = toolMessageBody{msg: msg}
+			}
+			result = checked
+			if note != "" {
+				result = note + "\n" + checked
+			}
+		}
+	}
+
 	// A hint is derived from the tool as this node has it, so a step that ran
 	// elsewhere gets one only when the same tool is registered here too. That is
 	// the honest limit: without the tool there is nothing to ask.
@@ -252,7 +274,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// chain handles that case.
 	if err := substituteTemplates(n, graph, a.registry); err != nil {
 		log.Printf("[dag] node %s template substitution failed: %v", n.ID, err)
-		ch <- a.finish(n, "", nil, fmt.Errorf("dependency injection failed: %w", err))
+		ch <- a.finish(ctx, n, "", nil, fmt.Errorf("dependency injection failed: %w", err))
 		return
 	}
 
@@ -261,7 +283,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// class where the planner invents params like bash(cwd: ...).
 	if tool, ok := a.registry.Get(n.ToolName); ok {
 		if err := validateDirectParams(tool, n.Params); err != nil {
-			ch <- a.finish(n, "", nil, err)
+			ch <- a.finish(ctx, n, "", nil, err)
 			return
 		}
 	}
@@ -271,7 +293,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	// so neither path can skip it. See target_scope.go.
 	if err := a.checkTarget(n, scope); err != nil {
 		log.Printf("[dag] node %s: %v", n.ID, err)
-		ch <- a.finish(n, "", nil, err)
+		ch <- a.finish(ctx, n, "", nil, err)
 		return
 	}
 
@@ -288,7 +310,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	if n.Type == NodeTool && n.Target != "" && n.Target != a.cfg.NodeID && a.remoteExec == nil {
 		log.Printf("[dag] node %s: step is for %s and no remote executor is configured", n.ID, Text.TruncateLog(n.Target, 12))
 		unreachable := fmt.Errorf("step is for %q and this agent has no remote executor, so it was not run", n.Target)
-		ch <- a.finish(n, "", nil, unreachable)
+		ch <- a.finish(ctx, n, "", nil, unreachable)
 		return
 	}
 
@@ -342,18 +364,18 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 
 		if err := scopeAllows(n.ToolName, scope); err != nil {
 			auditRemote("", err)
-			ch <- a.finish(n, "", nil, err)
+			ch <- a.finish(ctx, n, "", nil, err)
 			return
 		}
 		if err := a.validateTarget(n.Target); err != nil {
 			log.Printf("[dag] node %s: invalid target %q: %v", n.ID, n.Target, err)
 			auditRemote("", err)
-			ch <- a.finish(n, "", nil, fmt.Errorf("invalid target %q: %w", n.Target, err))
+			ch <- a.finish(ctx, n, "", nil, fmt.Errorf("invalid target %q: %w", n.Target, err))
 			return
 		}
 		if err := a.checkClearance(ctx, n.ToolName, n.Params, usernameOf(scope)); err != nil {
 			auditRemote("", err)
-			ch <- a.finish(n, "", nil, err)
+			ch <- a.finish(ctx, n, "", nil, err)
 			return
 		}
 		// Asked last here as it is below, and after the target check for the same
@@ -368,7 +390,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			Params:  n.Params,
 			Target:  n.Target,
 		}); !allow {
-			ch <- a.finish(n, reason, nil, nil)
+			ch <- a.finish(ctx, n, reason, nil, nil)
 			return
 		}
 		log.Printf("[dag] remote exec %s (%s) -> %s", n.ID, n.ToolName, Text.TruncateLog(n.Target, 12))
@@ -396,7 +418,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			err = fmt.Errorf("step on %q failed: %w", n.Target, err)
 		}
 		auditRemote(result, err)
-		ch <- a.finish(n, result, body, err)
+		ch <- a.finish(ctx, n, result, body, err)
 		return
 	}
 
@@ -421,7 +443,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 	}
 
 	result, body, err := a.executeToolNode(ctx, n, graph, budget, n.ToolName, n.Params, triggerID, intent, scope)
-	ch <- a.finish(n, result, body, err)
+	ch <- a.finish(ctx, n, result, body, err)
 }
 
 /*

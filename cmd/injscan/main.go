@@ -17,7 +17,7 @@ import (
 
 func main() {
 	dir := flag.String("model", "", "model folder; empty uses the built-in model")
-	kind := flag.String("kind", "telemetry", "telemetry or file: chooses the cut-offs")
+	kind := flag.String("kind", "log", "log or file: chooses the cut-offs")
 	all := flag.Bool("all", false, "print every line, not only flagged ones")
 	flag.Parse()
 

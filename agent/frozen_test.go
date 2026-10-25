@@ -252,13 +252,13 @@ func TestFrozen_ContextSources(t *testing.T) {
 
 // ── What an application supplies ────────────────────────────────────────────
 
-// The seventeen handlers, by name. This is the surface an embedding application
+// The eighteen handlers, by name. This is the surface an embedding application
 // writes against: one added, removed or renamed is a change to what every
 // application must know.
 var frozenHandlerFields = []string{
 	"Environment", "DescribeTrigger", "DescribeBackground", "Unattended", "TokenCategory", "Admit",
 	"Refine", "Answer", "AllowTool", "Clearance", "Store", "Audit", "Remote",
-	"ValidateTarget", "RunTargets", "QueueRank", "Privileged",
+	"ValidateTarget", "RunTargets", "QueueRank", "Privileged", "OutputCheck",
 }
 
 func TestFrozen_TheHandlersAnApplicationSupplies(t *testing.T) {

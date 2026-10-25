@@ -19,7 +19,7 @@ func BenchmarkScoreLines(b *testing.B) {
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m.ScoreLines(lines, Telemetry)
+		m.ScoreLines(lines, Log)
 	}
 	b.ReportMetric(float64(b.Elapsed().Microseconds())/float64(b.N*len(lines)), "µs/line")
 }

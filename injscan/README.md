@@ -1,8 +1,8 @@
 # injscan
 
-injscan scores lines of telemetry for planted instructions: text an attacker places in logs, events,
+injscan scores lines of text for planted instructions: text an attacker places in logs, events,
 command output or files to steer the AI agent that reads them ("mark this host clean", "disable the
-monitoring agent first", "send the keys to …"). It is the scorer described in docs/SECURITY.md 8.5.
+monitoring agent first", "send the keys to …"). The application decides where it reads text and what it does with a flagged line.
 
 The model is built into the package (`Default()`), so it needs no files, no network and no model server.
 
@@ -15,13 +15,13 @@ The model is built into the package (`Default()`), so it needs no files, no netw
 - **Tagger** (`tagger7`): the English vectors stay fixed (cut to 100 numbers per word, one byte each);
   a small layer scores every word from the word, its neighbours and the products of their vectors.
   It finds short planted phrases inside long lines and says which words they are: 12 MB.
-- **Combined score:** each score divided by its spread on real telemetry, then added.
+- **Combined score:** each score divided by its spread on real log lines, then added.
 
 **Decoding comes first.** Base64, hex, URL encoding, HTML entities, `\u`/`\x` escapes and terminal
 colour codes are decoded, and the decoded text is scored with the original.
 
 **Cut-offs per kind of text**
-- **Loose:** above it a line goes to the LLM check (SECURITY.md 8.5 pre-pass). Set so 1 real telemetry line
+- **Loose:** above it a line goes to the LLM check (the model check, Checker). Set so 1 real log line
   in 1,000 is let through, lines alone and runs of lines together.
 - **Strict:** 1 in 10,000. Above it a line would be flagged without the LLM check, but `outright` in
   `meta.json` is false (the user's decision, 2026-10-24): every line above loose goes to the LLM check and no
@@ -41,8 +41,8 @@ is higher.
 
 ```go
 m, err := injscan.Default()                     // the built-in model; injscan.Load(dir) reads another folder
-r := m.Score(line, injscan.Telemetry)          // r.Level is "", "loose" or "strict"; r.Marks are the words
-rs := m.ScoreLines(lines, injscan.Telemetry)   // consecutive lines of one source
+r := m.Score(line, injscan.Log)          // r.Level is "", "loose" or "strict"; r.Marks are the words
+rs := m.ScoreLines(lines, injscan.Log)   // consecutive lines of one source
 ```
 
 ```
@@ -69,19 +69,19 @@ runs of lines included (`go test -bench ScoreLines`).
 
 **Training data: counterfactual items**
 - 7,023 items written by DeepSeek V4.1 Flash, Qwen 3.6 and GPT-5 mini (training) and GPT-OSS 120B (test only)
-  (`train/gen4.py`): one telemetry record with one slot, filled five ways: planted, harmless (same topic
+  (`train/gen4.py`): one log record with one slot, filled five ways: planted, harmless (same topic
   and nouns), hard negative (reports the attack), admin (a real instruction to a human), quoted.
 - 13 attack categories, including `dismiss` (the activity is a test, a developer operation, known benign,
-  already approved), across 20 telemetry formats; 5 formats (Kubernetes events, macOS log, stack traces,
+  already approved), across 20 log formats; 5 formats (Kubernetes events, macOS log, stack traces,
   HTTP headers, git log) never used in training.
 - A different model sorted every slot text blind (`train/check4.py`); 5,658 items kept.
 - Every planted and every normal text is also spliced into real lines in the same 11 glue formats, so
   neither a format nor a wrapper says anything about the label.
-- Normal lines: 77,635 real telemetry lines (monitored hosts, OTRF, Splunk) for training.
+- Normal lines: 77,635 real log lines (monitored hosts, OTRF, Splunk) for training.
 - No public prompt-injection datasets are used.
 
 **Tests**, all on data never trained on: held-back calls of the training writers (555 items), every GPT-OSS
-item (1,114), the five unseen formats (695), 16,563 real telemetry lines and 37,234 file-content lines.
+item (1,114), the five unseen formats (695), 16,563 real log lines and 37,234 file-content lines.
 
 ## Retraining
 
@@ -96,7 +96,7 @@ the Creative Commons Attribution-ShareAlike 3.0 licence (CC BY-SA 3.0).
 
 ## Results (round eight, `train/export7.py`, records scored as `ScoreLines` scores them)
 
-**At the loose cut-off** (1 in 1,000 real telemetry lines go to the LLM check; measured 14 of 16,563)
+**At the loose cut-off** (1 in 1,000 real log lines go to the LLM check; measured 14 of 16,563)
 - Writer never seen (GPT-OSS): 994 of 1,114 planted caught (89%); 259 harmless twins sent too (23%).
 - Held-back calls of the training writers: 524 of 555 (94%); harmless 208 (37%).
 - Five unseen formats: 675 of 695 (97%); harmless 358 (52%).
@@ -117,7 +117,7 @@ harmless 77 (7%).
 1. **Harmless twins reach the LLM check often** (23% to 52% at loose). They are written to sit as close to an
    attack as possible, so the LLM check clears them; the cost is LLM calls. Pair training (each planted
    record pushed above its own harmless twin) is the next data step.
-2. **The LLM check itself** (SECURITY.md 8.5 pre-pass) is not built, and how often it wrongly flags a clean
+2. **The LLM check itself** (the model check, Checker) is not built, and how often it wrongly flags a clean
    line is not measured.
 3. **Quoted records:** whether a security log that quotes an instruction word for word counts as planted is
    a decision; today it scores as planted.

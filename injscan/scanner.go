@@ -5,12 +5,12 @@ package injscan
 import "strings"
 
 // Kind says what a text is; each kind has its own cut-offs because ordinary documentation is full of
-// instructions and would otherwise drown the cut-offs for telemetry.
+// instructions and would otherwise drown the cut-offs for logs.
 type Kind string
 
 const (
-	Telemetry Kind = "telemetry"
-	File      Kind = "file"
+	Log  Kind = "log" // text a machine writes: logs, events, command output
+	File Kind = "file"
 )
 
 // Level is how far a text's score goes past the cut-offs for its kind.
@@ -45,12 +45,12 @@ type Model struct {
 	meta   meta
 }
 
-// Cutoffs returns the cut-offs for a kind (telemetry when the kind is unknown).
+// Cutoffs returns the cut-offs for a kind (log when the kind is unknown).
 func (m *Model) Cutoffs(k Kind) Cutoffs {
 	if c, ok := m.meta.Cutoffs[string(k)]; ok {
 		return c
 	}
-	return m.meta.Cutoffs[string(Telemetry)]
+	return m.meta.Cutoffs[string(Log)]
 }
 
 // Score scores one text against the single-line cut-offs.

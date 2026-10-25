@@ -60,7 +60,7 @@ type meta struct {
 		TaggerSpread float64 `json:"tagger_spread"`
 		FTSpread     float64 `json:"ft_spread"`
 	} `json:"combine"`
-	Cutoffs map[string]Cutoffs `json:"cutoffs"` // "telemetry", "file"
+	Cutoffs map[string]Cutoffs `json:"cutoffs"` // "log", "file"
 	// Outright says whether a line above Strict is flagged without the LLM check. When false every line
 	// above Loose goes to the LLM check and no line is given the Strict level.
 	Outright bool `json:"outright"`

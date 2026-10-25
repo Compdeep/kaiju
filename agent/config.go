@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"time"
@@ -318,6 +319,10 @@ type ComputeConfig struct {
 // to know they existed, which were required, and in what order. Anything
 // genuinely settable while running stayed a method — see SetClearance and
 // SetToolReach.
+// OutputCheckFunc is Handlers.OutputCheck: tool is the step's tool, target
+// where it ran ("" for here), result what it returned.
+type OutputCheckFunc func(ctx context.Context, tool, target, result string) (checked, note string)
+
 type Handlers struct {
 	// Unattended reports whether a run has nobody watching it, which decides
 	// whether it may ask a question or use tools that record a person's
@@ -369,6 +374,13 @@ type Handlers struct {
 	// Remote runs a step on the target its Target names. Nil makes targets
 	// inert — every step runs locally, as before targets existed.
 	Remote RemoteExecutor
+
+	// OutputCheck reads a tool step's result before any model does, wherever
+	// the step ran, and may withhold parts of it (for example lines planted to
+	// steer the agent, found with the injscan package). It returns the result
+	// to use and a note to put above it; the result unchanged and an empty
+	// note leave it as it was. Nil checks nothing.
+	OutputCheck OutputCheckFunc
 
 	// Privileged runs, somewhere other than this program, a step for this node
 	// that acts on its target (toolapi.RequiresTarget) at a level that allows

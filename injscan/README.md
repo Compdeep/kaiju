@@ -63,7 +63,7 @@ runs of lines included (`go test -bench ScoreLines`).
 - `model/`: the model files, built into the package (format in `model.go`).
 - `testdata/golden.json`: scores from the Python reference; `go test` checks Go gives the same
   numbers (905 texts and 5 multi-line records, within 0.01). Public lines and generated records only.
-- `testdata/bench.log`: 500 public log lines (OTRF, Splunk) for the benchmark.
+- `testdata/bench.txt`: 500 public log lines (OTRF, Splunk) for the benchmark.
 
 ## How it was built
 

@@ -6,13 +6,13 @@ import (
 	"testing"
 )
 
-// BenchmarkScoreLines scores testdata/bench.log (one line each) as one source, runs included.
+// BenchmarkScoreLines scores testdata/bench.txt (one line each) as one source, runs included.
 func BenchmarkScoreLines(b *testing.B) {
 	m, err := Load("model")
 	if err != nil {
 		b.Skip(err)
 	}
-	raw, err := os.ReadFile("testdata/bench.log")
+	raw, err := os.ReadFile("testdata/bench.txt")
 	if err != nil {
 		b.Skip(err)
 	}

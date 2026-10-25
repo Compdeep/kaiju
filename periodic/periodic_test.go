@@ -221,9 +221,9 @@ func TestAFailedRunIsLogged(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 	r, _ := started(t, "")
-	r.Add(Task{Name: "cert-renew", Every: time.Hour, AtStart: true, Run: func(context.Context) error { return errors.New("no fleet key") }})
+	r.Add(Task{Name: "cert-renew", Every: time.Hour, AtStart: true, Run: func(context.Context) error { return errors.New("no key file") }})
 	waitUntil(t, "the failure", func() bool { return statusOf(r, "cert-renew").Failures == 1 })
-	if !bytes.Contains(buf.Bytes(), []byte("[periodic] cert-renew: no fleet key")) {
+	if !bytes.Contains(buf.Bytes(), []byte("[periodic] cert-renew: no key file")) {
 		t.Errorf("log = %q", buf.String())
 	}
 }

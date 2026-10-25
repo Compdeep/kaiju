@@ -30,9 +30,9 @@ type MemoryStore struct {
 func NewMemoryStore(mem *agent.Memory) *MemoryStore { return &MemoryStore{mem: mem} }
 
 // RequiresTarget is false: this is the agent's own memory, in this process, so
-// there is no other machine for a step to name. Without this the default applies,
+// there is no other target for a step to name. Without this the default applies,
 // which is true, and an application that checks it would ask every memory step to
-// name a machine before it could run.
+// name a target before it could run.
 func (m *MemoryStore) RequiresTarget() bool { return false }
 
 /*

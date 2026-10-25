@@ -291,7 +291,7 @@ type PlanStep struct {
 	Params    map[string]any `json:"params"`
 	DependsOn FlexInts       `json:"depends_on"` // index-based references
 	Tag       string         `json:"tag"`
-	// Target names the machine this step runs on. Usually left to
+	// Target names the target this step runs on. Usually left to
 	// applyRunTarget rather than written by the planner, since a tool's own
 	// declaration says whether it needs one.
 	Target string `json:"target,omitempty"`
@@ -327,7 +327,7 @@ var planStepFields = func() map[string]bool {
  *       calling itself. It used to declare a second struct listing every field
  *       by hand and copy them across one at a time, and a field added to
  *       PlanStep and not to that copy was dropped with no error. Target is how
- *       that was found: a plan named the machine to run on and the step arrived
+ *       that was found: a plan named the target to run on and the step arrived
  *       without one.
  *
  *       It also tolerates a model that still emits the legacy param_refs field,
@@ -2335,7 +2335,7 @@ func (a *Agent) validatePlanSteps(steps []PlanStep, isAuto bool, inferredIntent 
 	// Fill in each step's target from the run's, guided by what the tool says
 	// it needs. Done here rather than trusting the planner to repeat the target
 	// on every step. A no-op when the trigger names no target, which is every
-	// application that does not dispatch work to other machines.
+	// application that does not dispatch work to other targets.
 	applyRunTarget(steps, trigger.Target, a.registry)
 
 	// Filter unknown tools.
@@ -3388,7 +3388,7 @@ func isNumericPathSegment(s string) bool {
  *       step whose tool does not is stripped of one it should never have had.
  *
  *       A step needing a target when the run has none is left alone and
- *       logged. A tool that must name a machine has no sensible default, and
+ *       logged. A tool that must name a target has no sensible default, and
  *       running it locally would produce a plausible answer about the wrong
  *       host, so the dispatcher refuses it (checkTarget).
  * param: steps - the plan, modified in place.
@@ -3409,7 +3409,7 @@ func applyRunTarget(steps []PlanStep, target string, registry *toolapi.Registry)
 				continue
 			}
 			if target == "" {
-				log.Printf("[plan] step %d (%s) needs a target machine but the run has none; leaving it unset, and the dispatcher refuses it when targets are in use",
+				log.Printf("[plan] step %d (%s) needs a target but the run has none; leaving it unset, and the dispatcher refuses it when targets are in use",
 					i, steps[i].Tool)
 				continue
 			}

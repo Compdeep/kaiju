@@ -43,12 +43,12 @@ type ResolvedScope struct {
  *       access scope, session ID, and conversation history.
  */
 type Trigger struct {
-	// Target names the machine this run is about, if any. Steps calling tools
+	// Target names the target this run is about, if any. Steps calling tools
 	// that require a target inherit it; see applyRunTarget. What goes in here,
 	// and how it is chosen, is the caller's business.
 	//
 	// Named Target, not TargetNode: "node" already means a DAG node in this
-	// package, and a machine is not one.
+	// package, and a target is not one.
 	Target string `json:"target,omitempty"`
 
 	Type          string          `json:"type"` // "chat_query", "api_query", "scheduled", "event", "command"
@@ -353,7 +353,7 @@ type Agent struct {
 	classifyStub func(query string, history []llm.Message) *PreflightResult
 	allowToolFn  AllowToolFunc   // nil = every call the gate allowed proceeds
 	auditFn      AuditFunc       // nil = gate decisions go to the file alone
-	remoteExec   RemoteExecutor  // nil = steps naming a machine run locally
+	remoteExec   RemoteExecutor  // nil = steps naming a target run locally
 	privileged   RemoteExecutor  // nil = root steps on this target run here
 	targetValid  TargetValidator // nil = any non-empty target accepted
 	targetLister TargetLister    // nil = a run concerns only its own Target
@@ -1541,7 +1541,7 @@ func (a *Agent) ToolsInfo() []toolapi.ToolInfo {
  * Callable at run time because reach is consulted on every lookup — Get
  * requires ReachLocal, GetForRemote requires ReachEverywhere — so withdrawing
  * a tool takes effect on the next call rather than the next restart. That is
- * the point of it: an operator narrowing what a machine will do for strangers
+ * the point of it: an operator narrowing what a node will do for strangers
  * is not waiting for a restart to be obeyed.
  */
 func (a *Agent) SetToolReach(name string, reach toolapi.Reach) error {

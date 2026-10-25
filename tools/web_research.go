@@ -45,7 +45,7 @@ func (w *WebResearch) Description() string {
 func (w *WebResearch) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 // RequiresTarget is false: research goes from this node to the web, so there is
-// no machine for a step to name.
+// no target for a step to name.
 func (w *WebResearch) RequiresTarget() bool { return false }
 
 func (w *WebResearch) Parameters() json.RawMessage {

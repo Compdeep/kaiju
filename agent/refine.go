@@ -38,7 +38,7 @@ import (
 //   - an error — treated as any other preflight failure
 //
 // The trigger is a pointer because refinement may also settle WHERE the run
-// applies — an application that resolves "the database host" to a machine sets
+// applies — an application that resolves "the database host" to a target sets
 // Target here, before any step is planned against the wrong one.
 //
 // Returning (nil, "", nil) leaves preflight's own answer standing, so an
@@ -99,7 +99,7 @@ func (a *Agent) refinePreflight(ctx context.Context, pf *PreflightResult, t *Tri
 	//
 	// The goroutine is abandoned rather than stopped, because nothing can stop
 	// it. Go has no way to interrupt a function that is not looking. So it gets
-	// a COPY of the trigger to write to: a refinement may settle which machine
+	// a COPY of the trigger to write to: a refinement may settle which target
 	// the run is about, and one that returned too late must not write that into
 	// a trigger the planner is already reading. The copy is thrown away with the
 	// answer, and the fields a refinement is meant to set are values rather than

@@ -10,19 +10,19 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
-// Changing what a machine's agent may do, from the machine's own page.
+// Changing what a node's agent may do, from the node's own page.
 //
 // A tool is in one of three states. `off` means nobody may call it. `local`
-// means this machine may call it while doing its own work — someone typing in
-// the chat, or the machine looking into something it noticed itself.
-// `everywhere` means that, and additionally that another machine may reach
+// means this node may call it while doing its own work — someone typing in
+// the chat, or the node looking into something it noticed itself.
+// `everywhere` means that, and additionally that a remote caller may reach
 // across and make this one run it.
 //
 // Only the first two may be changed here, and a tool already at `everywhere`
-// may not be changed here at all. Letting another machine reach in is a
-// decision about the whole installation rather than about this one machine: a
-// page on the machine being reached into must not be able to grant that, and
-// must not be able to withdraw it either, or whoever sits at that machine can
+// may not be changed here at all. Letting a remote caller reach in is a
+// decision about the whole installation rather than about this one node: a
+// page on the node being reached into must not be able to grant that, and
+// must not be able to withdraw it either, or whoever sits at that node can
 // stop the rest of the installation doing its job.
 //
 // The state is held in the registry and takes effect on the next call. Keeping
@@ -75,7 +75,7 @@ func toolStateHandler(ag *agent.Agent, persist func(name, state string) error) h
 		}
 		if reach == toolapi.ReachEverywhere {
 			writeToolError(w, http.StatusForbidden,
-				"a tool cannot be granted reach beyond this machine from this machine's own page")
+				"a tool cannot be granted reach beyond this node from this node's own page")
 			return
 		}
 

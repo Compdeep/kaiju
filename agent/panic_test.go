@@ -69,7 +69,7 @@ func TestApplicationCodeThatPanicsDoesNotEndTheRun(t *testing.T) {
 		}
 	})
 
-	t.Run("a crashed machine lister falls back to the run's target", func(t *testing.T) {
+	t.Run("a crashed target lister falls back to the run's target", func(t *testing.T) {
 		a := &Agent{targetLister: func(Trigger) []string { boom(); return nil }}
 		got := a.runTargets(Trigger{Target: "host-2"})
 		if len(got) != 1 || got[0] != "host-2" {

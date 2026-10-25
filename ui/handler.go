@@ -44,11 +44,11 @@ type Options struct {
 	// SetToolState is where the application keeps a tool state changed from the
 	// interface. It is given the tool's name and its new state, which is "off"
 	// or "local" and never "everywhere" — see tools.go for why that one is not
-	// granted or withdrawn from a machine's own page.
+	// granted or withdrawn from a node's own page.
 	//
 	// Nil means the panel is read-only: it shows each tool and its state, and
 	// offers no way to change one. That is the safe default, because a writable
-	// panel decides what this machine's agent may do and an application that
+	// panel decides what this node's agent may do and an application that
 	// has not thought about who reaches it should not get one by omission.
 	SetToolState func(name, state string) error
 }

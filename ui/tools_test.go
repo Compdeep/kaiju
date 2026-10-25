@@ -92,7 +92,7 @@ func TestToolState_ReachBeyondThisMachineIsNeitherGrantedNorWithdrawn(t *testing
 
 	// Granting it from here.
 	if rec := patch(t, h, "/api/v1/tools/shared_tool", `{"reach":"everywhere"}`); rec.Code != http.StatusForbidden {
-		t.Errorf("granting reach beyond this machine: status = %d, want 403", rec.Code)
+		t.Errorf("granting reach beyond this node: status = %d, want 403", rec.Code)
 	}
 
 	// And withdrawing it, once something else has granted it.

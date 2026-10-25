@@ -21,13 +21,13 @@ type registeredTool struct {
 // Reach is how far a registered tool may be called from.
 //
 // One value rather than a flag and a second list. An application that can run a
-// step on another machine has three answers for each tool, not two: nobody may
-// call it, this node may call it on itself, or another machine may ask this
+// step on another target has three answers for each tool, not two: nobody may
+// call it, this node may call it on itself, or a remote caller may ask this
 // node to run it. The middle one is the interesting case and it has nowhere to
 // live in a boolean — a tool that is fine to run here can be a poor thing to
 // let a stranger trigger.
 //
-// Reach says nothing about whether THIS node may call OUT to another machine.
+// Reach says nothing about whether THIS node may call OUT to another target.
 // That is the plan's business and the remote executor's. This is only about
 // what arrives here.
 type Reach uint8
@@ -42,7 +42,7 @@ const (
 	// registered tool, because granting more should be something someone typed.
 	ReachLocal
 
-	// ReachEverywhere is callable by this node's runs and by another machine
+	// ReachEverywhere is callable by this node's runs and by a remote caller
 	// dispatching a step onto it.
 	ReachEverywhere
 )
@@ -302,7 +302,7 @@ func (r *Registry) SetEnabled(name string, enabled bool) error {
 		return fmt.Errorf("tool %q not found", name)
 	}
 	// On means local, never everywhere: a two-state caller cannot be allowed to
-	// grant another machine the right to run something here, because it has no
+	// grant a remote caller the right to run something here, because it has no
 	// way to say it meant to. Use SetReach for that.
 	if enabled {
 		rt.reach = ReachLocal
@@ -349,13 +349,13 @@ func (r *Registry) ToolDefsForNames(names []string) []llm.ToolDef {
 }
 
 /*
- * GetForRemote returns a tool only if another machine may run it here.
+ * GetForRemote returns a tool only if a remote caller may run it here.
  * desc: The lookup a handler uses for work arriving from elsewhere. A tool at
  *       ReachLocal is invisible to it and the call fails as an unknown tool,
  *       which is what an operator means by "this node may do that, and nobody
  *       else may make it".
  * param: name - the tool name from the incoming request.
- * return: the tool and true when it may be run for another machine.
+ * return: the tool and true when it may be run for a remote caller.
  */
 func (r *Registry) GetForRemote(name string) (Tool, bool) {
 	r.mu.RLock()

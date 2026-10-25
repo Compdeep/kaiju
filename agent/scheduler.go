@@ -2711,7 +2711,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 // It used to fall back to searching the result text for "bash_error":true when
 // a node had no typed body. Nothing has written that string since the tool
 // returned envelopes, and the one path that arrived without a body — a step
-// dispatched to another machine — now parses one, so the search could only ever
+// dispatched to another target — now parses one, so the search could only ever
 // have matched a tool whose output happened to contain the words.
 //
 // KNOWN WART: a tool that refuses because it is not available here — no store

@@ -10,7 +10,7 @@ import (
 // Which handles a run surfaced and never followed, without knowing the domain.
 //
 // Some tool output is a fact and some of it is a handle on something else: a
-// search result's URL, a record id, a machine name. A handle a run surfaced and never
+// search result's URL, a record id, a target name. A handle a run surfaced and never
 // followed is the thing a model is most likely to talk about as though it had —
 // citing a page it never opened, describing a record it never read.
 //
@@ -107,7 +107,7 @@ func (a *Agent) collectHandles(graph *Graph) []handle {
  * desc: A handle counts as followed when the tool its producer named was called
  *       with that value. Matching the tool matters: the first version matched
  *       the value against every parameter in the run, which is safe for a URL
- *       and wrong for a short identifier — a machine named "self" or a record id of
+ *       and wrong for a short identifier — a target named "self" or a record id of
  *       "1" collides with an unrelated parameter and is reported as followed
  *       when nothing followed it.
  *
@@ -285,7 +285,7 @@ func collectParamStrings(v any, into map[string]bool) {
  *       wrong.
  *
  *       Nothing is named here. The sentence is fixed and every noun in it comes
- *       from the tool: run against a tool that lists machines it reads
+ *       from the tool: run against a tool that lists targets it reads
  *       "${step.N.hosts.0.id} into inspect_host(target)".
  * param: schema - the tool's declared output schema.
  * return: one line per handle, empty when the tool declares none.

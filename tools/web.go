@@ -113,7 +113,7 @@ func (w *WebFetch) Description() string {
 func (w *WebFetch) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 // RequiresTarget is false: a fetch goes from this node to the web, so there is
-// no machine for a step to name.
+// no target for a step to name.
 func (w *WebFetch) RequiresTarget() bool { return false }
 
 // Destination is the host this call will reach, so the throttle below applies to

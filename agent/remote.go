@@ -8,7 +8,7 @@ import (
 
 // Remote execution.
 //
-// A plan step may name the machine it runs on. This package holds only that
+// A plan step may name the target it runs on. This package holds only that
 // idea: a node carries an opaque Target string, and if the embedding
 // application supplied an executor, tool nodes with a target are handed to it
 // instead of running locally.
@@ -17,7 +17,7 @@ import (
 //
 //   - what a target NAME is (a host, a node id, a queue, a device serial)
 //   - how to REACH one (ssh, http, a p2p transport, a message bus)
-//   - how one is CHOSEN (the planner-side logic that decides which machine a
+//   - how one is CHOSEN (the planner-side logic that decides which target a
 //     step belongs on)
 //   - what happens at the far end, including whatever authorisation the
 //     receiving side applies to work arriving from elsewhere
@@ -45,14 +45,14 @@ type RemoteRequest struct {
 	CorrelationID string
 }
 
-// RemoteExecutor runs a tool call on another machine.
+// RemoteExecutor runs a tool call on another target.
 //
 // Implementations live in the embedding application, which owns the transport.
 //
 // A nil executor means remote execution is unavailable, and a tool node naming
-// another machine is refused rather than run here. It used to run locally, on
+// another target is refused rather than run here. It used to run locally, on
 // the reasoning that this was the behaviour before targets existed — which
-// stopped holding once a planner could name a machine, since the step then does
+// stopped holding once a planner could name a target, since the step then does
 // its work on the wrong one.
 type RemoteExecutor interface {
 	Execute(ctx context.Context, req RemoteRequest) (string, error)
@@ -76,7 +76,7 @@ func (a *Agent) validateTarget(target string) (err error) {
 		return nil
 	}
 	// A check that crashed has not approved the target. Reject it: the next step
-	// is a connection to a machine named by a model.
+	// is a connection to a target named by a model.
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[agent] the target check panicked, rejecting the target: %v", r)
@@ -102,9 +102,9 @@ func (a *Agent) remoteFor(n *Node) bool {
 		n.Type == NodeTool
 }
 
-// TargetLister reports which machines a run concerns.
+// TargetLister reports which targets a run concerns.
 //
-// A run may touch more machines than the one its Target names — the host it
+// A run may touch more targets than the one its Target names — the host it
 // came from, others the same condition was seen on, one a conversation is
 // about. Only the application knows which of those count, so it says.
 //
@@ -113,11 +113,11 @@ func (a *Agent) remoteFor(n *Node) bool {
 type TargetLister func(t Trigger) []string
 
 /*
- * runTargets returns the machines a run concerns, for reporting.
+ * runTargets returns the targets a run concerns, for reporting.
  * desc: The application's list when it supplies one, otherwise the trigger's
  *       own target alone. Never nil-panics and never routes.
  * param: t - the trigger.
- * return: the machines, or nil when there are none.
+ * return: the targets, or nil when there are none.
  */
 func (a *Agent) runTargets(t Trigger) (out []string) {
 	if a != nil && a.targetLister != nil {
@@ -125,7 +125,7 @@ func (a *Agent) runTargets(t Trigger) (out []string) {
 		// to the run's own target, as no lister does.
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("[agent] the machine lister panicked, reporting the run's own target: %v", r)
+				log.Printf("[agent] the target lister panicked, reporting the run's own target: %v", r)
 				if t.Target != "" {
 					out = []string{t.Target}
 				} else {
@@ -144,7 +144,7 @@ func (a *Agent) runTargets(t Trigger) (out []string) {
 /*
  * remoteExecute hands a call to the application's executor.
  * desc: A panic in the executor fails the node. The executor dials another
- *       machine, and a crash part-way through says nothing about whether the
+ *       target, and a crash part-way through says nothing about whether the
  *       call landed — so the honest answer is that this step failed, not that it
  *       succeeded and not that it never ran. Recording it as done would claim a
  *       step ran somewhere nobody can check.

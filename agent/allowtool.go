@@ -52,11 +52,11 @@ type ToolCallRequest struct {
 	// the call.
 	Params map[string]any
 
-	// Target is the machine this call will run on, and empty means this one.
+	// Target is the target this call will run on, and empty means here.
 	//
 	// Here because a rule cannot judge a call without knowing where it lands. An
 	// application may allow a tool locally and not allow the same tool to be
-	// aimed at somebody else's machine — that is a decision about reach, which
+	// aimed at another target — that is a decision about reach, which
 	// this package deliberately has no opinion on, so it hands over the fact and
 	// asks.
 	//

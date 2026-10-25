@@ -304,11 +304,11 @@ type ComputeConfig struct {
 // difference is only how many questions each answers.
 //
 // Each is optional, and nil means the question is never asked rather than that
-// something is broken. An application that never sends work to another machine
+// something is broken. An application that never sends work to another target
 // leaves Remote and ValidateTarget unset, and targets are then inert.
 //
 // They were called Capabilities, which described the first few — Remote lets
-// the agent reach another machine, Store lets it record — and stopped fitting
+// the agent reach another target, Store lets it record — and stopped fitting
 // as the struct grew: Admit and AllowTool take an ability away rather than
 // adding one, and DescribeTrigger supplies a sentence. What all thirteen have
 // in common is that the application handles a question this package cannot
@@ -357,7 +357,7 @@ type Handlers struct {
 	Store EventStore
 
 	// Audit records one gate decision — every tool call, and every refusal of
-	// one, with the intent and impact it was judged at and the machine it ran
+	// one, with the intent and impact it was judged at and the target it ran
 	// on. The engine writes its own file regardless; this is the copy an
 	// application can put behind a dashboard, since it cannot read that file.
 	//
@@ -366,7 +366,7 @@ type Handlers struct {
 	// nothing else.
 	Audit AuditFunc
 
-	// Remote runs a step on the machine its Target names. Nil makes targets
+	// Remote runs a step on the target its Target names. Nil makes targets
 	// inert — every step runs locally, as before targets existed.
 	Remote RemoteExecutor
 
@@ -382,11 +382,11 @@ type Handlers struct {
 	// accepts any non-empty target.
 	ValidateTarget TargetValidator
 
-	// RunTargets reports which machines a run concerns, for reporting only —
+	// RunTargets reports which targets a run concerns, for reporting only —
 	// nothing is dispatched from it. Nil falls back to the run's own Target.
 	RunTargets TargetLister
 
-	// Environment describes the surroundings a run happens in — which machines
+	// Environment describes the surroundings a run happens in — which targets
 	// exist, what is reachable, whatever the application decides the planner
 	// should know. Appended verbatim to planning and reflection prompts. Nil,
 	// or an empty string, adds nothing.
@@ -431,7 +431,7 @@ type Handlers struct {
 	// nil, is ordinary. A run of higher rank waits while a run of lower rank
 	// is queued; runs of one rank keep their order. A chat is never ranked:
 	// it goes first as before. The engine attaches no meaning to the number.
-	// An application uses it so that one source of work, a machine sending
+	// An application uses it so that one source of work, a target sending
 	// far more than its share, waits behind everyone else's instead of
 	// delaying it. Ranks above 1000 are read as 1000, and below 0 as 0.
 	QueueRank func(Trigger) int

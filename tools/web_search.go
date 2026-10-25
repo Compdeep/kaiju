@@ -128,7 +128,7 @@ func (w *WebSearch) Description() string {
 func (w *WebSearch) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 // RequiresTarget is false: a search goes from this node to the web, so there is
-// no machine for a step to name.
+// no target for a step to name.
 func (w *WebSearch) RequiresTarget() bool { return false }
 
 func (w *WebSearch) Parameters() json.RawMessage {

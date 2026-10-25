@@ -10,7 +10,7 @@ package agent
 // So an application that registers its own set instead of calling
 // tools.Register has to supply these names, under these names, or those steps
 // fail at dispatch with "unknown tool". That failure arrives inside a run, on
-// the machine the step was aimed at, long after startup. Nothing at
+// the target the step was aimed at, long after startup. Nothing at
 // registration time says a name is missing, because nothing knows what the
 // scheduler will need until it needs it.
 //

@@ -333,7 +333,7 @@ type PathPolicy func(path string) (string, error)
 /*
  * NewFileWrite creates a new FileWrite tool instance.
  * desc: Writes wherever it is told when where is nil, which is what an application
- *       operating on machines outside its own directory needs. Pass a policy to confine
+ *       operating on targets outside its own directory needs. Pass a policy to confine
  *       it; ConfineToWorkspace is the one this module's own program uses.
  * param: where - the policy, or nil for no restriction beyond the operating system's.
  * return: pointer to a new FileWrite

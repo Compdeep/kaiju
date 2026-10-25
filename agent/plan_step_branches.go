@@ -70,7 +70,7 @@ func planStepBranches(names []string, registry *toolapi.Registry) (json.RawMessa
 		// to allow null; the model, which under strict never sees the schema, is
 		// then made to write a value there and writes "compute" — every step of
 		// every live plan did — and a step meant to run a tool on a remote
-		// machine runs as a compute node on this one, target ignored. "type" is
+		// target runs as a compute node on this one, target ignored. "type" is
 		// optional because a step is a tool step unless it says otherwise.
 		branches = append(branches, fmt.Sprintf(`{
 			"type": "object",

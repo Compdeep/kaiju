@@ -21,7 +21,7 @@ type EventStore interface {
 // it cost, and what it concluded.
 type Run struct {
 	ID string
-	// NodeID is the machine that ran it, not the machine it was about — see
+	// NodeID is the node that ran it, not the target it was about — see
 	// Source and Target below.
 	NodeID string
 
@@ -36,8 +36,8 @@ type Run struct {
 	// it set them and never interpreted here.
 	//
 	// They are here because NodeID answers a different question. NodeID is the
-	// machine that did the work, which is the only machine this package can
-	// name truthfully. An application often wants the machine the work was
+	// node that did the work, which is the only one this package can
+	// name truthfully. An application often wants the target the work was
 	// ABOUT — the host an event came from, or the one a command was aimed at —
 	// and the rule for choosing between them is the application's. Without
 	// these it cannot apply that rule, because nothing else on this record says
@@ -79,7 +79,7 @@ type Run struct {
 // Action is one state-changing tool call made during a run.
 type Action struct {
 	ID         string
-	NodeID     string // the machine it ran on
+	NodeID     string // the node it ran on
 	Timestamp  int64
 	ActionType string // the tool name
 	Params     string // JSON

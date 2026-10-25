@@ -115,7 +115,7 @@ func (st *toolThrottle) waitThrottle(ctx context.Context, key string, cooldown t
  */
 /*
  * finish is how a step ends, wherever it ran.
- * desc: A step runs here or on another machine, and the two paths were kept
+ * desc: A step runs here or on another target, and the two paths were kept
  *       level with each other by hand. The remote one has been found short four
  *       times now — the scope, clearance and AllowTool checks; the envelope it
  *       did not parse; a target with no executor falling through to local
@@ -138,14 +138,14 @@ func (st *toolThrottle) waitThrottle(ctx context.Context, key string, cooldown t
  * return: the completion to send.
  */
 func (a *Agent) finish(n *Node, result string, body NodeBody, err error) nodeCompletion {
-	// A hint is derived from the tool as this machine has it, so a step that ran
+	// A hint is derived from the tool as this node has it, so a step that ran
 	// elsewhere gets one only when the same tool is registered here too. That is
 	// the honest limit: without the tool there is nothing to ask.
 	//
 	// And a hint that names a PATH is only meaningful where the file is. The
 	// panel opens it on the machine running the dashboard, so a path from a
-	// step that ran elsewhere shows nothing — or, worse, shows this machine's
-	// file of that name as though it were the other machine's. A hint carrying
+	// step that ran elsewhere shows nothing — or, worse, shows this node's
+	// file of that name as though it were the target's. A hint carrying
 	// inline content makes no such assumption and travels.
 	//
 	// This is the one thing the two paths do differently, and it is written
@@ -154,7 +154,7 @@ func (a *Agent) finish(n *Node, result string, body NodeBody, err error) nodeCom
 		if tool, ok := a.registry.Get(n.ToolName); ok {
 			hint := toolapi.GetDisplayHint(tool, n.Params, result)
 			if hint != nil && hint.Path != "" && a.remoteFor(n) {
-				log.Printf("[dag] node %s ran on %s; its panel names a path on that machine, so it is not shown here",
+				log.Printf("[dag] node %s ran on %s; its panel names a path on that target, so it is not shown here",
 					n.ID, Text.TruncateLog(n.Target, 12))
 				hint = nil
 			}
@@ -275,10 +275,10 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		return
 	}
 
-	// A step naming another machine with no way to reach one is refused, not
+	// A step naming another target with no way to reach one is refused, not
 	// run here. Falling through to local execution was defended as behaving
 	// "exactly as before targets existed", which stopped being true the moment
-	// a planner could name a machine: process_kill aimed at another host then
+	// a planner could name a target: process_kill aimed at another host then
 	// kills a process on this one, and nothing says so.
 	//
 	// A target equal to this node's own id means "here" and is not this case.
@@ -301,7 +301,7 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			n.ID, n.Type, Text.TruncateLog(n.Target, 12))
 	}
 
-	// Remote execution: the planner named a machine and the embedding
+	// Remote execution: the planner named a target and the embedding
 	// application supplied an executor, so hand the call over rather than
 	// running it here. Local throttling is deliberately skipped — the cooldown
 	// protects THIS process's rate limits, and the work is not happening in
@@ -315,13 +315,13 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 		// far end cannot ask them: it knows its own clearance and its own tool
 		// list, and nothing about who asked on this side. The other three stay
 		// below and are deliberately not repeated — the registry lookup and the
-		// IGX gate are the RECEIVING machine's to make against its own state,
+		// IGX gate are the RECEIVING target's to make against its own state,
 		// and the throttle protects this process's rate limits, which a call
 		// running elsewhere does not spend.
 		// Every one of these lines is written here or nowhere. The local path
 		// audits four times over — a throttle refusal, a gate refusal, a
 		// clearance refusal, and the call itself — and a call that leaves this
-		// machine went through none of that code.
+		// node went through none of that code.
 		auditRemote := func(result string, err error) {
 			e := gates.AuditEntry{
 				Tool:      n.ToolName,
@@ -390,8 +390,8 @@ func (a *Agent) fireNode(ctx context.Context, n *Node, graph *Graph,
 			body = toolMessageBody{msg: msg}
 		}
 		// The executor's error is the far end's, and it may not mention which
-		// machine it came from — "dial tcp: i/o timeout" names nothing. The
-		// step's whole point was the machine, so the failure says it.
+		// target it came from — "dial tcp: i/o timeout" names nothing. The
+		// step's whole point was the target, so the failure says it.
 		if err != nil {
 			err = fmt.Errorf("step on %q failed: %w", n.Target, err)
 		}
@@ -913,7 +913,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 	// the call's result, so it learns why instead of trying again. See
 	// allowtool.go.
 	// Target is left empty on purpose: reaching here means the call runs on this
-	// machine, whatever the node happens to name.
+	// node, whatever the node happens to name.
 	if allow, reason := a.allowTool(ctx, ToolCallRequest{
 		Trigger: triggerFrom(ctx, graph),
 		Graph:   graph,
@@ -1066,7 +1066,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
  * scopeAllows reports whether the principal behind this run may use a tool.
  * desc: The permission list belongs to whoever asked — a logged-in dashboard
  *       user, typically — so it has to be applied wherever the call is going.
- *       A machine at the far end enforces its own clearance and knows nothing
+ *       A target at the far end enforces its own clearance and knows nothing
  *       about who asked here, so this is the one check that has no counterpart
  *       on the receiving side.
  *

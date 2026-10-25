@@ -189,7 +189,7 @@ type Node struct {
 	ToolName  string
 	Params    map[string]any // may embed ${node.<id>(.path)?} templates resolved by the dispatcher before execution
 	DependsOn []string       // node IDs that must resolve before this fires
-	// Target names the machine this node runs on; empty means here. Opaque to
+	// Target names the target this node runs on; empty means here. Opaque to
 	// this package and passed through exactly as the planner set it — see
 	// remote.go.
 	Target    string
@@ -278,7 +278,7 @@ type DAGEvent struct {
 	TriggerID string   `json:"trigger_id,omitempty"` // for "start"
 	RunID     string   `json:"run_id,omitempty"`
 	SessionID string   `json:"session_id,omitempty"` // session this event belongs to (for frontend routing)
-	Targets   []string `json:"targets,omitempty"`    // for "start": the machines this run concerns, so a frontend can show each as busy
+	Targets   []string `json:"targets,omitempty"`    // for "start": the targets this run concerns, so a frontend can show each as busy
 	Text      string   `json:"text,omitempty"`       // for "outcome" (streaming token chunk)
 }
 

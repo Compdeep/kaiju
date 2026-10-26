@@ -1,0 +1,5 @@
+# The scorer's model is read byte for byte and built into the program: a
+# checkout that turns its line endings into CRLF leaves a \r on every word, so
+# no word matches and nothing is ever flagged. Never convert these.
+injscan/model/** -text
+injscan/testdata/** -text

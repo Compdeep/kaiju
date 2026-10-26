@@ -161,9 +161,16 @@ func privilegeName(luid windows.LUID) (string, error) {
 // signalling programs above it, which are nearly all; nothing refuses Network,
 // and ReadPrograms and SignalPrograms cannot be refused apart from
 // ChangeFiles.
+//
+// Every Windows this runs on has restricted tokens, so a token that cannot be
+// made is a failure, not a system without a lock. It used to be reported as no
+// lock, which is kept for good and runs every command with the agent's whole
+// rights: SYSTEM, for a service. The lock is reported either way, and
+// platformCommand makes a token for each command and refuses the command when
+// it cannot.
 func detect() Report {
 	if _, err := restrictedToken(tokenKind{low: true}); err != nil {
-		return Report{}
+		logf("[sandbox] a restricted token could not be made (%v): locked commands are refused until one can", err)
 	}
 	return Report{Lock: "restricted-token", Unenforced: []Effect{Network}}
 }

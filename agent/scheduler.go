@@ -3031,7 +3031,7 @@ func (a *Agent) twotimeRetry(ctx context.Context, node *Node, comp nodeCompletio
 			scopeCap = c
 		}
 	}
-	ctx = a.lockContext(ctx, intent, scopeCap)
+	ctx = a.lockContext(ctx, intent, scope, scopeCap)
 
 	// Through the graph, not the map: the retry below rewrites this parameter
 	// from its own goroutine while the trace reads it. See Graph.SetParam.

@@ -789,9 +789,21 @@ func remoteLevel(intent gates.Intent, scope *ResolvedScope, tool, target string)
  * lockContext puts on ctx the most a step may do, so the programs its tool
  * starts are locked below control (toolapi.Command), and names the workspace,
  * where generated code is written and run, as writable.
+ * desc: A step that runs here runs on this node, so the run's ceiling for this
+ *       node holds as well, as remoteLevel holds a remote step to its target's.
+ *       Without it a run allowed only to read this node still ran a command
+ *       the planner rated a read, such as bash, unlocked. A run with a target
+ *       list that leaves this node out may not change anything here.
+ * param: scope - the run's scope, or nil.
  * param: scopeCap - the scope's cap for the tool, or -1 for none.
  */
-func (a *Agent) lockContext(ctx context.Context, intent gates.Intent, scopeCap int) context.Context {
+func (a *Agent) lockContext(ctx context.Context, intent gates.Intent, scope *ResolvedScope, scopeCap int) context.Context {
+	if scope != nil && scope.Targets != nil {
+		here := scope.Targets[a.cfg.NodeID] // absent: 0
+		if scopeCap < 0 || here < scopeCap {
+			scopeCap = here
+		}
+	}
 	ctx = toolapi.WithLevel(ctx, a.gate.Ceiling(intent, scopeCap))
 	if a.cfg.Workspace != "" {
 		ctx = toolapi.WithWritable(ctx, a.cfg.Workspace)
@@ -912,7 +924,7 @@ func (a *Agent) executeToolNode(ctx context.Context, n *Node, graph *Graph, budg
 
 	// The programs the tool starts are locked unless this step may do
 	// everything; see toolapi.Command.
-	ctx = a.lockContext(ctx, intent, scopeCap)
+	ctx = a.lockContext(ctx, intent, scope, scopeCap)
 
 	// Clearance: check external authorization endpoint (if configured)
 	if a.clearanceCheck != nil {

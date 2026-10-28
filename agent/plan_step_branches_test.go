@@ -127,12 +127,12 @@ func TestPlanSchema_EachBranchPinsItsToolAndCarriesItsParams(t *testing.T) {
 	}
 }
 
-// A step's "type" stays optional on the wire. The closer used to add it to every
-// branch's required list, and a model that never sees the schema under strict
-// was made to write a value there: it wrote "compute" on every step of every
-// live plan, and each ran as a compute node on the local machine with the
-// remote target ignored. The branch owns its required list, like the root.
-func TestPlanSchema_ABranchDoesNotRequireType(t *testing.T) {
+// A branch offers no "type". The closer once made it required, and a model that
+// never sees the schema under strict wrote "compute" on every step; made
+// optional, it was still written on a third of them. A step's kind is its
+// tool, so the field is not offered at all. The branch owns its required list,
+// like the root.
+func TestPlanSchema_ABranchOffersNoType(t *testing.T) {
 	a := branchAgent(t)
 	sent := llm.SchemaAsSent(a.executivePlanSchema(a.registry.List()))
 	if sent == nil {
@@ -154,13 +154,8 @@ func TestPlanSchema_ABranchDoesNotRequireType(t *testing.T) {
 		t.Fatalf("the sent schema is not the shape expected: %v", err)
 	}
 	for _, b := range doc.Properties.Steps.Items.AnyOf {
-		for _, k := range b.Required {
-			if k == "type" {
-				t.Errorf("a branch requires \"type\": %v", b.Required)
-			}
-		}
-		if _, has := b.Properties["type"]; !has {
-			t.Error("a branch lost its \"type\" property; it is optional, not absent")
+		if _, has := b.Properties["type"]; has {
+			t.Error("a branch offers \"type\"; a step's kind is its tool")
 		}
 		if len(b.Required) != 4 {
 			t.Errorf("a branch requires %v, want exactly tool, params, tag and depends_on", b.Required)

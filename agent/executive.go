@@ -286,7 +286,11 @@ func (f *FlexInts) UnmarshalJSON(data []byte) error {
  *       index-based depends_on references, and a human-readable tag.
  */
 type PlanStep struct {
-	Type      string         `json:"type,omitempty"` // "tool" (default) or "compute"
+	// Type is read and never trusted. A step's kind is its tool: tool
+	// "compute" is a compute step, any other tool is a tool step (IsCompute).
+	// The plan schema no longer offers it; it stays so a reply that still
+	// writes it decodes.
+	Type      string         `json:"type,omitempty"`
 	Tool      string         `json:"tool"`
 	Params    map[string]any `json:"params"`
 	DependsOn FlexInts       `json:"depends_on"` // index-based references
@@ -301,6 +305,12 @@ type PlanStep struct {
 	// the plan is a broken plan, and the executive can fix one it is told about.
 	UnresolvedDeps []string `json:"-"`
 }
+
+// IsCompute reports whether the step is a compute step: its tool is "compute".
+// The one place a step's kind is decided, so the graft, the input check and
+// the replan budget cannot disagree about it. The [plan] line still counts a
+// written "type", because it measures what the model sent.
+func (s PlanStep) IsCompute() bool { return s.Tool == "compute" }
 
 // planStepFields is every JSON name a step may carry: PlanStep's own, read off
 // its tags, plus the legacy param_refs this decoder still accepts.
@@ -556,7 +566,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	sb.WriteString("NEVER write code in bash params.\n")
 	sb.WriteString("NEVER use bash for complex multi-step tasks.\n")
 	sb.WriteString("NEVER use interactive commands.\n")
-	sb.WriteString("Use compute (type:\"compute\") for coding, development, and analytics work that the aggregator can't do — see the Compute Nodes decision rules below. Provide the GOAL, not the code.\n")
+	sb.WriteString("Use the compute tool for coding, development, and analytics work that the aggregator can't do — see the Compute Nodes decision rules below. Provide the GOAL, not the code.\n")
 	sb.WriteString("ALWAYS use the compute mode preflight selected — see the Compute Nodes section below. Workspace contents do NOT influence this choice.\n")
 	sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\", port=NNNN) spawns in the background and returns immediately. ALWAYS include the port parameter so health checks know which port to verify.\n")
 	sb.WriteString("ALWAYS use bash only for commands that terminate: ls, grep, git, npm install, curl, node script.js, etc.\n")
@@ -629,7 +639,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			sb.WriteString("  {\"tool\":\"web_search\",\"params\":\"{\\\"query\\\":\\\"current solar flux F10.7\\\"}\",\"tag\":\"search_flux\"},\n")
 			sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":\"{\\\"url\\\":\\\"${step.search_tle.results.0.url}\\\",\\\"format\\\":\\\"text\\\"}\",\"tag\":\"fetch_tle\"},\n")
 			sb.WriteString("  {\"tool\":\"web_fetch\",\"params\":\"{\\\"url\\\":\\\"${step.search_flux.results.0.url}\\\",\\\"format\\\":\\\"text\\\"}\",\"tag\":\"fetch_flux\"},\n")
-			sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":\"{\\\"goal\\\":\\\"propagate ISS+Starlink TLEs over 14 days with sgp4, apply drag from given F10.7, count close-approaches within 5km, output probability as JSON\\\",\\\"mode\\\":\\\"shallow\\\",\\\"context\\\":[\\\"tle=${step.fetch_tle.content}\\\",\\\"flux=${step.fetch_flux.content}\\\"]}\",\"tag\":\"compute_probability\"}\n")
+			sb.WriteString("  {\"tool\":\"compute\",\"params\":\"{\\\"goal\\\":\\\"propagate ISS+Starlink TLEs over 14 days with sgp4, apply drag from given F10.7, count close-approaches within 5km, output probability as JSON\\\",\\\"mode\\\":\\\"shallow\\\",\\\"context\\\":[\\\"tle=${step.fetch_tle.content}\\\",\\\"flux=${step.fetch_flux.content}\\\"]}\",\"tag\":\"compute_probability\"}\n")
 			sb.WriteString("]\n")
 			sb.WriteString("```\n")
 			sb.WriteString("Three batches in one plan: search → fetch → compute. Every compute input is wired from real upstream content. If your plan for a quant task ends at search/fetch with no compute, you under-planned — the user's question requires actual computation that the aggregator can't do.\n\n")
@@ -659,7 +669,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			sb.WriteString("Example — \"build a web app with auth\":\n")
 			sb.WriteString("```json\n")
 			sb.WriteString("[\n")
-			sb.WriteString("  {\"type\":\"compute\",\"tool\":\"compute\",\"params\":\"{\\\"goal\\\":\\\"build a Vue 3 + Express webapp with JWT auth and SQLite database\\\",\\\"mode\\\":\\\"deep\\\",\\\"query\\\":\\\"build a Vue 3 webapp with auth\\\"}\",\"tag\":\"build_webapp\"}\n")
+			sb.WriteString("  {\"tool\":\"compute\",\"params\":\"{\\\"goal\\\":\\\"build a Vue 3 + Express webapp with JWT auth and SQLite database\\\",\\\"mode\\\":\\\"deep\\\",\\\"query\\\":\\\"build a Vue 3 webapp with auth\\\"}\",\"tag\":\"build_webapp\"}\n")
 			sb.WriteString("]\n")
 			sb.WriteString("```\n")
 			sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
@@ -918,7 +928,6 @@ var executivePlanStepOpen = `{
 				"type": "object",
 				"required": ["tool", "params", "tag", "depends_on"],
 				"properties": {
-					"type":       {"type": "string", "enum": ["tool","compute"], "description": "Node type: tool (default) or compute (LLM code generation)"},
 					"tool":       {"type": "string", "description": "Tool name from the Tools list"},
 					"params":     {"type": "object", "additionalProperties": true, "description": "The tool's input parameters, as an object whose keys are the parameter names in that tool's signature. ALWAYS populate for tools with required params marked *; write {} when the tool takes none. A value is either something you have — {\"command\": \"ls -la\"} — or a REFERENCE to an earlier step's output, written ${step.<that step's tag>.<dot-path into its output>}. Example: a fetch reading the first result of a search tagged find_docs is {\"url\": \"${step.find_docs.results.0.url}\"}."},
 					"depends_on": {"type": "array", "items": {"type": ["integer", "string"]}, "description": "Which earlier steps must finish before this one starts, by position. STEPS RUN IN PARALLEL: every step whose depends_on is [] is dispatched at once, so [] means \"nothing is holding this step back\" — correct for independent work, wrong the moment one step acts on what another produces. Using another step's OUTPUT needs nothing here: the ${step.tag.field} reference orders it for you. This field is for the other kind, where no value passes but the order still matters — a step that writes a file and a command that runs it, an install and the thing that needs it. Leave it out there and both start together, the second reads the state from before the first, and the plan reports success on a wrong result. An unnecessary dependency costs a little time; a missing one breaks the plan silently."},
@@ -1188,14 +1197,7 @@ func fixDuplicateStepNames(steps []PlanStep) {
 func validatePlanComputeInputs(steps []PlanStep) []string {
 	var errs []string
 	for i, s := range steps {
-		// A step that names a tool is a tool call, whatever `type` says. The
-		// planner emits web_fetch steps typed "compute"; judging those by the
-		// compute rule spends three corrections telling a fetch to wire
-		// ${step.<tag>.<field>}, which is not something a fetch can do.
-		if s.Tool != "" && s.Tool != "compute" {
-			continue
-		}
-		if s.Type != "compute" && s.Tool != "compute" {
+		if !s.IsCompute() {
 			continue
 		}
 		// A step that declares a dependency and wires nothing is the same fault
@@ -2742,7 +2744,7 @@ func planStepsToNodes(steps []PlanStep, graph *Graph, budget *Budget, registry *
 		}
 
 		nodeType := NodeTool
-		if s.Type == "compute" || s.Tool == "compute" {
+		if s.IsCompute() {
 			nodeType = NodeCompute
 		}
 		n := &Node{

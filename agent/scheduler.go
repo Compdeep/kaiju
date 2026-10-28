@@ -438,7 +438,7 @@ type scheduleOutcome struct {
 func scaleReplanCap(base int, steps []PlanStep) int {
 	extra := len(steps) / 4
 	for _, s := range steps {
-		if s.Tool == "compute" || s.Type == "compute" {
+		if s.IsCompute() {
 			extra++
 		}
 	}

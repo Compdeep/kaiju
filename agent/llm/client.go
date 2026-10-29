@@ -919,11 +919,11 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	// DEBUG (KAIJU_DUMP_REQUEST != "0"): the EXACT bytes sent to the model on a
-	// streaming call (model + temperature + full messages), for byte-for-byte replay.
-	// Last streaming call in a run is the aggregator, so this captures its real
-	// request. Overwritten each call.
-	if os.Getenv("KAIJU_DUMP_REQUEST") != "0" {
+	// DEBUG (KAIJU_PROMPT_DEBUG=1, the switch for the prompt traces): the EXACT
+	// bytes sent to the model on a streaming call (model + temperature + full
+	// messages), for byte-for-byte replay. Last streaming call in a run is the
+	// aggregator, so this captures its real request. Overwritten each call.
+	if os.Getenv("KAIJU_PROMPT_DEBUG") == "1" {
 		_ = os.WriteFile("/tmp/kaiju-last-stream-request.json", body, 0o644)
 	}
 

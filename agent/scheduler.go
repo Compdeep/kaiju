@@ -1276,7 +1276,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				if isModelStage(node) && llm.IsAuthFailure(errMsg) {
 					log.Printf("[dag] the model rejected our credentials, stopping this run: %v", comp.Err)
 					reflectionConcluded = true
-					reflectionOutcome = "The model rejected the credentials it was given: the API key is missing, invalid, or has no access to the configured model. Nothing further was attempted on this run."
+					reflectionOutcome = "The model rejected the credentials it was given: the API key is missing, invalid, has no access to the configured model, or has run out of credit. Nothing further was attempted on this run."
 					graph.SkipAllPending()
 					inflight = 0
 					continue

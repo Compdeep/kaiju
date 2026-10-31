@@ -139,7 +139,7 @@ var (
 	credentialTerms = []string{
 		"http 401", "http 403", "unauthorized", "forbidden",
 		"invalid api key", "insufficient_quota", "insufficient credits",
-		"authentication",
+		"authentication", "http 402", "requires more credits",
 	}
 	rateLimitTerms = []string{
 		"http 429", "too many requests", "rate limit",
@@ -253,9 +253,10 @@ func retryAfterHeader(h http.Header) time.Duration {
 
 /*
  * httpFailure names what a non-200 response was.
- * desc: The status decides, except where it does not: quota problems arrive as
- *       402 and sometimes as 400, and only the body says so. Built here rather
- *       than at each return so the three send paths cannot disagree.
+ * desc: The status decides, except where it does not: a quota problem
+ *       arrives as 402, which is always one, and sometimes as 400, where only
+ *       the body says so. Built here rather than at each return so the three
+ *       send paths cannot disagree.
  * param: status - the HTTP status.
  * param: hdr - the response headers, for Retry-After.
  * param: body - the response body, already bounded by the caller.
@@ -266,7 +267,8 @@ func httpFailure(status int, hdr http.Header, body string) *CallError {
 	switch {
 	case status == http.StatusTooManyRequests:
 		kind = KindRateLimited
-	case status == http.StatusUnauthorized, status == http.StatusForbidden:
+	case status == http.StatusUnauthorized, status == http.StatusForbidden,
+		status == http.StatusPaymentRequired:
 		kind = KindCredentials
 	case status >= 500:
 		kind = KindUpstream

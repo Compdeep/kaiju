@@ -2683,6 +2683,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 
 	// Snapshot the final graph so the caller can persist the trace server-side.
 	// This is the same node list the "done" event broadcasts to the browser.
+	graph.SkipUnfinished()
 	traceJSON, _ := json.Marshal(graph.Snapshot())
 
 	return &SyncResult{

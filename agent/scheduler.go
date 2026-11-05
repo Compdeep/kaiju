@@ -1850,10 +1850,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// outcome still surfaces via reflectionOutcome below.
 						graph.SetBody(comp.NodeID, newReflectionBody(*ref, comp.Result))
 						graph.SkipAllPending()
-						reflectionConcluded = true
+						// A step still running has a result this reflection did not
+						// see: wait for it, and the reflection that follows reads
+						// everything. The wall clock bounds one that never returns.
+						reflectionConcluded = inflight == 0
 						reflectionOutcome = ref.Outcome
 						reflectionAggregate = ref.Aggregate
-						log.Printf("[dag] reflection: conclude early (%s)", ref.Reason)
+						log.Printf("[dag] reflection: conclude early (%s), %d step(s) still running", ref.Reason, inflight)
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONCLUDE", Text.TruncateLog(ref.Reason, 200))
 
 						// NOTE: `investigate` is gone as a reflection decision. Repair

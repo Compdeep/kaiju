@@ -55,6 +55,21 @@ type Thinking struct {
 	// and never shortens one, so a wrong entry costs waiting rather than an
 	// answer.
 	Pace float64
+	// Sampling is how the model's maker says to sample it when it thinks. Zero
+	// leaves the caller's temperature alone and sends nothing else.
+	Sampling Sampling
+}
+
+// Sampling is a model's published decoding settings. Measured on
+// qwen/qwen3.6-35b-a3b, thinking, on the planner (1,035 live runs, 5 November
+// 2026): at the caller's temperature 0.3 and nothing else, 44 plans of 140
+// wrote steps to the cap or past 30; at its maker's 0.6, top_p 0.95 and
+// top_k 20, 6 of 138. The model card warns that low-temperature decoding
+// repeats endlessly, which is what the cut plans were.
+type Sampling struct {
+	Temperature float64
+	TopP        float64
+	TopK        int
 }
 
 // Catalog answers for one model. The second return is false for a model it does

@@ -882,6 +882,9 @@ func (w *WebFetch) formatExtract(ctx context.Context, status, rawURL string, bod
 			Temperature: 0.2,
 			MaxTokens:   replyTokens,
 			ToolChoice:  "none", // no tools on this call; see prose.go
+			// Reading a page needs no thinking, and a model that thinks by
+			// default spent the whole reply on it and returned nothing.
+			Think: &llm.Reasoning{Want: llm.WantOff},
 		})
 		if err != nil {
 			lastErr = err
@@ -983,6 +986,8 @@ func (w *WebFetch) generalSummary(ctx context.Context, content, sentinel string)
 		Temperature: 0.2,
 		MaxTokens:   1024,
 		ToolChoice:  "none", // no tools on this call; see prose.go
+		// As the extraction above: reading a page needs no thinking.
+		Think: &llm.Reasoning{Want: llm.WantOff},
 	})
 	if err != nil || len(resp.Choices) == 0 {
 		return ""

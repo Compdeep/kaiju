@@ -88,6 +88,9 @@ type Info struct {
 	// are allowed. Measured the same way, and false by default for the same
 	// reason.
 	ReasoningBudget bool `json:"reasoning_budget,omitempty"`
+	// ThinkingSampling is the decoding its maker publishes for when it thinks.
+	// Zero means none published, and the caller's temperature is sent as it is.
+	ThinkingSampling Sampling `json:"thinking_sampling,omitempty"`
 	// Pace is how this model's speed compares with the rest, as a word an
 	// operator can read. Read it through DeadlineMultiple.
 	//
@@ -350,6 +353,13 @@ func Limits(id string) (contextTokens, maxOutputTokens int) {
  * param: id - the model id as configured for a lane, e.g. "qwen/qwen3-32b".
  * return: the entry and true, or the zero Info and false.
  */
+// Sampling is a model's published decoding settings (see llm.Sampling).
+type Sampling struct {
+	Temperature float64 `json:"temperature"`
+	TopP        float64 `json:"top_p"`
+	TopK        int     `json:"top_k"`
+}
+
 func Find(id string) (Info, bool) {
 	for _, m := range all {
 		if m.ID == id {

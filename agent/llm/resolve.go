@@ -22,6 +22,9 @@ type resolved struct {
 	// acts on them. Zero values ask for nothing.
 	Effort Effort
 	Budget int
+	// Sampling is the model's published decoding for a call that thinks, or
+	// zero.
+	Sampling Sampling
 	// Wait multiplies the ordinary deadline. Always 1 or more.
 	Wait float64
 }
@@ -121,6 +124,7 @@ func resolveReasoning(req *ChatRequest, f ModelFacts, known bool) resolved {
 	if budget > 0 && f.Thinking.Budget {
 		out.Budget = budget
 	}
+	out.Sampling = f.Thinking.Sampling
 
 	// 4. The clock: what this model's measured pace earns it.
 	out.Wait = paceOf(f)
@@ -177,7 +181,13 @@ func (c *Client) applyReasoning(req *ChatRequest) {
 		model = c.model
 	}
 	f, known := c.facts(model)
-	req.Reasoning = resolveReasoning(req, f, known).wire()
+	r := resolveReasoning(req, f, known)
+	req.Reasoning = r.wire()
+	// A thinking call is sampled as the model's maker says, over the caller's
+	// temperature: at 0.3 and nothing else, qwen3.6's plans repeated to the cap.
+	if s := r.Sampling; s.Temperature > 0 {
+		req.Temperature, req.TopP, req.TopK = s.Temperature, s.TopP, s.TopK
+	}
 }
 
 /*

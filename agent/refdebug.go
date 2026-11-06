@@ -23,9 +23,10 @@ import (
  * schema it read them from. Enough to tell, without re-deriving it from the
  * source, which of those cases this was.
  *
- * Diagnostic only. It never changes a decision, never fails a run, and writes
- * nothing when the directory is unavailable — a trace that can break the thing
- * it traces is worse than no trace.
+ * Diagnostic only, written with the prompt traces (KAIJU_PROMPT_DEBUG=1). It
+ * never changes a decision, never fails a run, and writes nothing when the
+ * directory is unavailable — a trace that can break the thing it traces is
+ * worse than no trace.
  */
 
 const refDebugDir = "/tmp/kaiju-prompts"
@@ -33,6 +34,9 @@ const refDebugDir = "/tmp/kaiju-prompts"
 // logRejectedReference appends one rejection to refs-rejected.log.
 func logRejectedReference(raw, field, producer string, outSchema json.RawMessage) {
 	defer func() { _ = recover() }() // a diagnostic must never take the run with it
+	if !debugLogEnabled() {
+		return
+	}
 
 	f, err := os.OpenFile(filepath.Join(refDebugDir, "refs-rejected.log"),
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)

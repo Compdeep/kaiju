@@ -83,6 +83,39 @@ func TestAnExpiredWallClockStillAnswers(t *testing.T) {
 	}
 }
 
+// A run that ended does not record a step as still running. The clock ran out
+// with the slow step in flight, and the saved steps said it was running: a
+// finished run read as one still working, on the dashboard and in its record.
+func TestAnEndedRunLeavesNoStepRunning(t *testing.T) {
+	tool := &slowTool{name: "process_list", started: make(chan struct{}, 1)}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{
+			"mode": "agent", "intent": "observe", "skills": []string{},
+		}},
+		"plan": plan(step("process_list", "procs", nil)),
+	})
+	a := agentOnStubWith(t, model, DAGConfig{
+		DAGEnabled: true, MaxNodes: 20, MaxLLMCalls: 20,
+		DAGWallClock: 400 * time.Millisecond,
+	}, tool)
+
+	res, err := a.RunDAGSync(context.Background(), Trigger{
+		Type: "chat_query", Data: json.RawMessage(`{"query":"what is running?"}`),
+	})
+	if err != nil || res == nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	var steps []NodeInfo
+	if err := json.Unmarshal(res.Trace, &steps); err != nil {
+		t.Fatalf("the trace does not read: %v", err)
+	}
+	for _, s := range steps {
+		if s.State == "pending" || s.State == "running" {
+			t.Errorf("step %s (%s) is saved as %s after the run ended", s.ID, s.Tool, s.State)
+		}
+	}
+}
+
 // The caller going away is not the clock expiring, and does not earn an answer:
 // there is nobody left to read one, and writing it costs a model call.
 func TestACallerThatGoesAwayGetsNoAnswer(t *testing.T) {

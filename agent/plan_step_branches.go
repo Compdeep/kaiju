@@ -66,12 +66,14 @@ func planStepBranches(names []string, registry *toolapi.Registry) (json.RawMessa
 			return nil, false
 		}
 		// The branch owns its required list, like the plan root and the tool's
-		// params. Without the marker the closer adds "type" to it and widens it
-		// to allow null; the model, which under strict never sees the schema, is
-		// then made to write a value there and writes "compute" — every step of
-		// every live plan did — and a step meant to run a tool on a remote
-		// target runs as a compute node on this one, target ignored. "type" is
-		// optional because a step is a tool step unless it says otherwise.
+		// params: without the marker the closer would require every property.
+		//
+		// No "type". A step's kind is its tool, and the compute tool has a
+		// branch of its own. A "type" offered beside a tool's name let a
+		// process lookup say it was compute: under strict the model never
+		// sees the schema, only the prompt's "compute for analytics", and on
+		// one day 1,562 tool steps came back typed compute, each run on this
+		// machine with its remote target ignored.
 		branches = append(branches, fmt.Sprintf(`{
 			"type": "object",
 			"%s": true,
@@ -80,7 +82,6 @@ func planStepBranches(names []string, registry *toolapi.Registry) (json.RawMessa
 				"tool": {"const": %s},
 				"params": %s,
 				"tag": {"type": "string", "description": "This step's name, unique within the plan: letters, digits, _ or - with no spaces. Other steps reference this step by it."},
-				"type": {"type": "string", "enum": ["tool","compute"]},
 				"depends_on": {"type": "array", "items": {"type": ["integer", "string"]}, "description": "Which earlier steps must finish before this one starts, by position. STEPS RUN IN PARALLEL: every step whose depends_on is [] is dispatched at once, so [] means \"nothing is holding this step back\" — correct for independent work, wrong the moment one step acts on what another produces. Using another step's OUTPUT needs nothing here: the ${step.tag.field} reference orders it for you. This field is for the other kind, where no value passes but the order still matters — a step that writes a file and a command that runs it, an install and the thing that needs it. Leave it out there and both start together, the second reads the state from before the first, and the plan reports success on a wrong result. An unnecessary dependency costs a little time; a missing one breaks the plan silently."}
 			}
 		}`, llm.AuthoredRequired, nameJSON, params))

@@ -29,6 +29,8 @@ func TestClassifyAgreesWithTheSearchesItReplaces(t *testing.T) {
 		{`{"error":{"code":"invalid_api_key"}} invalid api key`, KindCredentials},
 		{"insufficient_quota: You exceeded your current quota", KindCredentials},
 		{"402: insufficient credits", KindCredentials},
+		{openRouterNoCredit, KindCredentials},
+		{openRouterInFlight, KindCredentials},
 		{"authentication error", KindCredentials},
 
 		// The other end asking to be left alone.
@@ -52,6 +54,31 @@ func TestClassifyAgreesWithTheSearchesItReplaces(t *testing.T) {
 	} {
 		if got := Classify(errors.New(c.msg)); got != c.want {
 			t.Errorf("%q classified %v, want %v", c.msg, got, c.want)
+		}
+	}
+}
+
+// Two 402 replies OpenRouter sent a live deployment that had run out of
+// credit. Neither body uses any of the older credential terms.
+const (
+	openRouterNoCredit = `HTTP 402: {"error":{"message":"This request requires more credits, or fewer max_tokens. You requested up to 8192 tokens, but can only afford 533.","code":402}}`
+	openRouterInFlight = `HTTP 402: {"error":{"message":"This request would exceed your available credits given your current in-flight requests. Retry after in-flight requests settle, or add credits.","code":402}}`
+)
+
+// A 402 is a credential problem whatever its body says: the status alone
+// decides, and the status is kept for whoever reads the error.
+func TestA402IsACredentialProblem(t *testing.T) {
+	for _, body := range []string{openRouterNoCredit, openRouterInFlight, "{}"} {
+		err := fmt.Errorf("planner LLM call: %w", httpFailure(http.StatusPaymentRequired, http.Header{}, body))
+		if got := Classify(err); got != KindCredentials {
+			t.Errorf("402 with body %.40q classified %v, want %v", body, got, KindCredentials)
+		}
+		var ce *CallError
+		if !errors.As(err, &ce) || ce.Status != http.StatusPaymentRequired {
+			t.Errorf("402 with body %.40q lost its status", body)
+		}
+		if !IsAuthFailure(err.Error()) {
+			t.Errorf("402 with body %.40q is not an auth failure", body)
 		}
 	}
 }

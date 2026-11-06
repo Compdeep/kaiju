@@ -471,6 +471,7 @@ func Facts(id string) (llm.ModelFacts, bool) {
 			Efforts:  efforts,
 			Budget:   m.ReasoningBudget,
 			Pace:     m.DeadlineMultiple(),
+			Sampling: llm.Sampling(m.ThinkingSampling),
 		},
 	}, true
 }

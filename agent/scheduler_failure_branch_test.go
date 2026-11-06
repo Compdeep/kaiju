@@ -105,6 +105,7 @@ func TestTheAuthFailureDetectorMatchesWhatProvidersSay(t *testing.T) {
 		"http 403 forbidden",
 		"invalid api key provided",
 		"insufficient_quota",
+		"HTTP 402: This request requires more credits, or fewer max_tokens.",
 	} {
 		if !llm.IsAuthFailure(msg) {
 			t.Errorf("%q is not read as a credentials failure, so the run would grind "+

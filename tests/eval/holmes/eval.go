@@ -577,7 +577,8 @@ func runScenario(kaijuShortName, absBin, configPath string, sc scenario, timeout
 		}
 		env = append(env, kv)
 	}
-	env = append(env, "KAIJU_CONFIG="+configPath)
+	// The prompt trace is off by default; the capture below reads it.
+	env = append(env, "KAIJU_CONFIG="+configPath, "KAIJU_PROMPT_DEBUG=1")
 	cmd.Env = env
 
 	log.Printf("[%s] invoking %s run <query> in %s", sc.name, kaijuShortName, workDir)

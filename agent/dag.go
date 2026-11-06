@@ -2023,6 +2023,26 @@ func (g *Graph) SkipAllPending() int {
 }
 
 /*
+ * SkipUnfinished marks every pending or running node as StateSkipped.
+ * desc: Called once, when the run ends: a loop cut short by its clock or a
+ *       refused key does not wait for the steps in flight, and they would be
+ *       saved as running. Not for a replan, where running steps carry on.
+ */
+func (g *Graph) SkipUnfinished() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, n := range g.nodes {
+		if n.State == StatePending || n.State == StateRunning {
+			n.State = StateSkipped
+			if n.EndedAt.IsZero() {
+				n.EndedAt = time.Now()
+			}
+			g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+		}
+	}
+}
+
+/*
  * Budget enforces resource limits on the DAG execution.
  * desc: Tracks total nodes, LLM calls, observer calls, and per-tool batch
  *       counters using atomic operations for concurrency safety.

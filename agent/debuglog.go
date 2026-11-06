@@ -20,17 +20,18 @@ import (
 // human-readable and append-only — read it top-to-bottom to follow the
 // investigation as it unfolded.
 //
-// Default: ON — we want these traces when things break. Flip to OFF with
-// KAIJU_PROMPT_DEBUG=0 (e.g. for CI or privacy-sensitive runs).
+// Default: OFF. Every prompt is kept in full, one file per run, and nothing
+// removes them: on a host running investigations all day they filled a /tmp
+// held in memory. Turn on with KAIJU_PROMPT_DEBUG=1 while debugging.
 //
 // To read:   tail -f /tmp/kaiju-prompts/<runID>.log
 
 const debugLogDir = "/tmp/kaiju-prompts"
 
-// debugLogEnabled returns true by default. Set KAIJU_PROMPT_DEBUG=0 to
-// disable. Cheap; called once per LLM call.
+// debugLogEnabled reports whether KAIJU_PROMPT_DEBUG=1. Cheap; called once
+// per LLM call.
 func debugLogEnabled() bool {
-	return os.Getenv("KAIJU_PROMPT_DEBUG") != "0"
+	return os.Getenv("KAIJU_PROMPT_DEBUG") == "1"
 }
 
 // LLMTrace captures everything we want to record about a single LLM call.

@@ -387,3 +387,26 @@ func TestGeneratedCodeRunsUnderTheConfiguredTimeout(t *testing.T) {
 		t.Error("ComputeTimeout is read and not passed to the step as timeout_sec")
 	}
 }
+
+// A step's kind is its tool. On one live day 1,562 steps named an ordinary
+// tool and came back typed "compute"; built as compute nodes they ran on this
+// machine with their remote target ignored, and the run had no evidence.
+func TestPlanStepsToNodes_AToolStepTypedComputeIsAToolStep(t *testing.T) {
+	steps := []PlanStep{
+		{Type: "compute", Tool: "process_info", Params: map[string]any{"pid": 42}, Tag: "proc", Target: "machine-b"},
+		{Type: "tool", Tool: "compute", Params: map[string]any{"goal": "sum"}, Tag: "sum"},
+	}
+	nodes, err := planStepsToNodes(steps, NewGraph(), NewBudget(100, 10, 50, 50, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("got %d nodes, want 2", len(nodes))
+	}
+	if nodes[0].Type != NodeTool || nodes[0].Target != "machine-b" {
+		t.Errorf("process_info typed compute: type %v target %q, want a tool node for machine-b", nodes[0].Type, nodes[0].Target)
+	}
+	if nodes[1].Type != NodeCompute {
+		t.Errorf("tool compute typed tool: type %v, want a compute node", nodes[1].Type)
+	}
+}

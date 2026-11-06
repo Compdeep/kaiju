@@ -129,6 +129,8 @@ type ChatRequest struct {
 	Tools       []ToolDef `json:"tools,omitempty"`
 	ToolChoice  any       `json:"tool_choice,omitempty"` // "auto", "required", "none", or {"type":"function","function":{"name":"X"}}
 	Temperature float64   `json:"temperature"`
+	TopP        float64   `json:"top_p,omitempty"` // set from the catalog only (Thinking.Sampling)
+	TopK        int       `json:"top_k,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
 	Stream      bool      `json:"stream,omitempty"`
 	// StreamOptions asks the provider (OpenAI/OpenRouter) to emit a terminal
@@ -919,11 +921,11 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	// DEBUG (KAIJU_DUMP_REQUEST != "0"): the EXACT bytes sent to the model on a
-	// streaming call (model + temperature + full messages), for byte-for-byte replay.
-	// Last streaming call in a run is the aggregator, so this captures its real
-	// request. Overwritten each call.
-	if os.Getenv("KAIJU_DUMP_REQUEST") != "0" {
+	// DEBUG (KAIJU_PROMPT_DEBUG=1, the switch for the prompt traces): the EXACT
+	// bytes sent to the model on a streaming call (model + temperature + full
+	// messages), for byte-for-byte replay. Last streaming call in a run is the
+	// aggregator, so this captures its real request. Overwritten each call.
+	if os.Getenv("KAIJU_PROMPT_DEBUG") == "1" {
 		_ = os.WriteFile("/tmp/kaiju-last-stream-request.json", body, 0o644)
 	}
 

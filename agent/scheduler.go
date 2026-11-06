@@ -438,7 +438,7 @@ type scheduleOutcome struct {
 func scaleReplanCap(base int, steps []PlanStep) int {
 	extra := len(steps) / 4
 	for _, s := range steps {
-		if s.Tool == "compute" || s.Type == "compute" {
+		if s.IsCompute() {
 			extra++
 		}
 	}
@@ -1276,7 +1276,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				if isModelStage(node) && llm.IsAuthFailure(errMsg) {
 					log.Printf("[dag] the model rejected our credentials, stopping this run: %v", comp.Err)
 					reflectionConcluded = true
-					reflectionOutcome = "The model rejected the credentials it was given: the API key is missing, invalid, or has no access to the configured model. Nothing further was attempted on this run."
+					reflectionOutcome = "The model rejected the credentials it was given: the API key is missing, invalid, has no access to the configured model, or has run out of credit. Nothing further was attempted on this run."
 					graph.SkipAllPending()
 					inflight = 0
 					continue
@@ -1850,10 +1850,13 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// outcome still surfaces via reflectionOutcome below.
 						graph.SetBody(comp.NodeID, newReflectionBody(*ref, comp.Result))
 						graph.SkipAllPending()
-						reflectionConcluded = true
+						// A step still running has a result this reflection did not
+						// see: wait for it, and the reflection that follows reads
+						// everything. The wall clock bounds one that never returns.
+						reflectionConcluded = inflight == 0
 						reflectionOutcome = ref.Outcome
 						reflectionAggregate = ref.Aggregate
-						log.Printf("[dag] reflection: conclude early (%s)", ref.Reason)
+						log.Printf("[dag] reflection: conclude early (%s), %d step(s) still running", ref.Reason, inflight)
 						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONCLUDE", Text.TruncateLog(ref.Reason, 200))
 
 						// NOTE: `investigate` is gone as a reflection decision. Repair
@@ -2683,6 +2686,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 
 	// Snapshot the final graph so the caller can persist the trace server-side.
 	// This is the same node list the "done" event broadcasts to the browser.
+	graph.SkipUnfinished()
 	traceJSON, _ := json.Marshal(graph.Snapshot())
 
 	return &SyncResult{

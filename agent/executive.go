@@ -1735,17 +1735,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	userQuery := objective
 	var toolIndex string
 	if graph != nil && graph.Context != nil {
-		gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
-			ReturnSources: Sources(
-				Worklog(20, "all"),
-				ToolIndex(relevant),
-			),
-			// Enough for the tool index relevantTools just sized, plus the
-			// worklog beside it. At 8000 the gate trimmed the index on every
-			// call — the schemas a planner needs to write ${step.N.field}
-			// against were the thing being cut.
-			MaxBudget: a.budget(toolIndexBudget) + 8000,
-		})
+		gateResp, gerr := graph.Context.Get(ctx, plannerContextRequest(a, relevant))
 		if gerr != nil {
 			log.Printf("[dag] executive (native) context build failed: %v", gerr)
 		} else {
@@ -3444,4 +3434,26 @@ func planArguments(c llm.Choice) string {
 		return c.Message.ToolCalls[0].Function.Arguments
 	}
 	return c.Message.Content
+}
+
+// plannerContextRequest is what the planner asks the gate for: the worklog and
+// the tool index.
+//
+// No clock: the planner is told the time by environmentSection, at the end of
+// its request. In an investigation the worklog is empty, so the gate's clock
+// fell back onto the tool index and led it, and the index — the largest block
+// the planner sends — was read again on every call.
+func plannerContextRequest(a *Agent, relevant []string) ContextRequest {
+	return ContextRequest{
+		OmitCurrentTime: true,
+		ReturnSources: Sources(
+			Worklog(20, "all"),
+			ToolIndex(relevant),
+		),
+		// Enough for the tool index relevantTools just sized, plus the
+		// worklog beside it. At 8000 the gate trimmed the index on every
+		// call — the schemas a planner needs to write ${step.N.field}
+		// against were the thing being cut.
+		MaxBudget: a.budget(toolIndexBudget) + 8000,
+	}
 }

@@ -26,6 +26,9 @@ type ModelFacts struct {
 	MaxOutputTokens int
 	// Thinking is what the model does with a reasoning instruction.
 	Thinking Thinking
+	// CacheOnRequest is true for a model that caches a prompt only when the
+	// request carries cache_control, so the client asks on every call.
+	CacheOnRequest bool
 }
 
 // Thinking is what a model does when asked to reason, or asked not to.

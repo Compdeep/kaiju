@@ -171,6 +171,22 @@ type ChatRequest struct {
 	// models/openrouter; nil on every other provider, and nil there too when
 	// both lists are empty.
 	Provider *ProviderRouting `json:"provider,omitempty"`
+
+	// CacheKey ties a run's calls together, so a gateway sends them to one
+	// provider and that provider's cache stays warm. OpenRouter and OpenAI read
+	// it; the client clears it for every other upstream, which may reject a
+	// field it does not know. Empty sends nothing.
+	CacheKey string `json:"prompt_cache_key,omitempty"`
+
+	// CacheControl asks a model that caches only when asked to cache this
+	// prompt, up to its last block. Set by the client from the catalog — see
+	// askForCache — and nil for every other model.
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+// CacheControl is Anthropic's cache request, which OpenRouter passes on.
+type CacheControl struct {
+	Type string `json:"type"` // "ephemeral", the only kind
 }
 
 // ProviderRouting is OpenRouter's provider-routing object, narrowed to the two
@@ -348,11 +364,40 @@ type Usage struct {
 	// completion, so without this "what did the thinking cost" has no answer —
 	// and it is the first question anybody asks when a bill moves.
 	Details *UsageDetails `json:"completion_tokens_details,omitempty"`
+	// Prompt carries the split inside PromptTokens: how much the provider
+	// served from its cache. Without it, whether a prompt was cached at all
+	// cannot be told from anything kaiju keeps.
+	Prompt *PromptDetails `json:"prompt_tokens_details,omitempty"`
 }
 
 // UsageDetails is the provider's breakdown of the completion.
 type UsageDetails struct {
 	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+}
+
+// PromptDetails is the provider's breakdown of the prompt. Both are part of
+// PromptTokens, not additional to it.
+type PromptDetails struct {
+	CachedTokens     int `json:"cached_tokens,omitempty"`      // read from the cache
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"` // written to it, OpenRouter and Anthropic only
+}
+
+// CachedTokens is the part of the prompt read from the provider's cache, and 0
+// where the provider did not say.
+func (u Usage) CachedTokens() int {
+	if u.Prompt == nil {
+		return 0
+	}
+	return u.Prompt.CachedTokens
+}
+
+// CacheWriteTokens is the part of the prompt written to the provider's cache,
+// and 0 where the provider did not say.
+func (u Usage) CacheWriteTokens() int {
+	if u.Prompt == nil {
+		return 0
+	}
+	return u.Prompt.CacheWriteTokens
 }
 
 // ReasoningTokens is what the hidden thinking cost, and 0 where the provider
@@ -648,6 +693,28 @@ func (c *Client) routeProviders(req *ChatRequest) {
 	req.Provider = &ProviderRouting{Only: only, Ignore: ignore}
 }
 
+// keepCacheKey clears the cache key on an upstream that does not read it.
+// OpenRouter and OpenAI's own API read prompt_cache_key. Every other
+// OpenAI-compatible endpoint is a ProviderOpenAI client too, and a self-hosted
+// one may reject a field it does not know, so OpenAI is recognised by its
+// address. Anthropic's request is built from other fields entirely.
+func (c *Client) keepCacheKey(req *ChatRequest) {
+	openAI := c.provider == ProviderOpenAI && strings.Contains(c.endpoint, "api.openai.com")
+	if c.provider != ProviderOpenRouter && !openAI {
+		req.CacheKey = ""
+	}
+}
+
+// askForCache asks a model that caches only when asked, as the catalog says,
+// to cache the prompt. One field at the top of the request covers everything
+// up to the last block, and the provider moves that point forward as a run
+// grows, so no stage has to say which part of its prompt is stable.
+func (c *Client) askForCache(req *ChatRequest) {
+	if f, ok := c.facts(req.Model); ok && f.CacheOnRequest {
+		req.CacheControl = &CacheControl{Type: "ephemeral"}
+	}
+}
+
 /*
  * Complete sends a chat completion request and returns the response.
  * desc: One send, and one more where asking again can help — see recover.go for
@@ -688,6 +755,8 @@ func (c *Client) completeOnce(ctx context.Context, req *ChatRequest) (*ChatRespo
 	}
 	c.capReply(req)
 	c.routeProviders(req)
+	c.keepCacheKey(req)
+	c.askForCache(req)
 	// Before the schema conversion below, which removes the Tools and
 	// ToolChoice that say this request forces one shape.
 	c.applyReasoning(req)
@@ -916,6 +985,8 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 	}
 	req.Stream = true
 	req.StreamOptions = &StreamOptions{IncludeUsage: true}
+	c.keepCacheKey(req)
+	c.askForCache(req)
 
 	body, err := json.Marshal(req)
 	if err != nil {

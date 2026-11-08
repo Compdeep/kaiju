@@ -67,6 +67,11 @@ type LLMTrace struct {
 	Err       string // error message if the call failed
 	TokensIn  int    // 0 if unknown
 	TokensOut int    // 0 if unknown
+
+	// TokensCached is the part of TokensIn the provider read from its cache.
+	// 0 when nothing was cached or the provider did not say.
+	TokensCached int
+
 	LatencyMS int64
 
 	// What this call asked of the model's thinking, what was actually sent, and
@@ -247,6 +252,9 @@ func (t LLMTrace) formatMeta() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("--- META ---\nlatency_ms: %d\ntokens_in: %d\ntokens_out: %d\n",
 		t.LatencyMS, t.TokensIn, t.TokensOut))
+	if t.TokensIn > 0 {
+		sb.WriteString(fmt.Sprintf("tokens_cached: %d (%d%%)\n", t.TokensCached, 100*t.TokensCached/t.TokensIn))
+	}
 
 	// What this call asked of the model's thinking, what reached the wire, and
 	// what it cost. The struct has carried these since the reasoning layer

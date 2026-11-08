@@ -114,3 +114,13 @@ func TestFactsDeclinesAModelItDoesNotCarry(t *testing.T) {
 		t.Errorf("%q: limits did not survive the translation", carried.ID)
 	}
 }
+
+// Whether a model caches only when asked reaches the client.
+func TestFactsSayWhichModelsCacheOnlyWhenAsked(t *testing.T) {
+	if f, ok := Facts("anthropic/claude-sonnet-5"); !ok || !f.CacheOnRequest {
+		t.Errorf("anthropic/claude-sonnet-5: ok=%v cacheOnRequest=%v, want both true", ok, f.CacheOnRequest)
+	}
+	if f, _ := Facts("qwen/qwen3.6-35b-a3b"); f.CacheOnRequest {
+		t.Error("qwen3.6 caches by itself and was marked as needing to be asked")
+	}
+}

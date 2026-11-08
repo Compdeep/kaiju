@@ -97,6 +97,10 @@ type Info struct {
 	// A median cannot answer this — what marks a model is its tail. Empty is the
 	// ordinary deadlines. See docs/model-pace.md.
 	Pace string `json:"pace,omitempty"`
+	// Cache is CacheRequested for a model that caches a prompt only when the
+	// request asks — Anthropic's. Empty for one that caches by itself, or not
+	// at all, where asking would add nothing.
+	Cache string `json:"cache,omitempty"`
 	// Tools reports whether the model can call tools at all.
 	Tools bool `json:"tools"`
 	// ToolCallOK reports whether the model reliably emits a SMALL forced tool call
@@ -127,6 +131,9 @@ type Info struct {
 	// router, chat, vision. The UI filters each lane's picker by role.
 	Roles []string `json:"roles,omitempty"`
 }
+
+// CacheRequested is the Cache of a model that caches only when asked.
+const CacheRequested = "requested"
 
 // catalog is the on-disk shape of models.json.
 type catalog struct {

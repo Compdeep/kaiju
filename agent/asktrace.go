@@ -172,6 +172,7 @@ func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 		tr.TokensIn = resp.Usage.PromptTokens
 		tr.TokensOut = resp.Usage.CompletionTokens
 		tr.TokensThought = resp.Usage.ReasoningTokens()
+		tr.TokensCached = resp.Usage.CachedTokens()
 		tr.Recovered = resp.Recovered.String()
 	}
 	tr.Asked, tr.Sent = describeThinking(req.Think), describeSent(req.Reasoning)

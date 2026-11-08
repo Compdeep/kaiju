@@ -25,6 +25,8 @@ type anthropicRequest struct {
 	// Translated from ChatRequest.Reasoning in buildAnthropicRequest, so a
 	// caller sets one field and does not learn which wire carried it.
 	Thinking *anthropicThinking `json:"thinking,omitempty"`
+	// CacheControl is ChatRequest.CacheControl, passed on.
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 // anthropicThinking is {"type":"disabled"} or {"type":"enabled",
@@ -107,6 +109,9 @@ type anthropicResponse struct {
 	Usage      struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
+		// Counted beside input_tokens, not inside it.
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	} `json:"usage"`
 }
 
@@ -159,9 +164,10 @@ func (c *Client) completeAnthropic(ctx context.Context, req *ChatRequest) (*Chat
 // buildAnthropicRequest converts an OpenAI ChatRequest to an Anthropic request.
 func buildAnthropicRequest(model string, req *ChatRequest) *anthropicRequest {
 	aReq := &anthropicRequest{
-		Model:       model,
-		MaxTokens:   req.MaxTokens,
-		Temperature: req.Temperature,
+		Model:        model,
+		MaxTokens:    req.MaxTokens,
+		Temperature:  req.Temperature,
+		CacheControl: req.CacheControl,
 	}
 	if aReq.MaxTokens == 0 {
 		aReq.MaxTokens = 4096
@@ -296,10 +302,21 @@ func convertAnthropicResponse(aResp *anthropicResponse) *ChatResponse {
 			Message:      msg,
 			FinishReason: finishReason,
 		}},
-		Usage: Usage{
-			PromptTokens:     aResp.Usage.InputTokens,
-			CompletionTokens: aResp.Usage.OutputTokens,
-			TotalTokens:      aResp.Usage.InputTokens + aResp.Usage.OutputTokens,
-		},
+		Usage: anthropicUsage(aResp.Usage.InputTokens, aResp.Usage.OutputTokens,
+			aResp.Usage.CacheReadInputTokens, aResp.Usage.CacheCreationInputTokens),
 	}
+}
+
+// anthropicUsage is Anthropic's usage in the shape every other provider uses.
+// Anthropic counts cache reads and writes beside input_tokens rather than
+// inside it, so the prompt is the three together: without that, a cached call
+// would look smaller than an uncached one, and the cached share would read as
+// more than all of it.
+func anthropicUsage(input, output, cacheRead, cacheWrite int) Usage {
+	prompt := input + cacheRead + cacheWrite
+	u := Usage{PromptTokens: prompt, CompletionTokens: output, TotalTokens: prompt + output}
+	if cacheRead > 0 || cacheWrite > 0 {
+		u.Prompt = &PromptDetails{CachedTokens: cacheRead, CacheWriteTokens: cacheWrite}
+	}
+	return u
 }

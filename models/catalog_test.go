@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -128,5 +129,31 @@ func TestAReasoningModelIsStillIdentifiable(t *testing.T) {
 	}
 	if !m.Thinks() {
 		t.Error("qwen3-32b is not marked as reasoning, so nothing can warn about it")
+	}
+}
+
+// "cache" says whether a model caches a prompt only when the request asks. Any
+// other word would be read as "no" and silently cost every call in full.
+func TestCacheIsAKnownWord(t *testing.T) {
+	for _, m := range All() {
+		if m.Cache != "" && m.Cache != CacheRequested {
+			t.Errorf("%s: cache %q, want \"\" or %q", m.ID, m.Cache, CacheRequested)
+		}
+	}
+}
+
+// Anthropic's models cache only when asked.
+func TestAnthropicModelsAskForTheirCache(t *testing.T) {
+	n := 0
+	for _, m := range All() {
+		if strings.HasPrefix(m.ID, "anthropic/") {
+			n++
+			if m.Cache != CacheRequested {
+				t.Errorf("%s does not ask for its cache, so every call is read in full", m.ID)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("no Anthropic model in the catalog to check")
 	}
 }

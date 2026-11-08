@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 // Config.Environment must actually reach the prompts. It was possible to set it
@@ -46,8 +49,16 @@ func TestEmptyEnvironmentStillCarriesTheDate(t *testing.T) {
 // "Aug 29 11:16:55", supplied the year from memory, and sent
 // START_TIME='2025-08-29' to nine API calls in a run that happened in 2026. Six
 // returned real data for the wrong year and nothing in the run could tell.
+//
+// The date is on the line the door adds, so it is read off a request as sent.
 func TestTheDateGivenToAStageCarriesTheYear(t *testing.T) {
-	got := (&Agent{}).environmentSection()
+	a := doorAgent()
+	req := &llm.ChatRequest{Messages: []llm.Message{
+		{Role: "system", Content: "the rules" + a.environmentSection()},
+		{Role: "user", Content: "q"},
+	}}
+	a.prepare(context.Background(), Heavy, req)
+	got := req.Messages[1].Content
 	year := strconv.Itoa(time.Now().UTC().Year())
 	if !strings.Contains(got, year) {
 		t.Fatalf("the year is missing, so a stage writing a date has to guess it: %q", got)

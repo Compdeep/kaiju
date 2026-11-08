@@ -473,6 +473,7 @@ func Facts(id string) (llm.ModelFacts, bool) {
 			Pace:     m.DeadlineMultiple(),
 			Sampling: llm.Sampling(m.ThinkingSampling),
 		},
+		CacheOnRequest: m.Cache == models.CacheRequested,
 	}, true
 }
 

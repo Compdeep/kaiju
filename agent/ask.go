@@ -198,6 +198,15 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 		req.Model = model
 	}
 
+	// Before the reply is sized, since it adds to the prompt.
+	stateTheTime(req)
+
+	// One key for every call of a run, so a gateway keeps the run on one
+	// provider and its cache warm. A caller's own key is kept.
+	if req.CacheKey == "" {
+		req.CacheKey = runIDFrom(ctx)
+	}
+
 	// The two lanes that force a SMALL call get the model's thinking turned off,
 	// whatever model that is.
 	//

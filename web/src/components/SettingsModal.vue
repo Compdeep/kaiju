@@ -64,6 +64,7 @@
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="openrouter">OpenRouter</option>
+                    <option value="bedrock">Amazon Bedrock</option>
                     <option value="ollama">Ollama</option>
                   </select>
                 </div>
@@ -93,6 +94,7 @@
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="openrouter">OpenRouter</option>
+                    <option value="bedrock">Amazon Bedrock</option>
                     <option value="ollama">Ollama</option>
                   </select>
                 </div>
@@ -121,6 +123,7 @@
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="openrouter">OpenRouter</option>
+                    <option value="bedrock">Amazon Bedrock</option>
                     <option value="ollama">Ollama</option>
                   </select>
                 </div>
@@ -149,6 +152,7 @@
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="openrouter">OpenRouter</option>
+                    <option value="bedrock">Amazon Bedrock</option>
                     <option value="ollama">Ollama</option>
                   </select>
                 </div>
@@ -177,6 +181,7 @@
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="openrouter">OpenRouter</option>
+                    <option value="bedrock">Amazon Bedrock</option>
                     <option value="ollama">Ollama</option>
                   </select>
                 </div>
@@ -205,6 +210,7 @@
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="openrouter">OpenRouter</option>
+                    <option value="bedrock">Amazon Bedrock</option>
                     <option value="ollama">Ollama</option>
                   </select>
                 </div>
@@ -324,6 +330,9 @@ const ENDPOINTS = {
   openai: 'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com',
   openrouter: 'https://openrouter.ai/api/v1',
+  // Bedrock's Chat Completions in us-east-1. Llama and Nova go to Converse on
+  // bedrock-runtime in the same region; the engine works that out per model.
+  bedrock: 'https://bedrock-mantle.us-east-1.api.aws/v1',
   ollama: 'http://localhost:11434/v1',
 }
 

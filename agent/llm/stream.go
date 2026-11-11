@@ -65,7 +65,7 @@ func (s *streamed) reply() *ChatResponse {
 		calls = append(calls, *s.tools[i])
 	}
 	m := Message{Role: "assistant", Content: s.content.String(), Reasoning: s.reasoning.String(), ToolCalls: calls}
-	liftThinkingInto(&m)
+	tidyReply(&m)
 	return &ChatResponse{
 		ID:       s.id,
 		Provider: s.provider,

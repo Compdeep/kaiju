@@ -350,10 +350,16 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		c.agent.SetLLMClient(l.Provider, l.Endpoint, l.APIKey, c.cfg.LLM.Model)
 		log.Printf("[config] reasoning model updated: provider=%s model=%s", l.Provider, c.cfg.LLM.Model)
 	}
-	if c.agent != nil && c.cfg.Executor.Model != "" && (patch.Executor != nil || patch.LLM != nil || len(patch.Providers) > 0) {
+	// An executor with no model of its own is the reasoning model, as at start-up,
+	// so clearing it takes effect now rather than at the next restart.
+	if c.agent != nil && (patch.Executor != nil || patch.LLM != nil || len(patch.Providers) > 0) {
 		l := c.cfg.ExecutorLane()
-		c.agent.SetExecutorClient(l.Provider, l.Endpoint, l.APIKey, c.cfg.Executor.Model)
-		log.Printf("[config] executor model updated: provider=%s model=%s", l.Provider, c.cfg.Executor.Model)
+		model := c.cfg.Executor.Model
+		if model == "" {
+			model = c.cfg.LLM.Model
+		}
+		c.agent.SetExecutorClient(l.Provider, l.Endpoint, l.APIKey, model)
+		log.Printf("[config] executor model updated: provider=%s model=%s", l.Provider, model)
 	}
 
 	// Save to disk

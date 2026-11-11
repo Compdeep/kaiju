@@ -942,9 +942,58 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 			m.Reasoning = m.ReasoningContent
 		}
 		m.ReasoningContent = ""
-		liftThinkingInto(m)
+		tidyReply(m)
 	}
 	return &chatResp, nil
+}
+
+/*
+ * tidyReply puts what a model wrote where a caller reads it, on every wire.
+ * desc: Thinking written into the answer moves to Reasoning, and a tool call
+ *       written as <tool_call> text has its own arguments read out of it.
+ * param: m - the reply, changed in place.
+ */
+func tidyReply(m *Message) {
+	liftThinkingInto(m)
+	for i := range m.ToolCalls {
+		m.ToolCalls[i].Function.Arguments = callArguments(m.ToolCalls[i].Function.Arguments)
+	}
+}
+
+/*
+ * callArguments reads a call's arguments out of <tool_call> text.
+ * desc: Qwen writes a call as <tool_call>{"name":…,"arguments":{…}}</tool_call>.
+ *       A host that cannot parse it, as Bedrock cannot when the JSON is off by
+ *       a brace, returns the whole text as the arguments of the call it was made
+ *       to give. The first JSON object inside the tag is read, and its
+ *       "arguments" taken when it is the call itself. Arguments that already
+ *       parse, or hold no tag, are returned as they came.
+ * param: args - the arguments as they arrived.
+ * return: the arguments.
+ */
+func callArguments(args string) string {
+	i := strings.Index(args, "<tool_call>")
+	if i < 0 || json.Valid([]byte(args)) {
+		return args
+	}
+	body, _, _ := strings.Cut(args[i+len("<tool_call>"):], "</tool_call>")
+	var raw json.RawMessage
+	if err := json.NewDecoder(strings.NewReader(body)).Decode(&raw); err != nil {
+		return args
+	}
+	var call struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if json.Unmarshal(raw, &call) == nil && call.Name != "" && len(call.Arguments) > 0 {
+		// Arguments sent as a JSON string hold the object as text.
+		var s string
+		if json.Unmarshal(call.Arguments, &s) == nil {
+			return s
+		}
+		return string(call.Arguments)
+	}
+	return string(raw)
 }
 
 // liftThinkingInto moves <think>…</think> out of a message's content and onto

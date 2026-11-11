@@ -424,8 +424,9 @@ function onReasoningProviderChange() {
 function onExecutorProviderChange() {
   cfg.value.executor.provider = execProvider.value
   const available = executorModels.value
-  if (available.length) cfg.value.executor.model = available[0].id
-  else cfg.value.executor.model = ''
+  // Same as reasoning clears the model too: the lane then follows the
+  // reasoning lane, model and all.
+  cfg.value.executor.model = execProvider.value && available.length ? available[0].id : ''
   patchConfig()
 }
 
@@ -551,7 +552,8 @@ async function patchConfig() {
   try {
     await api.patch('/api/v1/config', {
       llm: { provider: cfg.value.llm.provider, model: cfg.value.llm.model, endpoint: cfg.value.llm.endpoint },
-      executor: { provider: cfg.value.executor.provider || undefined, model: cfg.value.executor.model || undefined },
+      // Empty is sent, not dropped: it is how "same as reasoning" is saved.
+      executor: { provider: cfg.value.executor.provider || '', model: cfg.value.executor.model || '' },
       vision: { provider: cfg.value.vision.provider, model: cfg.value.vision.model },
       chat: { provider: cfg.value.chat.provider, model: cfg.value.chat.model, tools: cfg.value.chat.tools || [] },
       agent: {

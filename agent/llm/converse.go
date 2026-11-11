@@ -195,7 +195,7 @@ func (c *Client) completeConverse(ctx context.Context, req *ChatRequest) (*ChatR
 				Function: FunctionCall{Name: b.ToolUse.Name, Arguments: string(b.ToolUse.Input)}})
 		}
 	}
-	liftThinkingInto(&msg)
+	tidyReply(&msg)
 	return &ChatResponse{
 		Choices: []Choice{{Message: msg, FinishReason: converseFinish(cr.StopReason)}},
 		Usage:   cr.Usage.usage(),

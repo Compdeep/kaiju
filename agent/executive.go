@@ -1256,6 +1256,20 @@ func validatePlanDeps(steps []PlanStep) []string {
 	return errs
 }
 
+// replayable copies calls to send back to the model, with arguments that do not
+// parse replaced by an empty object. A host that parses them refuses the whole
+// request otherwise, and the fix is never asked for; the text that failed goes
+// back in the tool message instead.
+func replayable(calls []llm.ToolCall) []llm.ToolCall {
+	out := slices.Clone(calls)
+	for i := range out {
+		if !json.Valid([]byte(out[i].Function.Arguments)) {
+			out[i].Function.Arguments = "{}"
+		}
+	}
+	return out
+}
+
 /*
  * parseExecutivePayload reads a plan out of a reply, however it arrived.
  * desc: A plan is asked for as one shape and comes back as four. It parses as
@@ -1936,7 +1950,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 			// Retry: send the error back and ask the planner to fix
 			log.Printf("[dag] executive (native) plan() parse failed, retrying: %v", err)
 			retryMessages := append(messages,
-				llm.Message{Role: "assistant", Content: "", ToolCalls: choice.Message.ToolCalls},
+				llm.Message{Role: "assistant", Content: "", ToolCalls: replayable(choice.Message.ToolCalls)},
 				llm.Message{Role: "tool", ToolCallID: tc.ID, Name: "plan", Content: planRetryAdvice(err, fixedRaw)},
 			)
 			retryResp, retryErr := a.completeHeavyChecked(retracing(ctx, "plan_reparse"), &llm.ChatRequest{

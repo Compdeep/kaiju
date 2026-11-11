@@ -132,6 +132,13 @@ func asSchemaRequest(req *ChatRequest, provider, model string) *ToolDef {
 	if provider == ProviderAnthropic || !asksForOneShape(req) {
 		return nil
 	}
+	// Bedrock's Chat Completions is not among the APIs Bedrock lists for
+	// structured output, and a schema there is compiled on first use, which
+	// can take a minute and a half. The forced tool call works on every model
+	// that calls tools, so that is what goes.
+	if provider == ProviderBedrock {
+		return nil
+	}
 	if speaksAnthropic(model) {
 		return nil
 	}

@@ -110,6 +110,8 @@ func (c *Client) facts(model string) (ModelFacts, bool) {
 	if model == "" {
 		model = c.model
 	}
+	// A catalog carries models, not their variants.
+	model = BaseModel(model)
 	if model == "" {
 		return ModelFacts{}, false
 	}

@@ -60,7 +60,7 @@ type Config struct {
 // the endpoint and key from the main model.
 type ModelConfig struct {
 	// LLMProvider names the provider for the main model ("openai",
-	// "anthropic", "openrouter"). Empty defaults to openai.
+	// "anthropic", "openrouter", "bedrock"). Empty defaults to openai.
 	//
 	// Set at run time: SetLLMClient, with the three fields below.
 	LLMProvider string

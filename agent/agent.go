@@ -501,7 +501,7 @@ func New(cfg Config) (*Agent, error) {
 		log.Fatalf("[agent] prompt load failed: %v", err)
 	}
 
-	client := llm.NewClient(cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits).Thinks(cfg.Thinks).Catalog(cfg.Catalog).Transport(cfg.LLMTransport)
+	client := llm.NewClientWithProvider(cfg.LLMProvider, cfg.LLMEndpoint, cfg.LLMAPIKey, cfg.LLMModel).Limits(cfg.Limits).Thinks(cfg.Thinks).Catalog(cfg.Catalog).Transport(cfg.LLMTransport)
 
 	reg := toolapi.NewRegistry()
 

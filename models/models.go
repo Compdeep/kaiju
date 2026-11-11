@@ -19,6 +19,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"log"
+
+	"github.com/Compdeep/kaiju/agent/llm"
 )
 
 /*
@@ -342,6 +344,7 @@ func ForcedSmallCall() []Info {
  * return: the context window and the largest reply the provider will produce.
  */
 func Limits(id string) (contextTokens, maxOutputTokens int) {
+	id = llm.BaseModel(id)
 	for _, m := range all {
 		if m.ID == id {
 			return m.ContextTokens, m.MaxOutputTokens
@@ -368,10 +371,43 @@ type Sampling struct {
 }
 
 func Find(id string) (Info, bool) {
+	// A variant id ("qwen.qwen3-32b+high") is its model with a thinking
+	// setting, so it is answered for by that model's entry — see llm.SplitVariant.
+	id = llm.BaseModel(id)
 	for _, m := range all {
 		if m.ID == id {
 			return m, true
 		}
 	}
 	return Info{}, false
+}
+
+/*
+ * Variants is the thinking settings a picker can offer this model as, each a
+ * word for llm.VariantID: "nothink" for a model that thinks and can stop, one
+ * per effort it was measured to act on, and "think" for one that can be
+ * switched on but has no measured effort.
+ * desc: Only what the catalog measured. A model whose thinking cannot be
+ *       changed by request has none, and is offered as itself.
+ * return: the words, or nil.
+ */
+func (i Info) Variants() []string {
+	var out []string
+	if i.Thinks() && i.ReasoningOptional {
+		out = append(out, "nothink")
+	}
+	if !i.Thinks() && !i.ReasoningOptional {
+		return out
+	}
+	for _, e := range llm.Efforts() {
+		for _, w := range i.ReasoningEfforts {
+			if w == e.String() {
+				out = append(out, w)
+			}
+		}
+	}
+	if len(i.ReasoningEfforts) == 0 && !i.Thinks() {
+		out = append(out, "think")
+	}
+	return out
 }

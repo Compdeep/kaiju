@@ -26,10 +26,14 @@ import (
 // (json:"-") and never persisted — the agent's session stores text, and images
 // are re-supplied per request by the host, never held in kaiju.
 type Message struct {
-	Role      string        `json:"role"` // "system", "user", "assistant", "tool"
-	Content   string        `json:"content,omitempty"`
-	Reasoning string        `json:"reasoning,omitempty"` // hidden reasoning from thinking models (reasoning field + lifted <think>…</think>)
-	Parts     []ContentPart `json:"-"`                   // multimodal parts; overrides Content when set
+	Role      string `json:"role"` // "system", "user", "assistant", "tool"
+	Content   string `json:"content,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"` // hidden reasoning from thinking models (reasoning field + lifted <think>…</think>)
+	// ReasoningContent is where some providers, Bedrock's Chat Completions
+	// among them, put the reasoning instead. Read only: the client moves it
+	// onto Reasoning, which is the one place a caller reads it.
+	ReasoningContent string        `json:"reasoning_content,omitempty"`
+	Parts            []ContentPart `json:"-"` // multimodal parts; overrides Content when set
 	// Provenance says what produced this turn — the tools an agent run fired, or
 	// empty when nothing is known. Never sent to a provider: it is here so a lane
 	// can tell a turn that did work from one that only spoke, which role and
@@ -159,6 +163,11 @@ type ChatRequest struct {
 	// from configuration: there is no deployment in which thinking helps a
 	// 96-token routing decision, so there is nothing to configure.
 	Reasoning *ReasoningControl `json:"reasoning,omitempty"`
+
+	// ReasoningEffort is OpenAI's reasoning parameter, which Bedrock reads in
+	// place of the object above. Set by the client for a Bedrock client only,
+	// and then the object above is nil — see bedrockEffort.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 
 	// Think is what the CALLER wants of the model's thinking, in terms that do
 	// not depend on the provider. Not sent: the field above is what goes out,
@@ -414,7 +423,29 @@ const (
 	ProviderOpenAI     = "openai"
 	ProviderAnthropic  = "anthropic"
 	ProviderOpenRouter = "openrouter"
+	// ProviderBedrock is Amazon Bedrock's OpenAI-compatible Chat Completions,
+	// reached with a Bedrock API key as the bearer token.
+	ProviderBedrock = "bedrock"
 )
+
+// DefaultBedrockRegion is the region a Bedrock client with no endpoint uses.
+const DefaultBedrockRegion = "us-east-1"
+
+/*
+ * BedrockEndpoint is the Chat Completions address for a Bedrock region.
+ * desc: bedrock-mantle, not bedrock-runtime: the open-weight models (Qwen,
+ *       NVIDIA, OpenAI's gpt-oss) are served there, and it is the one of the
+ *       two that lists its models.
+ * param: region - an AWS region, e.g. "us-east-1"; empty is the default.
+ * return: the base address, ending in /v1.
+ */
+func BedrockEndpoint(region string) string {
+	region = strings.TrimSpace(region)
+	if region == "" {
+		region = DefaultBedrockRegion
+	}
+	return "https://bedrock-mantle." + region + ".api.aws/v1"
+}
 
 // Client calls an LLM chat completions endpoint (OpenAI or Anthropic).
 type Client struct {
@@ -603,6 +634,9 @@ func NewClientWithProvider(provider, endpoint, apiKey, model string) *Client {
 	if provider == "" {
 		provider = ProviderOpenAI
 	}
+	if provider == ProviderBedrock && strings.TrimSpace(endpoint) == "" {
+		endpoint = BedrockEndpoint("")
+	}
 	return &Client{
 		provider: provider,
 		endpoint: endpoint,
@@ -753,6 +787,7 @@ func (c *Client) completeOnce(ctx context.Context, req *ChatRequest) (*ChatRespo
 	if err := providerBreaker.allow(); err != nil {
 		return nil, err
 	}
+	c.takeVariant(req)
 	c.capReply(req)
 	c.routeProviders(req)
 	c.keepCacheKey(req)
@@ -900,7 +935,12 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 	// left in the middle of the answer when not. Message.Reasoning is the one
 	// place a caller reads it, whichever way the reply arrived.
 	for i := range chatResp.Choices {
-		liftThinkingInto(&chatResp.Choices[i].Message)
+		m := &chatResp.Choices[i].Message
+		if m.Reasoning == "" {
+			m.Reasoning = m.ReasoningContent
+		}
+		m.ReasoningContent = ""
+		liftThinkingInto(m)
 	}
 	return &chatResp, nil
 }
@@ -923,6 +963,7 @@ func liftThinkingInto(m *Message) {
 // delta, returning the full accumulated text. Thin wrapper over
 // CompleteStreamResp for callers that only need the text.
 func (c *Client) CompleteStream(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (string, error) {
+	c.takeVariant(req)
 	c.capReply(req)
 	resp, err := c.CompleteStreamResp(ctx, req, onChunk)
 	if err != nil {
@@ -965,6 +1006,7 @@ func (c *Client) CompleteStreamResp(ctx context.Context, req *ChatRequest, onChu
 // streamOnce is one streamed attempt: the preparation, the wire, and the
 // observation.
 func (c *Client) streamOnce(ctx context.Context, req *ChatRequest, onChunk func(chunk, kind string)) (*ChatResponse, error) {
+	c.takeVariant(req)
 	c.capReply(req)
 	// The same settlement Complete makes. Without it a streamed call is the one
 	// kind whose thinking nobody decided.
@@ -1047,7 +1089,9 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 				Delta struct {
 					Content   string `json:"content"`
 					Reasoning string `json:"reasoning"`
-					ToolCalls []struct {
+					// Bedrock's name for the same thing.
+					ReasoningContent string `json:"reasoning_content"`
+					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Type     string `json:"type"`
@@ -1079,6 +1123,9 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 		ch := chunk.Choices[0]
 		if ch.FinishReason != "" {
 			finish = ch.FinishReason
+		}
+		if ch.Delta.Reasoning == "" {
+			ch.Delta.Reasoning = ch.Delta.ReasoningContent
 		}
 		if ch.Delta.Reasoning != "" {
 			reasoning.WriteString(ch.Delta.Reasoning)

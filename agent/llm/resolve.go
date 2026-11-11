@@ -182,7 +182,11 @@ func (c *Client) applyReasoning(req *ChatRequest) {
 	}
 	f, known := c.facts(model)
 	r := resolveReasoning(req, f, known)
-	req.Reasoning = r.wire()
+	if c.provider == ProviderBedrock {
+		req.Reasoning, req.ReasoningEffort = nil, r.bedrockEffort(f)
+	} else {
+		req.Reasoning = r.wire()
+	}
 	// A thinking call is sampled as the model's maker says, over the caller's
 	// temperature: at 0.3 and nothing else, qwen3.6's plans repeated to the cap.
 	if s := r.Sampling; s.Temperature > 0 {
@@ -208,4 +212,42 @@ func (r resolved) wire() *ReasoningControl {
 		out.Enabled = &think
 	}
 	return out
+}
+
+/*
+ * bedrockEffort is the resolved reasoning as Bedrock's reasoning_effort, or ""
+ * to send nothing.
+ * desc: One word carries all of it, so each answer has to be put as a word.
+ *       On: the effort asked for, or for a model that does not think unless
+ *       asked, the strongest it was measured to act on — Qwen3 on Bedrock
+ *       thinks at "high" and at nothing below. A model that already thinks is
+ *       sent nothing. Off: "none", and only to a model that thinks by default
+ *       and can stop; one that does not think by default is already off.
+ *       Budgets have no word here and are not sent.
+ * param: f - the catalog's answer for this model.
+ * return: the word, or "".
+ */
+func (r resolved) bedrockEffort(f ModelFacts) string {
+	if r.Effort != EffortUnset {
+		return r.Effort.String()
+	}
+	if !r.Say {
+		return ""
+	}
+	if !r.Think {
+		if f.Thinking.Default {
+			return "none"
+		}
+		return ""
+	}
+	if f.Thinking.Default || len(f.Thinking.Efforts) == 0 {
+		return ""
+	}
+	strongest := f.Thinking.Efforts[0]
+	for _, e := range f.Thinking.Efforts {
+		if e > strongest {
+			strongest = e
+		}
+	}
+	return strongest.String()
 }

@@ -281,10 +281,27 @@ Choose one:
 
 ### groups
 
-The groups of work the request needs. The planner is shown only the tools in
-the groups you pick, so a group left out is work the plan cannot do. Pick every
-group the request could involve, and when unsure between two, pick both. Leave
-it empty only when no group fits; the planner is then shown every tool.
+Select every group of tools needed to fulfil the whole request. The planner
+receives only the tools in the groups you select, so a missing group can make
+the task impossible.
+
+Think through the complete workflow, not just the main action:
+
+- What is the outcome the user wants?
+- What inputs or information does it need? Are they already in the
+  conversation or accessible context, or must they be retrieved, read or
+  generated?
+- What is needed for the steps in between, as well as for the final one?
+
+Consider where information comes from, not only what the user wants done. A
+calculation may need web research first; code may need files read first.
+
+Do not assume information is available unless it is present in the
+conversation or accessible context. Do not select groups merely because they
+could theoretically be useful.
+
+When unsure between two plausible groups, include both. Leave it empty only
+when no group fits; the planner is then shown every tool.
 
 Group names only, never a skill name:
 

@@ -66,7 +66,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	// The chat lane's. Split out of ROUTE because the two lanes ask different
 	// things, and asking both in one reply let the words starve the decision.
 	"RECALL":          {"867c79be8a26ea3e", 1196},
-	"PREFLIGHT":       {"4ceb63abcb34ac7e", 6952},
+	"PREFLIGHT":       {"84da80ffecc4f69e", 7609},
 	"EXECUTIVE":       {"c05787f9bb1332ad", 7682},
 	"AGGREGATOR":      {"a782c5558ef001d0", 3631},
 	"REFRAME_PLAN":    {"38e0608552a210d1", 3921},

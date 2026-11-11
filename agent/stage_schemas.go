@@ -362,10 +362,10 @@ func preflightSchema() llm.ToolDef {
 						"items": {"type": "string"},
 						"description": "Skill keys relevant to this query."
 					},
-					"required_categories": {
+					"groups": {
 						"type": "array",
-						"items": {"type": "string"},
-						"description": "Tool categories the plan MUST include."
+						"items": {"type": "string", "enum": %s},
+						"description": "The groups of work this request needs. The planner is shown only their tools."
 					},
 					"context": %s,
 					"compute_mode": {
@@ -379,7 +379,7 @@ func preflightSchema() llm.ToolDef {
 					}
 				},
 				"required": ["mode", "intent", "context", "compute_mode"]
-			}`, PreflightContextSchema())),
+			}`, groupEnum(), PreflightContextSchema())),
 		},
 	}
 }

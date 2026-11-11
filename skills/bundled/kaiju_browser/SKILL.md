@@ -1,6 +1,7 @@
 ---
 name: kaiju_browser
 description: Works in the person's own Chrome through the Kaiju Browser Relay extension — pairing it, listing and switching tabs, opening pages, reading what a page says, screenshots, and clicking, typing, choosing from dropdowns and pressing keys, including on sites they are signed in to
+groups: [browser]
 ---
 
 ## When to Use

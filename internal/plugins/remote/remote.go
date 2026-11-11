@@ -64,6 +64,9 @@ type manifestTool struct {
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
 	Impact      string          `json:"impact"`
+	// Groups are the toolapi.Groups the tool belongs to. None means it is
+	// shown on every run.
+	Groups []string `json:"groups"`
 	// Reader marks a tool that renders+extracts a URL. When set, the bridge ALSO
 	// registers it as web_fetch's ReaderFallback, so once the plugin is enabled the
 	// fetch tool reads every page through it automatically (JS/SPA pages included) —
@@ -164,6 +167,7 @@ var _ toolapi.Tool = (*remoteTool)(nil)
 
 func (t *remoteTool) Name() string        { return t.spec.Name }
 func (t *remoteTool) Description() string { return t.spec.Description }
+func (t *remoteTool) Groups() []string    { return t.spec.Groups }
 
 func (t *remoteTool) Parameters() json.RawMessage {
 	if len(t.spec.Parameters) == 0 || string(t.spec.Parameters) == "null" {

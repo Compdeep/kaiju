@@ -1,6 +1,7 @@
 ---
 name: session_logs
 description: "Search and analyse past conversation sessions. Use when the user asks about previous conversations, wants to find something discussed earlier, or needs to review session history."
+groups: [memory]
 ---
 
 ## When to Use

@@ -536,9 +536,8 @@ type executiveOutput struct {
  *       behind them were read in full every time. Written in this order, every
  *       run shares the first sixty thousand.
  *
- *       The categories preflight names open the run's half. The step that
- *       dropped tools of other kinds from the index is gone: it made the index
- *       differ between runs, which is the one thing the shared start cannot do.
+ *       The tool index is the picked groups' tools, so it is shared by runs
+ *       that picked the same groups; the rules before it are shared by all.
  * param: relevant - slice of tool names visible to the planner.
  * param: dagMode - the DAG execution mode string.
  * param: intent - the intent level string ("auto" or a specific level).
@@ -676,46 +675,15 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		}
 	}
 
-	// What this query must reach for, before anything it may reach with.
-	//
-	// Preflight decides this, and it is the first of the run's own sections:
-	// after the shared start, so the cache match above it holds, and ahead of
-	// the skill guidance rather than at the very end, where it was once written
-	// and nobody applied it. Measured over twenty-eight runs the first plan met
-	// about half of the categories named, so this is a hint the planner weighs,
-	// not a rule it keeps.
-	if graph != nil && graph.Preflight != nil && len(graph.Preflight.RequiredCategories) > 0 {
-		sb.WriteString("## Required Tool Categories\n")
-		sb.WriteString(fmt.Sprintf("This query needs tools from: %s. Your plan MUST include at least one tool from each of these categories.\n",
-			strings.Join(graph.Preflight.RequiredCategories, ", ")))
-		// bash appears under network as well as process, because a shell running
-		// curl reaches the network — and listing it only under process made this
-		// block contradict a skill.
-		//
-		// The weather skill names the tool and the URL: bash, curl wttr.in, and
-		// "don't use web_search for weather". Preflight categorised a weather
-		// question as network. bash was not a network tool here, so a plan of
-		// five curl calls satisfied the skill and named no network tool, which
-		// this block forbids in the one line of the prompt that says MUST. The
-		// planner obeyed the MUST: five web_search calls, twenty-five results,
-		// not one temperature among them, and three planning rounds to arrive
-		// where the skill had pointed in the first.
-		sb.WriteString("Category → common tools:\n")
-		sb.WriteString("- network: web_fetch, web_search, bash (curl, wget)\n")
-		sb.WriteString("- filesystem: file_read, file_write, file_list, bash\n")
-		sb.WriteString("- compute: compute\n")
-		sb.WriteString("- process: process_list, process_kill, bash\n")
-		sb.WriteString("- info: sysinfo, env_list, disk_usage, net_info, bash\n\n")
-	}
-
 	// Skill Planning Guidance sections. These are authoritative — if a skill
 	// says "use compute deep", the planner must follow that, not substitute
 	// file_list/file_read. Written after the tool index because the set of
 	// skills is this run's; see the doc comment on the order.
 	var guidance []string
 	plannerHeadings := skillmd.PlannerHeadings
-	// The keys this run selected, or every key when it selected none — the
-	// planner has always fallen back to all of them rather than to nothing.
+	// The keys this run selected. A run that selected none and picked no group
+	// gets every key, as the planner always has; one that picked groups gets
+	// only the cards that came with them.
 	//
 	// Resolved through lookupGuidanceBody, so a skill card counts as well
 	// as a SKILL.md. This loop read one of the two stores, which meant every
@@ -723,7 +691,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	// planner that never saw it. Iterating the keys rather than a map also
 	// fixes the order, which varied between runs.
 	keys := cards
-	if len(keys) == 0 {
+	if len(keys) == 0 && len(pickedGroups(graph)) == 0 {
 		keys = a.guidanceKeys()
 	}
 	for _, key := range keys {

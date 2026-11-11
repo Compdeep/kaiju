@@ -44,7 +44,8 @@ var _ toolapi.TypedExecutor = (*DebugTool)(nil)
 // NewDebugTool constructs a DebugTool bound to an Agent.
 func NewDebugTool(a *Agent) *DebugTool { return &DebugTool{agent: a} }
 
-func (d *DebugTool) Name() string { return debugToolName }
+func (d *DebugTool) Name() string     { return debugToolName }
+func (d *DebugTool) Groups() []string { return []string{toolapi.GroupCode} }
 
 func (d *DebugTool) Description() string {
 	return "Find the ROOT CAUSE of something this run cannot account for. Spawns Holmes, a " +

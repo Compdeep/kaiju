@@ -42,6 +42,7 @@ Common yt-dlp options:
 - Custom filename: `yt-dlp -o 'output.%(ext)s' '<URL>'`
 - List formats: `yt-dlp -F '<URL>'`
 - With subtitles: `yt-dlp --write-subs '<URL>'`
+- Transcript only, for a question about what a video says: `yt-dlp --write-auto-sub --skip-download '<URL>'`, then `grep` the subtitle file
 - Playlist: `yt-dlp --yes-playlist '<URL>'`
 
 ### File download (PDF, image, archive, binary)

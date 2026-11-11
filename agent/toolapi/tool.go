@@ -209,52 +209,58 @@ func GetDestination(t Tool, params map[string]any) string {
 }
 
 /*
- * Categorised is an optional interface a tool implements to say what KIND of
- * work it does, from a closed vocabulary the engine owns.
- * desc: One purpose only — narrowing what a planner is shown on a registry too
- *       large to show whole. It is not authorisation, it is not routing, and
- *       nothing dispatches on it.
+ * Grouped is an optional interface a tool implements to name the groups of work
+ * it belongs to, from Groups.
+ * desc: Preflight picks the groups a request needs, and the planner is shown
+ *       only the tools in them. A tool in several groups is shown once.
  *
- *       The vocabulary is deliberately coarse and domain-neutral, because the
- *       classifier that names these is a model reading a request in ordinary
- *       words. Five buckets are hard to get wrong; a finer taxonomy would be
- *       wrong more often, and a wrong bucket costs a tool its place.
- *
- *       A tool that implements nothing declares nothing, and a tool that
- *       declares nothing is never excluded on this basis — see ToolCategories.
- *       Silence must not remove a capability.
+ *       A tool that names no group is always shown. Silence must not remove a
+ *       capability, so a tool an application wrote without groups, or the
+ *       shell, is never lost to a wrong pick.
  */
-type Categorised interface {
-	/*
-	 * Categories names the kinds of work this tool does.
-	 * return: zero or more of CategoryNetwork, CategoryFilesystem,
-	 *         CategoryCompute, CategoryProcess, CategoryInfo
-	 */
-	Categories() []string
+type Grouped interface {
+	// Groups names the groups this tool belongs to, each a Name from Groups.
+	Groups() []string
 }
 
-// The vocabulary. A tool may name more than one; most name one.
+// Group is one kind of work a request can need, as preflight is shown it.
+type Group struct {
+	Name  string
+	About string // what a request in this group asks for, in plain words
+}
+
+// The group names, for tools to declare.
 const (
-	CategoryNetwork    = "network"    // reaching anything off this machine
-	CategoryFilesystem = "filesystem" // reading, writing or listing files
-	CategoryCompute    = "compute"    // running code, or processing data
-	CategoryProcess    = "process"    // inspecting or controlling running programs
-	CategoryInfo       = "info"       // reading the state of this machine
+	GroupWeb       = "web"
+	GroupBrowser   = "browser"
+	GroupFiles     = "files"
+	GroupDocuments = "documents"
+	GroupCode      = "code"
+	GroupData      = "data"
+	GroupOSProcess = "os_process"
+	GroupOSInfo    = "os_info"
+	GroupMemory    = "memory"
+	GroupKaiju     = "kaiju"
 )
 
-/*
- * ToolCategories returns what kinds of work a tool declares, or nothing.
- * desc: Nothing is the answer for every tool that has not been told to say,
- *       which is most of them and every tool an application wrote before this
- *       existed. A caller narrowing by category must treat that as "cannot
- *       say", never as "matches nothing" — the difference is a tool the
- *       planner can still see against one it can never call.
- * param: t - the tool to ask
- * return: its categories, or nil
- */
-func ToolCategories(t Tool) []string {
-	if c, ok := t.(Categorised); ok {
-		return c.Categories()
+// Groups is every group preflight can pick, in the order it is shown them.
+var Groups = []Group{
+	{GroupWeb, "find or read information on the public web: search, read a page, research a topic with sources, current facts, news, prices, weather"},
+	{GroupBrowser, "act in the person's own open Chrome browser: tabs, clicking, typing, reading or screenshotting what is on screen"},
+	{GroupFiles, "list, read, create, change, move, archive or unpack files and folders"},
+	{GroupDocuments, "read the content of documents and images: PDF, Word, Excel, PowerPoint, text files, pictures"},
+	{GroupCode, "write, run, debug or build code, scripts, apps or websites; work in a repository with git"},
+	{GroupData, "calculate, analyse or transform data; statistics; charts and tables; converting between formats"},
+	{GroupOSProcess, "running programs and services on this machine: list, start, stop, restart or kill them"},
+	{GroupOSInfo, "facts about this machine: hardware, operating system, disk space, memory use, environment variables, network interfaces, clipboard"},
+	{GroupMemory, "remember facts about the person, recall them, or search past conversations"},
+	{GroupKaiju, "kaiju itself: its plugins, and showing things in its side panel"},
+}
+
+// ToolGroups returns the groups a tool names, or nil when it names none.
+func ToolGroups(t Tool) []string {
+	if g, ok := t.(Grouped); ok {
+		return g.Groups()
 	}
 	return nil
 }

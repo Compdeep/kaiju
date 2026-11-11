@@ -68,6 +68,10 @@ func (c *ComputeTool) EngineSetParams() []string {
 
 func (c *ComputeTool) Name() string { return "compute" }
 
+// Compute is in code and in data: it writes and runs code, for a build or for
+// a calculation.
+func (c *ComputeTool) Groups() []string { return []string{toolapi.GroupCode, toolapi.GroupData} }
+
 func (c *ComputeTool) Description() string {
 	return "Compute a VALUE via a runnable script, or scaffold a whole new project. " +
 		"Shallow mode: the Coder emits a script, the script runs, stdout is captured " +

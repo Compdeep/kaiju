@@ -27,7 +27,8 @@ type VisionTool struct {
 // NewVisionTool constructs the image_read tool bound to an Agent's vision lane.
 func NewVisionTool(a *Agent) *VisionTool { return &VisionTool{agent: a} }
 
-func (t *VisionTool) Name() string { return "image_read" }
+func (t *VisionTool) Name() string     { return "image_read" }
+func (t *VisionTool) Groups() []string { return []string{toolapi.GroupDocuments} }
 
 func (t *VisionTool) Description() string {
 	return "Look at an image file and answer a question about it using the vision model. " +

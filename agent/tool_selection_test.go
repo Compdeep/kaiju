@@ -236,16 +236,16 @@ func TestRelevantTools_RecordsHowTheListWasNarrowed(t *testing.T) {
 // The summary line says the lane, the rank and the guidance. The categories are
 // what the planner is told the plan must reach for, and they were on no line at
 // all — so the reason was in a field nothing rendered.
-func TestPreflightDecided_CarriesTheCategoriesItNamed(t *testing.T) {
+func TestPreflightDecided_CarriesTheGroupsItNamed(t *testing.T) {
 	pf := &PreflightResult{
-		Mode:               "agent",
-		RequiredCategories: []string{"process", "network"},
-		Skills:             []string{"security"},
-		ComputeMode:        "shallow",
-		NeedsSynthesis:     true,
+		Mode:           "agent",
+		Groups:         []string{"os_process", "web"},
+		Skills:         []string{"security"},
+		ComputeMode:    "shallow",
+		NeedsSynthesis: true,
 	}
 	got := strings.Join(preflightDecided(pf), " | ")
-	for _, want := range []string{"categories: process, network", "mode: agent", "guidance: security", "compute: shallow", "synthesis"} {
+	for _, want := range []string{"groups: os_process, web", "mode: agent", "guidance: security", "compute: shallow", "synthesis"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%q missing from: %s", want, got)
 		}
@@ -254,10 +254,10 @@ func TestPreflightDecided_CarriesTheCategoriesItNamed(t *testing.T) {
 
 // Naming none is an answer, not an absence: it is the first thing anyone asks
 // when a planner was shown everything.
-func TestPreflightDecided_SaysWhenNoCategoriesWereNamed(t *testing.T) {
+func TestPreflightDecided_SaysWhenNoGroupsWereNamed(t *testing.T) {
 	got := strings.Join(preflightDecided(&PreflightResult{Mode: "agent"}), " | ")
-	if !strings.Contains(got, "categories: none named") {
-		t.Errorf("an empty category list left no line: %s", got)
+	if !strings.Contains(got, "groups: none named, every tool shown") {
+		t.Errorf("an empty group list left no line: %s", got)
 	}
 }
 

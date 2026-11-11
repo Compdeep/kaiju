@@ -44,6 +44,10 @@ func NewSkillMD(fm *Frontmatter, body, baseDir, filePath string, modTime time.Ti
 func (s *SkillMD) Name() string        { return s.fm.Name }
 func (s *SkillMD) Description() string { return s.fm.Description }
 
+// Groups are the toolapi.Groups this card comes with. A card naming none is
+// added only when preflight picks it.
+func (s *SkillMD) Groups() []string { return s.fm.Groups }
+
 func (s *SkillMD) Parameters() json.RawMessage { return s.params }
 
 // Body returns the raw markdown body for section extraction (e.g. Planning Guidance).

@@ -11,6 +11,7 @@ import (
 type Frontmatter struct {
 	Name                   string         `yaml:"name"`
 	Description            string         `yaml:"description"`
+	Groups                 []string       `yaml:"groups"` // toolapi.Groups this card comes with
 	UserInvocable          *bool          `yaml:"user-invocable"`
 	DisableModelInvocation bool           `yaml:"disable-model-invocation"`
 	CommandDispatch        string         `yaml:"command-dispatch"`

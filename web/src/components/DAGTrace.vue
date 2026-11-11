@@ -475,8 +475,8 @@ function pushNode(items, n, depth, last) {
   if (n.tools && n.tools.length) {
     items.push({ type: 'tools', key: `tl-${n.id}`, node: n, depth: sub })
   }
-  // What a classifying node settled — the categories among them, which is what
-  // the planner is told the plan must reach for. See NodeInfo.Decided.
+  // What a classifying node settled — the groups among them, which decide the
+  // tools the planner is shown. See NodeInfo.Decided.
   if (n.decided && n.decided.length) {
     items.push({ type: 'decided', key: `dc-${n.id}`, node: n, depth: sub })
   }
@@ -578,11 +578,11 @@ function indent(d) { return { paddingLeft: (d || 0) * 13 + 'px' } }
 // the counts can be coloured when a step actually removed something — most
 // steps normally do not, and telling them apart at a glance is the point of
 // showing this at all.
-// The categories first when there are any — they are what the planner is told
-// to reach for, and the reason anyone opens this row.
+// The groups first when there are any — they decide the tools the planner is
+// shown, and are the reason anyone opens this row.
 function decidedPeek(decided) {
-  const cats = (decided || []).find(d => d.startsWith('categories: '))
-  if (cats) return cats
+  const groups = (decided || []).find(d => d.startsWith('groups: '))
+  if (groups) return groups
   return (decided || []).slice(0, 2).join(' · ')
 }
 

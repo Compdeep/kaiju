@@ -1,6 +1,7 @@
 ---
 name: kaiju_coder
 description: Coding workflows — write, refactor, debug, and review code using file and bash tools with parallel planning guidance
+groups: [code]
 metadata:
   requires:
     bins: ["git"]

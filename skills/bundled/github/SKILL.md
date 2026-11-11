@@ -33,6 +33,8 @@ Plan parallel calls when checking multiple repos or filtering by different crite
 
 Nothing links them, so they run at the same time.
 
+For the first or last issue with a label, or one by date: `bash` — `gh api "repos/<owner>/<repo>/issues?labels=<label>&state=closed&sort=created&direction=asc&per_page=1"`
+
 ### View CI run logs
 
 1. `bash` — `gh run list --limit 5` to find the run, tag `find_run`

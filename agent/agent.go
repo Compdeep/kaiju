@@ -961,6 +961,15 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 		step("scope", len(base), len(base), "no scope set, all allowed")
 	}
 
+	// The groups preflight picked: their tools, and the tools that name none.
+	if groups := pickedGroups(graph); len(groups) > 0 {
+		before := len(base)
+		base = a.toolsInGroups(base, groups)
+		step("groups", before, len(base), "preflight picked "+strings.Join(groups, ", "))
+	} else {
+		step("groups", len(base), len(base), "none picked, every tool shown")
+	}
+
 	// Last, and only here, does the list get shorter for reasons of size. The
 	// planner is shown a signature and a return shape per tool, and that is what
 	// stops fitting once a registry is large. Trimming after the visibility

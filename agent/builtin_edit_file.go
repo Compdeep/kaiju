@@ -70,6 +70,9 @@ var _ toolapi.TypedExecutor = (*EditFileTool)(nil)
 func NewEditFileTool(a *Agent) *EditFileTool { return &EditFileTool{agent: a} }
 
 func (e *EditFileTool) Name() string { return "edit_file" }
+func (e *EditFileTool) Groups() []string {
+	return []string{toolapi.GroupFiles, toolapi.GroupCode}
+}
 
 func (e *EditFileTool) Description() string {
 	return "Edit or create a specific file via the Coder LLM. Use this when " +

@@ -1,6 +1,7 @@
 ---
 name: system_operations
 description: Process management, command execution, service control, system administration tasks
+groups: [os_process]
 ---
 
 ## Planning Guidance

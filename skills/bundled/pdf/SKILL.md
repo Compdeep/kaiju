@@ -1,6 +1,7 @@
 ---
 name: "PDF Reading"
 description: "Read the text of a PDF file — an uploaded document or one downloaded from the web — before answering questions about its contents."
+groups: [documents]
 ---
 
 ## Core Role

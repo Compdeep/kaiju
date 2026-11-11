@@ -1,6 +1,7 @@
 ---
 name: data_science
 description: "Python data analysis, statistics, and data science workflows. Use when the goal involves loading data, cleaning, aggregating, computing statistics, building models, or producing plots and reports."
+groups: [data]
 ---
 
 ## When to Use

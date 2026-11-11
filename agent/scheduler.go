@@ -339,10 +339,10 @@ func preflightDecided(pf *PreflightResult) []string {
 	}
 	add("mode", pf.Mode)
 	add("intent", pf.Intent.String())
-	if len(pf.RequiredCategories) > 0 {
-		add("categories", strings.Join(pf.RequiredCategories, ", "))
+	if len(pf.Groups) > 0 {
+		add("groups", strings.Join(pf.Groups, ", "))
 	} else {
-		add("categories", "none named")
+		add("groups", "none named, every tool shown")
 	}
 	if len(pf.Skills) > 0 {
 		add("guidance", strings.Join(pf.Skills, ", "))
@@ -471,7 +471,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	// ── Phase 0: Preflight (two separable jobs) ──
 	//   routing   — mode = chat / meta / investigate; chat & meta short-circuit the
 	//               executive. Only needed in interactive mode.
-	//   plan-prep — skills (which guidance cards), intent (rank), required_categories,
+	//   plan-prep — skills (which guidance cards), intent (rank), groups,
 	//               and a context paragraph. The agent's own pre-plan setup.
 	// Autonomous mode is pure agent: skip routing (its result would only be
 	// discarded) and run plan-prep directly. Interactive mode routes first, and
@@ -561,8 +561,8 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			})
 		}
 
-		log.Printf("[dag] preflight: mode=%s intent=%s skills=%v categories=%v context=%q",
-			pf.Mode, pf.Intent, pf.Skills, pf.RequiredCategories, Text.TruncateLog(pf.Context.Text(), 120))
+		log.Printf("[dag] preflight: mode=%s intent=%s skills=%v groups=%v context=%q",
+			pf.Mode, pf.Intent, pf.Skills, pf.Groups, Text.TruncateLog(pf.Context.Text(), 120))
 
 		// Short-circuit chat — skip the executive entirely. Interactive only;
 		// autonomous never produces this mode.

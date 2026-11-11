@@ -1,6 +1,7 @@
 ---
 name: web_research_guide
 description: Guides web research using web_search, web_fetch, and web_research, including source selection, multi-angle research, and whole-page analysis.
+groups: [web]
 ---
 
 ## Planning Guidance

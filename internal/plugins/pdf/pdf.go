@@ -53,7 +53,8 @@ const defaultMaxChars = 200_000
 // extractTool reads a PDF's text layer and returns it as plain text.
 type extractTool struct{ workspace string }
 
-func (t *extractTool) Name() string { return "pdf_extract" }
+func (t *extractTool) Name() string     { return "pdf_extract" }
+func (t *extractTool) Groups() []string { return []string{toolapi.GroupDocuments} }
 
 func (t *extractTool) Description() string {
 	return "Extract the text of a text-based PDF file into plain text. Use this to read the contents of a PDF — one that was uploaded, or one that web_fetch downloaded to disk — before answering questions about it. Input is a file path. Works on digital PDFs with a real text layer; a scanned or image-only PDF returns little or no text (that needs a vision model)."

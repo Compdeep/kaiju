@@ -1,6 +1,7 @@
 ---
 name: "Plugins"
 description: "Report which plugins this kaiju has and which it could have, and — only when the user asks — install one, which rebuilds kaiju and restarts it."
+groups: [kaiju]
 ---
 
 ## Core Role

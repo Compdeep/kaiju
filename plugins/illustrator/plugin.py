@@ -108,6 +108,8 @@ MANIFEST = {
                 },
                 "required": ["action", "path"],
             },
+            # kaiju shows it to the planner when preflight picks one of these.
+            "groups": ["files", "documents"],
         }
     ],
 }

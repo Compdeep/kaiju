@@ -19,7 +19,7 @@ Every kaiju investigation is a DAG. Components emit nodes, the scheduler fires t
               circuit)  ▼
                  ┌───────────────────────┐
                  │  classifyInvestigate  │  skills · mode · intent ·
-                 │  (preflight)          │  required_categories · context · compute_mode
+                 │  (preflight)          │  groups · context · compute_mode
                  └──────┬────────────────┘
                         ▼
                  ┌─────────────┐
@@ -137,13 +137,15 @@ It carries only a minimal slice of history (`routeContext` — the running conve
   "skills":              ["webdeveloper", "python"],
   "mode":                "chat" | "meta" | "investigate",
   "intent":              "<intent name from the registry>",
-  "required_categories": ["network", "filesystem", "compute", "process", "info"],
+  "groups":              ["web", "code", ...],
   "context":             "paragraph quoting every concrete identifier (URLs, paths, selectors, constants) verbatim",
   "compute_mode":        "" | "shallow" | "deep"
 }
 ```
 
 The skill manifest is built here (only reached on the investigate path). `intent` resolves against the intent registry; `context` is the ONLY channel by which concrete identifiers from chat history reach the Coder/Executive/microplanner, so the prompt forces verbatim quoting. Any missing or malformed field falls back to a safe default (`validatePreflight` / `defaultPreflight`). The result lands on the Graph (`graph.Preflight`, `graph.ActiveCards`) — per-investigation, so concurrent runs never clobber each other.
+
+`groups` are names from `toolapi.Groups`. The planner is shown only the tools in the picked groups (each tool names its groups through `Groups()`) and the tools that name none, such as `bash`. A card whose header names a picked group comes with it; a picked card in a group not picked is dropped. No group picked means every tool, as before (`agent/groups.go`).
 
 ### Executive
 

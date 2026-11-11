@@ -8,21 +8,21 @@ import (
 
 // Two runs that chose different skills and different intents are given the
 // same prompt up to where their own choices begin. That shared start is what a
-// model host can cache, and it has to hold the long parts — the rules and the
-// tool index — or there is nothing worth caching.
+// model host can cache: the rules always, and the tool index for runs that
+// picked the same groups.
 func TestPlannerPrompt_SharesItsStartAcrossRuns(t *testing.T) {
 	a := &Agent{skillGuidance: loadBuiltinSkills(nil)}
 	g1, g2 := NewGraph(), NewGraph()
 	g1.ActiveCards = []string{"data_retrieval"}
-	g1.Preflight = &PreflightResult{RequiredCategories: []string{"network"}}
+	g1.Preflight = &PreflightResult{Groups: []string{"web"}}
 	g2.ActiveCards = []string{"system_operations"}
 
 	p1 := a.executiveSystemPrompt(context.Background(), g1, nil, "", "observe", "")
 	p2 := a.executiveSystemPrompt(context.Background(), g2, nil, "", "execute", "")
 
-	cut := strings.Index(p1, "## Required Tool Categories")
+	cut := strings.Index(p1, "## Skill Guidance")
 	if cut < 0 {
-		t.Fatal("the prompt has no Required Tool Categories section")
+		t.Fatal("the prompt has no Skill Guidance section")
 	}
 	shared := p1[:cut]
 	if !strings.HasPrefix(p2, shared) {

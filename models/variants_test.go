@@ -79,3 +79,11 @@ func TestWithVariants(t *testing.T) {
 		t.Errorf("gpt-oss on OpenRouter: %d entries, want itself and three efforts", n)
 	}
 }
+
+// Bedrock serves Qwen3 32B with a 32,768-token context. Sized against more, a
+// planner call went past it and Bedrock refused the request.
+func TestBedrockQwen32BWindow(t *testing.T) {
+	if ctx, _ := Limits("qwen.qwen3-32b"); ctx != 32768 {
+		t.Errorf("context = %d, want 32768", ctx)
+	}
+}

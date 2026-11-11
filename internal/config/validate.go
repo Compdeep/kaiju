@@ -14,8 +14,8 @@ import (
  * return: an error describing the first validation failure, or nil if valid
  */
 func (c *Config) Validate() error {
-	if c.LLM.APIKey == "" {
-		return fmt.Errorf("config: llm.api_key is required (set LLM_API_KEY env var or config)")
+	if c.ReasoningLane().APIKey == "" {
+		return fmt.Errorf("config: no key for the reasoning provider %q (set providers.%s.api_key, or LLM_API_KEY)", c.LLM.Provider, c.LLM.Provider)
 	}
 	if c.LLM.Model == "" {
 		return fmt.Errorf("config: llm.model is required")

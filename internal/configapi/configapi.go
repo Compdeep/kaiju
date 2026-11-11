@@ -150,6 +150,12 @@ type configPatch struct {
 		Model    *string   `json:"model,omitempty"`
 		Tools    *[]string `json:"tools,omitempty"`
 	} `json:"chat,omitempty"`
+	// Providers sets keys and addresses per provider. An empty or absent
+	// field leaves what is saved.
+	Providers map[string]struct {
+		Endpoint *string `json:"endpoint,omitempty"`
+		APIKey   *string `json:"api_key,omitempty"`
+	} `json:"providers,omitempty"`
 	Agent *struct {
 		DAGEnabled        *bool   `json:"dag_enabled,omitempty"`
 		DAGMode           *string `json:"dag_mode,omitempty"`
@@ -188,8 +194,9 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		if patch.LLM.Endpoint != nil {
 			c.cfg.LLM.Endpoint = *patch.LLM.Endpoint
 		}
-		if patch.LLM.APIKey != nil {
-			c.cfg.LLM.APIKey = *patch.LLM.APIKey
+		if patch.LLM.APIKey != nil && *patch.LLM.APIKey != "" {
+			// The reasoning lane's key is its provider's key.
+			c.setProvider(c.cfg.LLM.Provider, nil, patch.LLM.APIKey)
 		}
 		if patch.LLM.Model != nil {
 			c.cfg.LLM.Model = *patch.LLM.Model
@@ -332,26 +339,21 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Live-update the agent's LLM clients when config changes
-	if patch.LLM != nil && c.agent != nil {
-		c.agent.SetLLMClient(c.cfg.LLM.Provider, c.cfg.LLM.Endpoint, c.cfg.LLM.APIKey, c.cfg.LLM.Model)
-		log.Printf("[config] reasoning model updated: provider=%s model=%s", c.cfg.LLM.Provider, c.cfg.LLM.Model)
+	for name, p := range patch.Providers {
+		c.setProvider(name, p.Endpoint, p.APIKey)
 	}
-	if patch.Executor != nil && c.agent != nil && c.cfg.Executor.Model != "" {
-		ep := c.cfg.Executor.Endpoint
-		if ep == "" {
-			ep = c.cfg.LLM.Endpoint
-		}
-		prov := c.cfg.Executor.Provider
-		if prov == "" {
-			prov = c.cfg.LLM.Provider
-		}
-		key := c.cfg.Executor.APIKey
-		if key == "" {
-			key = c.cfg.LLM.APIKey
-		}
-		c.agent.SetExecutorClient(prov, ep, key, c.cfg.Executor.Model)
-		log.Printf("[config] executor model updated: model=%s", c.cfg.Executor.Model)
+
+	// Live-update the agent's LLM clients when config changes. A provider's
+	// key reaches every lane on that provider, so a key change rebuilds both.
+	if c.agent != nil && (patch.LLM != nil || len(patch.Providers) > 0) {
+		l := c.cfg.ReasoningLane()
+		c.agent.SetLLMClient(l.Provider, l.Endpoint, l.APIKey, c.cfg.LLM.Model)
+		log.Printf("[config] reasoning model updated: provider=%s model=%s", l.Provider, c.cfg.LLM.Model)
+	}
+	if c.agent != nil && c.cfg.Executor.Model != "" && (patch.Executor != nil || patch.LLM != nil || len(patch.Providers) > 0) {
+		l := c.cfg.ExecutorLane()
+		c.agent.SetExecutorClient(l.Provider, l.Endpoint, l.APIKey, c.cfg.Executor.Model)
+		log.Printf("[config] executor model updated: provider=%s model=%s", l.Provider, c.cfg.Executor.Model)
 	}
 
 	// Save to disk
@@ -364,6 +366,31 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, map[string]string{"status": "updated"}, http.StatusOK)
+}
+
+/*
+ * setProvider saves a provider's address and key, each only when given, and
+ * hands the result to the agent's catalog.
+ */
+func (c *API) setProvider(name string, endpoint, key *string) {
+	if name == "" {
+		return
+	}
+	if c.cfg.Providers == nil {
+		c.cfg.Providers = map[string]config.ProviderConfig{}
+	}
+	p := c.cfg.Providers[name]
+	if endpoint != nil && *endpoint != "" {
+		p.Endpoint = *endpoint
+	}
+	if key != nil && *key != "" {
+		p.APIKey = *key
+	}
+	c.cfg.Providers[name] = p
+	c.cfg.LLM.APIKey = "" // kept per provider now; see config.keysByProvider
+	if c.agent != nil {
+		c.agent.SetProvider(name, agent.ProviderCreds{Type: p.Type, Endpoint: p.Endpoint, APIKey: p.APIKey})
+	}
 }
 
 /*
@@ -401,10 +428,10 @@ func (c *API) handleListModels(w http.ResponseWriter, _ *http.Request) {
 			configured[name] = true
 		}
 	}
-	if c.cfg.LLM.Provider != "" && c.cfg.LLM.APIKey != "" {
-		configured[c.cfg.LLM.Provider] = true
+	if l := c.cfg.ReasoningLane(); l.Provider != "" && l.APIKey != "" {
+		configured[l.Provider] = true
 	}
-	out := models.All()
+	out := models.WithVariants(models.All())
 	for i := range out {
 		out[i].Available = configured[out[i].Provider]
 	}

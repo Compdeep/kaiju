@@ -417,3 +417,40 @@ func (i Info) Variants() []string {
 	}
 	return out
 }
+
+/*
+ * WithVariants is list with each model followed by its thinking variants, for a
+ * picker. A variant is its model with the thinking fixed: named for it, marked
+ * as thinking or not, and with no thinking switch of its own, since picking it
+ * is the setting.
+ * param: list - the models to offer.
+ * return: a new list.
+ */
+func WithVariants(list []Info) []Info {
+	out := make([]Info, 0, len(list))
+	for _, m := range list {
+		out = append(out, m)
+		for _, word := range m.Variants() {
+			v := m
+			thinks := word != "nothink"
+			v.ID = llm.VariantID(m.ID, word)
+			v.Name = m.Name + " (" + variantLabel(word) + ")"
+			v.Thinking = &thinks
+			v.ReasoningOptional = false
+			v.FitsSmallCall = v.FitsForcedSmallCall()
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// variantLabel is how a picker names a thinking variant.
+func variantLabel(word string) string {
+	switch word {
+	case "nothink":
+		return "no thinking"
+	case "think":
+		return "thinking"
+	}
+	return "thinking, " + word
+}

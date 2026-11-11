@@ -75,7 +75,8 @@ func Run(opts Options) int {
 		log.Printf("[editor] load config %s: %v", opts.ConfigPath, err)
 		return 1
 	}
-	if cfg.LLM.APIKey == "" {
+	lane := cfg.ReasoningLane()
+	if lane.APIKey == "" {
 		log.Printf("[editor] no LLM API key in %s (or unresolved ${ENV})", opts.ConfigPath)
 		return 1
 	}
@@ -98,7 +99,7 @@ func Run(opts Options) int {
 		return 0
 	}
 
-	client := llm.NewClientWithProvider(cfg.LLM.Provider, cfg.LLM.Endpoint, cfg.LLM.APIKey, cfg.LLM.Model)
+	client := llm.NewClientWithProvider(lane.Provider, lane.Endpoint, lane.APIKey, cfg.LLM.Model)
 
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
 	defer cancel()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -549,11 +550,7 @@ func New(cfg Config) (*Agent, error) {
 			log.Printf("[agent] provider %q has no api_key, skipping", name)
 			continue
 		}
-		wire := p.Type
-		if wire == "" {
-			wire = name
-		}
-		providerClients[name] = llm.NewClientWithProvider(wire, p.Endpoint, p.APIKey, "").Limits(cfg.Limits).Thinks(cfg.Thinks).Catalog(cfg.Catalog).Transport(cfg.LLMTransport)
+		providerClients[name] = providerClient(cfg, name, p)
 	}
 	if len(providerClients) > 0 {
 		names := make([]string, 0, len(providerClients))
@@ -1557,6 +1554,40 @@ func (a *Agent) SetToolReach(name string, reach toolapi.Reach) error {
 func (a *Agent) GateInfo() (rateLimit, maxTurns, clearance int, lockdown bool) {
 	rl, mt := a.gate.Info()
 	return rl, mt, a.clearance.Clearance(), a.gate.Lockdown()
+}
+
+// providerClient is the client for one entry of the provider catalog. Its wire
+// is the entry's Type, or its name.
+func providerClient(cfg Config, name string, p ProviderCreds) *llm.Client {
+	wire := p.Type
+	if wire == "" {
+		wire = name
+	}
+	return llm.NewClientWithProvider(wire, p.Endpoint, p.APIKey, "").Limits(cfg.Limits).Thinks(cfg.Thinks).Catalog(cfg.Catalog).Transport(cfg.LLMTransport)
+}
+
+/*
+ * SetProvider replaces one entry of the provider catalog the lanes route
+ * through, at run time. An empty key removes it.
+ * desc: The map is replaced, not written to, so a lane reading the old one
+ *       mid-call is not reading a map being changed.
+ */
+func (a *Agent) SetProvider(name string, p ProviderCreds) {
+	clients := maps.Clone(a.providerClients)
+	creds := maps.Clone(a.cfg.Providers)
+	if clients == nil {
+		clients = map[string]*llm.Client{}
+	}
+	if creds == nil {
+		creds = map[string]ProviderCreds{}
+	}
+	creds[name] = p
+	if p.APIKey == "" {
+		delete(clients, name)
+	} else {
+		clients[name] = providerClient(a.cfg, name, p)
+	}
+	a.providerClients, a.cfg.Providers = clients, creds
 }
 
 /*

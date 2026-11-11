@@ -85,6 +85,8 @@ type ModelConfig struct {
 	// Built into one llm.Client per provider at boot; a request selects a
 	// provider+model and kaiju routes to the matching keyed client. Keys live
 	// only here — requests carry a selection, never a key.
+	//
+	// Set at run time: SetProvider, one entry at a time.
 	Providers map[string]ProviderCreds
 
 	Temperature float64

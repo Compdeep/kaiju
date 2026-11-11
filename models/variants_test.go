@@ -61,3 +61,21 @@ func TestBedrockAPIs(t *testing.T) {
 		t.Errorf("Nova 2 Lite variants = %v", got)
 	}
 }
+
+// Each model is followed by its variants, each named and marked for what it
+// does, with no thinking switch of its own: the variant is the setting.
+func TestWithVariants(t *testing.T) {
+	qwen, _ := Find("qwen.qwen3-32b")
+	got := WithVariants([]Info{qwen})
+	if len(got) != 2 || got[0].ID != "qwen.qwen3-32b" || got[1].ID != "qwen.qwen3-32b+high" {
+		t.Fatalf("got %v", got)
+	}
+	v := got[1]
+	if !v.Thinks() || v.ReasoningOptional || v.Name != "Qwen3 32B (thinking, high)" || v.Provider != "bedrock" {
+		t.Errorf("variant = %+v", v)
+	}
+	oss, _ := Find("openai/gpt-oss-120b")
+	if n := len(WithVariants([]Info{oss})); n != 4 {
+		t.Errorf("gpt-oss on OpenRouter: %d entries, want itself and three efforts", n)
+	}
+}

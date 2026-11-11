@@ -18,12 +18,14 @@
           <!-- Models Tab -->
           <div v-if="tab === 'models'" key="models">
 
-            <!-- API Key (shared) -->
+            <!-- API keys, one per provider. Every lane uses the key of the
+                 provider it names, so lanes on two providers each work. -->
             <div class="form-group">
-              <label>api key <span v-if="cfg.llm.api_key" class="key-set">&#10003; set</span><span v-else class="key-missing">not set</span></label>
-              <div class="key-row">
-                <input v-model="apiKey" type="password" name="kaiju-api-key" id="kaiju-api-key" autocomplete="off" data-form-type="other" data-1p-ignore data-lpignore="true" :placeholder="cfg.llm.api_key ? 'enter new key to replace' : 'paste key'" />
-                <button class="btn btn-sm" @click="saveKey" :disabled="!apiKey">save</button>
+              <label>api keys</label>
+              <div v-for="p in KEYED_PROVIDERS" :key="p.id" class="key-row">
+                <span class="key-name">{{ p.label }}<span v-if="keySet(p.id)" class="key-set">&#10003; set</span><span v-else class="key-missing">not set</span></span>
+                <input v-model="keys[p.id]" type="password" :name="'kaiju-key-' + p.id" autocomplete="off" data-form-type="other" data-1p-ignore data-lpignore="true" :placeholder="keySet(p.id) ? 'enter new key to replace' : 'paste key'" />
+                <button class="btn btn-sm" @click="saveKey(p.id)" :disabled="!keys[p.id]">save</button>
               </div>
             </div>
 
@@ -304,7 +306,18 @@ const settings = useSettingsStore()
 const tab = ref('models')
 const cfg = ref({ llm: { provider: '', model: '', endpoint: '', reasoning: '' }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1, route_provider: '', route_model: '', answer_provider: '', answer_model: '' } })
 const allModels = ref([])
-const apiKey = ref('')
+// The providers that take a key. Ollama runs locally and needs none.
+const KEYED_PROVIDERS = [
+  { id: 'openai', label: 'OpenAI' },
+  { id: 'anthropic', label: 'Anthropic' },
+  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'bedrock', label: 'Amazon Bedrock' },
+]
+const keys = ref({})
+/** desc: whether the server holds a key for this provider (it sends it masked). */
+function keySet(id) {
+  return !!cfg.value.providers?.[id]?.api_key
+}
 const execProvider = ref('')
 const visionProvider = ref('')
 const chatProvider = ref('')
@@ -554,14 +567,16 @@ async function patchConfig() {
 }
 
 /**
- * desc: Save a new API key to the server and refresh the config
+ * desc: Save one provider's key, with its address, and refresh the config
+ * @param {string} id - the provider
  * @returns {Promise<void>}
  */
-async function saveKey() {
-  if (!apiKey.value) return
+async function saveKey(id) {
+  const key = keys.value[id]
+  if (!key) return
   try {
-    await api.patch('/api/v1/config', { llm: { api_key: apiKey.value } })
-    apiKey.value = ''
+    await api.patch('/api/v1/config', { providers: { [id]: { api_key: key, endpoint: ENDPOINTS[id] } } })
+    keys.value[id] = ''
     cfg.value = await api.get('/api/v1/config')
   } catch (err) { alert(err.message) }
 }
@@ -598,7 +613,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.key-row { display: flex; gap: 8px; }
+.key-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.key-name { flex: 0 0 150px; font-size: 12px; }
 .key-row input { flex: 1; }
 .key-set { color: var(--signal-green); font-size: 10px; font-weight: 600; margin-left: 4px; text-transform: none; letter-spacing: 0; }
 .key-missing { color: var(--signal-red); font-size: 10px; font-weight: 600; margin-left: 4px; text-transform: none; letter-spacing: 0; }

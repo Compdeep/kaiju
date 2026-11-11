@@ -369,10 +369,12 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		classifierEnabled = *cfg.Agent.ClassifierEnabled
 	}
 
+	reasoning := cfg.ReasoningLane()
 	agentCfg := agent.Config{
 		ModelConfig: agent.ModelConfig{
-			LLMEndpoint: cfg.LLM.Endpoint,
-			LLMAPIKey:   cfg.LLM.APIKey,
+			LLMProvider: reasoning.Provider,
+			LLMEndpoint: reasoning.Endpoint,
+			LLMAPIKey:   reasoning.APIKey,
 			LLMModel:    cfg.LLM.Model,
 			// "on", "off", or empty, which is on wherever the catalog says the
 			// model can think. Reasoning lane only.
@@ -450,27 +452,11 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		log.Fatalf("agent: %v", err)
 	}
 
-	// Set the correct LLM provider (agent.New defaults to openai)
-	if cfg.LLM.Provider != "" && cfg.LLM.Provider != "openai" {
-		ag.SetLLMClient(cfg.LLM.Provider, cfg.LLM.Endpoint, cfg.LLM.APIKey, cfg.LLM.Model)
-	}
-
 	// Set executor model (if configured separately, otherwise uses reasoning model)
 	if cfg.Executor.Model != "" {
-		execProvider := cfg.Executor.Provider
-		if execProvider == "" {
-			execProvider = cfg.LLM.Provider
-		}
-		execEndpoint := cfg.Executor.Endpoint
-		if execEndpoint == "" {
-			execEndpoint = cfg.LLM.Endpoint
-		}
-		execAPIKey := cfg.Executor.APIKey
-		if execAPIKey == "" {
-			execAPIKey = cfg.LLM.APIKey
-		}
-		ag.SetExecutorClient(execProvider, execEndpoint, execAPIKey, cfg.Executor.Model)
-		log.Printf("[kaiju] executor model: %s (%s)", cfg.Executor.Model, execProvider)
+		l := cfg.ExecutorLane()
+		ag.SetExecutorClient(l.Provider, l.Endpoint, l.APIKey, cfg.Executor.Model)
+		log.Printf("[kaiju] executor model: %s (%s)", cfg.Executor.Model, l.Provider)
 	}
 
 	// Register kaiju tools
@@ -656,7 +642,7 @@ func createAgent(cfg *config.Config) *agent.Agent {
 // runChat starts an interactive CLI session.
 func runChat() {
 	cfg := loadConfig()
-	if cfg.LLM.APIKey == "" {
+	if cfg.ReasoningLane().APIKey == "" {
 		log.Fatal("No LLM API key configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or LLM_API_KEY env var.")
 	}
 
@@ -889,7 +875,7 @@ func runServe() {
 		log.Printf("[kaiju] %v", err)
 	}
 
-	if cfg.LLM.APIKey == "" {
+	if cfg.ReasoningLane().APIKey == "" {
 		log.Println("[kaiju] WARNING: No LLM API key configured. Agent will not work until configured via UI or env var.")
 	}
 
@@ -1145,7 +1131,7 @@ func runServe() {
 // runOnce executes a single query and exits.
 func runOnce(query string) {
 	cfg := loadConfig()
-	if cfg.LLM.APIKey == "" {
+	if cfg.ReasoningLane().APIKey == "" {
 		log.Fatal("No LLM API key configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or LLM_API_KEY env var.")
 	}
 

@@ -132,7 +132,7 @@ type LLMConfig struct {
 type ExecutorConfig struct {
 	Provider string `json:"provider,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
-	APIKey   string `json:"api_key,omitempty"` // defaults to LLM.APIKey if empty
+	APIKey   string `json:"api_key,omitempty"` // defaults to its provider's key — see ExecutorLane
 	Model    string `json:"model,omitempty"`
 }
 
@@ -476,6 +476,7 @@ func (c *Config) resolve() {
 		p.Endpoint = resolveEnv(p.Endpoint)
 		c.Providers[name] = p
 	}
+	c.keysByProvider()
 	c.Channels.Telegram.Token = resolveEnv(c.Channels.Telegram.Token)
 	c.Channels.Discord.Token = resolveEnv(c.Channels.Discord.Token)
 	c.API.AuthToken = resolveEnv(c.API.AuthToken)
@@ -546,3 +547,77 @@ func (c *Config) PluginHostStart() string { return c.RemotePluginStart }
 
 // PluginWorkspace is where a plugin host runs and writes.
 func (c *Config) PluginWorkspace() string { return c.Agent.Workspace }
+
+// Keys are kept per provider, in Providers, and every lane takes the key of the
+// provider it names. A lane holds a provider and a model, never a key, so two
+// lanes on two providers each have the right one.
+
+/*
+ * keysByProvider moves the reasoning lane's key into Providers under the
+ * reasoning provider, where every lane looks.
+ * desc: For files written before keys were kept per provider. A provider that
+ *       already has a key keeps it. The lane's copy is cleared either way, so a
+ *       later change of provider cannot carry one provider's key to another.
+ */
+func (c *Config) keysByProvider() {
+	if c.LLM.APIKey == "" || c.LLM.Provider == "" {
+		return
+	}
+	if c.Providers == nil {
+		c.Providers = map[string]ProviderConfig{}
+	}
+	p := c.Providers[c.LLM.Provider]
+	if p.APIKey == "" {
+		p.APIKey = c.LLM.APIKey
+		if p.Endpoint == "" {
+			p.Endpoint = c.LLM.Endpoint
+		}
+		c.Providers[c.LLM.Provider] = p
+	}
+	c.LLM.APIKey = ""
+}
+
+// Lane is what a lane's client is built with.
+type Lane struct {
+	Provider, Endpoint, APIKey string
+}
+
+/*
+ * lane resolves a lane's provider, endpoint and key: the lane's own endpoint
+ * and key where it sets them, else its provider's. A key still held on the
+ * reasoning lane (a config built in code, not loaded) counts as its provider's.
+ */
+func (c *Config) lane(provider, endpoint, key string) Lane {
+	p := c.Providers[provider]
+	if endpoint == "" {
+		endpoint = p.Endpoint
+	}
+	if key == "" {
+		key = p.APIKey
+	}
+	if key == "" && provider == c.LLM.Provider {
+		key = c.LLM.APIKey
+	}
+	return Lane{Provider: provider, Endpoint: endpoint, APIKey: key}
+}
+
+// ReasoningLane is what the reasoning lane's client is built with.
+func (c *Config) ReasoningLane() Lane {
+	return c.lane(c.LLM.Provider, c.LLM.Endpoint, "")
+}
+
+// ExecutorLane is what the executor lane's client is built with: its own
+// provider, or the reasoning lane's.
+func (c *Config) ExecutorLane() Lane {
+	if c.Executor.Provider == "" || c.Executor.Provider == c.LLM.Provider {
+		l := c.ReasoningLane()
+		if c.Executor.Endpoint != "" {
+			l.Endpoint = c.Executor.Endpoint
+		}
+		if c.Executor.APIKey != "" {
+			l.APIKey = c.Executor.APIKey
+		}
+		return l
+	}
+	return c.lane(c.Executor.Provider, c.Executor.Endpoint, c.Executor.APIKey)
+}

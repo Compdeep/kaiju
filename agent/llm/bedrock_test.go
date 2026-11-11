@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -108,20 +109,28 @@ func TestBedrockDefaultEndpoint(t *testing.T) {
 	}
 }
 
-// A forced single tool goes to Bedrock as the tool call, not as a schema:
-// Chat Completions on Bedrock is not among the structured-output APIs.
-func TestBedrockKeepsForcedToolCalls(t *testing.T) {
+// A forced single tool goes to Bedrock as a strict schema, as everywhere else.
+// Sent as a plain tool call it is not enforced there, and a planner shown its
+// earlier steps as calls writes the next step as a call instead of a plan.
+func TestBedrockGetsTheStrictSchema(t *testing.T) {
 	var body map[string]any
-	srv := bodyCapture(t, &body)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"{\"a\":\"x\"}"},"finish_reason":"stop"}]}`))
+	}))
 	defer srv.Close()
 	c := NewClientWithProvider(ProviderBedrock, srv.URL+"/v1", "k", "qwen.qwen3-32b")
 	req := oneTool(`{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`)
-	_, _ = c.Complete(context.Background(), req)
-	if _, ok := body["response_format"]; ok {
-		t.Error("response_format sent to Bedrock")
+	resp, err := c.Complete(context.Background(), req)
+	if err != nil || len(resp.Choices) == 0 || len(resp.Choices[0].Message.ToolCalls) == 0 {
+		t.Fatalf("the reply did not come back as the tool call: %v %+v", err, resp)
 	}
-	if _, ok := body["tools"]; !ok {
-		t.Error("the forced tool was not sent")
+	rf, ok := body["response_format"].(map[string]any)
+	if !ok || rf["type"] != "json_schema" {
+		t.Fatalf("response_format = %v, want a json_schema", body["response_format"])
+	}
+	if js, _ := rf["json_schema"].(map[string]any); js["strict"] != true {
+		t.Errorf("schema not strict: %v", rf["json_schema"])
 	}
 }
 

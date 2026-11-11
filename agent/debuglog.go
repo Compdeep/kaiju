@@ -58,12 +58,15 @@ type LLMTrace struct {
 	GateSummary  string
 	GateReturned map[string]string // verbatim sources
 
-	// The actual prompts sent to the LLM.
+	// The actual prompts sent to the LLM. Turns is what sits between them:
+	// earlier calls and their results, which a planner is shown as its own.
 	System string
+	Turns  string
 	User   string
 
 	// Result of the call.
 	Output    string // LLM response (raw text)
+	Call      string // the tool the response called, when it called one
 	Err       string // error message if the call failed
 	TokensIn  int    // 0 if unknown
 	TokensOut int    // 0 if unknown
@@ -216,6 +219,10 @@ func (t LLMTrace) formatPrompts() string {
 			sb.WriteString("\n")
 		}
 	}
+	if t.Turns != "" {
+		sb.WriteString("--- TURNS ---\n")
+		sb.WriteString(t.Turns)
+	}
 	if t.User != "" {
 		sb.WriteString("--- USER PROMPT ---\n")
 		sb.WriteString(t.User)
@@ -237,6 +244,9 @@ func (t LLMTrace) formatOutput() string {
 	}
 	if t.Output != "" {
 		sb.WriteString("--- OUTPUT ---\n")
+		if t.Call != "" {
+			sb.WriteString("call: " + t.Call + "\n")
+		}
 		sb.WriteString(t.Output)
 		if !strings.HasSuffix(t.Output, "\n") {
 			sb.WriteString("\n")

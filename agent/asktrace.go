@@ -141,25 +141,7 @@ func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 		GateReturned: id.GateReturned,
 		LatencyMS:    time.Since(started).Milliseconds(),
 	}
-	// Every system message, in order, and the last user one.
-	//
-	// It kept only the LAST system message, which was the whole prompt while
-	// there was only ever one. A recalled block is a second — placed just before
-	// the message it was recalled for, which is where it reads correctly and
-	// also where it displaced the persona in every trace of a turn that reached
-	// back. An operator then saw the recall and not the prompt.
-	var system []string
-	for _, m := range req.Messages {
-		switch m.Role {
-		case "system":
-			if m.Content != "" {
-				system = append(system, m.Content)
-			}
-		case "user":
-			tr.User = m.Content
-		}
-	}
-	tr.System = strings.Join(system, "\n\n")
+	traceMessages(&tr, req.Messages)
 	if err != nil {
 		tr.Err = err.Error()
 	}
@@ -168,6 +150,7 @@ func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 		tr.Output = c.Message.Content
 		if len(c.Message.ToolCalls) > 0 {
 			tr.Output = c.Message.ToolCalls[0].Function.Arguments
+			tr.Call = c.Message.ToolCalls[0].Function.Name
 		}
 		tr.TokensIn = resp.Usage.PromptTokens
 		tr.TokensOut = resp.Usage.CompletionTokens
@@ -177,6 +160,43 @@ func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 	}
 	tr.Asked, tr.Sent = describeThinking(req.Think), describeSent(req.Reasoning)
 	WriteLLMTrace(tr)
+}
+
+/*
+ * traceMessages writes a request's messages into a trace.
+ * desc: Every system message in order, the last user message, and every turn
+ *       in between: assistant calls and the tool results that answer them. A
+ *       planner is shown the steps already run as its own calls, and a trace
+ *       without them hid that from whoever read it. Every system message, not
+ *       the last: a recalled block is a second one, and keeping only the last
+ *       showed the recall and not the prompt.
+ * param: tr - the trace to fill.
+ * param: msgs - the request's messages.
+ */
+func traceMessages(tr *LLMTrace, msgs []llm.Message) {
+	var system []string
+	var turns strings.Builder
+	for _, m := range msgs {
+		switch m.Role {
+		case "system":
+			if m.Content != "" {
+				system = append(system, m.Content)
+			}
+		case "user":
+			tr.User = m.Content
+		case "assistant":
+			for _, c := range m.ToolCalls {
+				fmt.Fprintf(&turns, "[assistant] %s(%s)\n", c.Function.Name, c.Function.Arguments)
+			}
+			if m.Content != "" {
+				fmt.Fprintf(&turns, "[assistant] %s\n", m.Content)
+			}
+		case "tool":
+			fmt.Fprintf(&turns, "[tool %s] %s\n", m.Name, m.Content)
+		}
+	}
+	tr.System = strings.Join(system, "\n\n")
+	tr.Turns = turns.String()
 }
 
 /*

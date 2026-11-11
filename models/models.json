@@ -1573,6 +1573,248 @@
         "medium",
         "high"
       ]
+    },
+    {
+      "id": "us.meta.llama4-maverick-17b-instruct-v1:0",
+      "name": "Llama 4 Maverick 17B",
+      "family": "llama4",
+      "params": "400B-A17B",
+      "context": "1M",
+      "context_tokens": 1048576,
+      "max_output_tokens": 8192,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": true,
+      "chat": true,
+      "roles": [
+        "answer",
+        "chat"
+      ]
+    },
+    {
+      "id": "us.meta.llama4-scout-17b-instruct-v1:0",
+      "name": "Llama 4 Scout 17B",
+      "family": "llama4",
+      "params": "109B-A17B",
+      "context": "1M",
+      "context_tokens": 1048576,
+      "max_output_tokens": 8192,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": true,
+      "chat": true,
+      "roles": [
+        "answer",
+        "chat"
+      ]
+    },
+    {
+      "id": "us.meta.llama3-3-70b-instruct-v1:0",
+      "name": "Llama 3.3 70B",
+      "family": "llama3",
+      "params": "70B",
+      "context": "131K",
+      "context_tokens": 131072,
+      "max_output_tokens": 8192,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": false,
+      "chat": true,
+      "roles": [
+        "answer",
+        "chat"
+      ]
+    },
+    {
+      "id": "us.meta.llama3-1-70b-instruct-v1:0",
+      "name": "Llama 3.1 70B",
+      "family": "llama3",
+      "params": "70B",
+      "context": "131K",
+      "context_tokens": 131072,
+      "max_output_tokens": 8192,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": false,
+      "chat": true,
+      "roles": [
+        "answer",
+        "chat"
+      ]
+    },
+    {
+      "id": "us.meta.llama3-1-8b-instruct-v1:0",
+      "name": "Llama 3.1 8B",
+      "family": "llama3",
+      "params": "8B",
+      "context": "131K",
+      "context_tokens": 131072,
+      "max_output_tokens": 8192,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": false,
+      "chat": true,
+      "roles": [
+        "chat"
+      ]
+    },
+    {
+      "id": "meta.llama3-70b-instruct-v1:0",
+      "name": "Llama 3 70B",
+      "family": "llama3",
+      "params": "70B",
+      "context": "8K",
+      "context_tokens": 8192,
+      "max_output_tokens": 2048,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": false,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": false,
+      "chat": true,
+      "roles": [
+        "chat"
+      ]
+    },
+    {
+      "id": "meta.llama3-8b-instruct-v1:0",
+      "name": "Llama 3 8B",
+      "family": "llama3",
+      "params": "8B",
+      "context": "8K",
+      "context_tokens": 8192,
+      "max_output_tokens": 2048,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": false,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": false,
+      "chat": true,
+      "roles": [
+        "chat"
+      ]
+    },
+    {
+      "id": "us.amazon.nova-2-lite-v1:0",
+      "name": "Nova 2 Lite",
+      "family": "nova",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 65536,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "id": "us.amazon.nova-pro-v1:0",
+      "name": "Nova Pro",
+      "family": "nova",
+      "context": "300K",
+      "context_tokens": 300000,
+      "max_output_tokens": 10000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "us.amazon.nova-lite-v1:0",
+      "name": "Nova Lite",
+      "family": "nova",
+      "context": "300K",
+      "context_tokens": 300000,
+      "max_output_tokens": 10000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "executor",
+        "answer"
+      ]
+    },
+    {
+      "id": "us.amazon.nova-micro-v1:0",
+      "name": "Nova Micro",
+      "family": "nova",
+      "context": "128K",
+      "context_tokens": 128000,
+      "max_output_tokens": 10000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "executor",
+        "router"
+      ]
     }
   ]
 }

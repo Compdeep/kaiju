@@ -103,6 +103,9 @@ type Info struct {
 	// request asks — Anthropic's. Empty for one that caches by itself, or not
 	// at all, where asking would add nothing.
 	Cache string `json:"cache,omitempty"`
+	// API is APIConverse for a Bedrock model served only on Bedrock's Converse
+	// API. Empty is the provider's Chat Completions.
+	API string `json:"api,omitempty"`
 	// Tools reports whether the model can call tools at all.
 	Tools bool `json:"tools"`
 	// ToolCallOK reports whether the model reliably emits a SMALL forced tool call
@@ -136,6 +139,9 @@ type Info struct {
 
 // CacheRequested is the Cache of a model that caches only when asked.
 const CacheRequested = "requested"
+
+// APIConverse is the API of a Bedrock model reached through Converse.
+const APIConverse = "converse"
 
 // catalog is the on-disk shape of models.json.
 type catalog struct {

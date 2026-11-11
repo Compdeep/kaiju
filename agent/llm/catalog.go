@@ -29,6 +29,9 @@ type ModelFacts struct {
 	// CacheOnRequest is true for a model that caches a prompt only when the
 	// request carries cache_control, so the client asks on every call.
 	CacheOnRequest bool
+	// Converse is true for a Bedrock model served only on Bedrock's Converse
+	// API, which a Bedrock client then sends it to — see converse.go.
+	Converse bool
 }
 
 // Thinking is what a model does when asked to reason, or asked not to.

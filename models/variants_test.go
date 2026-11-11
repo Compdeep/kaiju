@@ -43,3 +43,21 @@ func TestVariants(t *testing.T) {
 		t.Errorf("on by default, switchable = %v", got)
 	}
 }
+
+// Llama and Nova are reached through Bedrock's Converse; the open-weight
+// Bedrock models through Chat Completions.
+func TestBedrockAPIs(t *testing.T) {
+	for id, want := range map[string]string{
+		"us.meta.llama4-maverick-17b-instruct-v1:0": APIConverse,
+		"us.amazon.nova-2-lite-v1:0":                APIConverse,
+		"qwen.qwen3-32b":                            "",
+	} {
+		if m, ok := Find(id); !ok || m.API != want {
+			t.Errorf("%s: found %v, api %q, want %q", id, ok, m.API, want)
+		}
+	}
+	nova, _ := Find("us.amazon.nova-2-lite-v1:0+high")
+	if got := nova.Variants(); !slices.Equal(got, []string{"low", "medium", "high"}) {
+		t.Errorf("Nova 2 Lite variants = %v", got)
+	}
+}

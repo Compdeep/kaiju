@@ -812,6 +812,8 @@ func (c *Client) completeOnce(ctx context.Context, req *ChatRequest) (*ChatRespo
 	var err error
 	if c.provider == ProviderAnthropic {
 		resp, err = c.completeAnthropic(ctx, req)
+	} else if c.converses(effModel) {
+		resp, err = c.completeConverse(ctx, req)
 	} else {
 		resp, err = c.completeOpenAI(ctx, req)
 		// A model behind this endpoint that has no structured-output support
@@ -1011,7 +1013,13 @@ func (c *Client) streamOnce(ctx context.Context, req *ChatRequest, onChunk func(
 	// The same settlement Complete makes. Without it a streamed call is the one
 	// kind whose thinking nobody decided.
 	c.applyReasoning(req)
-	resp, err := c.completeStreamResp(ctx, req, onChunk)
+	var resp *ChatResponse
+	var err error
+	if c.converses(req.Model) {
+		resp, err = c.streamConverse(ctx, req, onChunk)
+	} else {
+		resp, err = c.completeStreamResp(ctx, req, onChunk)
+	}
 	// One emit covering every return path in the implementation below,
 	// including the early transport and HTTP failures.
 	emitCall(ctx, req, resp, err)
@@ -1060,15 +1068,7 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 		return nil, httpFailure(resp.StatusCode, resp.Header, truncate(string(data), 300))
 	}
 
-	var content strings.Builder
-	var reasoning strings.Builder
-	toolsByIndex := map[int]*ToolCall{}
-	var order []int // tool-call indices in first-seen order
-	var usage Usage
-	finish := "stop"
-	// Which call this was and which host served it. Every frame repeats them,
-	// so the first that carries each is kept.
-	var genID, provider string
+	out := newStreamed(onChunk)
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // tool-arg frames can be long
@@ -1108,46 +1108,30 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 		if json.Unmarshal([]byte(payload), &chunk) != nil {
 			continue
 		}
-		if genID == "" {
-			genID = chunk.ID
+		// Which call this was and which host served it. Every frame repeats
+		// them, so the first that carries each is kept.
+		if out.id == "" {
+			out.id = chunk.ID
 		}
-		if provider == "" {
-			provider = chunk.Provider
+		if out.provider == "" {
+			out.provider = chunk.Provider
 		}
 		if chunk.Usage != nil {
-			usage = *chunk.Usage
+			out.usage = *chunk.Usage
 		}
 		if len(chunk.Choices) == 0 {
 			continue
 		}
 		ch := chunk.Choices[0]
 		if ch.FinishReason != "" {
-			finish = ch.FinishReason
+			out.finish = ch.FinishReason
 		}
-		if ch.Delta.Reasoning == "" {
-			ch.Delta.Reasoning = ch.Delta.ReasoningContent
-		}
-		if ch.Delta.Reasoning != "" {
-			reasoning.WriteString(ch.Delta.Reasoning)
-			if onChunk != nil {
-				onChunk(ch.Delta.Reasoning, "reasoning")
-			}
-		}
-		if ch.Delta.Content != "" {
-			content.WriteString(ch.Delta.Content)
-			if onChunk != nil {
-				onChunk(ch.Delta.Content, "content")
-			}
-		}
+		out.thought(ch.Delta.Reasoning + ch.Delta.ReasoningContent)
+		out.text(ch.Delta.Content)
 		// Tool calls stream as indexed deltas: id/name arrive once, arguments in
 		// fragments. Accumulate per index.
 		for _, tc := range ch.Delta.ToolCalls {
-			acc, ok := toolsByIndex[tc.Index]
-			if !ok {
-				acc = &ToolCall{Type: "function"}
-				toolsByIndex[tc.Index] = acc
-				order = append(order, tc.Index)
-			}
+			acc := out.tool(tc.Index)
 			if tc.ID != "" {
 				acc.ID = tc.ID
 			}
@@ -1160,52 +1144,14 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 			acc.Function.Arguments += tc.Function.Arguments
 		}
 	}
-	// What arrived, arrived.
-	//
 	// A stream that is cut — by our deadline, or by the connection going away —
-	// has already been paid for up to that point, and everything it carried was
-	// in these builders and then thrown away with a bare `return nil, err`. The
-	// caller lost a partial answer it had already shown to somebody, and a
-	// second attempt lost the reasoning it could have started from.
-	assembled := func() *ChatResponse {
-		var toolCalls []ToolCall
-		for _, idx := range order {
-			toolCalls = append(toolCalls, *toolsByIndex[idx])
-		}
-		finalContent := content.String()
-		reasonStr := reasoning.String()
-		// Some models stream reasoning inline as <think>…</think> in the content
-		// (rather than a reasoning field). Lift it out so content stays clean and
-		// the thinking is captured either way.
-		if clean, think := extractThink(finalContent); think != "" {
-			finalContent = clean
-			if reasonStr != "" {
-				reasonStr += "\n"
-			}
-			reasonStr += think
-		}
-		return &ChatResponse{
-			ID:       genID,
-			Provider: provider,
-			Choices: []Choice{{
-				Index:        0,
-				Message:      Message{Role: "assistant", Content: finalContent, Reasoning: reasonStr, ToolCalls: toolCalls},
-				FinishReason: finish,
-			}},
-			Usage: usage,
-		}
-	}
-
+	// has been paid for up to that point, so what it carried is returned with
+	// the error.
 	if err := scanner.Err(); err != nil {
-		return assembled(), err
+		return out.reply(), err
 	}
-
-	// Bill the streamed call through the same counter as non-streamed ones, so
-	// chat/aggregator streaming is no longer undercounted.
-	if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
-		tokens.AddSplit(ctx, usage.PromptTokens, usage.CompletionTokens)
-	}
-	return assembled(), nil
+	out.bill(ctx)
+	return out.reply(), nil
 }
 
 // extractThink lifts <think>…</think> blocks out of s, returning the cleaned text

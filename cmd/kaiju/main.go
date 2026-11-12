@@ -66,14 +66,7 @@ func main() {
 	// First, before anything else: when this program was started to lock a
 	// tool's command, Enter locks it and runs the command instead.
 	sandbox.Enter()
-	// The command line writes generated code into the folder it runs in, so it
-	// gives up tracing other programs below root: Landlock, which keeps that
-	// folder writable while everything else is refused, refuses tracing.
-	sandbox.Enable(sandbox.Options{Effects: func() sandbox.Effects {
-		e := sandbox.DefaultEffects()
-		e[sandbox.ReadPrograms] = sandbox.Never
-		return e
-	}})
+	sandbox.Enable(sandbox.Options{Effects: kaijuEffects})
 
 	if len(os.Args) < 2 {
 		printUsage()
@@ -1507,4 +1500,30 @@ func runSkillCmd() {
 		fmt.Fprintln(os.Stderr, "usage: kaiju skill <install|list|update|info> [args]")
 		os.Exit(1)
 	}
+}
+
+/*
+ * kaijuEffects is what a step's programs may do at each level in kaiju.
+ * desc: The engine's defaults with two changes.
+ *
+ *       Changing files from 100. Level 100 is operate: "write files, modify
+ *       state, run code — the default working level for real tasks". The
+ *       engine's default holds changing files until 200, so a step at 100 could
+ *       write only in the workspace, and a compute or bash step could not edit
+ *       a repository or any folder the user named, which is ordinary work at
+ *       operate. A program now writes wherever the user running kaiju may.
+ *       Level 0 (observe) still only reads, and root stays at 200. Deletes are
+ *       not held apart: overwriting or truncating a file destroys it as surely,
+ *       and neither the Windows lock nor a separate account can tell them
+ *       apart. Enbarr builds its own table and keeps changing files at 200.
+ *
+ *       Tracing other programs never below root: at level 0, Landlock, which
+ *       keeps the workspace writable while everything else is refused, refuses
+ *       tracing.
+ */
+func kaijuEffects() sandbox.Effects {
+	e := sandbox.DefaultEffects()
+	e[sandbox.ChangeFiles] = 100
+	e[sandbox.ReadPrograms] = sandbox.Never
+	return e
 }

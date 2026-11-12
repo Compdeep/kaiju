@@ -3229,7 +3229,7 @@ func architectChild(graph *Graph, n *Node) bool {
 // code compute just generated — downstream of a shallow-mode top-level compute
 // node. Returns the grafted nodes so the caller can rewire downstream deps.
 //
-// The execute node tees its combined output to /tmp/kaiju_<node>.out.
+// The execute node runs the command with stderr joined to stdout.
 func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd string, budget *Budget) []*Node {
 	var grafted []*Node
 	if execCmd == "" {
@@ -3240,8 +3240,11 @@ func (a *Agent) graftComputeExecution(graph *Graph, comp *Node, compID, execCmd 
 		return grafted
 	}
 
-	outFile := fmt.Sprintf("/tmp/kaiju_%s.out", comp.ID)
-	wrapped := fmt.Sprintf("( %s ) >%s 2>&1; rc=$?; cat %s; exit $rc", execCmd, outFile, outFile)
+	// stderr joined to stdout so a traceback reads in order with what came
+	// before it. No file of its own: it teed to /tmp/kaiju_<node>.out, which a
+	// step below level 200 may not create, so the script never ran; bash keeps
+	// the whole output at output_path already.
+	wrapped := fmt.Sprintf("( %s ) 2>&1", execCmd)
 	execTag := "exec_" + sanitizeTag(comp.Tag)
 	if execTag == "exec_" {
 		execTag = "exec_" + comp.ID

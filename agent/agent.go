@@ -961,13 +961,15 @@ func (a *Agent) relevantTools(ctx context.Context, graph *Graph, trigger Trigger
 		step("scope", len(base), len(base), "no scope set, all allowed")
 	}
 
-	// The groups preflight picked: their tools, and the tools that name none.
+	// The groups preflight picked decide how much of each tool is shown, not
+	// which tools are: their tools in full, the rest in one line. See
+	// toolIndexEntry.
 	if groups := pickedGroups(graph); len(groups) > 0 {
-		before := len(base)
-		base = a.toolsInGroups(base, groups)
-		step("groups", before, len(base), "preflight picked "+strings.Join(groups, ", "))
+		full := len(a.toolsInGroups(base, groups))
+		step("groups", len(base), len(base), fmt.Sprintf("preflight picked %s: %d in full, %d in one line",
+			strings.Join(groups, ", "), full, len(base)-full))
 	} else {
-		step("groups", len(base), len(base), "none picked, every tool shown")
+		step("groups", len(base), len(base), "none picked, every tool in full")
 	}
 
 	// Last, and only here, does the list get shorter for reasons of size. The
@@ -1013,7 +1015,7 @@ func (a *Agent) fitToolIndex(graph *Graph, names []string) []string {
 	indexCap := a.budget(toolIndexBudget)
 	total := 0
 	for i, n := range names {
-		total += toolIndexEntrySize(a.registry, n)
+		total += toolIndexEntrySize(a.registry, n, pickedGroups(graph))
 		if total > indexCap {
 			// Never return nothing: one tool too large for the budget is still
 			// the tool this run was told to use.

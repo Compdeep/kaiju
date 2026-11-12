@@ -26,8 +26,8 @@ func TestToolIndexIsTheSameWhateverOrderTheToolsArrive(t *testing.T) {
 		reg.Register(&countingTool{name: n})
 	}
 
-	ranked := compileToolIndex(reg, []string{"web_fetch", "bash", "compute", "file_read"})
-	otherRanking := compileToolIndex(reg, []string{"file_read", "compute", "bash", "web_fetch"})
+	ranked := compileToolIndex(reg, []string{"web_fetch", "bash", "compute", "file_read"}, nil)
+	otherRanking := compileToolIndex(reg, []string{"file_read", "compute", "bash", "web_fetch"}, nil)
 
 	if ranked != otherRanking {
 		n := 0
@@ -46,7 +46,7 @@ func TestToolIndexStillListsEveryTool(t *testing.T) {
 	for _, n := range names {
 		reg.Register(&countingTool{name: n})
 	}
-	idx := compileToolIndex(reg, names)
+	idx := compileToolIndex(reg, names, nil)
 	for _, n := range names {
 		if !strings.Contains(idx, n) {
 			t.Errorf("%s is missing from the index", n)
@@ -61,7 +61,7 @@ func TestToolIndexIsInAFixedOrder(t *testing.T) {
 	for _, n := range []string{"zebra_tool", "alpha_tool", "middle_tool"} {
 		reg.Register(&countingTool{name: n})
 	}
-	idx := compileToolIndex(reg, []string{"zebra_tool", "middle_tool", "alpha_tool"})
+	idx := compileToolIndex(reg, []string{"zebra_tool", "middle_tool", "alpha_tool"}, nil)
 	a, m, z := strings.Index(idx, "alpha_tool"), strings.Index(idx, "middle_tool"), strings.Index(idx, "zebra_tool")
 	if !(a < m && m < z) {
 		t.Errorf("index order is alpha=%d middle=%d zebra=%d, want ascending", a, m, z)

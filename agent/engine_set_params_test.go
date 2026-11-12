@@ -105,7 +105,7 @@ func TestEngineSetParams_TheyAreNotInTheSchemaTheProviderReceives(t *testing.T) 
 // The planner is not shown it.
 func TestTaskFiles_TheSignatureThePlannerReadsDoesNotOfferIt(t *testing.T) {
 	_, reg := computeOnlyAgent(t)
-	entry := toolIndexEntry(reg, "compute")
+	entry := toolIndexEntry(reg, "compute", nil)
 	if entry == "" {
 		t.Fatal("compute has no index entry")
 	}
@@ -114,7 +114,7 @@ func TestTaskFiles_TheSignatureThePlannerReadsDoesNotOfferIt(t *testing.T) {
 		t.Errorf("compute's signature still offers task_files: %s", sig)
 	}
 	// And the one it is meant to reach for instead still does.
-	edit := toolIndexEntry(reg, "edit_file")
+	edit := toolIndexEntry(reg, "edit_file", nil)
 	if !strings.Contains(edit[:strings.Index(edit, ")")+1], "task_files") {
 		t.Errorf("edit_file's signature no longer offers task_files: %s", edit)
 	}

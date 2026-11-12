@@ -12,10 +12,10 @@ import (
 /*
  * Groups narrow a run to the work it needs.
  *
- * Preflight picks groups from toolapi.Groups. The planner is then shown the
- * tools in those groups and the tools that name none, and the cards that come
- * with those groups. Picking none, or no preflight, shows everything, as
- * before groups existed.
+ * Preflight picks groups from toolapi.Groups. The planner is shown every tool:
+ * those in the picked groups, and those that name none, in full, the rest in
+ * one line. It is given the cards that come with those groups. Picking none,
+ * or no preflight, shows every tool in full, as before groups existed.
  */
 
 // maxCards is the most cards one run carries, picked and added together.
@@ -141,4 +141,13 @@ func (a *Agent) toolsInGroups(names, groups []string) []string {
 		kept = append(kept, name)
 	}
 	return kept
+}
+
+// inFull reports whether the planner is shown name in full: it is listed, and
+// it is in a picked group or none was picked.
+func (a *Agent) inFull(graph *Graph, relevant []string, name string) bool {
+	if !slices.Contains(relevant, name) {
+		return false
+	}
+	return len(a.toolsInGroups([]string{name}, pickedGroups(graph))) == 1
 }

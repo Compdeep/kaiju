@@ -52,14 +52,47 @@ func shown(t *testing.T, a *Agent, groups ...string) []string {
 	return got
 }
 
-// The planner is shown the picked groups' tools, each once, and the tools that
-// name no group.
-func TestGroups_ShowOnlyThePickedGroupsTools(t *testing.T) {
-	got := shown(t, groupedAgent(t), toolapi.GroupCode, toolapi.GroupFiles)
-	want := []string{shellToolName, computeToolName, "file_read"}
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Errorf("shown %v, want %v", got, want)
+// Every tool is listed whatever preflight picked. A pick is a guess made with
+// thinking off, and a tool left out of it was a tool the planner could not use:
+// Qwen 3.6 picked only data for "the center of gravity of the solar system
+// right now", and the planner had no web tool to fetch the positions with.
+func TestGroups_EveryToolIsListed(t *testing.T) {
+	got := shown(t, groupedAgent(t), toolapi.GroupCode)
+	if len(got) != 5 {
+		t.Errorf("shown %v, want all five", got)
+	}
+}
+
+// wordyGroupedTool has a two-sentence description and names its groups.
+type wordyGroupedTool struct {
+	wordyTool
+	groups []string
+}
+
+func (w *wordyGroupedTool) Groups() []string { return w.groups }
+
+// The picked groups' tools are described in full; the rest in one line, their
+// signature and first sentence, so a wrong pick costs detail and not the tool.
+func TestGroups_PickedGroupsInFullTheRestInOneLine(t *testing.T) {
+	reg := toolapi.NewRegistry()
+	desc := "Read a page on the web. Returns its text, cut to the budget, with the links it holds."
+	for _, tool := range []toolapi.Tool{
+		&wordyGroupedTool{wordyTool{"web_fetch", desc}, []string{toolapi.GroupWeb}},
+		&wordyGroupedTool{wordyTool{"edit_file", "Change a file. Needs task_files."}, []string{toolapi.GroupCode}},
+	} {
+		if err := reg.Register(tool); err != nil {
+			t.Fatal(err)
+		}
+	}
+	index := compileToolIndex(reg, []string{"web_fetch", "edit_file"}, []string{toolapi.GroupCode})
+	if !strings.Contains(index, "edit_file() — Change a file. Needs task_files.\n") {
+		t.Errorf("the picked group's tool is not in full:\n%s", index)
+	}
+	if !strings.Contains(index, "web_fetch() — Read a page on the web.\n") || strings.Contains(index, "Returns its text") {
+		t.Errorf("the unpicked tool is not one line:\n%s", index)
+	}
+	if full := compileToolIndex(reg, []string{"web_fetch"}, nil); !strings.Contains(full, "Returns its text") {
+		t.Errorf("no group picked did not describe every tool in full:\n%s", full)
 	}
 }
 
@@ -75,12 +108,12 @@ func TestGroups_NoneMeansEveryTool(t *testing.T) {
 	}
 }
 
-// compute comes only with code or data, so its section and the workspace
-// listing are written only then.
-func TestGroups_ComputeOnlyWithCodeOrData(t *testing.T) {
+// compute's section and the workspace listing come only with code or data;
+// compute itself is still listed, in one line.
+func TestGroups_ComputeSectionsOnlyWithCodeOrData(t *testing.T) {
 	a := groupedAgent(t)
-	if got := shown(t, a, toolapi.GroupWeb); slices.Contains(got, computeToolName) {
-		t.Errorf("a web request was shown compute: %v", got)
+	if got := shown(t, a, toolapi.GroupWeb); !slices.Contains(got, computeToolName) {
+		t.Errorf("a web request was not listed compute: %v", got)
 	}
 	g := NewGraph()
 	g.Preflight = &PreflightResult{Groups: []string{toolapi.GroupWeb}}

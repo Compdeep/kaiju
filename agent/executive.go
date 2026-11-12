@@ -49,9 +49,11 @@ func prefixAssistantHistory(history []llm.Message) []llm.Message {
  * Called once at prompt build time.
  * param: registry - the tool registry
  * param: names - tool names to include
+ * param: groups - the groups preflight picked; their tools, and every tool when
+ *        none was picked, are described in full, the rest in one line
  * return: compiled tool index string
  */
-func compileToolIndex(registry *toolapi.Registry, names []string) string {
+func compileToolIndex(registry *toolapi.Registry, names []string, groups []string) string {
 	var sb strings.Builder
 	sb.WriteString("## Tools (* = required param, name: a|b|c = the only values that parameter takes)\n")
 	sb.WriteString("The parameters shown for each tool are the only ones available — use only the parameters listed.\n")
@@ -69,7 +71,7 @@ func compileToolIndex(registry *toolapi.Registry, names []string) string {
 	ordered := append([]string(nil), names...)
 	sort.Strings(ordered)
 	for _, name := range ordered {
-		sb.WriteString(toolIndexEntry(registry, name))
+		sb.WriteString(toolIndexEntry(registry, name, groups))
 	}
 	return sb.String()
 }
@@ -81,13 +83,22 @@ func compileToolIndex(registry *toolapi.Registry, names []string) string {
 // without assembling the whole index — relevantTools has to know what a tool
 // costs before it decides to show it. Returns "" for a name the registry does
 // not hold, so an entry always costs what it is worth.
-func toolIndexEntry(registry *toolapi.Registry, name string) string {
+//
+// A tool outside the groups preflight picked gets one line: its signature and
+// the first sentence of its description. It is listed rather than left out
+// because the pick is made with thinking off and is often short of what the
+// work needs; a planner shown the tool can still use it, with its real
+// parameters, and one never shown it cannot.
+func toolIndexEntry(registry *toolapi.Registry, name string, groups []string) string {
 	tool, ok := registry.Get(name)
 	if !ok {
 		return ""
 	}
 	var sb strings.Builder
 	sig := compactParamSignature(tool.Parameters())
+	if !inGroups(toolapi.ToolGroups(tool), groups) {
+		return fmt.Sprintf("%s(%s) — %s\n", name, sig, firstSentence(tool.Description()))
+	}
 	sb.WriteString(fmt.Sprintf("%s(%s) — %s\n", name, sig, tool.Description()))
 	// A parameter required only in some modes is marked required by neither the
 	// signature nor the schema's flat "required" list, because it is not
@@ -115,8 +126,19 @@ func toolIndexEntry(registry *toolapi.Registry, name string) string {
 
 // toolIndexEntrySize is what showing one tool to the planner costs, in
 // characters of its index.
-func toolIndexEntrySize(registry *toolapi.Registry, name string) int {
-	return len(toolIndexEntry(registry, name))
+func toolIndexEntrySize(registry *toolapi.Registry, name string, groups []string) int {
+	return len(toolIndexEntry(registry, name, groups))
+}
+
+// firstSentence is a description cut to its first sentence, for the one-line
+// entry of a tool outside the picked groups.
+func firstSentence(desc string) string {
+	for i := 0; i+1 < len(desc); i++ {
+		if (desc[i] == '.' || desc[i] == '?' || desc[i] == '!') && (desc[i+1] == ' ' || desc[i+1] == '\n') {
+			return desc[:i+1]
+		}
+	}
+	return desc
 }
 
 /*
@@ -594,7 +616,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 
 	sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time.\n")
 	if toolIndex == "" {
-		toolIndex = compileToolIndex(a.registry, relevant)
+		toolIndex = compileToolIndex(a.registry, relevant, pickedGroups(graph))
 	}
 	sb.WriteString(toolIndex)
 	sb.WriteString("\n")
@@ -609,7 +631,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		// says coding is on. The list this prompt is built from is already
 		// filtered by reach and by the run's scope, so asking it is asking the
 		// same question the dispatcher will ask later.
-		if slices.Contains(relevant, computeToolName) {
+		if a.inFull(graph, relevant, computeToolName) {
 			sb.WriteString("## Compute Nodes\n")
 			sb.WriteString("**Compute is the right tool whenever real computation is required.** The aggregator at the end of the plan is an LLM call that can handle small math, summarisation, and qualitative synthesis — but it CANNOT propagate orbits, run sgp4 / skyfield / pandas / scipy, parse thousand-row CSVs, or compute precision floating-point values. When the question needs any of those, **add a compute step.** The Persistence litany in your system prompt is explicit: the way to answer a hard quant question is to compute it, not to recommend an external app.\n\n")
 			sb.WriteString("Only omit compute when the answer truly is a lookup (a static value from a press release, a fact from Wikipedia, a short web summary). \"Looks like a lookup\" is not the same as \"is a lookup\" — *next visible Starlink passes over Tokyo tonight* is NOT pre-computed on any page; it requires sgp4 propagation. If a known web tool exists for it (Heavens-Above, in-the-sky.org), assume the tool is a JS widget that computes on click — not a fetchable answer. Fetch the underlying TLE catalogue from CelesTrak and compute it yourself.\n\n")
@@ -729,7 +751,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 
 	sb.WriteString(fmt.Sprintf("%s\n", igxSection))
 
-	if slices.Contains(relevant, computeToolName) {
+	if a.inFull(graph, relevant, computeToolName) {
 		// Preflight owns the compute-depth decision; the planner treats it as
 		// authoritative rather than re-deriving deep vs shallow from workspace
 		// residue. Here and not in the Compute Nodes section because it changes
@@ -743,7 +765,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 
 	// The workspace layout describes where compute puts what it builds, so
 	// it belongs with compute — see above.
-	if slices.Contains(relevant, computeToolName) {
+	if a.inFull(graph, relevant, computeToolName) {
 		sb.WriteString("\n## Workspace Layout\n")
 		sb.WriteString("- project/ — source code, application files\n")
 		sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
@@ -1730,7 +1752,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	if toolIndex == "" {
 		// Fallback if the gate is unavailable (defensive; shouldn't happen
 		// in a normal investigation).
-		toolIndex = compileToolIndex(a.registry, relevant)
+		toolIndex = compileToolIndex(a.registry, relevant, pickedGroups(graph))
 	}
 
 	sysPromptN := a.executiveSystemPrompt(ctx, graph, relevant, dagMode, intent, toolIndex)

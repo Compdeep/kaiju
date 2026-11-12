@@ -1421,7 +1421,7 @@ func (s *toolIndexSource) Load(g *Graph, t *Trigger, a *Agent, params map[string
 	if len(names) == 0 {
 		return "", nil
 	}
-	return compileToolIndex(a.registry, names), nil
+	return compileToolIndex(a.registry, names, pickedGroups(g)), nil
 }
 
 // compactOutputShape renders a tool's OutputSchema as a concise one-line(ish)

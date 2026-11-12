@@ -89,7 +89,7 @@ func TestIndexEntryStatesTheRuleForARegisteredTool(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	entry := toolIndexEntry(reg, "stub_net")
+	entry := toolIndexEntry(reg, "stub_net", nil)
 	if entry == "" {
 		t.Fatal("no index entry for a registered tool")
 	}

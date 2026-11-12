@@ -113,7 +113,7 @@ func TestFitToolIndex_TrimsFromTheBottom(t *testing.T) {
 	}
 	size := 0
 	for _, n := range got {
-		size += toolIndexEntrySize(reg, n)
+		size += toolIndexEntrySize(reg, n, nil)
 	}
 	if size > toolIndexBudget.Base {
 		t.Errorf("kept %d chars, budget is %d", size, toolIndexBudget.Base)

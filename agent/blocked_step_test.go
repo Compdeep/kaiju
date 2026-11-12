@@ -98,7 +98,8 @@ func TestAStepWhoseDependencyFailedIsSkippedNotFailed(t *testing.T) {
 	if got := deliver["state"]; got != "skipped" {
 		t.Errorf("the step that never ran has state %v, want skipped — it was not tried, so it did not fail", got)
 	}
-	if errText, _ := deliver["err"].(string); !strings.Contains(errText, "has empty result (failed)") {
+	// Said in the trace as the step it waited on and how that step ended.
+	if errText, _ := deliver["err"].(string); !strings.Contains(errText, "needs listing, which failed") {
 		t.Errorf("the skipped step reads %q, want it to keep why it never ran", errText)
 	}
 	if reader.calls != 0 {

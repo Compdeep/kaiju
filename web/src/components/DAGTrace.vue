@@ -139,7 +139,7 @@
             <span v-for="sk in item.skills" :key="sk" class="t-skill-chip">{{ sk }}</span>
           </div>
 
-          <div v-if="item.type === 'error'" class="tl tl-sub tl-err tl-clickable"
+          <div v-if="item.type === 'error'" :class="['tl', 'tl-sub', 'tl-err', 'tl-clickable', item.errType]"
                :style="indent(item.depth)" @click="toggleResult('err-' + item.key)">
             <span class="t-branch">└</span>
             <span :class="['t-err-badge', item.errType || 'exec']">{{ errLabel(item.errType) }}</span>
@@ -565,7 +565,7 @@ function fmtTokens(t) { return t >= 1000 ? (t / 1000).toFixed(1) + 'k' : String(
  * @param {string} t - Error type (gate, clearance, timeout, or other)
  * @returns {string} Formatted error label
  */
-function errLabel(t) { return { gate: '\u26D4 GATE', clearance: '\uD83D\uDD12 CLEARANCE', timeout: '\u23F1 TIMEOUT' }[t] || '\u2717 ERROR' }
+function errLabel(t) { return { gate: '\u26D4 GATE', clearance: '\uD83D\uDD12 CLEARANCE', timeout: '\u23F1 TIMEOUT', skipped: '\u2013 SKIPPED' }[t] || '\u2717 ERROR' }
 
 /**
  * desc: Indentation for a row at a given depth in the dependency tree
@@ -698,6 +698,7 @@ function parseRCA(result) {
   --n-rca:     #7c3aed;   /* holmes — violet */
   --n-human:   #db2777;   /* interjection — pink */
   --n-danger:  #dc2626;   /* failures, actuator — red */
+  --n-skip:    #ea580c;   /* skipped: an earlier step had nothing to give — orange */
   --n-ok:      #059669;   /* resolved — emerald */
   --n-on-danger: #fff;
 
@@ -738,6 +739,7 @@ function parseRCA(result) {
   --n-rca:     #c084fc;
   --n-human:   #ff77c8;
   --n-danger:  #ff6b6b;
+  --n-skip:    #ff9f43;
   --n-ok:      #4ade80;
   --n-on-danger: #1a0b0b;
 
@@ -1060,6 +1062,11 @@ function parseRCA(result) {
   overflow: hidden; text-overflow: ellipsis;
 }
 .tl-err .t-expand { color: var(--n-danger); opacity: 1; }
+/* Skipped: the step never ran because an earlier one had nothing to give. Not
+   a fault of its own, so orange rather than the failure red. */
+.tl-err.skipped { background: color-mix(in srgb, var(--n-skip) 12%, transparent); }
+.t-err-badge.skipped { background: var(--n-skip); color: var(--n-on-danger); }
+.tl-err.skipped .t-err-msg, .tl-err.skipped .t-expand { color: var(--n-skip); }
 
 /* Footer */
 .tl-footer { margin-top: 3px; }

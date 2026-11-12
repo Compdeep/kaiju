@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -319,7 +320,7 @@ type NodeInfo struct {
 	Summary    string          `json:"summary,omitempty"`     // short human-readable summary line
 	Params     string          `json:"params,omitempty"`      // compact params summary
 	Impact     int             `json:"impact,omitempty"`      // tool impact level for this call
-	ErrType    string          `json:"err_type,omitempty"`    // "gate", "clearance", "timeout", "exec"
+	ErrType    string          `json:"err_type,omitempty"`    // "gate", "clearance", "timeout", "exec", "skipped"
 	Retry      string          `json:"retry,omitempty"`       // the retry tier that ran: "blind" or "twotime"
 	Source     string          `json:"source,omitempty"`      // "builtin", "skillmd", "custom"
 	Actions    []NodeAction    `json:"actions,omitempty"`     // side-effects: panel_show, notify, etc.
@@ -595,6 +596,15 @@ func (g *Graph) nodeInfo(n *Node) *NodeInfo {
 	if n.Error != nil {
 		errStr := n.Error.Error()
 		info.Error = errStr
+		// A step skipped because an earlier step had nothing to give did not
+		// fail: say so, and say why, rather than showing the wrapped error,
+		// which reads "dependency injection failed: template on n12: …".
+		var blocked *blockedByDep
+		if n.State == StateSkipped && errors.As(n.Error, &blocked) {
+			info.ErrType = "skipped"
+			info.Error = "skipped: " + g.blockedReason(blocked)
+			return info
+		}
 		// Classify error type
 		if strings.HasPrefix(errStr, "gate:") {
 			info.ErrType = "gate"
@@ -2348,4 +2358,18 @@ func (a *Agent) hasUsableEvidence(graph *Graph) bool {
 		}
 	}
 	return false
+}
+
+// blockedReason says, for the trace, why a step never ran: the reason the
+// resolver gave, or which step it was waiting on and how that step ended. The
+// graph's lock is held.
+func (g *Graph) blockedReason(b *blockedByDep) string {
+	if b.Why != "" {
+		return b.Why
+	}
+	name := b.DepID
+	if dep, ok := g.nodes[b.DepID]; ok && dep.Tag != "" {
+		name = dep.Tag
+	}
+	return fmt.Sprintf("needs %s, which %s with nothing to read", name, b.State)
 }

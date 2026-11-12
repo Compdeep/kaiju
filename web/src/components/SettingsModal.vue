@@ -592,6 +592,11 @@ onMounted(async () => {
     if (!cfg.value.chat) cfg.value.chat = { provider: '', model: '' }
     if (!cfg.value.agent) cfg.value.agent = {}
     if (!Array.isArray(cfg.value.chat.tools)) cfg.value.chat.tools = []
+    // The server leaves an empty model out (omitempty). A missing value matches
+    // no option, so the box showed blank instead of "same as …".
+    for (const lane of [cfg.value.executor, cfg.value.vision, cfg.value.chat]) lane.model ??= ''
+    cfg.value.agent.route_model ??= ''
+    cfg.value.agent.answer_model ??= ''
     try { availableTools.value = await api.get('/api/v1/tools') } catch {}
     execProvider.value = cfg.value.executor.provider || ''
     visionProvider.value = cfg.value.vision.provider || ''

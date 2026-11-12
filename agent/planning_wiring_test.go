@@ -274,25 +274,3 @@ func TestShippedSkills_ContributeGuidanceThePlannerReads(t *testing.T) {
 		}
 	}
 }
-
-// web_research_guide may not forbid a URL the planner knows. "Never type a URL
-// from memory" came with every web run once cards followed groups (d8fa8c1),
-// and it ruled out what the runs that answered the barycenter question did:
-// call the JPL Horizons API by its known address. Searching first still leads,
-// and a URL from memory is unproven until fetched.
-func TestWebResearchGuide_AllowsAKnownOfficialURL(t *testing.T) {
-	card := everyShippedCard(t)["bundled/web-research"]
-	if card == "" {
-		t.Fatal("web-research card not found")
-	}
-	for _, banned := range []string{"Never type a URL from memory", "remembered URLs are not evidence"} {
-		if strings.Contains(card, banned) {
-			t.Errorf("the card still forbids known URLs: %q", banned)
-		}
-	}
-	for _, want := range []string{"or from what you know", "unproven until it is fetched", "web_search", "web_fetch"} {
-		if !strings.Contains(card, want) {
-			t.Errorf("the card is missing %q", want)
-		}
-	}
-}

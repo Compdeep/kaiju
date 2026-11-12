@@ -181,6 +181,11 @@ func (c *Client) applyReasoning(req *ChatRequest) {
 		model = c.model
 	}
 	f, known := c.facts(model)
+	// A schema is what a stage that forces one shape asked for, and this model
+	// drops it when it thinks, so that request goes without thinking.
+	if f.Thinking.DropsSchema && asksForOneShape(req) {
+		req.Think = &Reasoning{Want: WantOff}
+	}
 	r := resolveReasoning(req, f, known)
 	if c.provider == ProviderBedrock {
 		req.Reasoning, req.ReasoningEffort = nil, r.bedrockEffort(f)

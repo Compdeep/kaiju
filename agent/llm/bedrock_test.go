@@ -134,6 +134,47 @@ func TestBedrockGetsTheStrictSchema(t *testing.T) {
 	}
 }
 
+// A model measured to drop a strict schema when it thinks is sent its schema
+// requests without thinking, and keeps thinking everywhere else. On Bedrock,
+// Qwen3 32B thinks only at high, and at high it followed a strict schema 0
+// times in 6; with no effort sent, every time. A model without that fact
+// keeps the effort it asked for.
+func TestThinkingIsOffForASchemaTheModelWouldDrop(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body = nil
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"{\"a\":\"x\"}"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+	schemaReq := func() *ChatRequest {
+		return oneTool(`{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`)
+	}
+	for _, c := range []struct {
+		name       string
+		drops      bool
+		wantSchema any
+	}{
+		{"drops the schema", true, nil},
+		{"keeps the schema", false, "high"},
+	} {
+		facts := func(string) (ModelFacts, bool) {
+			f, _ := qwenOnBedrock("")
+			f.Thinking.DropsSchema = c.drops
+			return f, true
+		}
+		cl := NewClientWithProvider(ProviderBedrock, srv.URL+"/v1", "k", "qwen.qwen3-32b+high").Catalog(facts)
+		_, _ = cl.Complete(context.Background(), schemaReq())
+		if body["reasoning_effort"] != c.wantSchema {
+			t.Errorf("%s: schema request sent reasoning_effort %v, want %v", c.name, body["reasoning_effort"], c.wantSchema)
+		}
+		_, _ = cl.Complete(context.Background(), &ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}})
+		if body["reasoning_effort"] != "high" {
+			t.Errorf("%s: plain request sent reasoning_effort %v, want high", c.name, body["reasoning_effort"])
+		}
+	}
+}
+
 // Thinking text comes back in reasoning_content as well as reasoning, streamed
 // or not.
 func TestReasoningContentIsRead(t *testing.T) {

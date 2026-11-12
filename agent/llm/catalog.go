@@ -52,6 +52,9 @@ type Thinking struct {
 	// Efforts are the effort values this model was measured to act on. Empty
 	// means nothing measured, and nothing is asked of it.
 	Efforts []Effort
+	// DropsSchema reports that, thinking, the model ignores a strict schema
+	// and answers in prose, so a request for one is sent with thinking off.
+	DropsSchema bool
 	// Budget reports whether a thinking budget in tokens is honoured AS a
 	// budget — the model returning roughly what it was allowed rather than
 	// whatever it wanted.

@@ -1351,6 +1351,7 @@
       "reasoning_efforts": [
         "high"
       ],
+      "thinking_drops_schema": true,
       "pace": "very slow"
     },
     {

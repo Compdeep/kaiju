@@ -43,3 +43,15 @@ func TestClearingTheExecutorUsesTheReasoningModel(t *testing.T) {
 		t.Errorf("executor sends to %q after same as reasoning, want the reasoning model", got)
 	}
 }
+
+// Qwen3 32B on Bedrock carries the measured fact that it drops a strict
+// schema when it thinks, so the engine sends its schema requests without.
+func TestQwen3OnBedrockDropsTheSchemaWhenThinking(t *testing.T) {
+	f, ok := Facts("qwen.qwen3-32b+high")
+	if !ok || !f.Thinking.DropsSchema {
+		t.Errorf("facts = %+v (%v), want DropsSchema", f.Thinking, ok)
+	}
+	if f, _ := Facts("qwen.qwen3-next-80b-a3b-instruct"); f.Thinking.DropsSchema {
+		t.Error("Qwen3 Next 80B keeps the schema at every effort, measured")
+	}
+}

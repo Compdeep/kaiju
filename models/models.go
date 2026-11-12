@@ -85,6 +85,10 @@ type Info struct {
 	// asked of it — a control that changes nothing is worse than one not
 	// offered, because somebody will trust it.
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+	// ThinkingDropsSchema reports that, thinking, this model ignores a strict
+	// schema and answers in prose. Measured: Qwen3 32B on Bedrock followed one
+	// 0 times in 6 at high, its only thinking effort, and every time without.
+	ThinkingDropsSchema bool `json:"thinking_drops_schema,omitempty"`
 	// ReasoningBudget reports whether a thinking budget in tokens is honoured AS
 	// a budget. Two entries in the catalog are: they return exactly what they
 	// are allowed. Measured the same way, and false by default for the same

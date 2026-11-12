@@ -144,8 +144,10 @@ func TestClosedSchema_IsStable(t *testing.T) {
 			t.Fatalf("the schema marshals differently between calls:\n %s\n %s", first, got)
 		}
 	}
-	if !strings.Contains(first, `["a","m","z"]`) {
-		t.Errorf("required is not sorted: %s", first)
+	// Stable by following the author's order, not by sorting: a strict decoder
+	// writes fields in schema order (see schema_order.go).
+	if !strings.Contains(first, `["z","a","m"]`) {
+		t.Errorf("required is not in the properties' order: %s", first)
 	}
 }
 

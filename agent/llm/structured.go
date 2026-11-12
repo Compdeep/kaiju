@@ -248,7 +248,14 @@ func closedSchema(raw json.RawMessage) json.RawMessage {
 	if err != nil {
 		return nil
 	}
-	return out
+	// json.Marshal writes a map's keys sorted, and a strict decoder writes the
+	// reply's fields in the order the schema lists them. Sorted, the reflector's
+	// required summary came last, the model tried to close the object without
+	// it, the grammar refused the } and allowed only whitespace, and qwen3.6
+	// wrote spaces to the 8192-token cap (run c77f2d9d, 2026-11-12; 2 of 8
+	// replays failed sorted, 0 of 24 in the author's order). The sent copy keeps
+	// the order the stage wrote. See schema_order.go.
+	return keepAuthorsOrder(raw, out)
 }
 
 /*

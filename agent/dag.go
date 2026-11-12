@@ -193,10 +193,15 @@ type Node struct {
 	// Target names the target this node runs on; empty means here. Opaque to
 	// this package and passed through exactly as the planner set it — see
 	// remote.go.
-	Target    string
-	Result    string
-	Body      NodeBody // typed output; Result is a cached render of this during the migration
-	Error     error
+	Target string
+	Result string
+	Body   NodeBody // typed output; Result is a cached render of this during the migration
+	Error  error
+	// NotUseful is why a stage that judges output (the group reviewer) did not
+	// accept what this step returned. The step keeps the state its tool gave
+	// it; this is a verdict about its output, not a failure of the call, and
+	// its output is not evidence. Empty when nobody rejected it.
+	NotUseful string
 	Children  []string // node IDs spawned by this node
 	SpawnedBy string   // parent node ID (empty for executive-created nodes)
 	Tag       string   // human-readable label from executive
@@ -320,7 +325,7 @@ type NodeInfo struct {
 	Summary    string          `json:"summary,omitempty"`     // short human-readable summary line
 	Params     string          `json:"params,omitempty"`      // compact params summary
 	Impact     int             `json:"impact,omitempty"`      // tool impact level for this call
-	ErrType    string          `json:"err_type,omitempty"`    // "gate", "clearance", "timeout", "exec", "skipped"
+	ErrType    string          `json:"err_type,omitempty"`    // "gate", "clearance", "timeout", "exec", "skipped", "not_useful"
 	Retry      string          `json:"retry,omitempty"`       // the retry tier that ran: "blind" or "twotime"
 	Source     string          `json:"source,omitempty"`      // "builtin", "skillmd", "custom"
 	Actions    []NodeAction    `json:"actions,omitempty"`     // side-effects: panel_show, notify, etc.
@@ -592,6 +597,10 @@ func (g *Graph) nodeInfo(n *Node) *NodeInfo {
 	if n.TokensIn > 0 || n.TokensOut > 0 {
 		info.TokensIn = n.TokensIn
 		info.TokensOut = n.TokensOut
+	}
+	if n.NotUseful != "" && n.Error == nil {
+		info.ErrType = "not_useful"
+		info.Error = "not useful: " + n.NotUseful
 	}
 	if n.Error != nil {
 		errStr := n.Error.Error()
@@ -1508,6 +1517,9 @@ func (g *Graph) ResolvedResultsSoFar() map[string]string {
 		if n.Type != NodeTool && n.Type != NodeCompute {
 			continue
 		}
+		if n.NotUseful != "" {
+			continue // judged not useful: not evidence
+		}
 		// Label with tool and key param for clarity
 		label := formatNodeLabel(n)
 		if _, exists := results[label]; exists {
@@ -1564,6 +1576,8 @@ type StepResult struct {
 	Payload json.RawMessage // what it returned, as fields. Nil for a body with none.
 	Content string          // what it returned as text, for a tool that has only text
 	Err     string          // why it failed, empty when it did not
+	// NotUseful is why its output was judged not useful, empty when it was not.
+	NotUseful string
 }
 
 /*
@@ -1674,6 +1688,7 @@ func (g *Graph) StepResults(round int) []StepResult {
 		if n.Error != nil {
 			r.Err = n.Error.Error()
 		}
+		r.NotUseful = n.NotUseful
 		out = append(out, r)
 	}
 	return out
@@ -1694,6 +1709,9 @@ func (g *Graph) resolvedResultNodes() map[string]*Node {
 		}
 		if n.Type != NodeTool && n.Type != NodeCompute {
 			continue
+		}
+		if n.NotUseful != "" {
+			continue // judged not useful: not evidence
 		}
 		label := formatNodeLabel(n)
 		if _, exists := out[label]; exists {
@@ -2289,7 +2307,10 @@ func (g *Graph) EvidenceStats() (toolNodes, failed, withResult int) {
 		}
 		toolNodes++
 		switch {
-		case n.State == StateFailed:
+		// A step judged not useful counts with the failures, as it did when
+		// the reviewer set it failed: it is not evidence, and Enbarr's verdict
+		// gate (alert_answer.go) reads this to refuse a verdict with none.
+		case n.State == StateFailed, n.NotUseful != "":
 			failed++
 		case n.State == StateResolved && strings.TrimSpace(n.Result) != "":
 			withResult++
@@ -2372,4 +2393,33 @@ func (g *Graph) blockedReason(b *blockedByDep) string {
 		name = dep.Tag
 	}
 	return fmt.Sprintf("needs %s, which %s with nothing to read", name, b.State)
+}
+
+/*
+ * SetNotUseful records that a stage judged a step's output not useful.
+ * desc: The step's state is left as its tool gave it: the call worked, and
+ *       saying it failed sent the reflector after a fault that did not happen.
+ * param: nodeID - the step.
+ * param: why - the reason given.
+ */
+func (g *Graph) SetNotUseful(nodeID, why string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if n, ok := g.nodes[nodeID]; ok {
+		n.NotUseful = why
+		g.emit(DAGEvent{Type: "node", NodeID: n.ID, Node: g.nodeInfo(n)})
+	}
+}
+
+// NotUsefulNodes is every step whose output was judged not useful, in order.
+func (g *Graph) NotUsefulNodes() []*Node {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	var out []*Node
+	for _, id := range g.order {
+		if n, ok := g.nodes[id]; ok && n.NotUseful != "" && n.Error == nil {
+			out = append(out, n)
+		}
+	}
+	return out
 }

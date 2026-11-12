@@ -205,9 +205,18 @@ func (a *Agent) applyGroupReview(graph *Graph, group []*Node, out groupReview) i
 		}
 		switch u.Action {
 		case "give_up":
-			// Left failed, carrying the reviewer's reason so the reflector reads
-			// why rather than only that it broke.
-			if u.Why != "" {
+			// A step that broke is left failed, carrying the reviewer's reason
+			// so the reflector reads why rather than only that it broke. A step
+			// that worked keeps its state, with the verdict beside it: setting
+			// it failed showed a fetch whose page loaded fine, or a command that
+			// exited 0, as a call that broke (run b09e2b84).
+			if n.State == StateResolved {
+				why := u.Why
+				if why == "" {
+					why = "the reviewer did not accept this output"
+				}
+				graph.SetNotUseful(n.ID, why)
+			} else if u.Why != "" {
 				graph.SetError(n.ID, fmt.Errorf("%s: %s", n.Tag, u.Why))
 			}
 			continue

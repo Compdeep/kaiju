@@ -205,6 +205,29 @@ func stepResultContent(r StepResult) string {
 		}
 		return string(b)
 	}
+	if r.NotUseful != "" {
+		// Beside the fields, not around them, as withStepName does, so a
+		// reference into the payload reads the same path.
+		out := map[string]any{"not_useful": r.NotUseful}
+		if len(r.Payload) > 0 {
+			var obj map[string]any
+			if json.Unmarshal(r.Payload, &obj) == nil {
+				for k, v := range obj {
+					out[k] = v
+				}
+			} else {
+				out["data"] = json.RawMessage(r.Payload)
+			}
+		} else if r.Content != "" {
+			out["content"] = r.Content
+		}
+		if r.Name != "" {
+			out["step"] = r.Name
+		}
+		if b, err := json.Marshal(out); err == nil {
+			return string(b)
+		}
+	}
 	if len(r.Payload) > 0 {
 		return withStepName(r.Payload, r.Name)
 	}

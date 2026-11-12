@@ -1167,6 +1167,23 @@ func (s *nodeReturnsSource) Load(g *Graph, t *Trigger, a *Agent, params map[stri
 			}
 		}
 
+		// Steps that worked but whose output was judged not useful: named with
+		// the reason and without their output, which is not evidence.
+		if rejected := g.NotUsefulNodes(); len(rejected) > 0 {
+			sb.WriteString("### Judged not useful\n\n")
+			for _, r := range rejected {
+				if len(typeSet) > 0 && !typeSet[r.ToolName] {
+					continue
+				}
+				label := r.Tag
+				if label == "" {
+					label = r.ToolName
+				}
+				sb.WriteString(fmt.Sprintf("- **%s** (%s): ran, output not used: %s\n", label, r.ToolName, r.NotUseful))
+			}
+			sb.WriteString("\n")
+		}
+
 		if len(failed) > 0 {
 			sb.WriteString("### Failed\n\n")
 			for _, f := range failed {

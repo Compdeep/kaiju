@@ -565,7 +565,7 @@ function fmtTokens(t) { return t >= 1000 ? (t / 1000).toFixed(1) + 'k' : String(
  * @param {string} t - Error type (gate, clearance, timeout, or other)
  * @returns {string} Formatted error label
  */
-function errLabel(t) { return { gate: '\u26D4 GATE', clearance: '\uD83D\uDD12 CLEARANCE', timeout: '\u23F1 TIMEOUT', skipped: '\u2013 SKIPPED' }[t] || '\u2717 ERROR' }
+function errLabel(t) { return { gate: '\u26D4 GATE', clearance: '\uD83D\uDD12 CLEARANCE', timeout: '\u23F1 TIMEOUT', skipped: '\u2013 SKIPPED', not_useful: '\u2298 NOT USEFUL' }[t] || '\u2717 ERROR' }
 
 /**
  * desc: Indentation for a row at a given depth in the dependency tree
@@ -1062,11 +1062,13 @@ function parseRCA(result) {
   overflow: hidden; text-overflow: ellipsis;
 }
 .tl-err .t-expand { color: var(--n-danger); opacity: 1; }
-/* Skipped: the step never ran because an earlier one had nothing to give. Not
-   a fault of its own, so orange rather than the failure red. */
-.tl-err.skipped { background: color-mix(in srgb, var(--n-skip) 12%, transparent); }
-.t-err-badge.skipped { background: var(--n-skip); color: var(--n-on-danger); }
-.tl-err.skipped .t-err-msg, .tl-err.skipped .t-expand { color: var(--n-skip); }
+/* Skipped (the step never ran because an earlier one had nothing to give) and
+   not useful (it ran, and its output was judged not useful): neither is a
+   fault of the step, so orange rather than the failure red. */
+.tl-err.skipped, .tl-err.not_useful { background: color-mix(in srgb, var(--n-skip) 12%, transparent); }
+.t-err-badge.skipped, .t-err-badge.not_useful { background: var(--n-skip); color: var(--n-on-danger); }
+.tl-err.skipped .t-err-msg, .tl-err.skipped .t-expand,
+.tl-err.not_useful .t-err-msg, .tl-err.not_useful .t-expand { color: var(--n-skip); }
 
 /* Footer */
 .tl-footer { margin-top: 3px; }

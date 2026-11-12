@@ -1449,8 +1449,8 @@
       "context_tokens": 262144,
       "max_output_tokens": 16384,
       "provider": "bedrock",
-      "thinking": true,
-      "reasoning_optional": false,
+      "thinking": false,
+      "reasoning_optional": true,
       "tools": true,
       "tool_call_ok": true,
       "verified": false,
@@ -1460,6 +1460,9 @@
         "answer",
         "planner",
         "executor"
+      ],
+      "reasoning_efforts": [
+        "high"
       ]
     },
     {
@@ -1471,8 +1474,8 @@
       "context_tokens": 262144,
       "max_output_tokens": 32768,
       "provider": "bedrock",
-      "thinking": true,
-      "reasoning_optional": false,
+      "thinking": false,
+      "reasoning_optional": true,
       "tools": true,
       "tool_call_ok": true,
       "verified": false,
@@ -1480,6 +1483,9 @@
       "chat": false,
       "roles": [
         "executor"
+      ],
+      "reasoning_efforts": [
+        "high"
       ]
     },
     {

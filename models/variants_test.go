@@ -87,3 +87,22 @@ func TestBedrockQwen32BWindow(t *testing.T) {
 		t.Errorf("context = %d, want 32768", ctx)
 	}
 }
+
+// Measured on Bedrock 2026-11-12: both Nemotrons answer without thinking by
+// default and at none, low and medium, and think only at high. Marked as
+// always thinking, they were left off the executor list and given no thinking
+// on the reasoning lane.
+func TestNemotronOnBedrockThinksOnlyWhenAsked(t *testing.T) {
+	for _, id := range []string{"nvidia.nemotron-super-3-120b", "nvidia.nemotron-nano-3-30b"} {
+		m, ok := Find(id)
+		if !ok {
+			t.Fatalf("%s not in the catalog", id)
+		}
+		if m.Thinks() || !m.ReasoningOptional || !slices.Equal(m.Variants(), []string{"high"}) {
+			t.Errorf("%s: thinks=%v optional=%v variants=%v", id, m.Thinks(), m.ReasoningOptional, m.Variants())
+		}
+		if !m.FitsForcedSmallCall() {
+			t.Errorf("%s is not offered for the executor", id)
+		}
+	}
+}

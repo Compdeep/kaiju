@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -482,7 +483,119 @@ func substituteTemplates(n *Node, graph *Graph, reg *toolapi.Registry) error {
 	// referenced five times was parsed five times.
 	resolved := make(map[string]any, 4)
 	var firstErr error
-	walkParams(n.Params, func(s string) (any, bool) {
+	required := requiredParamSet(reg, n)
+	for key, val := range n.Params {
+		// A reference in an optional parameter whose step has nothing to give
+		// does not stop this step: the parameter, or its "name=value" entry,
+		// is left out or marked missing and the step runs on the rest. In a
+		// required parameter it blocks the step. Unknown tool: all required.
+		optional := required != nil && !required[key]
+		fn := templateLeaf(n, graph, reg, resolved, &firstErr, optional)
+		if str, ok := val.(string); ok {
+			if newVal, replaced := fn(str); replaced {
+				n.Params[key] = newVal
+			}
+		} else {
+			walkParams(val, fn)
+		}
+	}
+	pruneMissingInputs(n.Params)
+	if firstErr != nil {
+		return firstErr
+	}
+	return refuseUnresolvedReference(n)
+}
+
+// missingInput marks a parameter value left out because the step it read from
+// had nothing to give; pruneMissingInputs removes it.
+type missingInput struct{}
+
+// contextEntryRe is the "name=value" form a list parameter such as compute's
+// context carries one input in.
+var contextEntryRe = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_.-]*)=`)
+
+/*
+ * requiredParamSet is the parameters n's tool requires, or nil when the tool or
+ * its schema is unknown (every parameter is then treated as required).
+ */
+func requiredParamSet(reg *toolapi.Registry, n *Node) map[string]bool {
+	if reg == nil {
+		return nil
+	}
+	tool, ok := reg.Get(n.ToolName)
+	if !ok {
+		return nil
+	}
+	schema, err := parseToolSchema(tool.Parameters())
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, k := range schema.Required {
+		out[k] = true
+	}
+	for _, c := range schema.Conditional {
+		if c.applies(n.Params) {
+			for _, k := range c.Require {
+				out[k] = true
+			}
+		}
+	}
+	return out
+}
+
+// pruneMissingInputs drops every missingInput from params: a map key holding
+// one is deleted, a list entry holding one is removed.
+func pruneMissingInputs(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, val := range x {
+			if _, gone := val.(missingInput); gone {
+				delete(x, k)
+				continue
+			}
+			x[k] = pruneMissingInputs(val)
+		}
+		return x
+	case []any:
+		out := x[:0]
+		for _, val := range x {
+			if _, gone := val.(missingInput); gone {
+				continue
+			}
+			out = append(out, pruneMissingInputs(val))
+		}
+		return out
+	}
+	return v
+}
+
+/*
+ * templateLeaf returns the function that resolves the placeholders in one
+ * string of a parameter.
+ * param: optional - whether the parameter the string is in is optional.
+ */
+func templateLeaf(n *Node, graph *Graph, reg *toolapi.Registry, resolved map[string]any, firstErr *error, optional bool) func(string) (any, bool) {
+	fail := func(err error) {
+		if *firstErr == nil {
+			*firstErr = err
+		}
+	}
+	// missing handles a reference whose step had nothing to give: in an
+	// optional parameter the string is marked missing (kept by name when it is
+	// a "name=value" entry, so the step is told) and true is returned.
+	missing := func(s string, err error) (any, bool) {
+		var blocked *blockedByDep
+		if !optional || !errors.As(err, &blocked) || blocked.Why == "" {
+			return nil, false
+		}
+		log.Printf("[dag] inject %s: optional input left out: %s", n.ID, blocked.Why)
+		if m := contextEntryRe.FindStringSubmatch(s); m != nil {
+			return m[1] + "=(not available: " + blocked.Why + ")", true
+		}
+		return missingInput{}, true
+	}
+	return func(s string) (any, bool) {
 		// Special case: the WHOLE string is a single bare placeholder.
 		// In that case, replace the param value with the extracted
 		// value as-is (preserving its original type — string, number,
@@ -492,9 +605,10 @@ func substituteTemplates(n *Node, graph *Graph, reg *toolapi.Registry) error {
 			field := m[2]
 			val, err := resolveTemplateFieldCached(graph, resolved, depID, field, n.ID, reg)
 			if err != nil {
-				if firstErr == nil {
-					firstErr = err
+				if v, ok := missing(s, err); ok {
+					return v, true
 				}
+				fail(err)
 				return s, false
 			}
 			// Widened here and not inside resolution because only this branch
@@ -511,28 +625,32 @@ func substituteTemplates(n *Node, graph *Graph, reg *toolapi.Registry) error {
 		}
 		// Embedded placeholders inside a larger string: replace each
 		// match with its string form.
+		var gone any
 		out := nodeTemplateRe.ReplaceAllStringFunc(s, func(match string) string {
 			m := nodeTemplateRe.FindStringSubmatch(match)
 			depID := m[1]
 			field := m[2]
 			val, err := resolveTemplateFieldCached(graph, resolved, depID, field, n.ID, reg)
 			if err != nil {
-				if firstErr == nil {
-					firstErr = err
+				if gone == nil {
+					if v, ok := missing(s, err); ok {
+						gone = v
+						return match
+					}
 				}
+				fail(err)
 				return match
 			}
 			return injectedString(val)
 		})
+		if gone != nil {
+			return gone, true
+		}
 		if out != s {
 			return out, true
 		}
 		return s, false
-	})
-	if firstErr != nil {
-		return firstErr
 	}
-	return refuseUnresolvedReference(n)
 }
 
 // unresolvedReferenceRe matches this engine's own reference syntax and nothing
@@ -607,13 +725,20 @@ func resolveTemplateFieldCached(graph *Graph, cache map[string]any, depID, field
 // A dependency that failed but still produced output is not this: its output is
 // injected as it always was, because a command that exits non-zero has its
 // stderr in the result and the next step often wants it.
+//
+// It is also raised for a dependency whose tool reported empty or error and so
+// returned no field to read; Why then says which step and what it reported.
 type blockedByDep struct {
 	Owner string
 	DepID string
 	State NodeState
+	Why   string
 }
 
 func (e *blockedByDep) Error() string {
+	if e.Why != "" {
+		return fmt.Sprintf("template on %s: %s", e.Owner, e.Why)
+	}
 	return fmt.Sprintf("template on %s: dep %s has empty result (%s)", e.Owner, e.DepID, e.State)
 }
 
@@ -664,9 +789,36 @@ func resolveTemplateField(graph *Graph, depID, field, owner string) (any, error)
 			return v, nil
 		}
 	}
-	// Body.Field missed. Distinguish "envelope not JSON" (a tool bug — degrade
-	// gracefully to the raw string so a working pipeline doesn't break) from
-	// "JSON valid but field absent" (a planner bug — fail loud).
+	// Body.Field missed. A tool that reported its status says why: empty or
+	// error means there is no such field to read, so this step is blocked with
+	// that reason; ok means the plan named a field the tool does not return.
+	//
+	// Without this, the fallback below fired for every typed tool, because a
+	// typed tool's Result is its rendered text and never JSON: an empty
+	// web_search handed "(no search: no reachable results …)" to web_fetch as
+	// its URL, and the run reported "invalid URL" instead of "the search found
+	// nothing" (runs d9d652e3 and b09e2b84).
+	if env, ok := dep.Body.(interface{ Envelope() toolapi.ToolMessage }); ok {
+		msg := env.Envelope()
+		name := dep.Tag
+		if name == "" {
+			name = depID
+		}
+		switch msg.Status {
+		case toolapi.StatusEmpty:
+			return nil, &blockedByDep{Owner: owner, DepID: depID, State: dep.State,
+				Why: fmt.Sprintf("%s found nothing (%s), so it has no %s to give", name, Text.TruncateLog(msg.Detail, 200), field)}
+		case toolapi.StatusError:
+			return nil, &blockedByDep{Owner: owner, DepID: depID, State: dep.State,
+				Why: fmt.Sprintf("%s failed (%s), so it has no %s to give", name, Text.TruncateLog(msg.Detail, 200), field)}
+		case toolapi.StatusOK:
+			return nil, fmt.Errorf("template on %s: field %q absent in dep %s", owner, field, depID)
+		}
+	}
+	// Plain text from a tool with no status (unclassified). Distinguish
+	// "result not JSON" (degrade gracefully to the raw string so a working
+	// pipeline doesn't break) from "JSON valid but field absent" (a planner bug
+	// — fail loud).
 	var probe any
 	if json.Unmarshal([]byte(dep.Result), &probe) != nil {
 		log.Printf("[dag] template on %s: dep %s result is not JSON, injecting full result (upstream tool bug, not rejecting)", owner, depID)

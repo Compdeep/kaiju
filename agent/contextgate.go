@@ -991,34 +991,68 @@ func containsAnyCI(s string, needles ...string) bool {
 	return false
 }
 
+// commandResult is the payload of a command step's result.
+type commandResult struct {
+	ExitCode int    `json:"exit_code"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	Command  string `json:"command"`
+}
+
+// commandData is the payload of n's result when n ran a command.
+func commandData(n *Node) (commandResult, bool) {
+	var d commandResult
+	tb, ok := n.Body.(toolMessageBody)
+	if !ok || tb.Envelope().Type != "command" {
+		return d, false
+	}
+	return d, json.Unmarshal(tb.Envelope().Data, &d) == nil
+}
+
+// commandOutput is what a command printed, stderr first, or "".
+func commandOutput(d commandResult) string {
+	var parts []string
+	if s := strings.TrimSpace(d.Stderr); s != "" {
+		parts = append(parts, "stderr: "+s)
+	}
+	if s := strings.TrimSpace(d.Stdout); s != "" {
+		parts = append(parts, "stdout: "+s)
+	}
+	return strings.Join(parts, " | ")
+}
+
+/*
+ * failedLine is the worklog line of a step that failed for good.
+ * desc: For a command, the engine's sentence ("command failed: exit 2" and the
+ *       level the step ran at) names no cause, and the worklog is all the
+ *       coder and the planner see of it. In a run the cause was "sh: 1: Syntax
+ *       error: Unterminated quoted string", the coder was never shown it, and
+ *       it blocked asking for the error output. The command's output goes at
+ *       the end, because appendWorklog keeps the end of a long error.
+ * param: n - the step.
+ * param: errMsg - the engine's sentence.
+ * return: errMsg, with the command's output after it where there is one.
+ */
+func failedLine(n *Node, errMsg string) string {
+	if d, ok := commandData(n); ok {
+		if out := commandOutput(d); out != "" {
+			return errMsg + " | " + out
+		}
+	}
+	return errMsg
+}
+
 // extractFailureDetail pulls the most useful error detail from a failed node.
 // For bash nodes, it digs into the structured JSON to extract stdout/stderr
 // instead of showing the raw JSON wrapper. Used by nodeReturnsSource and
 // the aggregator's failure summary.
 func extractFailureDetail(n *Node) string {
 	// Typed bash: read exit status and streams off the command body directly.
-	if tb, ok := n.Body.(toolMessageBody); ok {
-		if env := tb.Envelope(); env.Type == "command" {
-			var d struct {
-				ExitCode int    `json:"exit_code"`
-				Stdout   string `json:"stdout"`
-				Stderr   string `json:"stderr"`
-				Command  string `json:"command"`
-			}
-			if json.Unmarshal(env.Data, &d) == nil {
-				var parts []string
-				if d.Stderr != "" {
-					parts = append(parts, "stderr: "+d.Stderr)
-				}
-				if d.Stdout != "" {
-					parts = append(parts, "stdout: "+d.Stdout)
-				}
-				if len(parts) > 0 {
-					return fmt.Sprintf("exit %d | %s", d.ExitCode, strings.Join(parts, " | "))
-				}
-				return fmt.Sprintf("exit %d (command: %s)", d.ExitCode, d.Command)
-			}
+	if d, ok := commandData(n); ok {
+		if out := commandOutput(d); out != "" {
+			return fmt.Sprintf("exit %d | %s", d.ExitCode, out)
 		}
+		return fmt.Sprintf("exit %d (command: %s)", d.ExitCode, d.Command)
 	}
 
 	// Try to extract from the result (legacy bash errors are returned as result, not Error)

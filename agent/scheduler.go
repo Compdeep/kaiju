@@ -1305,11 +1305,11 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 					// A check that failed says something about what it checked,
 					// not about itself, and the worklog is read by a human
 					// deciding what went wrong.
-					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_FAIL", errMsg)
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "VALIDATION_FAIL", failedLine(node, errMsg))
 				case strings.Contains(errMsg, "gate:"):
 					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "GATE_BLOCKED", errMsg)
 				default:
-					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "FAILED", errMsg)
+					appendWorklog(a.cfg.MetadataDir, graph.SessionID, node.Tag, "FAILED", failedLine(node, errMsg))
 				}
 				// Don't cascade prune — let downstream nodes attempt to run.
 				// The reflector will see the failure and decide what to do.

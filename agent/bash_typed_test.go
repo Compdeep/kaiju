@@ -66,3 +66,21 @@ func TestARemoteResultKeepsItsEnvelope(t *testing.T) {
 			"failure, so the run treats it as done and never repairs it")
 	}
 }
+
+// The worklog line of a failed command ends with what the command printed. The
+// engine's sentence ("exit 2" and the level) names no cause; in a run the cause
+// was "sh: 1: Syntax error: Unterminated quoted string", and a coder reading
+// only the sentence blocked asking for it.
+func TestFailedLineCarriesTheCommandsOutput(t *testing.T) {
+	n := &Node{Body: toolMessageBody{msg: toolapi.ToolFail("command", "exit 2",
+		map[string]any{"exit_code": 2, "stderr": "sh: 1: Syntax error: Unterminated quoted string\n"})}}
+	got := failedLine(n, "command failed: exit 2")
+	if got != "command failed: exit 2 | stderr: sh: 1: Syntax error: Unterminated quoted string" {
+		t.Errorf("failedLine = %q", got)
+	}
+	// Any other failure keeps its own line.
+	other := &Node{Body: toolMessageBody{msg: toolapi.ToolFail("page", "HTTP 404", nil)}}
+	if got := failedLine(other, "page failed: HTTP 404"); got != "page failed: HTTP 404" {
+		t.Errorf("failedLine = %q", got)
+	}
+}

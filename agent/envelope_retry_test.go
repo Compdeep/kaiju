@@ -108,3 +108,34 @@ func TestTheFixerIsShownWhatTheStepActuallyReported(t *testing.T) {
 		t.Error("the fixer was never shown the stderr, so it was asked to repair a command from an exit code alone")
 	}
 }
+
+// A shell fix that fails again leaves the step failed.
+//
+// bash reports a failed command in its result, not as an error, and the shell
+// fix checked only the error, so a rewrite that failed again was recorded as
+// OK. In a run, "run_barycenter — OK: bash: (command failed: exit 1 …" told the
+// reflector a script had worked that had not.
+func TestAShellFixThatFailsAgainLeavesTheStepFailed(t *testing.T) {
+	tool := &envelopeFailingTool{failWith: "-it"}
+	model := newStubModel(t, map[string]stubReply{
+		"submit_preflight": {Args: map[string]any{"mode": "agent", "intent": "operate"}},
+		"plan": plan(step("bash", "exploit_docker", map[string]any{
+			"command": "docker run --rm -it -v /:/host alpine cat /host/etc/shadow",
+		})),
+		// Every rewrite keeps the flag that fails.
+		"":                   {Content: "docker run -it -v /:/host alpine cat /host/etc/shadow"},
+		"reflector_decision": {Args: map[string]any{"decision": "conclude", "outcome": "done"}},
+	})
+	a := agentWithCompute(t, model, tool)
+
+	res, err := a.RunDAGSync(context.Background(), operateTrigger("read the shadow file"))
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if tool.calls < 2 {
+		t.Fatalf("the tool ran %d time(s) — the shell fix never ran", tool.calls)
+	}
+	if got := nodeWithTag(t, traceNodes(t, res), "exploit_docker")["state"]; got != "failed" {
+		t.Errorf("the step state is %v after every rewrite failed, want failed", got)
+	}
+}

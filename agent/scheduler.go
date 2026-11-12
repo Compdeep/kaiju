@@ -3116,14 +3116,14 @@ func (a *Agent) twotimeRetry(ctx context.Context, node *Node, comp nodeCompletio
 			return
 		}
 
-		result, execErr := a.runBashParams(ctx, node)
-		if execErr == nil {
-			ch <- nodeCompletion{NodeID: comp.NodeID, Result: result}
+		rerun := a.runBashParams(ctx, node, comp.NodeID)
+		if rerun.Err == nil {
+			ch <- rerun
 			return
 		}
 		// Failed again. Feed THIS error to the next attempt — the whole reason a
-		// second attempt is worth making.
-		lastCmd, lastErr = fixed, execErr.Error()
+		// second attempt is worth making — with what the command printed.
+		lastCmd, lastErr = fixed, failedLine(&Node{Body: rerun.Body}, rerun.Err.Error())
 		log.Printf("[dag] shell fix attempt %d still failed: %s", attempt,
 			Text.TruncateLog(lastErr, 120))
 	}
@@ -3187,25 +3187,29 @@ func (a *Agent) askShellFix(ctx context.Context, nodeID, objective, command, err
 // execBashParams runs the bash tool with the node's current params (same path as
 // normal dispatch) and reports the outcome. Shared by the retry paths.
 func (a *Agent) execBashParams(ctx context.Context, node *Node, comp nodeCompletion, ch chan nodeCompletion) {
-	result, execErr := a.runBashParams(ctx, node)
-	if execErr != nil {
-		ch <- nodeCompletion{NodeID: comp.NodeID, Err: execErr}
-	} else {
-		ch <- nodeCompletion{NodeID: comp.NodeID, Result: result}
-	}
+	ch <- a.runBashParams(ctx, node, comp.NodeID)
 }
 
 // runBashParams runs the bash tool and RETURNS the outcome instead of reporting
 // it. Separated from execBashParams so a caller that wants to act on a failure —
 // the second fix attempt — can see it without racing the completion channel.
-func (a *Agent) runBashParams(ctx context.Context, node *Node) (string, error) {
+func (a *Agent) runBashParams(ctx context.Context, node *Node, nodeID string) nodeCompletion {
 	sk, ok := a.registry.Get("bash")
 	if !ok {
-		return "", fmt.Errorf("bash tool not found")
+		return nodeCompletion{NodeID: nodeID, Err: fmt.Errorf("bash tool not found")}
 	}
-	return sk.(interface {
-		Execute(context.Context, map[string]any) (string, error)
-	}).Execute(ctx, node.Params)
+	// Typed, and through completionOf like normal dispatch: bash reports a
+	// failed command in its result, not as an error, and reading only the error
+	// recorded a retry that failed again as OK.
+	if typed, ok := sk.(toolapi.TypedExecutor); ok {
+		msg, err := typed.ExecuteTyped(ctx, node.Params)
+		if err != nil {
+			return nodeCompletion{NodeID: nodeID, Err: err}
+		}
+		return completionOf(nodeID, msg.JSON(), toolMessageBody{msg: msg}, nil)
+	}
+	result, err := sk.Execute(ctx, node.Params)
+	return completionOf(nodeID, result, nil, err)
 }
 
 // architectChild reports whether a compute node is a coder child grafted from

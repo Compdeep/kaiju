@@ -135,6 +135,37 @@ func TestConverseStartsWithTheUser(t *testing.T) {
 	}
 }
 
+// A request with no tools, such as a reframe stage, still carries the earlier
+// steps as tool calls. Converse refuses tool blocks without a toolConfig, so
+// they go as text; with tools they stay as blocks.
+func TestConverseToolsAsTextWithoutATool(t *testing.T) {
+	msgs := []Message{
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "s1", Function: FunctionCall{Name: "compute", Arguments: `{"goal":"x"}`}}}},
+		{Role: "tool", ToolCallID: "s1", Content: `{"error":"blocked"}`},
+		{Role: "user", Content: "rewrite"},
+	}
+	out := buildConverseRequest(&ChatRequest{Messages: msgs})
+	got, _ := json.Marshal(out.Messages)
+	if strings.Contains(string(got), "toolUse") || strings.Contains(string(got), "toolResult") {
+		t.Fatalf("tool blocks sent without a toolConfig: %s", got)
+	}
+	for _, want := range []string{`Called compute with {\"goal\":\"x\"}`, `compute returned: {\"error\":\"blocked\"}`} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("messages lack %s\nmessages: %s", want, got)
+		}
+	}
+	if out.Messages[0].Role != "user" {
+		t.Errorf("first message is %s", out.Messages[0].Role)
+	}
+
+	withTool := buildConverseRequest(&ChatRequest{Messages: msgs, ToolChoice: "required",
+		Tools: []ToolDef{{Type: "function", Function: FunctionDef{Name: "reflect", Parameters: json.RawMessage(`{"type":"object"}`)}}}})
+	got, _ = json.Marshal(withTool.Messages)
+	if !strings.Contains(string(got), "toolUse") || !strings.Contains(string(got), "toolResult") {
+		t.Errorf("tool blocks lost with a toolConfig: %s", got)
+	}
+}
+
 // Thinking goes to Nova 2 as its reasoning config.
 func TestConverseThinking(t *testing.T) {
 	var path string

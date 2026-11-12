@@ -321,6 +321,43 @@ func startWithUser(msgs []converseMessage) []converseMessage {
 }
 
 /*
+ * toolsAsText writes tool calls and their results as text, for a request that
+ * declares no tools.
+ * desc: Converse refuses tool blocks in a request without a toolConfig: "The
+ *       toolConfig field must be defined when using toolUse and toolResult
+ *       content blocks." (HTTP 400, found on Nova 2 Lite 2026-11-12, on every
+ *       reframe stage). Chat Completions accepts them, and
+ *       BuildMessagesWithResults writes the steps already run as the
+ *       assistant's tool calls for every stage, tools or not. The fix stays
+ *       here, on the Converse wire only, so no other provider's request changes.
+ * param: msgs - the conversation in Converse's shape.
+ * return: msgs, with each toolUse and toolResult block as a text block.
+ */
+func toolsAsText(msgs []converseMessage) []converseMessage {
+	names := map[string]string{}
+	for i := range msgs {
+		for j, b := range msgs[i].Content {
+			switch {
+			case b.ToolUse != nil:
+				names[b.ToolUse.ToolUseID] = b.ToolUse.Name
+				msgs[i].Content[j] = converseBlock{Text: fmt.Sprintf("Called %s with %s", b.ToolUse.Name, b.ToolUse.Input)}
+			case b.ToolResult != nil:
+				var sb strings.Builder
+				for _, c := range b.ToolResult.Content {
+					sb.WriteString(c.Text)
+				}
+				name := names[b.ToolResult.ToolUseID]
+				if name == "" {
+					name = "a tool"
+				}
+				msgs[i].Content[j] = converseBlock{Text: fmt.Sprintf("%s returned: %s", name, sb.String())}
+			}
+		}
+	}
+	return msgs
+}
+
+/*
  * buildConverseRequest is req in Converse's shape.
  * desc: System messages go apart. Tool results are user turns, and turns from
  *       the same side are merged, because Converse refuses two in a row.
@@ -347,8 +384,6 @@ func buildConverseRequest(req *ChatRequest) *converseRequest {
 		out.Messages = append(out.Messages, converseMessage{Role: role, Content: blocks})
 	}
 
-	out.Messages = startWithUser(out.Messages)
-
 	if len(req.Tools) > 0 && req.ToolChoice != "none" {
 		tc := &converseTools{}
 		for _, t := range req.Tools {
@@ -364,6 +399,10 @@ func buildConverseRequest(req *ChatRequest) *converseRequest {
 		}
 		out.ToolConfig = tc
 	}
+	if out.ToolConfig == nil {
+		out.Messages = toolsAsText(out.Messages)
+	}
+	out.Messages = startWithUser(out.Messages)
 
 	if e := req.ReasoningEffort; e != "" && e != "none" {
 		out.Additional = map[string]any{"reasoningConfig": map[string]string{"type": "enabled", "maxReasoningEffort": e}}

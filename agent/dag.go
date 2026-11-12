@@ -1000,8 +1000,14 @@ func (g *Graph) SetState(nodeID string, state NodeState) {
 // A trace has to show what a tool returned, and a tool that returns a page
 // returns more than a trace can hold — so values are shortened and the shape is
 // not.
+//
+// 4000 per value, not 400: the same values are the tool results every stage
+// reads, and a fetched page's summary runs to about 3,500 characters. At 400 the
+// Horizons documentation summary reached the planner as its first and last 200
+// characters, the parameter list in between was lost, and the planner guessed
+// parameters six times (run ea4397c6, 2026-11-12).
 const (
-	payloadValueChars = 400   // per string value
+	payloadValueChars = 4000  // per string value
 	payloadWholeChars = 12000 // the whole structure, after shortening
 )
 

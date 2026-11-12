@@ -161,8 +161,12 @@ func (b *Bash) Excerpts() []toolapi.Excerpt {
 	}}
 }
 
+// bashOutputNote is the rule about using bash's fields, shown to the planner
+// after their names.
+const bashOutputNote = "stdout is text, not a list, and is cut at each end when long: have the command print only the value a later step needs, and read output_path when the whole output matters."
+
 func (b *Bash) OutputSchema() json.RawMessage {
-	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOf(bashData{}))
+	return toolapi.EnvelopeSchema(toolapi.PayloadSchemaOfWithNote(bashData{}, bashOutputNote))
 }
 
 // Destination is the host this command reaches, so two commands that reach the

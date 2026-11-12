@@ -20,9 +20,9 @@ func TestPlannerPrompt_SharesItsStartAcrossRuns(t *testing.T) {
 	p1 := a.executiveSystemPrompt(context.Background(), g1, nil, "", "observe", "")
 	p2 := a.executiveSystemPrompt(context.Background(), g2, nil, "", "execute", "")
 
-	cut := strings.Index(p1, "## Skill Guidance")
+	cut := strings.Index(p1, "## Required Tool Groups")
 	if cut < 0 {
-		t.Fatal("the prompt has no Skill Guidance section")
+		t.Fatal("the prompt has no Required Tool Groups section")
 	}
 	shared := p1[:cut]
 	if !strings.HasPrefix(p2, shared) {

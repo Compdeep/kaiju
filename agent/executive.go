@@ -57,6 +57,7 @@ func compileToolIndex(registry *toolapi.Registry, names []string, groups []strin
 	var sb strings.Builder
 	sb.WriteString("## Tools (* = required param, name: a|b|c = the only values that parameter takes)\n")
 	sb.WriteString("The parameters shown for each tool are the only ones available — use only the parameters listed.\n")
+	sb.WriteString("→ returns lists the fields a later step can reference as ${step.<tag>.<field>}.\n")
 	// Listed in a fixed order, not the order they were ranked in.
 	//
 	// A provider caches a prompt as far as the first character that differs

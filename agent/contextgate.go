@@ -1486,21 +1486,18 @@ func compactOutputShape(schema json.RawMessage) string {
 		return ""
 	}
 
+	// Names only. A ${step.<tag>.<field>} reference needs the name, and a
+	// sentence per field was half the tool index. A rule about using a field
+	// goes in the tool's own description, which follows the list; what a field
+	// means still reaches the step that reads it (upstream_fields.go).
 	var parts []string
-	for name, p := range s.Properties {
-		if p.Description != "" {
-			parts = append(parts, fmt.Sprintf("%s: %s", name, p.Description))
-		} else if p.Type != "" {
-			parts = append(parts, fmt.Sprintf("%s (%s)", name, p.Type))
-		} else {
-			parts = append(parts, name)
-		}
+	for name := range s.Properties {
+		parts = append(parts, name)
 	}
-	// Named first, because it is what a read is for and the measurements are
-	// about it. A tool whose payload already declares its own content — web_fetch
-	// does — says it better than this does, so it is not said twice.
+	// A tool whose payload is only measurements has its text in content, and a
+	// planner never shown that name writes ${step.tag} and gets the measurements.
 	if envelopeHasContent && !hasPart(parts, "content") {
-		parts = append(parts, "content: the text this tool returned — reference it with ${step.<tag>.content}")
+		parts = append(parts, "content")
 	}
 	sortStrings(parts)
 

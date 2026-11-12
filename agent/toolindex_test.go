@@ -33,7 +33,7 @@ func TestToolIndexShowsTheToolNotTheEnvelope(t *testing.T) {
 	wrapped := compactOutputShape(toolapi.EnvelopeSchema(indexFields))
 	flat := compactOutputShape(json.RawMessage(indexFields))
 
-	if !strings.Contains(wrapped, "content:") {
+	if !strings.Contains(wrapped, "content") {
 		t.Errorf("an envelope must name content, the field its text arrives in: %s", wrapped)
 	}
 	if strings.Contains(flat, "content") {
@@ -109,10 +109,22 @@ func removeField(shape, name string) string {
 	inner := strings.TrimSuffix(strings.TrimPrefix(shape, "{"), "}")
 	kept := []string{}
 	for _, part := range strings.Split(inner, ", ") {
-		if strings.HasPrefix(part, name+":") {
+		if part == name || strings.HasPrefix(part, name+":") {
 			continue
 		}
 		kept = append(kept, part)
 	}
 	return "{" + strings.Join(kept, ", ") + "}"
+}
+
+// The planner is shown a tool's output fields by name, and the tool's note on
+// them, not a sentence per field. A name is what a ${step.<tag>.<field>}
+// reference needs; the sentences were half the tool index. What a field means
+// still reaches the step that reads it, from the schema, not from this line.
+func TestToolIndexNamesTheFieldsAndKeepsTheNote(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","description":"Search results with URLs.","properties":{"query":{"type":"string","description":"the search query executed"},"results":{"type":"array","description":"ranked search results"}}}`)
+	got := compactOutputShape(toolapi.EnvelopeSchema(string(schema)))
+	if want := "{content, query, results} — Search results with URLs."; got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
 }

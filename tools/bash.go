@@ -452,10 +452,14 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		stdoutStr := headTailTruncate(stdout.String(), 200, 600)
 		stderrStr := headTailTruncate(stderr.String(), 200, 600)
 		detail := fmt.Sprintf("exit %d: %s", exitCode, err.Error())
-		// Said with the failure, so a refused command is not retried as
-		// though it might work the next time.
-		if limits := toolapi.Limits(ctx); limits != "" {
+		// The level is named only when the command was refused, so a refused
+		// command is not retried as though it might work the next time. Named
+		// on every failure, it made a missing file read as a permission error;
+		// any other failure gives the command's own last line of stderr.
+		if limits := toolapi.Limits(ctx); limits != "" && refused(stderr.String()) {
 			detail += " (" + limits + ")"
+		} else if why := lastLine(stderr.String()); why != "" {
+			detail += ": " + why
 		}
 		return toolapi.ToolFail("command", detail, bashData{
 			ExitCode:        exitCode,
@@ -671,4 +675,24 @@ func (b *Bash) keepOutput(output string) (path string, written int, truncated bo
 		return rel, len(keep), truncated, nil
 	}
 	return full, len(keep), truncated, nil
+}
+
+// refused reports whether a command's stderr says the operating system refused
+// it, which at a level below root is the lock.
+func refused(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "permission denied") ||
+		strings.Contains(s, "operation not permitted") ||
+		strings.Contains(s, "read-only file system")
+}
+
+// lastLine is the last line of a command's stderr that says anything, cut to
+// 200 bytes: where a traceback or a CLI puts its reason.
+func lastLine(stderr string) string {
+	lines := strings.Split(strings.TrimRight(stderr, "\n "), "\n")
+	line := strings.TrimSpace(lines[len(lines)-1])
+	if len(line) > 200 {
+		line = line[:200]
+	}
+	return line
 }

@@ -97,7 +97,8 @@ type Deps struct {
 	Executor *llm.Client
 
 	// Search configures the search provider and its rate limit. The zero value
-	// is Startpage with DuckDuckGo as a fallback.
+	// has no OpenRouter key, so it scrapes DuckDuckGo; with a key it searches
+	// through Perplexity Sonar.
 	Search SearchConfig
 
 	// Fetch bounds what web_fetch may spend on one page — disk, and the model.

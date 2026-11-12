@@ -28,8 +28,8 @@ func TestWebSearchImplementsTheToolInterfaces(t *testing.T) {
 
 func TestWebSearchDefaults(t *testing.T) {
 	w := NewWebSearchWithConfig(SearchConfig{})
-	if w.provider != "startpage+ddg" {
-		t.Errorf("default provider = %q, want startpage+ddg", w.provider)
+	if w.provider != "ddg" {
+		t.Errorf("default provider without a key = %q, want ddg", w.provider)
 	}
 	if w.delay != 200*time.Millisecond {
 		t.Errorf("default delay = %v, want 200ms", w.delay)
@@ -120,80 +120,6 @@ func TestWebSearchRequiresAQueryParameter(t *testing.T) {
 	t.Error("query is not in required")
 }
 
-// ── parseStartpageResults ─────────────────────────────────────────────────
-
-func TestParseStartpageResultsExtractsLinkAndSnippet(t *testing.T) {
-	html := `
-	<div class="result css-abc">
-		<a class="result-link other-class" href="https://example.com/page1">
-			Example Page Title
-		</a>
-		<p>This is the snippet text describing the page.</p>
-	</div>`
-	results := parseStartpageResults(html, 5)
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	r := results[0]
-	if r.URL != "https://example.com/page1" {
-		t.Errorf("URL = %q", r.URL)
-	}
-	if !strings.Contains(r.Title, "Example Page Title") {
-		t.Errorf("Title = %q", r.Title)
-	}
-	if !strings.Contains(r.Snippet, "snippet text") {
-		t.Errorf("Snippet = %q", r.Snippet)
-	}
-}
-
-func TestParseStartpageResultsRespectsMax(t *testing.T) {
-	var sb strings.Builder
-	for i := 0; i < 5; i++ {
-		sb.WriteString(`
-	<div class="result css-x">
-		<a class="result-link" href="https://example.com/`)
-		sb.WriteString(string(rune('a' + i)))
-		sb.WriteString(`">Title</a>
-		<p>snippet</p>
-	</div>`)
-	}
-	if results := parseStartpageResults(sb.String(), 3); len(results) > 3 {
-		t.Errorf("expected at most 3 results, got %d", len(results))
-	}
-}
-
-func TestParseStartpageResultsSkipsNonHTTPLinks(t *testing.T) {
-	html := `
-	<div class="result">
-		<a class="result-link" href="javascript:void(0)">Skip this</a>
-		<p>x</p>
-	</div>
-	<div class="result">
-		<a class="result-link" href="https://valid.example.com/">Keep this</a>
-		<p>y</p>
-	</div>`
-	for _, r := range parseStartpageResults(html, 5) {
-		if !strings.HasPrefix(r.URL, "http") {
-			t.Errorf("a non-http URL got through: %q", r.URL)
-		}
-	}
-}
-
-func TestParseStartpageResultsOnEmptyHTML(t *testing.T) {
-	if results := parseStartpageResults("", 5); len(results) != 0 {
-		t.Errorf("expected nothing, got %d results", len(results))
-	}
-}
-
-func TestParseStartpageResultsOnMalformedHTML(t *testing.T) {
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("panic on malformed HTML: %v", r)
-		}
-	}()
-	_ = parseStartpageResults(`<div class="result"><a class="result-link" href="https://x.com`, 5)
-}
-
 // ── parseDDGResults ───────────────────────────────────────────────────────
 
 func TestParseDDGResultsExtractsResultLinks(t *testing.T) {
@@ -242,7 +168,7 @@ func TestResolveDDGURLRejectsARelativeLink(t *testing.T) {
 	}
 }
 
-// ── stripTags and indexOfClass ────────────────────────────────────────────
+// ── stripTags ────────────────────────────────────────────
 
 func TestStripTagsRemovesTagsAndKeepsText(t *testing.T) {
 	if got := stripTags("<b>hello</b> <i>world</i>"); got != "hello world" {
@@ -253,25 +179,5 @@ func TestStripTagsRemovesTagsAndKeepsText(t *testing.T) {
 func TestStripTagsDecodesAmp(t *testing.T) {
 	if got := stripTags("a &amp; b"); got != "a & b" {
 		t.Errorf("got %q", got)
-	}
-}
-
-func TestIndexOfClassFindsAWholeWordClass(t *testing.T) {
-	if got := indexOfClass(`<div class="foo bar baz">x</div>`, "bar"); got == -1 {
-		t.Error("bar was not found")
-	}
-}
-
-// The whole-word rule: without it "foo" matches "foobar" and the parser starts
-// reading from the wrong element, which yields results that are not results.
-func TestIndexOfClassRejectsAPartialMatch(t *testing.T) {
-	if got := indexOfClass(`<div class="foobar">x</div>`, "foo"); got != -1 {
-		t.Errorf("foobar matched foo, got idx=%d", got)
-	}
-}
-
-func TestIndexOfClassNotFound(t *testing.T) {
-	if got := indexOfClass(`<div class="x">y</div>`, "missing"); got != -1 {
-		t.Errorf("expected -1, got %d", got)
 	}
 }

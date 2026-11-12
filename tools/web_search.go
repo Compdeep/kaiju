@@ -16,15 +16,24 @@ import (
 )
 
 /*
- * WebSearch searches the web using configurable search providers.
- * desc: Supports Startpage (Google proxy) and DuckDuckGo. Configurable via kaiju.json.
- *       Includes a per-instance rate limiter to avoid triggering anti-bot protection.
+ * WebSearch searches the web.
+ * desc: Two providers. sonar asks Perplexity Sonar through OpenRouter and returns
+ *       the sources it cites; it is the default whenever an OpenRouter key is
+ *       configured. ddg scrapes DuckDuckGo's html page and is what runs without
+ *       a key, and what sonar falls back to when a call fails.
+ *
+ *       Startpage was retired on 2026-11-12. It, and DuckDuckGo after a few
+ *       queries, answer a server with a bot check, which the scraper reads as no
+ *       results: runs found nothing for most queries (half the searches that day
+ *       came back empty). Sonar answered the same queries with the right sources.
  */
 type WebSearch struct {
 	client   *http.Client
 	mu       sync.Mutex
 	lastAt   time.Time
-	provider string        // "startpage", "ddg", "startpage+ddg"
+	provider string        // "sonar" or "ddg"
+	apiKey   string        // OpenRouter key, for sonar
+	endpoint string        // OpenRouter base URL, for sonar
 	delay    time.Duration // min delay between requests
 }
 
@@ -33,7 +42,12 @@ type WebSearch struct {
  * desc: Passed from kaiju.json tools.web section.
  */
 type SearchConfig struct {
-	Provider string  // "startpage" (default), "ddg", "startpage+ddg"
+	// Provider is "sonar" or "ddg". Empty, or a retired value ("startpage",
+	// "startpage+ddg"), means sonar when APIKey is set and ddg when it is not;
+	// "sonar" without a key is ddg, since there is nothing to call.
+	Provider string
+	APIKey   string  // the OpenRouter key sonar is called with
+	Endpoint string  // the OpenRouter base URL; https://openrouter.ai/api/v1 when empty
 	DelaySec float64 // min seconds between search requests (default 1.5)
 
 	// HTTPClient replaces the default client. Nil means the default, so this
@@ -49,7 +63,7 @@ type SearchConfig struct {
 
 /*
  * NewWebSearch creates a new WebSearch tool instance with default settings.
- * desc: Uses Startpage+DDG fallback with 1.5s delay.
+ * desc: No key, so DuckDuckGo, with the default delay.
  * return: pointer to a new WebSearch
  */
 func NewWebSearch() *WebSearch {
@@ -96,9 +110,13 @@ func sharedSearch(cfg SearchConfig) *WebSearch {
 }
 
 func NewWebSearchWithConfig(cfg SearchConfig) *WebSearch {
-	provider := cfg.Provider
-	if provider == "" {
-		provider = "startpage+ddg"
+	provider := searchProvider(cfg.Provider, cfg.APIKey)
+	endpoint := strings.TrimRight(cfg.Endpoint, "/")
+	if endpoint == "" {
+		endpoint = defaultOpenRouterEndpoint
+	}
+	if provider == "ddg" && cfg.APIKey == "" {
+		log.Printf("[web_search] no OpenRouter key: scraping DuckDuckGo, which blocks servers after a few queries. Set an OpenRouter key for reliable search.")
 	}
 	delay := cfg.DelaySec
 	if delay <= 0 {
@@ -112,6 +130,8 @@ func NewWebSearchWithConfig(cfg SearchConfig) *WebSearch {
 	return &WebSearch{
 		client:   client,
 		provider: provider,
+		apiKey:   cfg.APIKey,
+		endpoint: endpoint,
 		delay:    time.Duration(float64(time.Second) * delay),
 	}
 }
@@ -200,16 +220,14 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 	var results []searchResult
 	var err error
 
-	switch w.provider {
-	case "startpage":
-		results, err = w.searchStartpage(ctx, query, maxResults, dateFilter)
-	case "ddg":
-		results, err = w.searchDDG(ctx, query, maxResults, dateFilter)
-	default: // "startpage+ddg"
-		results, err = w.searchStartpage(ctx, query, maxResults, dateFilter)
-		if err != nil || len(results) == 0 {
+	if w.provider == "sonar" {
+		results, err = w.searchSonar(ctx, query, rdays(params))
+		if err != nil {
+			log.Printf("[web_search] sonar failed, falling back to DuckDuckGo: %v", err)
 			results, err = w.searchDDG(ctx, query, maxResults, dateFilter)
 		}
+	} else {
+		results, err = w.searchDDG(ctx, query, maxResults, dateFilter)
 	}
 
 	if err != nil {
@@ -230,8 +248,15 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 	// Never emit a bare `null` — an empty results field serializes to
 	// "results": null and the model hallucinates URLs to fill it. Always return
 	// an explicit [] plus a note so "no results" reads as "no results".
+	if len(results) > maxResults {
+		results = results[:maxResults]
+	}
 	if len(results) == 0 {
-		return toolapi.ToolEmpty("search", "no reachable results for this query — try a different query or report that nothing was found"), nil
+		detail := "no reachable results for this query — try a different query or report that nothing was found"
+		if w.apiKey == "" {
+			detail += ". This search scrapes DuckDuckGo, which refuses servers after a few queries; with an OpenRouter key configured, search goes through Perplexity Sonar instead"
+		}
+		return toolapi.ToolEmpty("search", detail), nil
 	}
 	// Content stays empty: the results are structured and the model reads them
 	// from the payload, which Evidence() falls back to.
@@ -239,7 +264,7 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 }
 
 // daysToBucket maps a recency_days count to the coarse date bucket the search
-// providers understand (DuckDuckGo df / Startpage qadf): d, w, m, y. Returns ""
+// DuckDuckGo understands (df): d, w, m, y. Returns ""
 // (no filter) for <=0 or beyond a year — older than that isn't "recency".
 func daysToBucket(days int) string {
 	switch {
@@ -255,154 +280,6 @@ func daysToBucket(days int) string {
 		return "y"
 	default:
 		return ""
-	}
-}
-
-func (w *WebSearch) searchStartpage(ctx context.Context, query string, max int, dateFilter string) ([]searchResult, error) {
-	form := url.Values{"query": {query}, "cat": {"web"}}
-	if dateFilter != "" {
-		form.Set("qadf", dateFilter) // Startpage query-add-date-filter (best-effort)
-	}
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://www.startpage.com/sp/search", strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := w.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
-	if err != nil {
-		return nil, err
-	}
-
-	return parseStartpageResults(string(body), max), nil
-}
-
-func parseStartpageResults(html string, max int) []searchResult {
-	var results []searchResult
-	remaining := html
-
-	// Startpage uses combined classes like: class="result css-o7i03b"
-	// Each result block contains an <a> with class containing "result-link"
-	for len(results) < max {
-		// Find result container: <div class="result css-...">
-		idx := indexOfClass(remaining, "result")
-		if idx == -1 {
-			break
-		}
-		remaining = remaining[idx:]
-
-		// Find the result-link anchor within this result block (within next 2000 chars)
-		block := remaining
-		if len(block) > 3000 {
-			block = block[:3000]
-		}
-
-		linkIdx := indexOfClass(block, "result-link")
-		if linkIdx == -1 {
-			remaining = remaining[20:] // skip past this result marker
-			continue
-		}
-
-		linkHTML := block[linkIdx:]
-
-		// Extract href
-		hrefStart := strings.Index(linkHTML, `href="`)
-		if hrefStart == -1 {
-			remaining = remaining[20:]
-			continue
-		}
-		hrefStr := linkHTML[hrefStart+6:]
-		hrefEnd := strings.Index(hrefStr, `"`)
-		if hrefEnd == -1 {
-			remaining = remaining[20:]
-			continue
-		}
-		resultURL := hrefStr[:hrefEnd]
-
-		if !strings.HasPrefix(resultURL, "http") {
-			remaining = remaining[20:]
-			continue
-		}
-
-		// Extract title: text inside the <a> tag
-		title := ""
-		aStart := strings.Index(linkHTML, ">")
-		aEnd := strings.Index(linkHTML, "</a>")
-		if aStart != -1 && aEnd != -1 && aStart < aEnd {
-			title = stripTags(linkHTML[aStart+1 : aEnd])
-		}
-
-		// Extract snippet from <p> in the block
-		snippet := ""
-		pIdx := strings.Index(block, "<p")
-		if pIdx != -1 {
-			pHTML := block[pIdx:]
-			pStart := strings.Index(pHTML, ">")
-			if pStart != -1 {
-				pHTML = pHTML[pStart+1:]
-				pEnd := strings.Index(pHTML, "</p>")
-				if pEnd != -1 {
-					snippet = stripTags(pHTML[:pEnd])
-					if len(snippet) > 200 {
-						snippet = snippet[:200]
-					}
-				}
-			}
-		}
-
-		if title != "" {
-			results = append(results, searchResult{
-				Title:   strings.TrimSpace(title),
-				URL:     resultURL,
-				Snippet: strings.TrimSpace(snippet),
-			})
-		}
-
-		// Advance past this result
-		remaining = remaining[linkIdx+20:]
-	}
-
-	return results
-}
-
-/*
- * indexOfClass finds the position of an HTML element whose class attribute contains the given class name.
- * desc: Searches for class="...className..." allowing combined classes like "result-title result-link css-xxx".
- * param: html - HTML string to search
- * param: className - class name to find (substring match within class attribute value)
- * return: index of the class= attribute, or -1 if not found
- */
-func indexOfClass(html, className string) int {
-	search := html
-	offset := 0
-	for {
-		idx := strings.Index(search, `class="`)
-		if idx == -1 {
-			return -1
-		}
-		attrStart := idx + 7
-		attrEnd := strings.Index(search[attrStart:], `"`)
-		if attrEnd == -1 {
-			return -1
-		}
-		classVal := search[attrStart : attrStart+attrEnd]
-		// Check if className appears as a whole word in the class list
-		for _, cls := range strings.Fields(classVal) {
-			if cls == className {
-				return offset + idx
-			}
-		}
-		// Move past this class attribute
-		advance := attrStart + attrEnd + 1
-		search = search[advance:]
-		offset += advance
 	}
 }
 

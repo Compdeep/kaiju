@@ -160,7 +160,7 @@ Kaiju supports multiple users with independent scopes and intent ceilings:
 | Tool | Impact | Description |
 |------|--------|-------------|
 | `bash` | 0-2 | Shell commands (impact varies by command content) |
-| `web_search` | 0 | Web search (Startpage + DuckDuckGo fallback) |
+| `web_search` | 0 | Web search (Perplexity Sonar through OpenRouter when an OpenRouter key is set; DuckDuckGo otherwise) |
 | `web_fetch` | 0 | Fetch URLs with content extraction (markdown, text, summary) |
 | `file_read` | 0 | Read files |
 | `file_write` | 1 | Write/create files |

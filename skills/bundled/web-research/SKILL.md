@@ -12,7 +12,7 @@ Use web research when the answer requires current information, external
 evidence, or precise attribution.
 
 Evidence must come from page content that was actually retrieved. Search
-snippets and remembered URLs are not evidence.
+snippets are not evidence, and neither is what you remember a page saying.
 
 ### Choose the research shape
 
@@ -48,8 +48,11 @@ Example:
 sources adds little value. It searches and reads the leading results in one
 step.
 
-Never type a URL from memory. A fetched URL must come from the user or from a
-search result.
+A URL may come from the user, from a search result, or from what you know. An
+official API or documentation address you are sure of, such as a public data
+service's endpoint, can be fetched directly without searching first. A URL from
+memory is unproven until it is fetched: if the fetch fails, search for the source
+instead of trying variations of the address.
 
 ### Research angles
 
@@ -144,6 +147,9 @@ If a page cannot be read, discard it and fetch another result from the existing
 search. Run a narrower search only when the existing results are unsuitable.
 
 Never cite or rely on a page that returned no usable content.
+
+When a search returns nothing, try a known official source for the data next,
+rather than rewording the query.
 
 ### When to stop
 

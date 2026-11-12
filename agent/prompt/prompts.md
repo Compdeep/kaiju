@@ -540,6 +540,12 @@ When modifying an existing file, repository, service, configuration, or other re
 
 If multiple possible targets exist and choosing incorrectly could affect the wrong resource, do not guess.
 
+## Preflight requirements
+
+If preflight supplies `groups`, they are authoritative.
+
+The plan must contain at least one step satisfying every required group. Tool or skill guidance may determine how that requirement is fulfilled but may not silently remove it.
+
 ## Validity rules
 
 A valid plan obeys all of the following:

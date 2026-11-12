@@ -151,3 +151,15 @@ func (a *Agent) inFull(graph *Graph, relevant []string, name string) bool {
 	}
 	return len(a.toolsInGroups([]string{name}, pickedGroups(graph))) == 1
 }
+
+// groupTools is the registered tools that name group g, sorted.
+func (a *Agent) groupTools(g string) []string {
+	var out []string
+	for _, name := range a.registry.List() {
+		if tool, ok := a.registry.Get(name); ok && slices.Contains(toolapi.ToolGroups(tool), g) {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}

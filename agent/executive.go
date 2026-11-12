@@ -697,6 +697,32 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		}
 	}
 
+	// What this query must reach for, before anything it may reach with.
+	//
+	// Preflight decides this, and it is the first of the run's own sections:
+	// after the shared start, so the cache match above it holds, and ahead of
+	// the skill guidance rather than at the very end, where it was once written
+	// and nobody applied it. Measured over twenty-eight runs the first plan met
+	// about half of the categories named, so this is a hint the planner weighs,
+	// not a rule it keeps.
+	//
+	// Restored after the groups change removed it: without it a run whose
+	// preflight picked web planned compute alone and never fetched the data.
+	if groups := pickedGroups(graph); len(groups) > 0 {
+		sb.WriteString("## Required Tool Groups\n")
+		sb.WriteString(fmt.Sprintf("This query needs tools from: %s. Your plan MUST include at least one tool from each of these groups.\n",
+			strings.Join(groups, ", ")))
+		// bash names no group and counts wherever it does the work: a shell
+		// running curl reaches the web. Leaving it out made this block
+		// contradict the weather skill, which says bash and curl wttr.in, and
+		// the planner obeyed the MUST with five web_search calls instead.
+		sb.WriteString("Group → tools:\n")
+		for _, g := range groups {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", g, strings.Join(a.groupTools(g), ", ")))
+		}
+		sb.WriteString("bash counts for any group whose work it does, such as curl for web.\n\n")
+	}
+
 	// Skill Planning Guidance sections. These are authoritative — if a skill
 	// says "use compute deep", the planner must follow that, not substitute
 	// file_list/file_read. Written after the tool index because the set of

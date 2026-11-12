@@ -16,6 +16,13 @@ Many questions reference Wikipedia directly or ask about well-documented facts.
 1. `web_fetch` — fetch the specific Wikipedia page with `format=summary` and a focused `focus` parameter targeting the exact data point
 2. If the page is long, fetch it and then search the file it saved. `web_fetch` returns `full_content_path`, which is the whole page on disk. Use `bash` with `grep` on that file. Do not use `format=raw` — it no longer exists.
 
+### GitHub data
+
+Questions about GitHub issues, commits, dates, or contributors.
+
+1. `bash` — use `gh` CLI: `gh issue list`, `gh issue view`, `gh api repos/owner/repo/issues`
+2. For specific issue labels or dates: `bash` — `gh api "repos/numpy/numpy/issues?labels=Regression&state=closed&sort=created&direction=asc&per_page=1"`
+
 ### Counting and enumeration
 
 Questions that ask "how many" require finding a complete list and counting.
@@ -60,6 +67,24 @@ Questions that chain facts: "the person who did X also did Y, what is Z?"
 4. `web_fetch` — read that page and extract Z, wiring the URL from `find_y`
 
 Each reference is the dependency. Do not add `depends_on` to a chain like this.
+
+### ArXiv and academic papers
+
+1. `web_fetch` — fetch `https://arxiv.org/abs/<id>` directly with `format=summary`
+2. For specific data within papers: `web_fetch` with a targeted `focus` parameter
+
+### Video content questions
+
+Questions about YouTube videos — timestamps, counts, dialogue.
+
+1. `web_fetch` — fetch the YouTube page to get the description and metadata
+2. `bash` — use `yt-dlp --write-auto-sub --skip-download` to get transcripts if needed
+3. For specific timestamps: fetch transcript and search with bash grep
+
+### Museum and collection lookups
+
+1. `web_fetch` — fetch the collection page directly using the accession/museum number in the URL
+2. Focus on the specific data point asked about
 
 ### What NOT to do
 

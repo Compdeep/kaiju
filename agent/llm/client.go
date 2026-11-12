@@ -806,7 +806,17 @@ func (c *Client) completeOnce(ctx context.Context, req *ChatRequest) (*ChatRespo
 	if effModel == "" {
 		effModel = c.model
 	}
-	replaced := asSchemaRequest(req, c.provider, effModel)
+	// Converse models (Nova and Llama on Bedrock) keep their forced tool call.
+	// Amazon lists structured outputs as not supported for them, and
+	// buildConverseRequest has no field for a schema, so the rewrite removed
+	// the stage's form and sent nothing in its place. With earlier steps in the
+	// request, Bedrock then refused it: "The toolConfig field must be defined
+	// when using toolUse and toolResult content blocks." (found 2026-11-12 on
+	// the reflector with Nova 2 Lite as executor).
+	var replaced *ToolDef
+	if !c.converses(effModel) {
+		replaced = asSchemaRequest(req, c.provider, effModel)
+	}
 
 	var resp *ChatResponse
 	var err error

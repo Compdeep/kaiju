@@ -86,6 +86,55 @@ func TestConverseRequest(t *testing.T) {
 	}
 }
 
+// A stage forcing a form keeps it as a forced tool on Converse, which has no
+// strict schema for these models. Without it the request carries the earlier
+// steps' tool calls and no toolConfig, and Bedrock refuses it.
+func TestConverseKeepsTheForcedForm(t *testing.T) {
+	var path string
+	var body map[string]any
+	srv := converseServer(t, plainReply, &path, &body)
+	defer srv.Close()
+	req := &ChatRequest{
+		Messages: []Message{
+			{Role: "assistant", ToolCalls: []ToolCall{{ID: "s1", Function: FunctionCall{Name: "compute", Arguments: `{}`}}}},
+			{Role: "tool", ToolCallID: "s1", Content: `{"error":"blocked"}`},
+			{Role: "user", Content: "decide"},
+		},
+		Tools: []ToolDef{{Type: "function", Function: FunctionDef{Name: "reflect", Parameters: json.RawMessage(
+			`{"type":"object","properties":{"decision":{"type":"string"}},"required":["decision"]}`)}}},
+		ToolChoice: "required",
+	}
+	if _, err := converseClient(srv, "us.amazon.nova-2-lite-v1:0", novaFacts).Complete(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := json.Marshal(body["toolConfig"])
+	if !strings.Contains(string(got), `"name":"reflect"`) || !strings.Contains(string(got), `"toolChoice":{"any":{}}`) {
+		t.Errorf("toolConfig = %s", got)
+	}
+}
+
+// Converse refuses a conversation that starts with the assistant, which is how
+// a stage's request starts when earlier steps come before the objective.
+func TestConverseStartsWithTheUser(t *testing.T) {
+	req := &ChatRequest{Messages: []Message{
+		{Role: "system", Content: "decide"},
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "s1", Function: FunctionCall{Name: "compute", Arguments: `{}`}}}},
+		{Role: "tool", ToolCallID: "s1", Content: "blocked"},
+		{Role: "user", Content: "what next"},
+	}}
+	out := buildConverseRequest(req)
+	if len(out.Messages) != 3 || out.Messages[0].Role != "user" || out.Messages[0].Content[0].Text != converseOpening ||
+		out.Messages[1].Role != "assistant" {
+		t.Fatalf("messages = %+v", out.Messages)
+	}
+
+	// A conversation that already starts with the user is left as it is.
+	plain := buildConverseRequest(&ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if len(plain.Messages) != 1 || plain.Messages[0].Content[0].Text != "hi" {
+		t.Errorf("messages = %+v", plain.Messages)
+	}
+}
+
 // Thinking goes to Nova 2 as its reasoning config.
 func TestConverseThinking(t *testing.T) {
 	var path string

@@ -295,6 +295,31 @@ func converseFinish(stop string) string {
 	return "stop"
 }
 
+// converseOpening is the user turn put first when a conversation would start
+// with the assistant. See startWithUser.
+const converseOpening = "The steps run so far, and what each returned:"
+
+/*
+ * startWithUser puts a user turn first when the conversation starts with the
+ * assistant.
+ * desc: Converse refuses that conversation: "A conversation must start with a
+ *       user message." (HTTP 400, found live on Nova 2 Lite, 2026-11-12).
+ *       Chat Completions accepts it, which is why the rest of kaiju builds it:
+ *       BuildMessagesWithResults puts the steps already run before the
+ *       objective, written as the assistant's tool calls, so every stage after
+ *       the first step starts with the assistant. The fix stays here, on the
+ *       Converse wire only, so no other provider's request changes.
+ * param: msgs - the conversation in Converse's shape.
+ * return: msgs, with converseOpening first where it was needed.
+ */
+func startWithUser(msgs []converseMessage) []converseMessage {
+	if len(msgs) == 0 || msgs[0].Role == "user" {
+		return msgs
+	}
+	opening := converseMessage{Role: "user", Content: []converseBlock{{Text: converseOpening}}}
+	return append([]converseMessage{opening}, msgs...)
+}
+
 /*
  * buildConverseRequest is req in Converse's shape.
  * desc: System messages go apart. Tool results are user turns, and turns from
@@ -321,6 +346,8 @@ func buildConverseRequest(req *ChatRequest) *converseRequest {
 		}
 		out.Messages = append(out.Messages, converseMessage{Role: role, Content: blocks})
 	}
+
+	out.Messages = startWithUser(out.Messages)
 
 	if len(req.Tools) > 0 && req.ToolChoice != "none" {
 		tc := &converseTools{}

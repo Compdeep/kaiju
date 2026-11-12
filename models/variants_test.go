@@ -106,3 +106,16 @@ func TestNemotronOnBedrockThinksOnlyWhenAsked(t *testing.T) {
 		}
 	}
 }
+
+// Measured on Bedrock 2026-11-12: Gemma 3 12B (Google) answered a forced tool
+// call and a strict schema 3 of 3 times each, and 9 of 12 small executor tasks,
+// the same as Nemotron Nano 3. It does not think.
+func TestGemma3OnBedrockIsOfferedForTheExecutor(t *testing.T) {
+	m, ok := Find("google.gemma-3-12b-it")
+	if !ok {
+		t.Fatal("google.gemma-3-12b-it not in the catalog")
+	}
+	if m.Provider != "bedrock" || m.Thinks() || !m.FitsForcedSmallCall() || !slices.Contains(m.Roles, "executor") {
+		t.Errorf("gemma 3 12b = %+v", m)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/toolapi"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -1055,22 +1056,77 @@ type payloadCapper interface {
  * return: the fields as JSON, or nil when there are none or they did not fit.
  */
 func (g *Graph) payloadOf(b NodeBody) json.RawMessage {
+	out, needed := g.payloadSized(b)
+	if out == nil && needed > 0 {
+		g.recordCut("payload", needed, 0)
+	}
+	return out
+}
+
+// payloadSized is payloadOf without the tally: the fields as a stage receives
+// them, and the size they needed when they were dropped for being too large.
+func (g *Graph) payloadSized(b NodeBody) (json.RawMessage, int) {
 	if b == nil {
-		return nil
+		return nil, 0
 	}
 	capper, ok := b.(payloadCapper)
 	if !ok {
-		return b.Payload()
+		return b.Payload(), 0
 	}
 	cap := payloadWholeChars
 	if g != nil && g.payloadCap > cap {
 		cap = g.payloadCap
 	}
-	out, needed := capper.payloadWithin(cap)
-	if out == nil && needed > 0 {
-		g.recordCut("payload", needed, 0)
+	return capper.payloadWithin(cap)
+}
+
+/*
+ * outputInToolMessage reports whether the tool message a stage is given for
+ * this step (StepResults, then stepResultContent) holds the step's output — the
+ * text node_returns writes, n.Result — whole.
+ * desc: Three cases, each an exact match, so nothing is judged by likeness:
+ *       - no fields reach the stage: the tool message is the output itself;
+ *       - the output is the fields (a tool with no text): the fields reach the
+ *         stage uncut;
+ *       - the output is the tool's text and the text is one of its fields,
+ *         uncut (a command whose stdout is all it printed). A file the text
+ *         names in a line of its own (handleLine) is a field too.
+ *       Anything else — text the fields do not hold, a field cut on the way —
+ *       is not held whole.
+ * param: n - a resolved step.
+ * return: true when the tool message holds the output whole.
+ */
+func (g *Graph) outputInToolMessage(n *Node) bool {
+	if n == nil || n.Body == nil || n.Result == "" || n.Body.Evidence() != n.Result {
+		return false
 	}
-	return out
+	payload, _ := g.payloadSized(n.Body)
+	if payload == nil {
+		return true // the tool message is the output itself
+	}
+	var fields any
+	if json.Unmarshal(payload, &fields) != nil {
+		return false
+	}
+	var output any
+	if json.Unmarshal([]byte(n.Result), &output) == nil && reflect.DeepEqual(output, fields) {
+		return true
+	}
+	tm, ok := n.Body.(toolMessageBody)
+	if !ok || tm.msg.Status != toolapi.StatusOK || tm.msg.Content == "" ||
+		n.Result != tm.msg.Content+tm.handleLine() {
+		return false
+	}
+	obj, ok := fields.(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, v := range obj {
+		if s, ok := v.(string); ok && s == tm.msg.Content {
+			return true
+		}
+	}
+	return false
 }
 
 /*

@@ -786,7 +786,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 				// Build deterministic reflection context via ContextGate.
 				rCtxResp, rctxErr := graph.Context.Get(ctx, ContextRequest{
 					ReturnSources: Sources(
-						NodeReturns("all"),
+						NodeReturnsBesideArcs(),
 						Worklog(10, "all"),
 					),
 					MaxBudget: 24000,
@@ -927,7 +927,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 		// Build batch reflection context via ContextGate. Deterministic, no curator.
 		batchCtxResp, bctxErr := graph.Context.Get(ctx, ContextRequest{
 			ReturnSources: Sources(
-				NodeReturns("all"),
+				NodeReturnsBesideArcs(),
 				Worklog(10, "all"),
 			),
 			MaxBudget: 24000,
@@ -1053,7 +1053,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			// Build main reflection context via ContextGate. Deterministic, no curator.
 			reflCtxResp, rctxErr := graph.Context.Get(ctx, ContextRequest{
 				ReturnSources: Sources(
-					NodeReturns("all"),
+					NodeReturnsBesideArcs(),
 					Worklog(10, "all"),
 				),
 				MaxBudget: 24000,
@@ -1154,7 +1154,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 							a.broadcastDAGEvent(graph, DAGEvent{Type: "node", NodeID: rID, Node: graph.SnapshotNode(rID)})
 							obsCtxResp, octxErr := graph.Context.Get(ctx, ContextRequest{
 								ReturnSources: Sources(
-									NodeReturns("all"),
+									NodeReturnsBesideArcs(),
 									Worklog(10, "all"),
 								),
 								MaxBudget: 24000,
@@ -2627,7 +2627,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 		var aggErr error
 		aggCtxResp2, actxErr2 := graph.Context.Get(answerCtx, ContextRequest{
 			ReturnSources: Sources(
-				NodeReturns("all"),
+				NodeReturnsBesideArcs(),
 				Worklog(30, "all"),
 			),
 			MaxBudget: 12000,

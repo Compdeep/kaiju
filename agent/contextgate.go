@@ -720,6 +720,26 @@ func NodeReturns(filter string) SourceSpec {
 	return SourceSpec{Name: SourceNodeReturns, Params: map[string]any{"filter": filter}, Weight: 3}
 }
 
+/*
+ * NodeReturnsBesideArcs is NodeReturns("all") for a call that is also given
+ * every step as a tool message (BuildMessagesWithResults with graph.Arcs).
+ * desc: A step whose tool message already holds its output whole is named under
+ *       "### Resolved" without the output, so one call does not carry the same
+ *       text twice. Any other step, and every failure, is written as before.
+ *       A call that is not given the tool messages — the interjection
+ *       reflector — uses NodeReturns("all").
+ * return: the spec.
+ */
+func NodeReturnsBesideArcs() SourceSpec {
+	return SourceSpec{Name: SourceNodeReturns, Params: map[string]any{
+		"filter":      "all",
+		"beside_arcs": true,
+	}, Weight: 3}
+}
+
+// inToolMessage stands in "### Resolved" for an output its tool message holds.
+const inToolMessage = "(in this step's tool message)"
+
 // NodeReturnsTyped narrows by node tool name (e.g. ["bash","compute"]).
 func NodeReturnsTyped(filter string, types []string) SourceSpec {
 	return SourceSpec{Name: SourceNodeReturns, Params: map[string]any{
@@ -1153,17 +1173,31 @@ func (s *nodeReturnsSource) Load(g *Graph, t *Trigger, a *Agent, params map[stri
 			return out
 		}
 
+		// Beside the tool messages, a step whose tool message holds its output
+		// whole is named without it: the call already carries that text once.
+		var nodes map[string]*Node
+		if beside, _ := params["beside_arcs"].(bool); beside {
+			nodes = g.resolvedResultNodes()
+		}
+		write := func(label, result string) {
+			if n := nodes[label]; n != nil && g.outputInToolMessage(n) {
+				sb.WriteString(fmt.Sprintf("**%s:** %s\n\n", label, inToolMessage))
+				return
+			}
+			sb.WriteString(fmt.Sprintf("**%s:**\n%s\n\n", label, cut(result)))
+		}
+
 		if len(resolved) > 0 {
 			sb.WriteString("### Resolved\n\n")
 			for label, result := range resolved {
-				sb.WriteString(fmt.Sprintf("**%s:**\n%s\n\n", label, cut(result)))
+				write(label, result)
 			}
 		}
 
 		if len(earlier) > 0 {
 			sb.WriteString("### Resolved in earlier rounds\n\n")
 			for label, result := range earlier {
-				sb.WriteString(fmt.Sprintf("**%s:**\n%s\n\n", label, cut(result)))
+				write(label, result)
 			}
 		}
 

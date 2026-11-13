@@ -401,7 +401,7 @@ func (a *Agent) reframeMaterial(ctx context.Context, graph *Graph, request strin
 		resp, err := graph.Context.Get(ctx, ContextRequest{
 			ReturnSources: Sources(
 				StepOutcomes(),
-				NodeReturns("all"),
+				NodeReturnsBesideArcs(),
 				Worklog(20, "all"),
 			),
 			MaxBudget:       6000,

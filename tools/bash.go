@@ -456,10 +456,13 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		// command is not retried as though it might work the next time. Named
 		// on every failure, it made a missing file read as a permission error;
 		// any other failure gives the command's own last line of stderr.
-		if limits := toolapi.Limits(ctx); limits != "" && refused(stderr.String()) {
+		limits := toolapi.Limits(ctx)
+		if limits != "" && refused(stderr.String()) {
 			detail += " (" + limits + ")"
 		} else if why := lastLine(stderr.String()); why != "" {
 			detail += ": " + why
+		} else {
+			detail += noErrorMessage(exitCode, command, limits)
 		}
 		return toolapi.ToolFail("command", detail, bashData{
 			ExitCode:        exitCode,
@@ -684,6 +687,28 @@ func refused(stderr string) bool {
 	return strings.Contains(s, "permission denied") ||
 		strings.Contains(s, "operation not permitted") ||
 		strings.Contains(s, "read-only file system")
+}
+
+// noErrorMessage is what a failure says when the command printed nothing on
+// stderr, usually because it sent its errors to /dev/null. Said with nothing,
+// an exit status and an empty output read to every stage as "nothing there":
+// run 19:40 2026-11-12 reported a file as empty and no SSH keys on the machine
+// from reads that had been refused. So it says the cause is not known, and
+// names the level as one possible cause without claiming it.
+func noErrorMessage(exitCode int, command, limits string) string {
+	if exitCode == 127 {
+		return ": a program the command runs was not found (exit 127)"
+	}
+	s := ": it printed no error message"
+	c := strings.ReplaceAll(command, " ", "")
+	if strings.Contains(c, "2>/dev/null") || strings.Contains(c, "&>/dev/null") {
+		s += ", because the command sends its errors to /dev/null"
+	}
+	s += ", so the cause is not known: what it read may be missing, or the command may have been refused"
+	if limits != "" {
+		s += " (" + limits + ")"
+	}
+	return s
 }
 
 // lastLine is the last line of a command's stderr that says anything, cut to

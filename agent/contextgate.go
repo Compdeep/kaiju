@@ -1069,10 +1069,18 @@ func failedLine(n *Node, errMsg string) string {
 func extractFailureDetail(n *Node) string {
 	// Typed bash: read exit status and streams off the command body directly.
 	if d, ok := commandData(n); ok {
-		if out := commandOutput(d); out != "" {
-			return fmt.Sprintf("exit %d | %s", d.ExitCode, out)
+		// The tool's own account of the failure leads: it holds the cause, or
+		// says the cause is not known when the command printed no error. Built
+		// from the exit code alone, a command that sent its errors to /dev/null
+		// read as "exit 1" and an empty result (run 19:40 2026-11-12).
+		head := fmt.Sprintf("exit %d", d.ExitCode)
+		if tb, ok := n.Body.(toolMessageBody); ok && strings.HasPrefix(tb.Envelope().Detail, head) {
+			head = tb.Envelope().Detail
 		}
-		return fmt.Sprintf("exit %d (command: %s)", d.ExitCode, d.Command)
+		if out := commandOutput(d); out != "" {
+			return head + " | " + out
+		}
+		return fmt.Sprintf("%s (command: %s)", head, d.Command)
 	}
 
 	// Try to extract from the result (legacy bash errors are returned as result, not Error)

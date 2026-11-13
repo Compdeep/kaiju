@@ -41,3 +41,28 @@ func TestBash_ARefusalNamesTheLevel(t *testing.T) {
 		t.Errorf("a refused command does not name the level: %s", got.Detail)
 	}
 }
+
+// A command that failed with nothing on stderr, because it sent its errors to
+// /dev/null, says that the cause is not known, and names the level as one
+// possible cause. Said with nothing, "exit 1" and an empty output read to every
+// stage as "nothing there": run 19:40 2026-11-12 reported google_sudoers as
+// empty and no SSH keys on the machine, from reads that had been refused.
+func TestBash_AFailureWithNoErrorMessageSaysTheCauseIsUnknown(t *testing.T) {
+	ctx := toolapi.WithLevel(context.Background(), toolapi.ImpactObserve)
+	got, _ := NewBash("").ExecuteTyped(ctx, map[string]any{"command": "cat /no/such/file 2>/dev/null"})
+	for _, want := range []string{"printed no error message", "/dev/null", "cause is not known", "runs at level"} {
+		if !strings.Contains(got.Detail, want) {
+			t.Errorf("the failure should say %q: %s", want, got.Detail)
+		}
+	}
+}
+
+// A program that is not installed: the shell's exit 127 says so even when its
+// message was discarded.
+func TestBash_ExitCode127SaysAProgramWasNotFound(t *testing.T) {
+	ctx := toolapi.WithLevel(context.Background(), toolapi.ImpactObserve)
+	got, _ := NewBash("").ExecuteTyped(ctx, map[string]any{"command": "no_such_program_xyz 2>/dev/null"})
+	if !strings.Contains(got.Detail, "was not found (exit 127)") {
+		t.Errorf("exit 127 should say a program was not found: %s", got.Detail)
+	}
+}

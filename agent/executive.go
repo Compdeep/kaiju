@@ -3208,7 +3208,8 @@ func validatePlanParams(steps []PlanStep, registry *toolapi.Registry) []string {
 		if err != nil {
 			continue // unreadable schema → nothing to check against
 		}
-		for _, m := range missingRequiredParams(schema, s.Params) {
+		missing := missingRequiredParams(schema, s.Params)
+		for _, m := range missing {
 			if m.When != "" {
 				errs = append(errs, fmt.Sprintf("step %d (%s): required parameter %q is not supplied — %s requires it when %s",
 					i, s.Tool, m.Name, s.Tool, m.When))
@@ -3216,6 +3217,17 @@ func validatePlanParams(steps []PlanStep, registry *toolapi.Registry) []string {
 			}
 			errs = append(errs, fmt.Sprintf("step %d (%s): required parameter %q is not supplied — %s requires: %s",
 				i, s.Tool, m.Name, s.Tool, strings.Join(schema.Required, ", ")))
+		}
+		// A step named after another tool most likely meant that tool. A model
+		// that writes params before tool lets the parameters pick the tool: run
+		// 72faf339 planned tag "process_list" with tool message_search and
+		// {"query": ""}, and three corrections naming only message_search's
+		// missing query returned the same step.
+		if len(missing) > 0 && s.Tag != "" && s.Tag != s.Tool {
+			if _, isTool := registry.Get(s.Tag); isTool {
+				errs = append(errs, fmt.Sprintf("step %d is named %q but calls %s; if you meant %s, change \"tool\" to %q",
+					i, s.Tag, s.Tool, s.Tag, s.Tag))
+			}
 		}
 		if schema.AdditionalProperties {
 			continue // extras allowed → no name left to reject

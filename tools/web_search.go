@@ -157,7 +157,7 @@ func (w *WebSearch) Parameters() json.RawMessage {
 		"properties": {
 			"query": {"type": "string", "description": "Search query"},
 			"max_results": {"type": "integer", "description": "Maximum results to return (default: 5, max: 10)"},
-			"recency_days": {"type": "integer", "description": "Optional: bias results to roughly the last N days (a recency filter — useful for time-sensitive research). Omit for no time limit."}
+			"recency_days": {"type": "integer", "description": "Optional: prefer results from roughly the last N days, for news and recent events. A preference, not a filter: older pages that answer the query are still returned."}
 		},
 		"required": ["query"],
 		"additionalProperties": false
@@ -196,13 +196,6 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 		}
 	}
 
-	// recency_days: an optional "recent results only" filter the planner can set
-	// for time-sensitive research. Mapped to each provider's coarse date bucket.
-	dateFilter := ""
-	if rd, ok := toolapi.ParamNum(params, "recency_days"); ok {
-		dateFilter = daysToBucket(int(rd))
-	}
-
 	// Rate limit: enforce minimum delay between search requests
 	w.mu.Lock()
 	if wait := time.Until(w.lastAt.Add(w.delay)); wait > 0 {
@@ -224,10 +217,12 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 		results, err = w.searchSonar(ctx, query, rdays(params))
 		if err != nil {
 			log.Printf("[web_search] sonar failed, falling back to DuckDuckGo: %v", err)
-			results, err = w.searchDDG(ctx, query, maxResults, dateFilter)
+			results, err = w.searchDDG(ctx, query, maxResults)
 		}
 	} else {
-		results, err = w.searchDDG(ctx, query, maxResults, dateFilter)
+		// recency_days is not passed on: DuckDuckGo's only date control (df)
+		// is a filter, which drops the older pages that answer the query.
+		results, err = w.searchDDG(ctx, query, maxResults)
 	}
 
 	if err != nil {
@@ -263,31 +258,8 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 	return toolapi.ToolOK("search", "", map[string]any{"query": query, "results": results}), nil
 }
 
-// daysToBucket maps a recency_days count to the coarse date bucket the search
-// DuckDuckGo understands (df): d, w, m, y. Returns ""
-// (no filter) for <=0 or beyond a year — older than that isn't "recency".
-func daysToBucket(days int) string {
-	switch {
-	case days <= 0:
-		return ""
-	case days <= 1:
-		return "d"
-	case days <= 7:
-		return "w"
-	case days <= 31:
-		return "m"
-	case days <= 366:
-		return "y"
-	default:
-		return ""
-	}
-}
-
-func (w *WebSearch) searchDDG(ctx context.Context, query string, max int, dateFilter string) ([]searchResult, error) {
+func (w *WebSearch) searchDDG(ctx context.Context, query string, max int) ([]searchResult, error) {
 	form := url.Values{"q": {query}, "b": {""}}
-	if dateFilter != "" {
-		form.Set("df", dateFilter) // DuckDuckGo date filter: d/w/m/y
-	}
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://html.duckduckgo.com/html/", strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err

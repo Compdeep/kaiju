@@ -54,10 +54,23 @@ func rdays(params map[string]any) int {
 	return 0
 }
 
-// sonarRecency maps recency_days to Perplexity's search_recency_filter, or ""
-// for no filter.
-func sonarRecency(days int) string {
-	return map[string]string{"d": "day", "w": "week", "m": "month", "y": "year"}[daysToBucket(days)]
+/*
+ * sonarInstruction is the system message Sonar searches by.
+ * desc: recency_days is a preference, said in words, not Perplexity's
+ *       search_recency_filter: that filter drops every page published before
+ *       the window, and the pages that answer "where is X now" (an ephemeris
+ *       service, a reference page, a library's documentation) are old pages
+ *       serving current data. Measured 2026-11-14 on "current solar system
+ *       barycenter position": a week's filter returned five unrelated pages,
+ *       none without it.
+ */
+func sonarInstruction(recencyDays int) string {
+	s := "Find the web pages that best answer the query and cite them."
+	if recencyDays > 0 {
+		s += fmt.Sprintf(" Prefer pages from the last %d days where the query is about recent events or news;"+
+			" a reference page or a live data source that answers the query counts whatever its age.", recencyDays)
+	}
+	return s
 }
 
 /*
@@ -73,12 +86,9 @@ func (w *WebSearch) searchSonar(ctx context.Context, query string, recencyDays i
 		"model":      sonarModel,
 		"max_tokens": sonarMaxTokens,
 		"messages": []map[string]string{
-			{"role": "system", "content": "Find the web pages that best answer the query and cite them."},
+			{"role": "system", "content": sonarInstruction(recencyDays)},
 			{"role": "user", "content": query},
 		},
-	}
-	if f := sonarRecency(recencyDays); f != "" {
-		body["search_recency_filter"] = f
 	}
 	b, err := json.Marshal(body)
 	if err != nil {

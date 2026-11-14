@@ -54,7 +54,7 @@ func (w *WebResearch) Parameters() json.RawMessage {
 		"properties": {
 			"query": {"type": "string", "description": "Search query — plain keywords, not stacked search operators."},
 			"max_sources": {"type": "integer", "description": "How many of the top results to fetch and read (default 4, max 6)."},
-			"recency_days": {"type": "integer", "description": "Optional: bias to results from roughly the last N days."},
+			"recency_days": {"type": "integer", "description": "Optional: prefer results from roughly the last N days, for news and recent events; older pages that answer the query are still returned."},
 			"focus": {"type": "string", "description": "Optional: the specific facts/figures to extract from each page."},
 			"exclude_domains": {"type": "array", "items": {"type": "string"}, "description": "Optional: domains to drop from the results (e.g. aggregators like statista.com, fortunebusinessinsights.com)."}
 		},

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -119,8 +120,13 @@ func TestSonarSourcesBecomeResults(t *testing.T) {
 	if f.sonarAuth != "Bearer sk-or-test" {
 		t.Errorf("Authorization = %q", f.sonarAuth)
 	}
-	if f.sonarBody["search_recency_filter"] != "week" {
-		t.Errorf("search_recency_filter = %v, want week for recency_days 5", f.sonarBody["search_recency_filter"])
+	// recency_days is a preference in the instruction, never a date filter.
+	if _, ok := f.sonarBody["search_recency_filter"]; ok {
+		t.Errorf("search_recency_filter = %v, want none: recency is a preference", f.sonarBody["search_recency_filter"])
+	}
+	if msgs, _ := f.sonarBody["messages"].([]any); len(msgs) == 0 ||
+		!strings.Contains(fmt.Sprint(msgs[0]), "last 5 days") {
+		t.Errorf("the instruction does not ask for recent pages: %v", f.sonarBody["messages"])
 	}
 	if f.ddgCalls != 0 {
 		t.Errorf("DuckDuckGo was called %d times on a Sonar success", f.ddgCalls)

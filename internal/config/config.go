@@ -356,10 +356,12 @@ type FileToolConfig struct {
  */
 type WebToolConfig struct {
 	Enabled bool `json:"enabled"`
-	// SearchProvider is "sonar" (Perplexity Sonar through OpenRouter) or "ddg"
-	// (DuckDuckGo, scraped). Empty or a retired value means sonar when the
-	// config has an OpenRouter key and ddg when it does not.
-	SearchProvider string  `json:"search_provider"`
+	// SearchProvider is "brave" (the Brave Search API) or "ddg" (DuckDuckGo,
+	// scraped). Empty or a retired value ("sonar", "startpage") means brave
+	// when there is a Brave key and ddg when there is not.
+	SearchProvider string `json:"search_provider"`
+	// SearchAPIKey is the Brave Search API key. Empty reads BRAVE_API_KEY.
+	SearchAPIKey   string  `json:"search_api_key"`
 	SearchDelaySec float64 `json:"search_delay_sec"` // min seconds between search requests (default 1.5)
 }
 

@@ -111,6 +111,7 @@ called out.
     "web": {
       "enabled": true,
       "search_provider": "",
+      "search_api_key": "",
       "search_delay_sec": 0.2
     },
     "sysinfo": { "enabled": true },
@@ -377,7 +378,7 @@ runtime fallbacks apply as noted.
 |------|--------|---------|-------------|
 | `bash` | `enabled`, `shell` | `true`, `"auto"` | Shell execution. `shell`: `auto`, `sh`, `powershell`, `cmd` (`auto` resolves to `sh`, or `powershell` on Windows). Working directory defaults to `workspace` |
 | `file` | `enabled`, `allowed_paths` | `true`, `["."]` | File read/write/list |
-| `web` | `enabled`, `search_provider`, `search_delay_sec` | `true`, `""`, `0.2` | Web search and fetch. `search_provider`: `sonar` (Perplexity Sonar through OpenRouter, using the OpenRouter provider's key) or `ddg` (DuckDuckGo, scraped; servers are often refused). Empty means `sonar` when an OpenRouter key is configured and `ddg` otherwise; `startpage` was retired. `search_delay_sec`: minimum seconds between search requests. Both fall back to these values at runtime when unset |
+| `web` | `enabled`, `search_provider`, `search_api_key`, `search_delay_sec` | `true`, `""`, `""`, `0.2` | Web search and fetch. `search_provider`: `brave` (the Brave Search API) or `ddg` (DuckDuckGo, scraped; servers are often refused). Empty means `brave` when there is a Brave key and `ddg` otherwise; `sonar` and `startpage` were retired. `search_api_key`: the Brave Search API key, or the `BRAVE_API_KEY` environment variable when empty. `search_delay_sec`: minimum seconds between search requests (at least 1.1 with Brave, its free plan's rate). Both fall back to these values at runtime when unset |
 | `sysinfo` | `enabled` | `true` | System information |
 | `compute` | `enabled`, `timeout_sec` | `true`, `120` | LLM-powered compute nodes. `timeout_sec`: max code execution time |
 

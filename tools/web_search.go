@@ -17,23 +17,23 @@ import (
 
 /*
  * WebSearch searches the web.
- * desc: Two providers. sonar asks Perplexity Sonar through OpenRouter and returns
- *       the sources it cites; it is the default whenever an OpenRouter key is
- *       configured. ddg scrapes DuckDuckGo's html page and is what runs without
- *       a key, and what sonar falls back to when a call fails.
+ * desc: Two providers. brave calls the Brave Search API and is the default
+ *       whenever a Brave key is configured. ddg scrapes DuckDuckGo's html page
+ *       and is what runs without a key, and what brave falls back to when a
+ *       call fails.
  *
  *       Startpage was retired on 2026-11-12. It, and DuckDuckGo after a few
  *       queries, answer a server with a bot check, which the scraper reads as no
  *       results: runs found nothing for most queries (half the searches that day
- *       came back empty). Sonar answered the same queries with the right sources.
+ *       came back empty). Perplexity Sonar was removed on 2026-11-15; see
+ *       web_search_brave.go.
  */
 type WebSearch struct {
 	client   *http.Client
 	mu       sync.Mutex
 	lastAt   time.Time
-	provider string        // "sonar" or "ddg"
-	apiKey   string        // OpenRouter key, for sonar
-	endpoint string        // OpenRouter base URL, for sonar
+	provider string        // "brave" or "ddg"
+	apiKey   string        // Brave key, for brave
 	delay    time.Duration // min delay between requests
 }
 
@@ -42,13 +42,12 @@ type WebSearch struct {
  * desc: Passed from kaiju.json tools.web section.
  */
 type SearchConfig struct {
-	// Provider is "sonar" or "ddg". Empty, or a retired value ("startpage",
-	// "startpage+ddg"), means sonar when APIKey is set and ddg when it is not;
-	// "sonar" without a key is ddg, since there is nothing to call.
+	// Provider is "brave" or "ddg". Empty, or a retired value ("sonar",
+	// "startpage", "startpage+ddg"), means brave when there is a key and ddg
+	// when there is not.
 	Provider string
-	APIKey   string  // the OpenRouter key sonar is called with
-	Endpoint string  // the OpenRouter base URL; https://openrouter.ai/api/v1 when empty
-	DelaySec float64 // min seconds between search requests (default 1.5)
+	APIKey   string  // the Brave Search API key; BRAVE_API_KEY when empty
+	DelaySec float64 // min seconds between search requests (default 0.2; at least 1.1 for brave)
 
 	// HTTPClient replaces the default client. Nil means the default, so this
 	// is invisible to every caller that does not need it.
@@ -110,17 +109,17 @@ func sharedSearch(cfg SearchConfig) *WebSearch {
 }
 
 func NewWebSearchWithConfig(cfg SearchConfig) *WebSearch {
-	provider := searchProvider(cfg.Provider, cfg.APIKey)
-	endpoint := strings.TrimRight(cfg.Endpoint, "/")
-	if endpoint == "" {
-		endpoint = defaultOpenRouterEndpoint
-	}
-	if provider == "ddg" && cfg.APIKey == "" {
-		log.Printf("[web_search] no OpenRouter key: scraping DuckDuckGo, which blocks servers after a few queries. Set an OpenRouter key for reliable search.")
+	key := searchKey(cfg.APIKey)
+	provider := searchProvider(cfg.Provider, key)
+	if provider == "ddg" && key == "" {
+		log.Printf("[web_search] no Brave key: scraping DuckDuckGo, which blocks servers after a few queries. Set tools.web.search_api_key or BRAVE_API_KEY for reliable search.")
 	}
 	delay := cfg.DelaySec
 	if delay <= 0 {
 		delay = 0.2
+	}
+	if provider == "brave" && time.Duration(float64(time.Second)*delay) < braveMinDelay {
+		delay = braveMinDelay.Seconds()
 	}
 	client := cfg.HTTPClient
 	if client == nil {
@@ -130,8 +129,7 @@ func NewWebSearchWithConfig(cfg SearchConfig) *WebSearch {
 	return &WebSearch{
 		client:   client,
 		provider: provider,
-		apiKey:   cfg.APIKey,
-		endpoint: endpoint,
+		apiKey:   key,
 		delay:    time.Duration(float64(time.Second) * delay),
 	}
 }
@@ -213,10 +211,10 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 	var results []searchResult
 	var err error
 
-	if w.provider == "sonar" {
-		results, err = w.searchSonar(ctx, query, rdays(params))
+	if w.provider == "brave" {
+		results, err = w.searchBrave(ctx, query, maxResults)
 		if err != nil {
-			log.Printf("[web_search] sonar failed, falling back to DuckDuckGo: %v", err)
+			log.Printf("[web_search] brave failed, falling back to DuckDuckGo: %v", err)
 			results, err = w.searchDDG(ctx, query, maxResults)
 		}
 	} else {
@@ -249,7 +247,7 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 	if len(results) == 0 {
 		detail := "no reachable results for this query — try a different query or report that nothing was found"
 		if w.apiKey == "" {
-			detail += ". This search scrapes DuckDuckGo, which refuses servers after a few queries; with an OpenRouter key configured, search goes through Perplexity Sonar instead"
+			detail += ". This search scrapes DuckDuckGo, which refuses servers after a few queries; with a Brave Search API key configured, search goes through Brave instead"
 		}
 		return toolapi.ToolEmpty("search", detail), nil
 	}

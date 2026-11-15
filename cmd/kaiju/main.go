@@ -496,14 +496,13 @@ func createAgent(cfg *config.Config) *agent.Agent {
 		// The workspace so a fetched page is kept and can be read in full later;
 		// the zero limits so this deployment takes the package's own.
 		reg.Replace(tools.NewWebFetchIn(cfg.Agent.Workspace, ag.ExecutorClient(), tools.FetchLimits{}), "builtin")
-		// Search goes through Perplexity Sonar on OpenRouter whenever the
-		// config has an OpenRouter key; without one it scrapes DuckDuckGo.
-		or := cfg.Providers["openrouter"]
+		// Search goes through the Brave Search API whenever there is a Brave
+		// key (tools.web.search_api_key, or BRAVE_API_KEY); without one it
+		// scrapes DuckDuckGo.
 		searchCfg := tools.SearchConfig{
 			Provider: cfg.Tools.Web.SearchProvider,
 			DelaySec: cfg.Tools.Web.SearchDelaySec,
-			APIKey:   or.APIKey,
-			Endpoint: or.Endpoint,
+			APIKey:   cfg.Tools.Web.SearchAPIKey,
 		}
 		reg.Replace(tools.NewWebSearchWithConfig(searchCfg), "builtin")
 		// web_research = search + auto-fetch the top results in one step, so the

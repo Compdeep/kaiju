@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
@@ -399,5 +401,31 @@ func TestPlanParams_ContextIsAListAndAnInventedNameIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(errs[0], "context.csv") || !strings.Contains(errs[0], "context") {
 		t.Errorf("the error should name the key it refused and what the tool does take, got: %s", errs[0])
+	}
+}
+
+// A result whose bulk is a field that is not a string, with a text field of
+// multi-byte characters, used to loop for ever: cutting through a character
+// made json.Marshal write the field back longer, so it never shrank to the
+// point where the loop gave up. It must end, and cut text must stay valid.
+func TestTruncateToolResult_EndsOnMultiByteTextAndBigObject(t *testing.T) {
+	for n := 140; n < 156; n++ {
+		raw, _ := json.Marshal(map[string]any{
+			"content": strings.Repeat("’", n),
+			"data":    map[string]any{"content": strings.Repeat("x", 10000)},
+		})
+		done := make(chan string, 1)
+		go func() { done <- truncateToolResult(string(raw), 4096, Text.HeadTail) }()
+		select {
+		case out := <-done:
+			if len(out) > len(raw) {
+				t.Fatalf("n=%d: result grew from %d to %d", n, len(raw), len(out))
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("n=%d: truncateToolResult did not return", n)
+		}
+	}
+	if out := Text.HeadTail(strings.Repeat("’", 100), 31, 31, "|"); !utf8.ValidString(out) {
+		t.Fatalf("HeadTail cut through a character: %q", out)
 	}
 }

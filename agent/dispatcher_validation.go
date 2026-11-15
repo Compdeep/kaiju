@@ -476,7 +476,7 @@ func truncateToolResult(s string, cap int, headTail func(string, int, int, ...st
 	}
 	// Shrink the largest string field(s) iteratively until under cap.
 	const marker = "\n... (content truncated to fit result cap; rerun with narrower focus or use file_read on the source) ...\n"
-	for len(mustMarshal(obj)) > cap {
+	for size := len(mustMarshal(obj)); size > cap; {
 		biggestKey := ""
 		biggestLen := 0
 		for k, v := range obj {
@@ -504,6 +504,14 @@ func truncateToolResult(s string, cap int, headTail func(string, int, int, ...st
 		}
 		re, _ := json.Marshal(shrunk)
 		obj[biggestKey] = re
+		// The serialised result has to get smaller on every pass, or the
+		// loop never ends: a field that does not hold the bulk of the size
+		// cannot bring it under the cap.
+		next := len(mustMarshal(obj))
+		if next >= size {
+			return headTail(s, cap*2/3, cap/3, marker)
+		}
+		size = next
 	}
 	return mustMarshal(obj)
 }

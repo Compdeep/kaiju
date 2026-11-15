@@ -703,7 +703,7 @@ func primaryContent(ctx context.Context, rawURL string) (string, bool) {
 
 /*
  * formatMarkdown uses readability to extract the main content as clean text.
- * desc: Parses the page with go-readability and returns the article text, falling back to plain text on failure.
+ * desc: Parses the page with go-readability and returns the article as markdown, links kept, falling back to plain text on failure.
  * param: ctx - context for cancellation
  * param: status - HTTP status line string
  * param: rawURL - the original URL for readability parsing
@@ -732,7 +732,15 @@ func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, bo
 		return w.formatText(ctx, status, rawURL, body)
 	}
 
-	content := article.TextContent
+	// The article as markdown keeps its paragraphs and its links; TextContent
+	// is the fallback when there is no article tree to read.
+	content := ""
+	if article.Node != nil {
+		content = nodeMarkdown(article.Node)
+	}
+	if strings.TrimSpace(content) == "" {
+		content = article.TextContent
+	}
 	if content == "" {
 		content = article.Content // HTML fallback
 	}

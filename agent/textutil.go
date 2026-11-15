@@ -5,6 +5,7 @@ import (
 	"github.com/Compdeep/kaiju/agent/toolapi"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 /*
@@ -154,7 +155,17 @@ func (textNS) HeadTail(s string, headN, tailN int, sep ...string) string {
 	if len(sep) > 0 && sep[0] != "" {
 		marker = sep[0]
 	}
-	return s[:headN] + marker + s[len(s)-tailN:]
+	// Cut on character boundaries. A cut through a multi-byte character
+	// leaves invalid UTF-8, which json.Marshal writes back as a longer
+	// \ufffd per byte, so a JSON field cut this way can grow.
+	head, tail := headN, len(s)-tailN
+	for head > 0 && !utf8.RuneStart(s[head]) {
+		head--
+	}
+	for tail < len(s) && !utf8.RuneStart(s[tail]) {
+		tail++
+	}
+	return s[:head] + marker + s[tail:]
 }
 
 /*

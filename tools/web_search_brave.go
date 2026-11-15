@@ -35,7 +35,7 @@ const braveEndpoint = "https://api.search.brave.com/res/v1/web/search"
 const braveKeyEnv = "BRAVE_API_KEY"
 
 // braveMinDelay is the least time between two Brave calls: the free plan
-// allows one query a second, and a refused call falls back to DuckDuckGo.
+// allows one query a second, and a refused call falls back to Firecrawl.
 const braveMinDelay = 1100 * time.Millisecond
 
 /*
@@ -52,14 +52,18 @@ func searchKey(configured string) string {
 
 /*
  * searchProvider resolves the configured provider against the key.
- * desc: "ddg" by name is DuckDuckGo. Anything else, including an empty value
- *       and the retired "sonar", "startpage" and "startpage+ddg", is Brave
- *       when there is a key and DuckDuckGo when there is not.
- * return: "brave" or "ddg".
+ * desc: "ddg" and "firecrawl" by name are those. Anything else, including an
+ *       empty value and the retired "sonar", "startpage" and "startpage+ddg",
+ *       is Brave when there is a key and Firecrawl's keyless search when there
+ *       is not. "brave" without a key is Firecrawl: there is nothing to call.
+ * return: "brave", "firecrawl" or "ddg".
  */
 func searchProvider(configured, apiKey string) string {
-	if strings.ToLower(strings.TrimSpace(configured)) == "ddg" || apiKey == "" {
-		return "ddg"
+	switch p := strings.ToLower(strings.TrimSpace(configured)); {
+	case p == "ddg" || p == "firecrawl":
+		return p
+	case apiKey == "":
+		return "firecrawl"
 	}
 	return "brave"
 }

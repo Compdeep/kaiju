@@ -28,8 +28,8 @@ func TestWebSearchImplementsTheToolInterfaces(t *testing.T) {
 
 func TestWebSearchDefaults(t *testing.T) {
 	w := NewWebSearchWithConfig(SearchConfig{})
-	if w.provider != "ddg" {
-		t.Errorf("default provider without a key = %q, want ddg", w.provider)
+	if w.provider != "firecrawl" {
+		t.Errorf("default provider without a key = %q, want firecrawl", w.provider)
 	}
 	if w.delay != 200*time.Millisecond {
 		t.Errorf("default delay = %v, want 200ms", w.delay)

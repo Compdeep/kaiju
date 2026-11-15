@@ -356,9 +356,10 @@ type FileToolConfig struct {
  */
 type WebToolConfig struct {
 	Enabled bool `json:"enabled"`
-	// SearchProvider is "brave" (the Brave Search API) or "ddg" (DuckDuckGo,
-	// scraped). Empty or a retired value ("sonar", "startpage") means brave
-	// when there is a Brave key and ddg when there is not.
+	// SearchProvider is "brave" (the Brave Search API), "firecrawl"
+	// (Firecrawl's keyless search) or "ddg" (DuckDuckGo, scraped). Empty or a
+	// retired value ("sonar", "startpage") means brave when there is a Brave
+	// key and firecrawl when there is not.
 	SearchProvider string `json:"search_provider"`
 	// SearchAPIKey is the Brave Search API key. Empty reads BRAVE_API_KEY.
 	SearchAPIKey   string  `json:"search_api_key"`

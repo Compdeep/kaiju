@@ -26,10 +26,13 @@ type fakeWeb struct {
 	braveToken string
 	braveCode  int
 	ddgCalls   int
+	fcBody     map[string]any
+	fcCode     int
+	fcCalls    int
 }
 
 func newFakeWeb(t *testing.T) *fakeWeb {
-	f := &fakeWeb{braveCode: http.StatusOK}
+	f := &fakeWeb{braveCode: http.StatusOK, fcCode: http.StatusOK}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -52,6 +55,16 @@ func newFakeWeb(t *testing.T) *fakeWeb {
 				hit("https://ssd.jpl.nasa.gov/horizons/", "Horizons System", ""),
 				hit("https://ssd.jpl.nasa.gov/planets/orbits.html", "Planetary orbits", ""),
 			}}})
+		case r.URL.Path == "/v2/search":
+			f.fcCalls++
+			_ = json.NewDecoder(r.Body).Decode(&f.fcBody)
+			if f.fcCode != http.StatusOK {
+				w.WriteHeader(f.fcCode)
+				return
+			}
+			_, _ = io.WriteString(w, `{"success":true,"creditsUsed":2,"data":{"web":[`+
+				`{"url":"https://ssd-api.jpl.nasa.gov/doc/horizons.html","title":"Horizons API","description":"Horizons API &amp; parameters","position":1},`+
+				`{"url":"https://ssd.jpl.nasa.gov/horizons/manual.html","title":"Horizons Manual","description":"","position":2}]}}`)
 		case r.URL.Path == "/html/":
 			f.ddgCalls++
 			_, _ = io.WriteString(w, `<a class="result__a" href="https://ddg.example.com/page">DDG Result</a>`)
@@ -124,13 +137,41 @@ func TestBraveResultsAreTheSearchResults(t *testing.T) {
 	}
 }
 
-func TestBraveFailureFallsBackToDuckDuckGo(t *testing.T) {
+func TestBraveFailureFallsBackToFirecrawlThenDuckDuckGo(t *testing.T) {
 	f := newFakeWeb(t)
 	f.braveCode = http.StatusTooManyRequests
 	w := braveSearch(f, "brave", "brave-test")
 	got := searchResults(t, w, map[string]any{"query": "anything"})
+	if len(got) != 2 || got[0].URL != "https://ssd-api.jpl.nasa.gov/doc/horizons.html" {
+		t.Fatalf("results = %+v, want the Firecrawl results", got)
+	}
+	f.fcCode = http.StatusTooManyRequests
+	got = searchResults(t, w, map[string]any{"query": "anything"})
 	if len(got) != 1 || got[0].URL != "https://ddg.example.com/page" {
 		t.Fatalf("results = %+v, want the DuckDuckGo result", got)
+	}
+}
+
+// Without a Brave key, search goes through Firecrawl's keyless tier.
+func TestKeylessSearchGoesThroughFirecrawl(t *testing.T) {
+	t.Setenv(braveKeyEnv, "")
+	f := newFakeWeb(t)
+	w := braveSearch(f, "", "")
+	got := searchResults(t, w, map[string]any{"query": "JPL Horizons API", "max_results": 3.0, "recency_days": 5.0})
+	if len(got) != 2 || got[0].URL != "https://ssd-api.jpl.nasa.gov/doc/horizons.html" || got[1].URL != "https://ssd.jpl.nasa.gov/horizons/manual.html" {
+		t.Fatalf("results = %+v, want the two Firecrawl results", got)
+	}
+	if got[0].Snippet != "Horizons API & parameters" {
+		t.Errorf("snippet = %q", got[0].Snippet)
+	}
+	if f.fcBody["query"] != "JPL Horizons API" || f.fcBody["limit"] != 3.0 {
+		t.Errorf("request body = %v", f.fcBody)
+	}
+	if _, ok := f.fcBody["tbs"]; ok {
+		t.Errorf("tbs sent: recency is a preference, not a filter")
+	}
+	if f.ddgCalls != 0 {
+		t.Errorf("DuckDuckGo was called %d times on a Firecrawl success", f.ddgCalls)
 	}
 }
 
@@ -138,11 +179,12 @@ func TestSearchProviderFollowsTheKey(t *testing.T) {
 	t.Setenv(braveKeyEnv, "")
 	for _, c := range []struct{ provider, key, want string }{
 		{"", "k", "brave"},
-		{"", "", "ddg"},
+		{"", "", "firecrawl"},
 		{"sonar", "k", "brave"},         // retired value
 		{"startpage+ddg", "k", "brave"}, // retired value
-		{"brave", "", "ddg"},            // no key, nothing to call
+		{"brave", "", "firecrawl"},      // no key, nothing to call
 		{"ddg", "k", "ddg"},             // asked for by name
+		{"firecrawl", "k", "firecrawl"}, // asked for by name
 	} {
 		w := NewWebSearchWithConfig(SearchConfig{Provider: c.provider, APIKey: c.key})
 		if w.provider != c.want {
@@ -159,7 +201,7 @@ func TestSearchProviderFollowsTheKey(t *testing.T) {
 	}
 }
 
-func TestEmptyScrapedSearchSaysAKeyIsNeeded(t *testing.T) {
+func TestEmptyKeylessSearchSaysAKeyHelps(t *testing.T) {
 	t.Setenv(braveKeyEnv, "")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `<html>anomaly</html>`)

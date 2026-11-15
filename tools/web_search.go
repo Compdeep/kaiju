@@ -17,10 +17,11 @@ import (
 
 /*
  * WebSearch searches the web.
- * desc: Two providers. brave calls the Brave Search API and is the default
- *       whenever a Brave key is configured. ddg scrapes DuckDuckGo's html page
- *       and is what runs without a key, and what brave falls back to when a
- *       call fails.
+ * desc: Three providers. brave calls the Brave Search API and is the default
+ *       whenever a Brave key is configured. firecrawl calls Firecrawl's keyless
+ *       search and is the default without a key (web_search_firecrawl.go). ddg
+ *       scrapes DuckDuckGo's html page. A failed call falls back down that
+ *       order: brave to firecrawl, firecrawl to ddg.
  *
  *       Startpage was retired on 2026-11-12. It, and DuckDuckGo after a few
  *       queries, answer a server with a bot check, which the scraper reads as no
@@ -32,7 +33,7 @@ type WebSearch struct {
 	client   *http.Client
 	mu       sync.Mutex
 	lastAt   time.Time
-	provider string        // "brave" or "ddg"
+	provider string        // "brave", "firecrawl" or "ddg"
 	apiKey   string        // Brave key, for brave
 	delay    time.Duration // min delay between requests
 }
@@ -42,9 +43,9 @@ type WebSearch struct {
  * desc: Passed from kaiju.json tools.web section.
  */
 type SearchConfig struct {
-	// Provider is "brave" or "ddg". Empty, or a retired value ("sonar",
-	// "startpage", "startpage+ddg"), means brave when there is a key and ddg
-	// when there is not.
+	// Provider is "brave", "firecrawl" or "ddg". Empty, or a retired value
+	// ("sonar", "startpage", "startpage+ddg"), means brave when there is a key
+	// and firecrawl when there is not.
 	Provider string
 	APIKey   string  // the Brave Search API key; BRAVE_API_KEY when empty
 	DelaySec float64 // min seconds between search requests (default 0.2; at least 1.1 for brave)
@@ -62,7 +63,7 @@ type SearchConfig struct {
 
 /*
  * NewWebSearch creates a new WebSearch tool instance with default settings.
- * desc: No key, so DuckDuckGo, with the default delay.
+ * desc: No key, so Firecrawl's keyless search, with the default delay.
  * return: pointer to a new WebSearch
  */
 func NewWebSearch() *WebSearch {
@@ -111,8 +112,8 @@ func sharedSearch(cfg SearchConfig) *WebSearch {
 func NewWebSearchWithConfig(cfg SearchConfig) *WebSearch {
 	key := searchKey(cfg.APIKey)
 	provider := searchProvider(cfg.Provider, key)
-	if provider == "ddg" && key == "" {
-		log.Printf("[web_search] no Brave key: scraping DuckDuckGo, which blocks servers after a few queries. Set tools.web.search_api_key or BRAVE_API_KEY for reliable search.")
+	if provider == "firecrawl" {
+		log.Printf("[web_search] no Brave key: searching through Firecrawl's keyless tier, which has a daily limit per IP address. Set tools.web.search_api_key or BRAVE_API_KEY to search through Brave.")
 	}
 	delay := cfg.DelaySec
 	if delay <= 0 {
@@ -211,15 +212,22 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 	var results []searchResult
 	var err error
 
-	if w.provider == "brave" {
+	// recency_days is not passed on: each provider's only date control is a
+	// filter, which drops the older pages that answer the query.
+	switch w.provider {
+	case "brave":
 		results, err = w.searchBrave(ctx, query, maxResults)
 		if err != nil {
-			log.Printf("[web_search] brave failed, falling back to DuckDuckGo: %v", err)
-			results, err = w.searchDDG(ctx, query, maxResults)
+			log.Printf("[web_search] brave failed, falling back to Firecrawl: %v", err)
+			results, err = w.searchFirecrawl(ctx, query, maxResults)
 		}
-	} else {
-		// recency_days is not passed on: DuckDuckGo's only date control (df)
-		// is a filter, which drops the older pages that answer the query.
+	case "firecrawl":
+		results, err = w.searchFirecrawl(ctx, query, maxResults)
+	default:
+		results, err = w.searchDDG(ctx, query, maxResults)
+	}
+	if err != nil && w.provider != "ddg" {
+		log.Printf("[web_search] firecrawl failed, falling back to DuckDuckGo: %v", err)
 		results, err = w.searchDDG(ctx, query, maxResults)
 	}
 
@@ -247,7 +255,7 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 	if len(results) == 0 {
 		detail := "no reachable results for this query — try a different query or report that nothing was found"
 		if w.apiKey == "" {
-			detail += ". This search scrapes DuckDuckGo, which refuses servers after a few queries; with a Brave Search API key configured, search goes through Brave instead"
+			detail += ". Without a Brave Search API key, search goes through Firecrawl's keyless tier, which has a daily limit, then DuckDuckGo, which refuses servers after a few queries"
 		}
 		return toolapi.ToolEmpty("search", detail), nil
 	}

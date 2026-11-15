@@ -16,8 +16,8 @@ import (
 // investigate stored the raw JSON and kept theirs, so the same node type
 // behaved differently depending on the branch taken.
 
-const concludeJSON = `{"decision":"conclude","reason":"credential dump confirmed on two hosts",` +
-	`"summary":"malicious","outcome":"Confirmed credential theft.","aggregate":false}`
+const concludeJSON = `{"decision":"conclude",` +
+	`"summary":"confirmed on two hosts","outcome":"Confirmed credential theft.","aggregate":false}`
 
 // TestReflectionBodyKeepsTheWholeReflection: everything the reflector decided
 // survives, not just the outcome.
@@ -32,8 +32,8 @@ func TestReflectionBodyKeepsTheWholeReflection(t *testing.T) {
 	if b.Out.Decision != "conclude" {
 		t.Errorf("Decision = %q", b.Out.Decision)
 	}
-	if b.Out.Reason != "credential dump confirmed on two hosts" {
-		t.Errorf("Reason = %q", b.Out.Reason)
+	if b.Out.Summary != "confirmed on two hosts" {
+		t.Errorf("Summary = %q", b.Out.Summary)
 	}
 	if b.Out.Aggregate == nil || *b.Out.Aggregate {
 		t.Errorf("Aggregate = %v, want a non-nil false — this was dropped entirely before", b.Out.Aggregate)
@@ -65,9 +65,8 @@ func TestReflectionBodySummary(t *testing.T) {
 		out  reflectionOutput
 		want string
 	}{
-		{"decision and reason", reflectionOutput{Decision: "conclude", Reason: "done"}, "conclude: done"},
-		{"summary stands in for a missing reason", reflectionOutput{Decision: "continue", Summary: "still gathering"}, "continue: still gathering"},
-		{"no decision leaves the reason alone", reflectionOutput{Reason: "just this"}, "just this"},
+		{"decision and summary", reflectionOutput{Decision: "continue", Summary: "still gathering"}, "continue: still gathering"},
+		{"no decision leaves the summary alone", reflectionOutput{Summary: "just this"}, "just this"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,8 +101,8 @@ func TestConcludeRestoresTheTraceLine(t *testing.T) {
 	if !strings.HasPrefix(got, "conclude:") {
 		t.Errorf("trace line = %q, want it to start with \"conclude:\"", got)
 	}
-	if !strings.Contains(got, "credential dump") {
-		t.Errorf("trace line = %q, want the reflector's reason in it", got)
+	if !strings.Contains(got, "confirmed on two hosts") {
+		t.Errorf("trace line = %q, want the reflector's summary in it", got)
 	}
 }
 

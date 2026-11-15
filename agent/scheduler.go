@@ -1691,8 +1691,8 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						graph.SetBody(comp.NodeID, newReflectionBody(*ref, comp.Result))
 						budget.ResetBatchCounters()
 						investigationCount = 0 // reset — if previous investigation worked, next reflection starts fresh
-						log.Printf("[dag] reflection: continue (%s), batch counters reset", ref.Reason)
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONTINUE", Text.TruncateLog(ref.Reason, 200))
+						log.Printf("[dag] reflection: continue (%s), batch counters reset", Text.TruncateLog(ref.Summary, 200))
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONTINUE", Text.TruncateLog(ref.Summary, 200))
 						launchReady()
 						// "continue" asserts there are steps still to run. When nothing
 						// launched there are none — and nothing is in flight to produce
@@ -1880,8 +1880,8 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						reflectionConcluded = inflight == 0
 						reflectionOutcome = ref.Outcome
 						reflectionAggregate = ref.Aggregate
-						log.Printf("[dag] reflection: conclude early (%s), %d step(s) still running", ref.Reason, inflight)
-						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONCLUDE", Text.TruncateLog(ref.Reason, 200))
+						log.Printf("[dag] reflection: conclude early (%s), %d step(s) still running", Text.TruncateLog(ref.Summary, 200), inflight)
+						appendWorklog(a.cfg.MetadataDir, graph.SessionID, "reflect", "CONCLUDE", Text.TruncateLog(ref.Summary, 200))
 
 						// NOTE: `investigate` is gone as a reflection decision. Repair
 						// now flows through the SAME door as expand: the reflector

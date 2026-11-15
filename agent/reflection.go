@@ -28,7 +28,6 @@ type reflectionOutput struct {
 	Failure    string          `json:"failure,omitempty"`   // only for replan after a failure: what was tried and what came back, quoted — see the split below
 	RawOutcome json.RawMessage `json:"outcome"`             // only for conclude — may be string or object
 	Outcome    string          `json:"-"`                   // parsed from RawOutcome
-	Reason     string          `json:"reason"`              // backward compat — used as Summary fallback
 	Aggregate  *bool           `json:"aggregate,omitempty"` // only for conclude
 }
 
@@ -89,13 +88,9 @@ func (b ReflectionBody) Evidence() string {
 	return b.Out.Summary
 }
 
-// Summary renders a short "decision: reason" line for the frontend trace.
+// Summary renders a short "decision: summary" line for the frontend trace.
 func (b ReflectionBody) Summary() string {
-	reason := b.Out.Reason
-	if reason == "" {
-		reason = b.Out.Summary
-	}
-	reason = Text.TruncateLog(reason, 160)
+	reason := Text.TruncateLog(b.Out.Summary, 160)
 	if b.Out.Decision == "" {
 		return reason
 	}
@@ -450,11 +445,6 @@ func parseReflectionOutput(raw string) (*reflectionOutput, error) {
 		// valid
 	default:
 		return nil, fmt.Errorf("unknown reflection decision: %q", output.Decision)
-	}
-
-	// Normalize summary — use Reason as fallback (backward compat)
-	if output.Summary == "" {
-		output.Summary = output.Reason
 	}
 
 	// Parse outcome for conclude

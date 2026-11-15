@@ -674,7 +674,8 @@ func nodeSummary(n *Node) string {
 		var parsed struct {
 			Decision string `json:"decision"`
 			Action   string `json:"action"`
-			Reason   string `json:"reason"`
+			Reason   string `json:"reason"`  // observer and interjection
+			Summary  string `json:"summary"` // reflection
 		}
 		if TryParseLLMJSON(n.Result, &parsed) {
 			decision := parsed.Decision
@@ -682,6 +683,9 @@ func nodeSummary(n *Node) string {
 				decision = parsed.Action
 			}
 			reason := parsed.Reason
+			if reason == "" {
+				reason = parsed.Summary
+			}
 			if len(reason) > 80 {
 				reason = reason[:80] + "…"
 			}

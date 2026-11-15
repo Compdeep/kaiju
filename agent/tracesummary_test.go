@@ -48,8 +48,8 @@ func TestTraceUsesTheReflectionDecision(t *testing.T) {
 	if !strings.HasPrefix(got, "conclude:") {
 		t.Errorf("trace = %q, want it to start with \"conclude:\"", got)
 	}
-	if !strings.Contains(got, "credential dump") {
-		t.Errorf("trace = %q, want the reflector's reason", got)
+	if !strings.Contains(got, "confirmed on two hosts") {
+		t.Errorf("trace = %q, want the reflector's summary", got)
 	}
 }
 

@@ -201,10 +201,11 @@ func (a *Agent) prepare(ctx context.Context, l Lane, req *llm.ChatRequest) *llm.
 	// Before the reply is sized, since it adds to the prompt.
 	stateTheTime(req)
 
-	// One key for every call of a run, so a gateway keeps the run on one
-	// provider and its cache warm. A caller's own key is kept.
+	// One key per stage of a run, so a gateway that routes on the key sends a
+	// stage's calls to the server holding that stage's cached prompt start. A
+	// caller's own key is kept.
 	if req.CacheKey == "" {
-		req.CacheKey = runIDFrom(ctx)
+		req.CacheKey = stageCacheKey(ctx)
 	}
 
 	// The two lanes that force a SMALL call get the model's thinking turned off,
@@ -411,4 +412,34 @@ func streamedResponse(text string) *llm.ChatResponse {
 		return nil
 	}
 	return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.Message{Content: text}}}}
+}
+
+/*
+ * stageCacheKey is the prompt_cache_key for a call: the run, then the stage.
+ * desc: Each stage starts its prompt with its own system prompt, so each has
+ *       its own cached start; one key for the whole run grouped five different
+ *       starts under one name. The stage is the trace's node type, or its tag
+ *       when the tag names a sub-stage ("reframe:reflect" and "reframe:plan"
+ *       have different system prompts). A planner retry ("plan_shorter") keeps
+ *       the planner's key: same system prompt. No run, no key.
+ * param: ctx - the call's context, carrying the run id and the trace id.
+ * return: "<run>:<stage>", the run id alone when the stage is unknown, or "".
+ */
+func stageCacheKey(ctx context.Context) string {
+	run := runIDFrom(ctx)
+	if run == "" {
+		return ""
+	}
+	id, ok := traceIDFrom(ctx)
+	if !ok {
+		return run
+	}
+	stage := id.NodeType
+	if strings.Contains(id.Tag, ":") {
+		stage = id.Tag
+	}
+	if stage == "" {
+		return run
+	}
+	return run + ":" + stage
 }

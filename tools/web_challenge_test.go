@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -26,11 +25,11 @@ const (
 
 func errResult(t *testing.T, status, body string) toolapi.ToolMessage {
 	t.Helper()
-	data, err := json.Marshal(fetchResult{Status: status, Content: body})
+	msg, err := marshalFetchResult(fetchResult{Status: status, Content: body})
 	if err != nil {
 		t.Fatalf("marshal fixture: %v", err)
 	}
-	return toolapi.ToolMessage{Type: "page", Status: toolapi.StatusError, Detail: status, Data: data}
+	return msg
 }
 
 func TestChallengeReasonNamesTheWall(t *testing.T) {

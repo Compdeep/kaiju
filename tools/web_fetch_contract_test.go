@@ -158,8 +158,8 @@ func TestWebFetch_TextFormatStripsHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	result := fetchPayload(t, out)
-	content, _ := result["content"].(string)
+	msg, _ := toolapi.ParseToolMessage(out)
+	content := msg.Content
 	if strings.Contains(content, "<h1>") {
 		t.Errorf("text format should strip HTML tags, got: %s", content)
 	}
@@ -431,5 +431,41 @@ func TestWebFetchDeclaresTheURLItEchoes(t *testing.T) {
 	// And the description still steers a planner away from chaining fetch to fetch.
 	if !strings.Contains(schema, "not a link found on the page") {
 		t.Errorf("the declaration does not say which kind of URL this is: %s", schema)
+	}
+}
+
+// A failed step reaches the planner as its error and its payload, never its
+// content, so what the server said was wrong has to be in the payload. A page
+// that worked carries its text once, in content, and not again in the payload.
+func TestWebFetch_ErrorBodyInPayloadPageTextOnce(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/bad" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("API MESSAGE: one or more query parameter was not recognized"))
+			return
+		}
+		w.Write([]byte(`<html><body><p>Body text here.</p></body></html>`))
+	}))
+	defer srv.Close()
+
+	w := NewWebFetch()
+	out, err := w.Execute(context.Background(), map[string]any{"url": srv.URL + "/bad"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got, _ := fetchPayload(t, out)["content"].(string); !strings.Contains(got, "not recognized") {
+		t.Errorf("the server's message is not in the payload: %s", out)
+	}
+	// The failure line is cut at 300: the server's message comes before the URL.
+	if msg, _ := toolapi.ParseToolMessage(out); !strings.Contains(msg.Detail, "not recognized") || len(msg.Detail) > 300 {
+		t.Errorf("Detail = %q, want the server's message within 300 characters", msg.Detail)
+	}
+
+	out, err = w.Execute(context.Background(), map[string]any{"url": srv.URL, "format": "text"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if _, twice := fetchPayload(t, out)["content"]; twice {
+		t.Errorf("the page text is in the payload as well as in content: %s", out)
 	}
 }

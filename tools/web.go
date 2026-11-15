@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Compdeep/kaiju/agent/llm"
 	"github.com/Compdeep/kaiju/agent/toolapi"
@@ -303,7 +304,7 @@ func (w *WebFetch) Parameters() json.RawMessage {
 		"properties": {
 			"url": {"type": "string", "description": "A real HTTP/HTTPS URL to fetch. Must start with http:// or https://. Never use placeholder values — wire upstream URLs in via ${step.N.results.M.url} (or similar dot-paths into the upstream JSON)."},
 			"format": {"type": "string", "description": "What to return inline. markdown (default) — the page as clean text, best for reading a reference document you are going to work from. text — the same, stripped of all markup. extract — only the parts matching the focus, quoted word for word, read across the WHOLE page; use this when you need exact names, parameters or figures, because it does not paraphrase. The full page is always written to disk and its path returned, whichever you pick.", "enum": ["markdown", "text", "extract"]},
-			"focus": {"type": "string", "description": "For summary mode: what to extract (e.g. 'pricing and shipping policies', 'key competitors')"},
+			"focus": {"type": "string", "description": "For format extract: the facts to find on the page (e.g. 'pricing and shipping policies', 'key competitors')"},
 			"method": {"type": "string", "description": "HTTP method (default: GET)", "enum": ["GET", "POST"]},
 			"body": {"type": "string", "description": "Request body (for POST)"},
 			"headers": {"type": "array", "description": "Additional HTTP headers (override the browser defaults), one \"Name: value\" string per entry. Rarely needed — a full browser header set is sent automatically.", "items": {"type": "string"}},
@@ -509,6 +510,12 @@ func (w *WebFetch) ExecuteTyped(ctx context.Context, params map[string]any) (too
 		if err == nil {
 			if why := challengeReason(body); why != "" {
 				out.Detail = status + " (" + why + ")"
+			} else if said := serverMessage(body, ctype); said != "" {
+				// What the server said was wrong, ahead of the URL: the
+				// failure line is cut at 300 characters, and a long URL used
+				// to fill it, so "parameter not recognized" never reached
+				// the planner.
+				out.Detail = status + ": " + said
 			}
 		}
 
@@ -622,14 +629,56 @@ func withURL(rawURL string, m toolapi.ToolMessage, err error) (toolapi.ToolMessa
 	if b, e := json.Marshal(obj); e == nil {
 		m.Data = b
 	}
-	if m.Status != toolapi.StatusOK && !strings.Contains(m.Detail, rawURL) {
+	// The URL in Detail is shortened: the whole of it is in Data and in the
+	// step's own params, and the failure line it rides in is cut at 300.
+	if short := shortURL(rawURL); m.Status != toolapi.StatusOK && !strings.Contains(m.Detail, short) {
 		if m.Detail == "" {
-			m.Detail = rawURL
+			m.Detail = short
 		} else {
-			m.Detail = m.Detail + " — " + rawURL
+			m.Detail = m.Detail + " — " + short
 		}
 	}
 	return m, nil
+}
+
+// failLineURL and failLineMessage bound the URL and the server's message in a
+// failed fetch's Detail, which the engine cuts at 300 characters.
+const (
+	failLineURL     = 80
+	failLineMessage = 180
+)
+
+// shortURL is rawURL cut to failLineURL, marked where it was cut.
+func shortURL(rawURL string) string {
+	if len(rawURL) <= failLineURL {
+		return rawURL
+	}
+	cut := failLineURL
+	for cut > 0 && !utf8.RuneStart(rawURL[cut]) {
+		cut--
+	}
+	return rawURL[:cut] + "…"
+}
+
+// serverMessage is the start of an error body as one line of text, cut to
+// failLineMessage: an API's "parameter not recognized", or the text of an HTML
+// error page.
+func serverMessage(body, ctype string) string {
+	if strings.Contains(ctype, "html") || strings.HasPrefix(strings.TrimSpace(body), "<") {
+		body = stripHTML(body)
+	}
+	msg := strings.Join(strings.Fields(body), " ")
+	if len(msg) <= failLineMessage {
+		return msg
+	}
+	cut := strings.LastIndex(msg[:failLineMessage], " ")
+	if cut <= 0 {
+		cut = failLineMessage
+		for cut > 0 && !utf8.RuneStart(msg[cut]) {
+			cut--
+		}
+	}
+	return msg[:cut] + "…"
 }
 
 // fetchResult is the structured JSON return shape of web_fetch. Declared here
@@ -637,7 +686,7 @@ func withURL(rawURL string, m toolapi.ToolMessage, err error) (toolapi.ToolMessa
 type fetchResult struct {
 	Status  string `json:"status"`
 	Title   string `json:"title,omitempty"`
-	Content string `json:"content"`
+	Content string `json:"content,omitempty"`
 	Format  string `json:"format,omitempty"`
 	// Note is set when the fetch succeeded structurally but the content
 	// is unusable (JS-rendered widget, login wall, summarizer refusal,
@@ -648,6 +697,19 @@ type fetchResult struct {
 }
 
 func marshalFetchResult(r fetchResult) (toolapi.ToolMessage, error) {
+	// A page's text goes in the envelope's Content only. It was in Data as
+	// well, which doubled every result: a 10 KB page came back as 20 KB and
+	// was cut twice as hard. ${node.X.content} still resolves, to Content,
+	// when Data has no field of that name.
+	//
+	// An error page's text stays in Data, and only there: a failed step reaches
+	// the planner as its error and its Data (stepResultContent), so what the
+	// server said was wrong — "parameter not recognized" — is read from Data.
+	failed := strings.HasPrefix(r.Status, "HTTP 4") || strings.HasPrefix(r.Status, "HTTP 5")
+	text := r.Content
+	if !failed {
+		r.Content = ""
+	}
 	data, err := json.Marshal(r)
 	if err != nil {
 		return toolapi.ToolMessage{}, err
@@ -666,10 +728,10 @@ func marshalFetchResult(r fetchResult) (toolapi.ToolMessage, error) {
 	// unreadable.
 	msg := toolapi.ToolMessage{Type: "page", Data: data}
 	switch {
-	case strings.HasPrefix(r.Status, "HTTP 4") || strings.HasPrefix(r.Status, "HTTP 5"):
+	case failed:
 		msg.Status = toolapi.StatusError
 		msg.Detail = r.Status
-	case strings.TrimSpace(r.Content) == "":
+	case strings.TrimSpace(text) == "":
 		msg.Status = toolapi.StatusEmpty
 		msg.Detail = r.Note
 		if msg.Detail == "" {
@@ -680,7 +742,7 @@ func marshalFetchResult(r fetchResult) (toolapi.ToolMessage, error) {
 		}
 	default:
 		msg.Status = toolapi.StatusOK
-		msg.Content = r.Content
+		msg.Content = text
 	}
 	return msg, nil
 }

@@ -13,8 +13,8 @@ Use when the question asks for a precise factual answer: a count, a name, a date
 
 Many questions reference Wikipedia directly or ask about well-documented facts.
 
-1. `web_fetch` — fetch the specific Wikipedia page with `format=summary` and a focused `focus` parameter targeting the exact data point
-2. If the page is long, fetch it and then search the file it saved. `web_fetch` returns `full_content_path`, which is the whole page on disk. Use `bash` with `grep` on that file. Do not use `format=raw` — it no longer exists.
+1. `web_fetch` — fetch the specific Wikipedia page with `format=extract` and a focused `focus` parameter targeting the exact data point
+2. If the page is long, fetch it and then search the file it saved. `web_fetch` returns `full_content_path`, which is the whole page on disk. Use `bash` with `grep` on that file.
 
 ### GitHub data
 
@@ -70,7 +70,7 @@ Each reference is the dependency. Do not add `depends_on` to a chain like this.
 
 ### ArXiv and academic papers
 
-1. `web_fetch` — fetch `https://arxiv.org/abs/<id>` directly with `format=summary`
+1. `web_fetch` — fetch `https://arxiv.org/abs/<id>` directly with `format=extract`
 2. For specific data within papers: `web_fetch` with a targeted `focus` parameter
 
 ### Video content questions

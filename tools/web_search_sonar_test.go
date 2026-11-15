@@ -179,3 +179,22 @@ func TestEmptyScrapedSearchSaysAKeyIsNeeded(t *testing.T) {
 		t.Errorf("the empty result should say an OpenRouter key gives reliable search, got %q", msg.Detail)
 	}
 }
+
+// A citation carries no text, so a result's snippet is the sentences of Sonar's
+// reply that cite it. A decimal point does not end a sentence.
+func TestCitedSentencesAreTheSnippets(t *testing.T) {
+	got := citedSentences("The **barycenter** moves as the planets orbit.[2][3] It is 1.1 solar radii from the centre.[1]\n- Query a live ephemeris for exact values.[3]")
+	want := map[int]string{
+		1: "It is 1.1 solar radii from the centre.",
+		2: "The barycenter moves as the planets orbit.",
+		3: "The barycenter moves as the planets orbit. Query a live ephemeris for exact values.",
+	}
+	for n, w := range want {
+		if got[n] != w {
+			t.Errorf("[%d] = %q, want %q", n, got[n], w)
+		}
+	}
+	if long := citedSentences(strings.Repeat("word ", 200) + ".[1]")[1]; len(long) > snippetMax+len("…") {
+		t.Errorf("snippet is %d bytes, want at most %d", len(long), snippetMax)
+	}
+}

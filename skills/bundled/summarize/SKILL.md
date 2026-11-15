@@ -15,7 +15,7 @@ Use when the user asks to summarize, extract text from, or transcribe:
 
 ### Summarize a URL
 
-1. `web_fetch` — fetch the page with `format=summary` and `focus` describing what to extract
+1. `web_fetch` — fetch the page with `format=extract` and `focus` describing what to extract
 
 Single step. Use a broad focus to capture the key points in one fetch.
 
@@ -23,9 +23,9 @@ Single step. Use a broad focus to capture the key points in one fetch.
 
 Plan fetches in parallel:
 
-1. `web_fetch` — fetch URL 1 with `format=summary`
-2. `web_fetch` — fetch URL 2 with `format=summary`
-3. `web_fetch` — fetch URL 3 with `format=summary`
+1. `web_fetch` — fetch URL 1
+2. `web_fetch` — fetch URL 2
+3. `web_fetch` — fetch URL 3
 
 Nothing links them, so they run at the same time.
 

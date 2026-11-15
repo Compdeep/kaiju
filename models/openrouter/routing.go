@@ -34,6 +34,9 @@ var blacklistJSON []byte
 //go:embed whitelist.json
 var whitelistJSON []byte
 
+//go:embed pinned.json
+var pinnedJSON []byte
+
 // list is the shape of both files. The comment field is there to be written and
 // never read; it carries the slug rules to whoever opens the file next.
 type list struct {
@@ -44,7 +47,40 @@ type list struct {
 var (
 	blocked = load("blacklist.json", blacklistJSON)
 	allowed = load("whitelist.json", whitelistJSON)
+	pinned  = loadPinned(pinnedJSON)
 )
+
+/*
+ * loadPinned parses pinned.json, the per-model whitelist.
+ * desc: A malformed file pins nothing and says so: an unpinned model is routed
+ *       as before, which costs cache hits, never a refused call. Empty slugs
+ *       are dropped, and a model left with none is not pinned, since an empty
+ *       `only` reads as "allow none".
+ * param: raw - the file's contents.
+ * return: model id to slugs, or nil.
+ */
+func loadPinned(raw []byte) map[string][]string {
+	var l struct {
+		Models map[string][]string `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &l); err != nil {
+		log.Printf("[openrouter] pinned.json: parse failed, no models pinned: %v", err)
+		return nil
+	}
+	out := map[string][]string{}
+	for model, slugs := range l.Models {
+		var keep []string
+		for _, s := range slugs {
+			if s != "" {
+				keep = append(keep, s)
+			}
+		}
+		if model != "" && len(keep) > 0 {
+			out[model] = keep
+		}
+	}
+	return out
+}
 
 /*
  * load parses one list.
@@ -88,6 +124,12 @@ func Blocked() []string { return copyOf(blocked) }
  *         restriction" rather than "allow none".
  */
 func Allowed() []string { return copyOf(allowed) }
+
+/*
+ * PinnedFor returns the only providers OpenRouter may route model to.
+ * return: a fresh copy, or nil when the model is not pinned.
+ */
+func PinnedFor(model string) []string { return copyOf(pinned[model]) }
 
 // copyOf hands out a copy so a caller stamping the slice onto a request cannot
 // scribble on the parsed list — the same reason models.All does.

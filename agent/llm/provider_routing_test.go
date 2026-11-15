@@ -93,3 +93,20 @@ func TestTheStockBuildSendsTheShippedBlacklist(t *testing.T) {
 		t.Errorf("only must stay absent, or OpenRouter refuses every provider: %+v", req.Provider)
 	}
 }
+
+// A pinned model is sent to its own hosts only, so its repeated prompt start
+// stays on one host's cache. Any other model is routed as before.
+func TestAPinnedModelGoesToItsOwnHosts(t *testing.T) {
+	c := &Client{provider: ProviderOpenRouter}
+	req := &ChatRequest{Model: "qwen/qwen3.6-35b-a3b"}
+	c.routeProviders(req)
+	if req.Provider == nil || len(req.Provider.Only) != 1 || req.Provider.Only[0] != "parasail/fp8" {
+		t.Fatalf("qwen3.6-35b-a3b routing = %+v, want only parasail/fp8", req.Provider)
+	}
+
+	other := &ChatRequest{Model: "openai/gpt-4.1-mini"}
+	c.routeProviders(other)
+	if other.Provider != nil && len(other.Provider.Only) > 0 {
+		t.Errorf("an unpinned model was given only %v", other.Provider.Only)
+	}
+}

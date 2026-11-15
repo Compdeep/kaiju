@@ -710,6 +710,8 @@ func (c *Client) setAuthHeaders(req *http.Request) {
  *       for calls that said nothing, not an override of a decision made closer
  *       to the work.
  *
+ *       A model named in pinned.json gets that model's hosts as `only`.
+ *
  *       Nothing is attached when both lists are empty, which is the shipped
  *       state. An empty `only` is not the same as no `only` — OpenRouter reads
  *       it as "no provider is allowed" and answers 404 — so the object is built
@@ -721,6 +723,12 @@ func (c *Client) routeProviders(req *ChatRequest) {
 		return
 	}
 	only, ignore := openrouter.Allowed(), openrouter.Blocked()
+	// A pinned model goes to its own hosts only, whatever the whitelist says:
+	// staying on one host is what lets its repeated prompt start be read from
+	// that host's cache. See models/openrouter/pinned.json.
+	if pin := openrouter.PinnedFor(req.Model); len(pin) > 0 {
+		only = pin
+	}
 	if len(only) == 0 && len(ignore) == 0 {
 		return
 	}

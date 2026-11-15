@@ -1,0 +1,6 @@
+{
+  "_comment": "Per model: the ONLY providers OpenRouter may route that model to. Keyed by model id; same slug rules as blacklist.json. A pin keeps one model's calls on one host, so a prompt repeated from call to call is read from that host's cache instead of being billed again in full; it removes fallback for that model only, so the host being down is a failed call. Models not listed keep the whitelist and blacklist. qwen3.6-35b-a3b on Parasail (2026-11-15): tools, tool_choice and structured output supported, cache read $0.025/M against $0.10/M input; CoreWeave was cheaper to cache but has no tool calling, which the planner and reflector need.",
+  "models": {
+    "qwen/qwen3.6-35b-a3b": ["parasail/fp8"]
+  }
+}

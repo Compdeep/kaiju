@@ -114,3 +114,15 @@ func TestCallersGetACopy(t *testing.T) {
 		t.Error("a caller wrote through to the parsed list")
 	}
 }
+
+func TestPinnedLoads(t *testing.T) {
+	if got := loadPinned([]byte(`{"models":{"m":["a",""],"n":[""],"":["x"]}}`)); len(got) != 1 || len(got["m"]) != 1 || got["m"][0] != "a" {
+		t.Errorf("loadPinned = %v, want only m pinned to a", got)
+	}
+	if got := loadPinned([]byte(`not json`)); got != nil {
+		t.Errorf("a malformed file pinned %v", got)
+	}
+	if PinnedFor("not-a-model") != nil {
+		t.Errorf("an unlisted model was pinned")
+	}
+}

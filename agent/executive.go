@@ -1728,6 +1728,14 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// one, could not be given one, and concluded the work impossible.
 	objective := a.objective(trigger, graph, replanFrame...)
 	relevant, narrowing := a.relevantTools(ctx, graph, trigger, objective)
+	// By name, not by rank. The ranking is redone against each round's
+	// objective, so the same tools came back in a different order every round
+	// (run e9d3ebc9, 2026-11-15: 44 tools, one set, six orders), and the tool
+	// list sits near the start of the prompt: a new order there is a new
+	// prompt, and nothing after it is read from the provider's cache. The shell
+	// stays first, as relevantTools puts it. Sorted on a copy: the slice is the
+	// ranker's.
+	relevant = shellFirst(sortedCopy(relevant))
 	// Recorded on whatever plan this call produces — see PlanResult.Tools.
 	defer func() {
 		if planOut != nil {
@@ -3499,4 +3507,11 @@ func plannerContextRequest(a *Agent, relevant []string) ContextRequest {
 		// against were the thing being cut.
 		MaxBudget: a.budget(toolIndexBudget) + 8000,
 	}
+}
+
+// sortedCopy returns names sorted, leaving names itself alone.
+func sortedCopy(names []string) []string {
+	out := append([]string(nil), names...)
+	sort.Strings(out)
+	return out
 }

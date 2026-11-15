@@ -114,7 +114,7 @@ func TestReflectionSplit_ThePlannerSeesWhatFailedAsARecord(t *testing.T) {
 		t.Errorf("the block does not say the inputs are the failed ones: %q", block)
 	}
 
-	frame := replanFrame("Re-query with a start and stop that differ.", block)
+	frame := replanFrame("", "Re-query with a start and stop that differ.", block)
 	if !strings.Contains(frame, "What was tried, and what came back:") {
 		t.Errorf("the failure has no heading of its own in the frame:\n%s", frame)
 	}
@@ -127,7 +127,29 @@ func TestReflectionSplit_ThePlannerSeesWhatFailedAsARecord(t *testing.T) {
 	if empty := replanFailureBlock("   "); empty != "" {
 		t.Errorf("an absent failure produced a block: %q", empty)
 	}
-	if f := replanFrame("Fetch what the search surfaced.", ""); strings.Contains(f, "What was tried") {
+	if f := replanFrame("", "Fetch what the search surfaced.", ""); strings.Contains(f, "What was tried") {
 		t.Errorf("a success replan was given a failure heading:\n%s", f)
+	}
+}
+
+// The reflector's summary reaches the planner: it is where a value read off the
+// results (the API's real address) is written when next and failure omit it.
+func TestReplanFrameCarriesTheReflectorsSummary(t *testing.T) {
+	sum := "The docs page was read. The correct base URL is https://ssd.jpl.nasa.gov/api/horizons.api. " + strings.Repeat("x", 400)
+	frame := replanFrame(replanSummaryBlock(sum), "Query the API.", "")
+	if !strings.Contains(frame, "Reflector's summary of where things stand:") || !strings.Contains(frame, "https://ssd.jpl.nasa.gov/api/horizons.api") {
+		t.Fatalf("the summary did not reach the planner:\n%s", frame)
+	}
+	if strings.Contains(frame, strings.Repeat("x", replanSummaryCap)) {
+		t.Errorf("the summary was not cut to %d characters", replanSummaryCap)
+	}
+	if strings.Index(frame, "summary of where things stand") > strings.Index(frame, "next move is") {
+		t.Errorf("the summary should come before the next move")
+	}
+	if replanSummaryBlock("  ") != "" {
+		t.Errorf("an empty summary produced a block")
+	}
+	if f := replanFrame("", "Fetch.", ""); strings.Contains(f, "summary of where") {
+		t.Errorf("no summary, yet a heading:\n%s", f)
 	}
 }

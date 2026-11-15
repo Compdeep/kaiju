@@ -120,7 +120,8 @@ func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget
  * return: resolved IGX intent and error.
  */
 // replanFrameTemplate is the frame handed to the executive on a replan (first %s
-// = the reflector's `next`, second = replanFailureBlock). It MUST keep teaching
+// = replanSummaryBlock, second = the reflector's `next`, third =
+// replanFailureBlock). It MUST keep teaching
 // step wiring — leading with a
 // web_search→web_fetch chain (`${step.0.results.0.url}`, `depends_on:[0]`) — and
 // MUST NOT tell the planner to avoid `${step}`/`depends_on` for its new steps.
@@ -140,15 +141,36 @@ func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget
 // there is the inputs that failed and the text that came back, which is what the
 // rule was written to admit.
 /*
- * replanFrame assembles the re-plan frame from the reflector's two fields.
+ * replanFrame assembles the re-plan frame from the reflector's fields.
  * desc: One place builds it, so what the planner is shown and what a test reads
  *       cannot drift apart.
+ * param: summaryBlock - replanSummaryBlock's output, or "".
  * param: next - the reflector's proposed move.
  * param: failureBlock - replanFailureBlock's output, or "".
  * return: the frame appended to the objective.
  */
-func replanFrame(next, failureBlock string) string {
-	return fmt.Sprintf(replanFrameTemplate, next, failureBlock)
+func replanFrame(summaryBlock, next, failureBlock string) string {
+	return fmt.Sprintf(replanFrameTemplate, summaryBlock, next, failureBlock)
+}
+
+// replanSummaryCap is how much of the reflector's summary the planner is shown.
+const replanSummaryCap = 300
+
+/*
+ * replanSummaryBlock renders the reflector's summary, or nothing.
+ * desc: The summary is where the reflector writes what it read off the results
+ *       (on 2026-11-15, "The correct base URL is https://ssd.jpl.nasa.gov/api/
+ *       horizons.api"). `next` and `failure` alone did not carry it, so the
+ *       planner kept the wrong host for three rounds. Cut to replanSummaryCap.
+ * param: summary - the reflector's `summary` field, possibly empty.
+ * return: the block to splice into the frame, with its own blank line, or "".
+ */
+func replanSummaryBlock(summary string) string {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return ""
+	}
+	return "\nReflector's summary of where things stand:\n" + Text.TruncateLog(summary, replanSummaryCap) + "\n"
 }
 
 /*
@@ -168,7 +190,7 @@ func replanFailureBlock(failure string) string {
 		"\n\nThose are the inputs that failed, not the ones to use. Choose the replacement yourself.\n"
 }
 
-const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n\nReflector says the next move is:\n%s\n%s\nPlan the next steps needed to close what remains and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. a `web_search` tagged `find_docs`, then a `web_fetch` whose url param is `${step.find_docs.results.0.url}`. The reference IS the wiring; do not also write `depends_on`. A reference addresses the NEW steps in THIS plan, by their tags. A step that already RAN is not addressable from here — neither its position nor its tag reaches back, because both name steps in THIS plan. What it returned is above, as a tool result: take the value out of that and write the value itself into the param, with `depends_on:[]`. A value you write literally must be one you can point to in the material above — a tool result, or the request itself. Copying it from there is what the sentence before this one asks for. What you may not write is a value you recall or assume: a URL, an id or a path you cannot find above does not exist, and the step that produces it is what to plan instead."
+const replanFrameTemplate = "\n\n## Re-plan\nThe plan so far has already run — the worklog below (## System State) shows completed work. Do NOT repeat completed steps.\n%s\nReflector says the next move is:\n%s\n%s\nPlan the next steps needed to close what remains and answer the original request above. WIRE your new steps into a chain, exactly like a first plan — e.g. a `web_search` tagged `find_docs`, then a `web_fetch` whose url param is `${step.find_docs.results.0.url}`. The reference IS the wiring; do not also write `depends_on`. A reference addresses the NEW steps in THIS plan, by their tags. A step that already RAN is not addressable from here — neither its position nor its tag reaches back, because both name steps in THIS plan. What it returned is above, as a tool result: take the value out of that and write the value itself into the param, with `depends_on:[]`. A value you write literally must be one you can point to in the material above — a tool result, or the request itself. Copying it from there is what the sentence before this one asks for. What you may not write is a value you recall or assume: a URL, an id or a path you cannot find above does not exist, and the step that produces it is what to plan instead."
 
 // replanDebugParagraph is added to the frame only when something has actually
 // failed.
@@ -1714,8 +1736,10 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						budget.ResetBatchCounters()
 
 						next := ref.Next
+						summaryBlock := replanSummaryBlock(ref.Summary)
 						if next == "" {
 							next = ref.Summary
+							summaryBlock = "" // already the next move
 						}
 
 						// concludeReplan collapses the run to a outcome when replan can't
@@ -1765,7 +1789,7 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 						// Anchor the user's goal verbatim (formatTrigger inside the
 						// executive); hand it a generic frame: what's already done
 						// (worklog) + the reflector's `next`. The executive decides HOW.
-						frame := replanFrame(next, replanFailureBlock(ref.Failure))
+						frame := replanFrame(summaryBlock, next, replanFailureBlock(ref.Failure))
 						// How to diagnose a failure, only where there is one.
 						// FailedNodes already excludes the ones a debug cycle
 						// has since addressed, so a run whose failures were

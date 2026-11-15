@@ -807,31 +807,9 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("\nThese are written FOR you and are read-only. Never guess a path in them — reference the field of the step that produced it:\n")
 		sb.WriteString("- fetched/ — the whole page each web_fetch retrieved. Reach it through that step's `full_content_path`.\n")
 		sb.WriteString("- output/ — the whole output each bash command printed. Reach it through that step's `output_path`.\n")
-		sb.WriteString("- sessions/<session-id>/ — working files from earlier turns of a conversation. Not listed below; name the path directly when an earlier turn's material is needed.\n")
-		// Workspace tree for orientation (what files exist in the workspace).
-		// We do NOT inject existing blueprints here — the mere presence of
-		// a blueprint in the workspace must not bias the planner toward
-		// compute(deep). Whether this query needs architecture is the
-		// preflight's call based on the user's actual request, not workspace
-		// residue from prior runs.
-		if graph != nil && graph.Context != nil {
-			gateResp, gerr := graph.Context.Get(ctx, ContextRequest{
-				// Depth 5 shows typical nested projects (e.g. workdir/project/<app>/<component>/src/<file>)
-				// up front so the Executive doesn't have to probe for entrypoints. The
-				// scanWorkspaceTree cap at 120 entries (round-robin across buckets) prevents
-				// runaway on monorepo-sized trees; MaxBudget:10000 is the secondary byte cap.
-				ReturnSources: Sources(WorkspaceTree(5)),
-				MaxBudget:     10000,
-			})
-			if gerr != nil {
-				log.Printf("[dag] executive context build failed: %v", gerr)
-			} else if tree := gateResp.Sources[SourceWorkspaceTree]; tree != "" {
-				sb.WriteString("\n### Current files\n")
-				sb.WriteString(tree)
-				sb.WriteString("\n")
-			}
-		}
-
+		sb.WriteString("- sessions/<session-id>/ — working files from earlier turns of a conversation. Not in the Current files list; name the path directly when an earlier turn's material is needed.\n")
+		// The workspace tree is not here: it changes as a run saves files, and
+		// it goes at the end of the request — see currentFiles.
 	}
 
 	// A ceiling stated on its own reads as an allowance to spend: every
@@ -1819,6 +1797,7 @@ func (a *Agent) runExecutiveNative(ctx context.Context, trigger Trigger, graph *
 	// that followed it was a sentence the reflector retyped — so a path that
 	// was correct and on disk arrived as a placeholder that resolved to
 	// nothing, and the plan used one the model half-remembered.
+	userQuery += a.currentFiles(ctx, graph, relevant)
 	messages := BuildMessagesWithResults(sysPromptN, userQuery, executiveHistory, graph.Arcs())
 
 	ctx = withTrace(ctx, TraceID{
@@ -3514,4 +3493,45 @@ func sortedCopy(names []string) []string {
 	out := append([]string(nil), names...)
 	sort.Strings(out)
 	return out
+}
+
+/*
+ * currentFiles is the workspace tree, for the end of the planner's request.
+ * desc: At the end, not in the system prompt. The tree changes whenever a step
+ *       saves a file, and a provider reuses a request's cached start only up to
+ *       the first character that differs: in the system prompt, at character
+ *       ~41,200 of 48,100, it cost the cache everything after it — the rest of
+ *       the system prompt, every turn and the user prompt (run e9d3ebc9,
+ *       2026-11-15). No time line: the gate's own clock is omitted, and the
+ *       request already carries the time at its end (stateTheTime).
+ *
+ *       Shown only where compute is shown in full, as before, since the layout
+ *       it orients against is compute's. Existing blueprints are not singled
+ *       out: their presence must not bias the planner toward compute(deep);
+ *       that is preflight's call.
+ * param: ctx, graph, relevant - as runExecutiveNative.
+ * return: the section with its heading, or "".
+ */
+func (a *Agent) currentFiles(ctx context.Context, graph *Graph, relevant []string) string {
+	if graph == nil || graph.Context == nil || !a.inFull(graph, relevant, computeToolName) {
+		return ""
+	}
+	// Depth 5 shows typical nested projects (e.g. workdir/project/<app>/<component>/src/<file>)
+	// up front so the planner doesn't have to probe for entrypoints. The
+	// scanWorkspaceTree cap at 120 entries (round-robin across buckets) prevents
+	// runaway on monorepo-sized trees; MaxBudget:10000 is the secondary byte cap.
+	resp, err := graph.Context.Get(ctx, ContextRequest{
+		ReturnSources:   Sources(WorkspaceTree(5)),
+		MaxBudget:       10000,
+		OmitCurrentTime: true,
+	})
+	if err != nil {
+		log.Printf("[dag] executive context build failed: %v", err)
+		return ""
+	}
+	tree := strings.TrimSpace(resp.Sources[SourceWorkspaceTree])
+	if tree == "" {
+		return ""
+	}
+	return "\n\n### Current files\n" + tree + "\n"
 }

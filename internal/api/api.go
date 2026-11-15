@@ -387,7 +387,14 @@ func (a *API) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// No HTTP-level timeout — the DAG's own wall clock (budget.WallClock) is
 	// the authority. A separate HTTP timeout caused connection resets and
 	// ghost retries when the DAG outlived the HTTP deadline.
-	ctx := r.Context()
+	//
+	// Not cancelled when the client goes away. The run's job context is made
+	// from this one, so a closed tab, a sleeping laptop or a dropped network
+	// aborted the run. The answer is stored on the session either way, the
+	// Stop button cancels through the scheduler (/api/v1/stop), and the run's
+	// own wall clock still bounds it. The request's values (the principal,
+	// the token counter) are kept.
+	ctx := context.WithoutCancel(r.Context())
 	// Attribute this run to the calling principal (JWT sub) and open a per-run
 	// token counter; both ride the ctx through SubmitSync into every LLM call on
 	// the sync path, so RunTotal(ctx) below is this request's exact token cost —

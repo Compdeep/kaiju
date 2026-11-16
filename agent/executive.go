@@ -732,7 +732,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		if graph != nil && graph.Preflight != nil && graph.Preflight.ComputeMode != "" {
 			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", graph.Preflight.ComputeMode))
 		} else {
-			sb.WriteString("**Preflight compute_mode is unset** — use mode \"shallow\" for any compute step.\n\n")
+			sb.WriteString("**No compute mode was set**: use direct tools, and plan compute only when the request needs code run.\n\n")
 		}
 	}
 

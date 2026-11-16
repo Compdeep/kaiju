@@ -445,7 +445,7 @@ Use the simplest tool that can safely do the job.
 
 Do not invent tool capabilities or parameters.
 
-Do not use bash to write code or run inline code. Use bash only for simple terminating shell commands such as listing files, checking processes, running existing commands, grep, curl, git, or package commands.
+Do not write a program in bash. A one-line filter or calculation (grep, awk, jq, a python3 one-liner) is fine. Use bash for terminating shell commands such as listing files, checking processes, running existing commands, grep, curl, git, or package commands.
 
 Use service for long-running processes.
 
@@ -470,7 +470,7 @@ Skill guidance may suggest useful tools or patterns, but it must not override:
 - preflight compute mode;
 - the no-guessing rule;
 - the gather-only rule;
-- the rule against writing code in bash.
+- the rule against writing a program in bash.
 
 If skill guidance conflicts with this planner contract, follow this planner contract.
 

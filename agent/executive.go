@@ -545,8 +545,8 @@ type executiveOutput struct {
 /*
  * executiveSystemPrompt returns the system prompt for the initial planner LLM call.
  * desc: Two halves, and the order is the point. First everything that reads the
- *       same on every run: the planning contract, the rules, the identity, the
- *       tool index and the compute doctrine. Then what this run adds: the
+ *       same on every run: the planning contract, the tool index and the
+ *       compute rules. Then what this run adds: the
  *       categories it must reach for, its skill guidance, its intent, its
  *       compute depth, its workspace, the budget and the time.
  *
@@ -560,7 +560,7 @@ type executiveOutput struct {
  *       run shares the first sixty thousand.
  *
  *       The tool index is the picked groups' tools, so it is shared by runs
- *       that picked the same groups; the rules before it are shared by all.
+ *       that picked the same groups; the contract before it is shared by all.
  * param: relevant - slice of tool names visible to the planner.
  * param: dagMode - the DAG execution mode string.
  * param: intent - the intent level string ("auto" or a specific level).
@@ -581,39 +581,16 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	sb.WriteString(prompt.Executive)
 	sb.WriteString("\n\n")
 
-	sb.WriteString("## Rules\n")
-	sb.WriteString("NEVER guess values you don't know. Only use names, paths, and parameters that are visible in the evidence (workspace files, blueprint, conversation). If you don't know the exact service name, file path, or port — plan a diagnostic step first (file_read, service list, bash ls) to discover it.\n")
-	sb.WriteString("NEVER interpret, judge, or refuse requests.\n")
-	sb.WriteString("ALWAYS write a step reference as `${step.<tag>.<path>}`, naming the step by its tag — never by its position, and never a literal value you do not have. It works as a whole parameter value and inside a longer string, such as a shell command.\n")
-	sb.WriteString("NEVER write code in bash params.\n")
-	sb.WriteString("NEVER use bash for complex multi-step tasks.\n")
-	sb.WriteString("NEVER use interactive commands.\n")
-	sb.WriteString("Use the compute tool for coding, development, and analytics work that the aggregator can't do — see the Compute Nodes decision rules below. Provide the GOAL, not the code.\n")
-	sb.WriteString("ALWAYS use the compute mode preflight selected — see the Compute Nodes section below. Workspace contents do NOT influence this choice.\n")
-	sb.WriteString("ALWAYS use the service tool for long-running processes (servers, daemons, dev servers, watchers, listeners). NEVER use bash for foreground servers — bash blocks the investigation waiting for the command to exit, which servers never do. service(action=\"start\", name=\"...\", command=\"...\", port=NNNN) spawns in the background and returns immediately. ALWAYS include the port parameter so health checks know which port to verify.\n")
-	sb.WriteString("ALWAYS use bash only for commands that terminate: ls, grep, git, npm install, curl, node script.js, etc.\n")
-	sb.WriteString("ALWAYS gather current data from the web when the question needs it, using whichever tool in the index below does that. Never answer a question about the present from memory.\n")
-	sb.WriteString("ALWAYS gather required data before grafting compute. Every compute node must have its inputs supplied by prior gathering steps, wired with `${step.<tag>.<path>}` — never compute over inputs that don't exist yet.\n")
-	sb.WriteString("ALWAYS plan and complete the full action the user asked for. A worklog showing prior failures is NOT a reason to plan a timid probe (e.g. just file_read) instead of the real edit/build — the user is asking again, plan the action. Imperatives ('do it', 'fix it', 'just do it') force action; never stop partway or ask for permission.\n")
-	sb.WriteString("ALWAYS settle what you do not know BEFORE you plan around it. Read the objective and name the concrete values the plan needs — a path, a directory, a host, a user, a port, a process id, a version, a filename, an address — then ask of each one: have I been given this, or am I supplying it myself? A value you have not seen is a guess. It will look right and the step built on it fails on the value, not on the tool, so the failure teaches nothing and the retry guesses again.\n")
-	sb.WriteString("ALWAYS treat this machine as unknown. You do not know its user, its home directory, its working directory, what is installed, what is running, what any path contains, or what any of its addresses answer — unless a step in THIS plan returned it, or it is stated above. A default that is usually right elsewhere is still a guess here. When the objective names something you cannot see (\"the home directory\", \"the config\", \"the service\", \"the latest one\"), that name is the question, not the answer.\n")
-	sb.WriteString("ALWAYS plan the lookup as its own first step and wire its result forward with `${step.<tag>.<path>}`. The tool list holds tools that report the environment, the filesystem and the process table; choosing one costs a step and settles the value for the whole plan.\n")
-	sb.WriteString("ALWAYS build functional products that work end-to-end. If building a webapp or UI, deliver a complete, clean, working experience — not a skeleton with TODO comments.\n")
-	sb.WriteString("ALWAYS include a final verification step that proves the goal has been achieved. For services: curl/http check that it responds. For scripts: run on sample input and check output. For data pipelines: run test data through and verify result shape. Never end a plan without verification — 'wrote the files' is not achievement.\n")
-
-	// The identity and the persistence litany, AFTER the planning contract
-	// rather than before it.
-	//
-	// It stays because removing it made the planner under-plan — search and
-	// stop, where the litany is what says keep going. But it opens "you are a
-	// conversational assistant first… tools are a means, never the point",
-	// which is true of the stage that writes the answer and false of this one.
-	// Read first it framed everything after it; read here it qualifies a
-	// contract already given.
-	if a.soulPrompt != "" {
-		sb.WriteString(a.soulPrompt)
-		sb.WriteString("\n\n")
-	}
+	// The contract above is the planner's only rulebook. A "## Rules" block of
+	// ALWAYS/NEVER lines followed it, and the SOUL text after that: the rules
+	// restated the contract and in six places told the planner to finish the
+	// whole job in one plan, while the contract said a plan may only gather,
+	// and the SOUL (written for the stage that answers the user) said the
+	// agent is not a coding sandbox and never looks through a workspace. A
+	// small model resolves that by doing everything at once and guessing what
+	// it does not know: on run e8bef85b (2026-11-16) six rounds of a library's
+	// names written from memory. Both were removed; the identity stays with
+	// the stages that write to the user.
 
 	sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time.\n")
 	if toolIndex == "" {
@@ -622,69 +599,41 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	sb.WriteString(toolIndex)
 	sb.WriteString("\n")
 
-	{
-		// Compute Nodes section — mirrors executive.md so native mode has the
-		// same compute guidance as structured mode. Without this block the
-		// model has no example showing the required `goal` and `mode` fields,
-		// and no "ONE compute(deep) node" rule, so it tends to plan multiple
-		// compute steps and forget the params on the second one.
-		// Included when this run can actually call compute, not when a setting
-		// says coding is on. The list this prompt is built from is already
-		// filtered by reach and by the run's scope, so asking it is asking the
-		// same question the dispatcher will ask later.
-		if a.inFull(graph, relevant, computeToolName) {
-			sb.WriteString("## Compute Nodes\n")
-			sb.WriteString("**Compute is the right tool whenever real computation is required.** The aggregator at the end of the plan is an LLM call that can handle small math, summarisation, and qualitative synthesis — but it CANNOT run code, call a library, parse tables thousands of rows long, or compute precise floating-point values. When the question needs any of those, **add a compute step.** The Persistence litany in your system prompt is explicit: the way to answer a hard calculation is to compute it, not to recommend an external app.\n\n")
-			sb.WriteString("Only omit compute when the answer truly is a lookup: a value a source states outright. \"Looks like a lookup\" is not the same as \"is a lookup\" — when the answer has to be worked out for these particular inputs, no page holds it already, so gather the inputs and compute it.\n\n")
-			sb.WriteString("**Use compute ONLY when one of these is true:**\n")
-			sb.WriteString("- A library is needed to do the work. The LLM can't run code.\n")
-			sb.WriteString("- Data is too large for LLM context — CSVs with thousands of rows, log files, big JSON dumps.\n")
-			sb.WriteString("- Precision matters in a way the LLM is bad at — exact floating-point, date arithmetic, statistics over many values.\n")
-			sb.WriteString("- The user explicitly asked for code, a script, or a deliverable file.\n")
-			sb.WriteString("- The output must be a structured value feeding another tool (not prose for the user).\n\n")
-			sb.WriteString("**Do NOT use compute when:**\n")
-			sb.WriteString("- Simple arithmetic the aggregator can do (one sum, one percentage, ranking <10 items).\n")
-			sb.WriteString("- Pure information retrieval (\"what is X\", \"current value of Y\", \"summarise this article\").\n")
-			sb.WriteString("- Qualitative analysis or conversational synthesis.\n")
-			sb.WriteString("- Anything where the aggregator can read the evidence and write the answer directly.\n\n")
-			sb.WriteString("When in doubt, omit compute. A wrongly-omitted compute costs nothing (aggregator handles it). A wrongly-added compute wastes an LLM call and can hallucinate when its inputs aren't real.\n\n")
-			sb.WriteString("**When you DO use compute:**\n")
-			sb.WriteString("- Provide the GOAL, never the code. Never write code in bash params or file_write content.\n")
-			sb.WriteString("- Wire every input through a reference to the step that produced it — `${step.<tag>.<path>}`. Never plan compute over inputs that don't yet exist — it will hallucinate.\n")
-			sb.WriteString("- The compute architect handles ALL implementation details (dirs, deps, file gen, service start, validation). Do NOT plan these as separate bash/service steps.\n")
-			sb.WriteString("- **Use tools directly when they can do the job** — curl in bash for downloads, web_fetch for pages, service for daemons. compute is for writing new code, not for wrapping existing tools in scripts.\n\n")
-			sb.WriteString("Level reference:\n")
-			sb.WriteString("- **Direct tools** (bash, service, file_read): default for downloads, searches, restarts, reads.\n")
-			sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or wired from an upstream step with `${step.<tag>.<path>}`).\n")
-			sb.WriteString("- **edit_file**: LLM-backed edit or create of a specific file. Use whenever you know the path and want the Coder to produce the content. task_files is REQUIRED.\n")
-			sb.WriteString("- **compute(shallow)**: compute a VALUE for downstream use — analytics, rankings, scores, derived constants. The Coder emits a runnable script, the script runs, stdout is captured on `.output` so downstream steps can read it with `${step.<tag>.output}`. NOT for editing files you already know the path of — use edit_file for that.\n")
-			if a.cfg.DisableCoding {
-				// Refused at dispatch when coding is off (compute.go). Offering it
-				// here, with an example, had planners choose it for a plain
-				// calculation and fail: runs 457eb7b7 and a9489bca, 2026-11-16.
-				sb.WriteString("- **compute(deep)** is switched off on this deployment: building a codebase is not available. Use compute(shallow) for every calculation.\n\n")
-			} else {
-				sb.WriteString("- **compute(deep)**: new codebases (webapp, CLI tool, service, library) built from scratch. ONE deep node per build.\n\n")
-			}
-			sb.WriteString("Required params:\n")
-			sb.WriteString("- compute: `goal` + `mode`. If a follow-up compute step needs data from a prior step, wire it with `${step.<tag>.<path>}` AND still provide `goal` and `mode` in `params`.\n")
-			sb.WriteString("- edit_file: `task_files` (at least one path) + `goal`. Skip the path and the Coder will refuse to guess — the step fails.\n\n")
-			sb.WriteString("**Known-path file operations — pick the right tool:**\n")
-			sb.WriteString("- Need an LLM to EDIT or CREATE a file at a known path? → `edit_file` with `task_files=[\"project/...\"]`.\n")
-			sb.WriteString("- Have the exact bytes already (literal or from upstream) and need them written? → `file_write` with `path` and `content`.\n")
-			sb.WriteString("- Need to COMPUTE a value (not a file) for downstream steps? → `compute(shallow)`, chain its `.output`.\n")
-			sb.WriteString("NEVER use the pattern `compute(shallow) → file_write` to edit a known file — that double-writes and the wiring fails when `.output` isn't produced. Use `edit_file` for edits; `compute` is for computing values, not for producing file content to be written elsewhere.\n\n")
-			if !a.cfg.DisableCoding {
-				sb.WriteString("Example — \"build a web app with user login\":\n")
-				sb.WriteString("```json\n")
-				sb.WriteString("[\n")
-				sb.WriteString("  {\"tool\":\"compute\",\"params\":\"{\\\"goal\\\":\\\"build a webapp with user login and a database\\\",\\\"mode\\\":\\\"deep\\\",\\\"query\\\":\\\"build a webapp with user login\\\"}\",\"tag\":\"build_webapp\"}\n")
-				sb.WriteString("]\n")
-				sb.WriteString("```\n")
-				sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
-			}
+	// Included when this run can actually call compute: the list this prompt is
+	// built from is already filtered by reach and by the run's scope.
+	if a.inFull(graph, relevant, computeToolName) {
+		sb.WriteString("## Compute\n")
+		sb.WriteString("Use compute when one of these is true:\n\n")
+		sb.WriteString("- the task requires running code;\n")
+		sb.WriteString("- precise calculation is needed;\n")
+		sb.WriteString("- a library is needed;\n")
+		sb.WriteString("- data is too large or structured for the final answer stage to process reliably;\n")
+		sb.WriteString("- a structured computed value must feed a later step.\n\n")
+		sb.WriteString("Do not use compute for simple arithmetic, summarization, qualitative analysis, or plain lookup.\n\n")
+		sb.WriteString("When using compute:\n")
+		sb.WriteString("- set mode to the preflight compute mode;\n")
+		sb.WriteString("- if no mode is provided, use \"shallow\";\n")
+		sb.WriteString("- provide the goal, not code;\n")
+		sb.WriteString("- wire inputs with `${step.<tag>.<field>}`;\n")
+		sb.WriteString("- do not use compute to edit known files.\n\n")
+		if a.cfg.DisableCoding {
+			// Refused at dispatch when coding is off (compute.go). Offering it
+			// had planners choose it for a plain calculation and fail: runs
+			// 457eb7b7 and a9489bca, 2026-11-16.
+			sb.WriteString("compute(deep) is switched off on this deployment: building a codebase is not available. Use compute(shallow) for every calculation.\n\n")
+		} else {
+			sb.WriteString("compute(deep) builds a new codebase (webapp, CLI tool, service, library) from scratch: ONE deep step per build.\n\n")
 		}
 	}
+	// Named only when the run has them: a name in text every run reads is
+	// offered to runs that were not given the tool (rules_no_tool_names_test).
+	if a.inFull(graph, relevant, "edit_file") {
+		sb.WriteString("Use edit_file to create or edit a known file when an LLM should write the content.\n")
+	}
+	if a.inFull(graph, relevant, "file_write") {
+		sb.WriteString("Use file_write only when the exact content is already known.\n")
+	}
+	sb.WriteString("\n")
 
 	// What this query must reach for, before anything it may reach with.
 	//
@@ -712,9 +661,11 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("bash counts for any group whose work it does, such as curl for web.\n\n")
 	}
 
-	// Skill Planning Guidance sections. These are authoritative — if a skill
-	// says "use compute deep", the planner must follow that, not substitute
-	// file_list/file_read. Written after the tool index because the set of
+	// Skill Planning Guidance sections. They suggest tools and patterns and
+	// give way to the planning contract where the two conflict: as
+	// "authoritative" a research card's "compute it with python in bash"
+	// outranked the contract's "no code in bash" (run e8bef85b). Written after
+	// the tool index because the set of
 	// skills is this run's; see the doc comment on the order.
 	var guidance []string
 	plannerHeadings := skillmd.PlannerHeadings
@@ -747,14 +698,14 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		}
 	}
 	if len(guidance) > 0 {
-		sb.WriteString("## Skill Guidance (authoritative — follow these instructions)\n\n")
+		sb.WriteString("## Skill Guidance\n\n")
 		if a.cfg.DisableCoding {
 			// A card that says compute deep is still followed for everything
 			// else it says; deep itself is refused at dispatch (compute.go), so
 			// telling the planner to obey it planned a step that could only fail.
-			sb.WriteString("Skill guidance is authoritative, with one exception: compute(deep) is switched off on this deployment, so where a skill says \"use compute deep\", use compute(shallow).\n\n")
+			sb.WriteString("Skill guidance suggests tools and patterns; where it conflicts with the planning contract, follow the contract. compute(deep) is switched off on this deployment, so where a skill says \"use compute deep\", use compute(shallow).\n\n")
 		} else {
-			sb.WriteString("Skill guidance is authoritative. If a skill says \"use compute deep\", use compute deep. Don't inspect — build.\n\n")
+			sb.WriteString("Skill guidance suggests tools and patterns; where it conflicts with the planning contract, follow the contract. If a skill says \"use compute deep\", use compute deep.\n\n")
 		}
 		sb.WriteString(strings.Join(guidance, "\n\n"))
 		sb.WriteString("\n\n")
@@ -781,7 +732,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		if graph != nil && graph.Preflight != nil && graph.Preflight.ComputeMode != "" {
 			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", graph.Preflight.ComputeMode))
 		} else {
-			sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss a query that needs a calculation but *sounds* like a lookup. If the question requires a library or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — where a script could produce the answer, a compute step costs far less than refusing the task. Where one could not, it costs more than doing nothing: compute writes a program and runs it, and a program cannot tell you what a page says. Reading sources and reporting what they hold is the aggregator's work, and it already sees every result this run gathered.\n\n")
+			sb.WriteString("**Preflight compute_mode is unset** — use mode \"shallow\" for any compute step.\n\n")
 		}
 	}
 

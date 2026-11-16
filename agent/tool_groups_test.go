@@ -119,7 +119,7 @@ func TestGroups_ComputeSectionsOnlyWithCodeOrData(t *testing.T) {
 	g.Preflight = &PreflightResult{Groups: []string{toolapi.GroupWeb}}
 	relevant, _ := a.relevantTools(context.Background(), g, Trigger{}, "anything")
 	p := a.executiveSystemPrompt(context.Background(), g, relevant, "", "observe", "")
-	for _, section := range []string{"## Compute Nodes", "## Workspace Layout"} {
+	for _, section := range []string{"## Compute\n", "## Workspace Layout"} {
 		if strings.Contains(p, section) {
 			t.Errorf("a web request's planner prompt has %q", section)
 		}

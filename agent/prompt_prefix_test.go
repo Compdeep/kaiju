@@ -28,8 +28,8 @@ func TestPlannerPrompt_SharesItsStartAcrossRuns(t *testing.T) {
 	if !strings.HasPrefix(p2, shared) {
 		t.Errorf("two runs differ before their skill guidance begins; the start cannot be cached")
 	}
-	if !strings.Contains(shared, "## Rules") {
-		t.Error("the rules are not in the shared start")
+	if !strings.Contains(shared, "## Core planning rule") {
+		t.Error("the planning contract is not in the shared start")
 	}
 	for _, own := range []string{"## Skill Guidance", "Intent: **observe**", "### data_retrieval", "Current time:"} {
 		if i := strings.Index(p1, own); i < cut {

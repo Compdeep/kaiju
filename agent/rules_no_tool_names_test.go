@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Compdeep/kaiju/agent/prompt"
 )
 
 // Tools the Rules section is allowed to name. Each is either always present or
@@ -34,21 +36,18 @@ var rulesMustNotName = []string{
 	"image_read", "edit_file",
 }
 
-// rulesSection returns the "## Rules" block of the planner prompt, which is the
-// part every run receives regardless of which tools it was given.
+// rulesSection returns the planning contract (prompt.Executive), the part of
+// the planner prompt every run receives whichever tools it was given. It was a
+// "## Rules" block written after the contract, removed on 2026-11-16 because it
+// restated the contract and contradicted it.
 func rulesSection(t *testing.T) string {
 	t.Helper()
 	a := reframeAgent(t)
-	prompt := a.executiveSystemPrompt(context.Background(), nil, nil, "", "", "")
-	start := strings.Index(prompt, "## Rules")
-	if start < 0 {
-		t.Fatal("the planner prompt has no ## Rules section")
+	p := a.executiveSystemPrompt(context.Background(), nil, nil, "", "", "")
+	if !strings.HasPrefix(p, prompt.Executive) {
+		t.Fatal("the planner prompt does not start with the planning contract")
 	}
-	rest := prompt[start+len("## Rules"):]
-	if end := strings.Index(rest, "\n## "); end >= 0 {
-		rest = rest[:end]
-	}
-	return rest
+	return prompt.Executive
 }
 
 func TestRules_NameNoOptionalTool(t *testing.T) {

@@ -11,9 +11,8 @@ at a page; it is not the page.
 
 - Never type a URL from memory. A fetched URL must come from the user or from
   a search result.
-- To read what a search finds, wire the result's URL into `web_fetch` with a
-  step reference. The reference is the dependency, so do not add `depends_on`,
-  and put both steps in one plan when the fetch can already be specified.
+- To read a page discovered through search, pass that search result's URL to
+  `web_fetch`.
 - `web_research` searches and reads the leading results in one step, for an
   angle where choosing the sources adds little.
 - Plan one angle per distinct question. Independent angles run in parallel.

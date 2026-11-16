@@ -82,26 +82,37 @@ func (c *ComputeTool) codingOff() bool {
 	return c != nil && c.agent != nil && c.agent.cfg.DisableCoding
 }
 
+// computeContextLine is what goes in context, said where the planner chooses
+// compute. The planner's tool list shows parameter names only, so the
+// explanation in the schema never reached it: qwen3.6 left context empty and
+// listed the steps it needed in depends_on, 23 times of 31 over six days, and
+// each of those steps was dropped by validatePlanWiring (run ec547582,
+// 2026-11-16, where the answer was then worked out by the answering stage,
+// ten times too small).
+const computeContextLine = "Give it the data it works on in context, one \"name=reference\" string per input, " +
+	"e.g. \"distance=${step.find_distance.results}\": the Coder sees only goal and context, so a result named " +
+	"only in depends_on never reaches it. "
+
 func (c *ComputeTool) Description() string {
 	if c.codingOff() {
 		return "Compute a VALUE via a runnable script: the Coder emits a script, the script runs, " +
-			"stdout is captured on `.output` so downstream steps can read it via ${step.N.output} — use this for " +
-			"analytics, rankings, calculations, derived data. Use mode shallow: building a codebase (deep) is switched " +
+			"stdout is captured on `.output` so downstream steps can read it via ${step.<tag>.output} — use this for " +
+			"analytics, rankings, calculations, derived data. " + computeContextLine + "Use mode shallow: building a codebase (deep) is switched " +
 			"off on this deployment. DO NOT use compute to edit a specific known file — use `edit_file` for that. " +
 			"It runs what it writes and waits for it to finish, so a file that never exits is killed at the timeout. " +
 			"Provide the GOAL, not the code."
 	}
 	return "Compute a VALUE via a runnable script, or scaffold a whole new project. " +
 		"Shallow mode: the Coder emits a script, the script runs, stdout is captured " +
-		"on `.output` so downstream steps can read it via ${step.N.output} — use this for analytics, rankings, " +
-		"calculations, derived data. Deep mode: an architect plans, then several coders " +
+		"on `.output` so downstream steps can read it via ${step.<tag>.output} — use this for analytics, rankings, " +
+		"calculations, derived data. " + computeContextLine + "Deep mode: an architect plans, then several coders " +
 		"build in parallel — use it when the work spans multiple files that have to agree " +
 		"with one another, whether the codebase is new or already there. " +
 		"DO NOT use compute to edit a specific known file — use `edit_file` for that. " +
 		"Shallow mode runs what it writes and waits for it to finish, so a file that " +
 		"never exits — a server, a watcher, a daemon — is killed at the timeout and " +
 		"reports one. When what you want is long-running, plan a `service` step after " +
-		"this one, wired to `${step.N.code_path}`; that starts it and leaves it up. " +
+		"this one, wired to `${step.<tag>.code_path}`; that starts it and leaves it up. " +
 		"Provide the GOAL, not the code."
 }
 

@@ -71,3 +71,35 @@ func TestEdgeReplyCap(t *testing.T) {
 		t.Errorf("no catalog: %d, want the base %d", got, replyEdgeBudget.Base)
 	}
 }
+
+// The edge is sent the material with the steps' outputs in it, and no tool
+// messages: the stage it feeds has those itself. On run 798fce9d (2026-11-16)
+// the tool messages were 77% of each reframe call.
+func TestReframe_TheOutputsComeInTheMaterialNotAsToolMessages(t *testing.T) {
+	model := newStubModel(t, map[string]stubReply{"": {Content: "WHAT REMAINS: nothing."}})
+	a := agentOnStub(t, model)
+	g := NewGraph()
+	g.Context = NewContextGate(g, &Trigger{}, a)
+	withStep(g, "titan_vs_saturn", "web_fetch", toolapi.ToolOK("page", "RG= 1.186913501319864E+06 km", map[string]any{"url": "https://ssd.jpl.nasa.gov/api/horizons.api"}))
+	// What a stage holding the tool messages is passed when no reframe is
+	// written names the step without its output.
+	if m := a.reframeMaterial(context.Background(), g, "the tide on Titan", ReframeToPlanner); strings.Contains(m, "RG= 1.186913501319864E+06") {
+		t.Errorf("the pass-through text repeats an output the tool messages hold:\n%s", m)
+	}
+	a.EdgeReFrame(context.Background(), g, "the tide on Titan", ReframeToPlanner)
+
+	model.mu.Lock()
+	defer model.mu.Unlock()
+	if len(model.calls) != 1 {
+		t.Fatalf("want one call to the edge's model, got %d", len(model.calls))
+	}
+	call := model.calls[0]
+	for _, m := range call.Messages {
+		if m.Role == "tool" || len(m.ToolCalls) > 0 {
+			t.Errorf("the edge was sent a tool message: %+v", m)
+		}
+	}
+	if !strings.Contains(call.User, "RG= 1.186913501319864E+06") {
+		t.Errorf("the step's output is not in the material:\n%s", call.User)
+	}
+}

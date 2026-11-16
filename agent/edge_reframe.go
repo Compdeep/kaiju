@@ -346,24 +346,26 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 	// ask, not askParsed. This writes prose. A reply that ran into the cap is
 	// passed over for the material below: the cap is above every real framing
 	// measured, so reaching it means the model looped rather than ran long.
+	// What the model reads: the steps' outputs themselves, cut to the gate's
+	// budget, where material names a step whose output the next stage's tool
+	// messages hold. This edge is not sent those tool messages, so it is given
+	// the outputs here instead.
+	whole := a.reframeMaterialWith(ctx, graph, request, edge, NodeReturns("all"))
 	resp, err := a.ask(withTrace(ctx, TraceID{
 		NodeType: "reframe",
 		Tag:      "reframe:" + edge.Name,
 		Input:    map[string]string{"edge": edge.Name},
 	}), Light, edge.reasoning(&llm.ChatRequest{
 		ToolChoice: "none",
-		// The arcs, not only the prose about them. This stage carries: it takes
-		// what the nodes produced and forms it for the next one to read, and its
-		// paragraph is placed FIRST in that stage's prompt. Given prose alone it
-		// can only pass on what the prose says — so when a worklog line showed a
-		// complete 74-byte result with a truncation marker on it, this stage
-		// reported the data as incomplete and every stage downstream agreed.
-		//
-		// The material stays: it is the summary this stage is asked to rewrite.
-		// The arcs are what let it check that summary against what actually came
-		// back.
-		Messages: BuildMessagesWithResults(
-			edge.Prompt, material, nil, graph.Arcs()),
+		// The material alone, with the steps' outputs in it, and not the arcs.
+		// The arcs were sent so this stage could check the prose against what
+		// came back: given only a worklog line that showed a complete 74-byte
+		// result with a truncation marker on it, it once reported the data as
+		// incomplete. The outputs in the material answer that. The arcs were
+		// every result of every round, again: on run 798fce9d (2026-11-16) 77%
+		// of each call, 35,000 tokens in to write about 200, and the stage this
+		// edge feeds receives the arcs itself.
+		Messages: BuildMessagesWithResults(edge.Prompt, whole, nil, nil),
 		Temperature: 0.2,
 		MaxTokens:   a.edgeReplyCap(ctx, edge),
 		// Thinking is stated either way, per edge — see ReframeEdge.Reason for
@@ -389,7 +391,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 	// debugrecord.go.
 	rec := DebugRecord{
 		ID: "reframe:" + edge.Name, Kind: "edge", Label: edge.Name, Round: graph.Round(),
-		System: edge.Prompt, User: material,
+		System: edge.Prompt, User: whole,
 	}
 	if err != nil || resp == nil || len(resp.Choices) == 0 ||
 		strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
@@ -444,12 +446,19 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
  * return: the material, empty when no step has ended.
  */
 func (a *Agent) reframeMaterial(ctx context.Context, graph *Graph, request string, edge ReframeEdge) string {
+	return a.reframeMaterialWith(ctx, graph, request, edge, NodeReturnsBesideArcs())
+}
+
+// reframeMaterialWith is reframeMaterial with the step outputs read through
+// returns: NodeReturnsBesideArcs for text passed to a stage that has the tool
+// messages, NodeReturns("all") for the edge's own model, which does not.
+func (a *Agent) reframeMaterialWith(ctx context.Context, graph *Graph, request string, edge ReframeEdge, returns SourceSpec) string {
 	outcomes := ""
 	if graph != nil && graph.Context != nil {
 		resp, err := graph.Context.Get(ctx, ContextRequest{
 			ReturnSources: Sources(
 				StepOutcomes(),
-				NodeReturnsBesideArcs(),
+				returns,
 				Worklog(20, "all"),
 			),
 			MaxBudget:       6000,

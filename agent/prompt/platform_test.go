@@ -57,7 +57,6 @@ var allowed = map[string]string{
 	"apt/brew/yum":       "names package managers to say they are NOT the debugger's territory",
 	"npm/pip/cargo":      "names package managers to say command-not-found for their tools IS fixable",
 	"`pip install`":      "one clause about a missing Python library, true wherever pip is",
-	"use pip to install": "the same clause",
 }
 
 // TestNoPlatformLeakageInPrompts reads every prompt and reports a command named

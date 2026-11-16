@@ -74,7 +74,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	"REFRAME_ANSWER":  {"6fa65607e7574724", 2074},
 	"REFRAME_HOOK":    {"b011756edfd9ca56", 584},
 	"HOLMES":          {"7a1a9069e0cc0139", 7027},
-	"MICROPLANNER":    {"fb204a95b4bb5c47", 4599},
+	"MICROPLANNER":    {"90667a2b662b871a", 4596},
 	"OBSERVER":        {"b3f8806d71436c94", 1041},
 	"GROUPREVIEW":     {"1a80f0a1888030f0", 1956},
 	"REFLECTOR":       {"33360d834bfabb7d", 7120},
@@ -83,7 +83,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	"CURATOR":         {"7345d945b7f1b76f", 3199},
 	"CHAT":            {"da887f1e924ef207", 2458},
 	"VISION":          {"a34b6cb0dc575294", 218},
-	"REACT":           {"8ac5f1aca3a544d3", 1669},
+	"REACT":           {"362f4031657d6e52", 1635},
 }
 
 // liveSections reads the sections as the binary actually holds them, which is

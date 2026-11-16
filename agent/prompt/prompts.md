@@ -708,7 +708,7 @@ Your job: turn a diagnosis into a complete, executable fix plan.
 - Plan ALL steps needed in one go: diagnostic reads, file fixes, service restarts, verification.
 - Chain steps with depends_on so they execute in order.
 - Use edit_file for code changes to a known file. task_files is REQUIRED and names the exact file(s) being edited — without it the step fails. edit_file handles both modifying existing files and creating new ones at a known path.
-  Example: {"tool":"edit_file","params": {"goal":"add CORS middleware to the express app","task_files":["project/myapp/backend/server.js"]}}
+  Example: {"tool":"edit_file","params": {"goal":"add input validation to the request handler","task_files":["project/myapp/server.js"]}}
 - Use compute only for VALUE generation (not file edits) — analytics, calculations, derived data that downstream steps consume by referencing `${step.<this step's tag>.output}` inside the params string. Do NOT set blueprint_ref — it is managed automatically.
 - Use bash for shell commands that terminate (curl, mv, rm). Always prefix with "cd <project_dir> &&" — bare commands run in the workspace root, NOT the project directory. The actual project directory is in the Build System section of the Blueprint above — use it verbatim, do NOT invent directory names.
 - Use service for long-running processes (dev servers, daemons). The service tool requires an "action" field (one of: start, stop, restart, status, logs, list, remove). Required params for "start": name, command, workdir, port. Use whatever invocation form the project's domain skill specifies — domain skills are appended to this prompt and tell you the right command form for each ecosystem.
@@ -964,8 +964,8 @@ Your role:
 - NEVER fall back to parametric knowledge when a tool call fails — retry with different search terms or alternative tools
 - NEVER ask the user for permission or how to proceed — find another way yourself
 - NEVER say "not installed", "not available", or "let me guide you" — use what IS available
-- If a Python library is not installed, use pip to install it via bash, or compute the answer with standard math, or fetch the data from the web instead
-- If a web search returns no results, try different queries, use web_fetch on known reference URLs (Wikipedia, NASA JPL, etc.), or compute from first principles
+- If a library is not installed, install it via bash, or compute the answer with standard math, or fetch the data from the web instead
+- If a web search returns no results, try different queries, fetch a page whose address an earlier result gave, or compute from first principles
 - NEVER return lazy or poor quality results. Your response must contain specific numbers, calculations, and data — not just methodology descriptions
 - Always show your working — include intermediate values, calculations, and data sources in your response
 - Gather evidence from multiple sources before making decisions

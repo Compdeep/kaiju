@@ -634,12 +634,12 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		// same question the dispatcher will ask later.
 		if a.inFull(graph, relevant, computeToolName) {
 			sb.WriteString("## Compute Nodes\n")
-			sb.WriteString("**Compute is the right tool whenever real computation is required.** The aggregator at the end of the plan is an LLM call that can handle small math, summarisation, and qualitative synthesis — but it CANNOT propagate orbits, run sgp4 / skyfield / pandas / scipy, parse thousand-row CSVs, or compute precision floating-point values. When the question needs any of those, **add a compute step.** The Persistence litany in your system prompt is explicit: the way to answer a hard quant question is to compute it, not to recommend an external app.\n\n")
-			sb.WriteString("Only omit compute when the answer truly is a lookup (a static value from a press release, a fact from Wikipedia, a short web summary). \"Looks like a lookup\" is not the same as \"is a lookup\" — *next visible Starlink passes over Tokyo tonight* is NOT pre-computed on any page; it requires sgp4 propagation. If a known web tool exists for it (Heavens-Above, in-the-sky.org), assume the tool is a JS widget that computes on click — not a fetchable answer. Fetch the underlying TLE catalogue from CelesTrak and compute it yourself.\n\n")
+			sb.WriteString("**Compute is the right tool whenever real computation is required.** The aggregator at the end of the plan is an LLM call that can handle small math, summarisation, and qualitative synthesis — but it CANNOT run code, call a library, parse tables thousands of rows long, or compute precise floating-point values. When the question needs any of those, **add a compute step.** The Persistence litany in your system prompt is explicit: the way to answer a hard calculation is to compute it, not to recommend an external app.\n\n")
+			sb.WriteString("Only omit compute when the answer truly is a lookup: a value a source states outright. \"Looks like a lookup\" is not the same as \"is a lookup\" — when the answer has to be worked out for these particular inputs, no page holds it already, so gather the inputs and compute it.\n\n")
 			sb.WriteString("**Use compute ONLY when one of these is true:**\n")
-			sb.WriteString("- A library is needed to do the work — numpy, scipy, sgp4, pandas, BeautifulSoup, jq, etc. The LLM can't run code.\n")
+			sb.WriteString("- A library is needed to do the work. The LLM can't run code.\n")
 			sb.WriteString("- Data is too large for LLM context — CSVs with thousands of rows, log files, big JSON dumps.\n")
-			sb.WriteString("- Precision matters in a way the LLM is bad at — financial math, exact floating-point, date arithmetic, sgp4, statistical inference.\n")
+			sb.WriteString("- Precision matters in a way the LLM is bad at — exact floating-point, date arithmetic, statistics over many values.\n")
 			sb.WriteString("- The user explicitly asked for code, a script, or a deliverable file.\n")
 			sb.WriteString("- The output must be a structured value feeding another tool (not prose for the user).\n\n")
 			sb.WriteString("**Do NOT use compute when:**\n")
@@ -652,7 +652,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			sb.WriteString("- Provide the GOAL, never the code. Never write code in bash params or file_write content.\n")
 			sb.WriteString("- Wire every input through a reference to the step that produced it — `${step.<tag>.<path>}`. Never plan compute over inputs that don't yet exist — it will hallucinate.\n")
 			sb.WriteString("- The compute architect handles ALL implementation details (dirs, deps, file gen, service start, validation). Do NOT plan these as separate bash/service steps.\n")
-			sb.WriteString("- **Use tools directly when they can do the job** — yt-dlp/curl in bash for downloads, web_fetch for pages, service for daemons. compute is for writing new code, not for wrapping existing tools in scripts.\n\n")
+			sb.WriteString("- **Use tools directly when they can do the job** — curl in bash for downloads, web_fetch for pages, service for daemons. compute is for writing new code, not for wrapping existing tools in scripts.\n\n")
 			sb.WriteString("Level reference:\n")
 			sb.WriteString("- **Direct tools** (bash, service, file_read): default for downloads, searches, restarts, reads.\n")
 			sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or wired from an upstream step with `${step.<tag>.<path>}`).\n")
@@ -675,10 +675,10 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			sb.WriteString("- Need to COMPUTE a value (not a file) for downstream steps? → `compute(shallow)`, chain its `.output`.\n")
 			sb.WriteString("NEVER use the pattern `compute(shallow) → file_write` to edit a known file — that double-writes and the wiring fails when `.output` isn't produced. Use `edit_file` for edits; `compute` is for computing values, not for producing file content to be written elsewhere.\n\n")
 			if !a.cfg.DisableCoding {
-				sb.WriteString("Example — \"build a web app with auth\":\n")
+				sb.WriteString("Example — \"build a web app with user login\":\n")
 				sb.WriteString("```json\n")
 				sb.WriteString("[\n")
-				sb.WriteString("  {\"tool\":\"compute\",\"params\":\"{\\\"goal\\\":\\\"build a Vue 3 + Express webapp with JWT auth and SQLite database\\\",\\\"mode\\\":\\\"deep\\\",\\\"query\\\":\\\"build a Vue 3 webapp with auth\\\"}\",\"tag\":\"build_webapp\"}\n")
+				sb.WriteString("  {\"tool\":\"compute\",\"params\":\"{\\\"goal\\\":\\\"build a webapp with user login and a database\\\",\\\"mode\\\":\\\"deep\\\",\\\"query\\\":\\\"build a webapp with user login\\\"}\",\"tag\":\"build_webapp\"}\n")
 				sb.WriteString("]\n")
 				sb.WriteString("```\n")
 				sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
@@ -781,7 +781,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		if graph != nil && graph.Preflight != nil && graph.Preflight.ComputeMode != "" {
 			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", graph.Preflight.ComputeMode))
 		} else {
-			sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss astrodynamics / financial / statistical / ephemeris queries that *sound* like lookups. If the question requires a library (sgp4, pandas, scipy, skyfield, ephem) or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — where a script could produce the answer, a compute step costs far less than refusing the task. Where one could not, it costs more than doing nothing: compute writes a program and runs it, and a program cannot tell you what a page says. Reading sources and reporting what they hold is the aggregator's work, and it already sees every result this run gathered.\n\n")
+			sb.WriteString("**Preflight compute_mode is unset.** Default to direct tools, BUT use your own judgment too — preflight is a single classifier call and can miss a query that needs a calculation but *sounds* like a lookup. If the question requires a library or precision math, plan a compute step anyway with `mode=\"shallow\"`. Recommending an external app is forbidden by your Persistence litany — where a script could produce the answer, a compute step costs far less than refusing the task. Where one could not, it costs more than doing nothing: compute writes a program and runs it, and a program cannot tell you what a page says. Reading sources and reporting what they hold is the aggregator's work, and it already sees every result this run gathered.\n\n")
 		}
 	}
 
@@ -790,7 +790,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	if a.inFull(graph, relevant, computeToolName) {
 		sb.WriteString("\n## Workspace Layout\n")
 		sb.WriteString("- project/ — source code, application files\n")
-		sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here: yt-dlp -o 'media/%(title)s.%(ext)s', curl -o media/file.jpg, etc.\n")
+		sb.WriteString("- media/ — downloaded media (images, videos, audio). ALWAYS save downloads here, e.g. curl -o media/file.jpg.\n")
 		sb.WriteString("- blueprints/ — architecture blueprints (auto-managed by compute)\n")
 		sb.WriteString("- canvas/ — visual output that RENDERS LIVE in the UI (HTML pages, charts, images). Put any chart, plot, diagram, or interactive view here so the user actually SEES it.\n")
 		sb.WriteString("- uploads/<session-id>/ — user-uploaded attachments. When the query has an [attached files] preamble, the paths land here. Each file may have <name>.meta.json (preview) and <name>.summary.md (LLM summary) sidecars.\n")

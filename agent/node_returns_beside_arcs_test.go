@@ -161,3 +161,25 @@ func TestEachOutputReachesTheCallOnce(t *testing.T) {
 		t.Errorf("the service text reaches the call %d times, want 1", n)
 	}
 }
+
+// A search whose snippets fit the payload caps is in its tool message whole,
+// and one with a snippet over payloadValueChars is not: the stage is sent that
+// snippet cut, so the whole output is written beside it as well. On run
+// f8e43d3a (2026-11-16) a Firecrawl excerpt of 5,181 characters did that on
+// every call; web_search now cuts its snippets to fit (tools.plainSnippets).
+func TestBesideArcsAndSearchSnippets(t *testing.T) {
+	search := func(snippet string) toolapi.ToolMessage {
+		return toolapi.ToolOK("search", "", map[string]any{"query": "tokyo friday", "results": []any{
+			map[string]any{"title": "Tokyo", "url": "https://www.japan.travel/en/weather/kanto/tokyo/", "snippet": snippet},
+		}})
+	}
+	row := "| 20 Nov (Friday) | Clear | 15° | 5° | 10% |\n"
+	fits := besideArcsGraph(t, map[string]toolapi.ToolMessage{"web_search": search(strings.Repeat(row, 30))})
+	if beside := loadReturns(t, fits, NodeReturnsBesideArcs()); strings.Contains(beside, "20 Nov (Friday)") {
+		t.Errorf("a search that fits is written again beside its tool message:\n%.300s", beside)
+	}
+	over := besideArcsGraph(t, map[string]toolapi.ToolMessage{"web_search": search(strings.Repeat(row, 120))})
+	if beside := loadReturns(t, over, NodeReturnsBesideArcs()); !strings.Contains(beside, "20 Nov (Friday)") {
+		t.Errorf("a snippet the tool message cuts must still reach the stage beside it")
+	}
+}

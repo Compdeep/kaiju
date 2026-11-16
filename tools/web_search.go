@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -252,6 +253,7 @@ func (w *WebSearch) ExecuteTyped(ctx context.Context, params map[string]any) (to
 	if len(results) > maxResults {
 		results = results[:maxResults]
 	}
+	plainSnippets(results)
 	if len(results) == 0 {
 		detail := "no reachable results for this query — try a different query or report that nothing was found"
 		if w.apiKey == "" {
@@ -498,3 +500,82 @@ func stripTags(s string) string {
 
 var _ toolapi.Tool = (*WebSearch)(nil)
 var _ toolapi.Outputter = (*WebSearch)(nil)
+
+// snippetChars is how much snippet text one search returns, shared between its
+// results. Firecrawl's excerpt is the page's opening as markdown, up to about
+// 5,000 characters, most of it image and link addresses. Five of them made a
+// 25,000-character result, which the stages could not take whole: each snippet
+// reached them cut to payloadValueChars, so the step was sent twice, once as
+// its tool message and once beside it, because the two no longer matched (run
+// f8e43d3a, 2026-11-16). At 8,000 the results stay under the agent's 12,000
+// character payload cap with their titles and addresses, and reach a stage as
+// they were returned.
+const (
+	snippetChars    = 8000
+	snippetMaxChars = 1500 // one snippet, when there are few results
+)
+
+var (
+	markdownImage = regexp.MustCompile(`!\[([^\]]*)\]\([^)]*\)`)
+	markdownLink  = regexp.MustCompile(`\[([^\[\]]*)\]\([^)]*\)`)
+	blankLines    = regexp.MustCompile(`\n[ \t]*(\n[ \t]*)+`)
+	spaceRuns     = regexp.MustCompile(`[ \t]+`)
+)
+
+/*
+ * plainSnippets turns each snippet into plain text and cuts it to its share.
+ * desc: An image becomes its description and a link its words; the addresses
+ *       are dropped, because the result's own url is the one a later step
+ *       fetches. A markdown line break (a backslash at the end of a line) and
+ *       blank lines and runs of spaces are removed. Tables are kept: a
+ *       forecast page's excerpt is its table, and on run f8e43d3a that table
+ *       held the day asked about. The cut ends at a space where one is near,
+ *       and is marked with an ellipsis.
+ * param: results - the search results, changed in place.
+ */
+func plainSnippets(results []searchResult) {
+	if len(results) == 0 {
+		return
+	}
+	share := snippetChars / len(results)
+	if share > snippetMaxChars {
+		share = snippetMaxChars
+	}
+	for i := range results {
+		results[i].Snippet = cutSnippet(plainSnippet(results[i].Snippet), share)
+	}
+}
+
+// plainSnippet is one snippet with its markdown images, links and spacing
+// removed.
+func plainSnippet(s string) string {
+	if strings.ContainsAny(s, "[\\") {
+		s = markdownImage.ReplaceAllString(s, "$1")
+		// A link's words may hold an image, which is gone now, so links go
+		// second; a link inside another link's words needs a second pass.
+		for i := 0; i < 2; i++ {
+			s = markdownLink.ReplaceAllString(s, "$1")
+		}
+		s = strings.ReplaceAll(s, "\\\n", "\n")
+	}
+	s = spaceRuns.ReplaceAllString(s, " ")
+	s = blankLines.ReplaceAllString(s, "\n")
+	return strings.TrimSpace(s)
+}
+
+// cutSnippet cuts s to at most max characters, at a space when there is one in
+// the last fifth.
+func cutSnippet(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	cut := max - 1
+	for i := cut; i > max*4/5; i-- {
+		if r[i] == ' ' || r[i] == '\n' {
+			cut = i
+			break
+		}
+	}
+	return strings.TrimRight(string(r[:cut]), " \n") + "…"
+}

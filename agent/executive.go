@@ -582,15 +582,20 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	sb.WriteString("\n\n")
 
 	// The contract above is the planner's only rulebook. A "## Rules" block of
-	// ALWAYS/NEVER lines followed it, and the SOUL text after that: the rules
-	// restated the contract and in six places told the planner to finish the
-	// whole job in one plan, while the contract said a plan may only gather,
-	// and the SOUL (written for the stage that answers the user) said the
-	// agent is not a coding sandbox and never looks through a workspace. A
-	// small model resolves that by doing everything at once and guessing what
-	// it does not know: on run e8bef85b (2026-11-16) six rounds of a library's
-	// names written from memory. Both were removed; the identity stays with
-	// the stages that write to the user.
+	// ALWAYS/NEVER lines followed it: it restated the contract and in six
+	// places told the planner to finish the whole job in one plan, while the
+	// contract said a plan may only gather. A small model resolves that by
+	// doing everything at once and guessing what it does not know: on run
+	// e8bef85b (2026-11-16) six rounds of a library's names written from
+	// memory. The block was removed.
+	//
+	// The identity and its Persistence litany stay. Removing them made the
+	// planner under-plan — search and stop — and the litany is what says keep
+	// going.
+	if a.soulPrompt != "" {
+		sb.WriteString(a.soulPrompt)
+		sb.WriteString("\n\n")
+	}
 
 	sb.WriteString("All tool calls pass through an intent and authorization protocol that enforces safety at execution time.\n")
 	if toolIndex == "" {

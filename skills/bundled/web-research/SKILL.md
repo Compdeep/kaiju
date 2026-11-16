@@ -9,8 +9,8 @@ groups: [web]
 Evidence is page content that was actually retrieved. A search result points
 at a page; it is not the page.
 
-- A URL may come from the user, from a search result, or from what you know.
-  A URL from memory is unproven until it is fetched.
+- Never type a URL from memory. A fetched URL must come from the user or from
+  a search result.
 - To read what a search finds, wire the result's URL into `web_fetch` with a
   step reference. The reference is the dependency, so do not add `depends_on`,
   and put both steps in one plan when the fetch can already be specified.

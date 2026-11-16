@@ -377,6 +377,8 @@ A later planning phase may continue from the results. That process is managed ou
 
 Do not guess future results or plan speculative work merely to make the current plan appear complete. Plan as far toward the user's objective as the current information reasonably allows.
 
+Be honest about what you know. A value you are not sure of is something to find out, not something to fill in: plan the step that finds it. A plan that only gathers is a complete plan; the run plans again from what it returns.
+
 Prefer the simplest complete plan. Do not add work merely because a tool makes it possible.
 
 ## Plan structure

@@ -393,15 +393,19 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		_ = killProcessTree(cmd.Process.Pid)
 	}
 
+	// Read once, without the terminal's escape codes. Everything below — the
+	// file at output_path, the inline result, the failure reason — reads these.
+	outText, errText := plainText(stdout.String()), plainText(stderr.String())
+
 	var result strings.Builder
-	if stdout.Len() > 0 {
-		result.WriteString(stdout.String())
+	if outText != "" {
+		result.WriteString(outText)
 	}
-	if stderr.Len() > 0 {
+	if errText != "" {
 		if result.Len() > 0 {
 			result.WriteString("\n--- stderr ---\n")
 		}
-		result.WriteString(stderr.String())
+		result.WriteString(errText)
 	}
 
 	// Everything the command printed goes to disk first, whatever is returned
@@ -431,8 +435,8 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		if strings.HasPrefix(err.Error(), "no output for ") {
 			return toolapi.ToolFail("command", fmt.Sprintf("killed after %s with no output — the command produced nothing for that long, so it was treated as stuck", idle),
 				map[string]any{"command": command, "idle_timeout": idle.String(),
-					"stdout": headTailTruncate(stdout.String(), failureHead, failureTail),
-					"stderr": headTailTruncate(stderr.String(), failureHead, failureTail)}), nil
+					"stdout": headTailTruncate(outText, failureHead, failureTail),
+					"stderr": headTailTruncate(errText, failureHead, failureTail)}), nil
 		}
 		if ctx.Err() != nil {
 			return toolapi.ToolMessage{}, fmt.Errorf("bash: %w", ctx.Err())
@@ -449,9 +453,9 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		// recent call last):" header and no error type. For tracebacks and
 		// most CLI errors the diagnostic info lives at the END, not the
 		// start, so we keep both ends.
-		stdoutStr := headTailTruncate(stdout.String(), failureHead, failureTail)
-		stderrStr := headTailTruncate(stderr.String(), failureHead, failureTail)
-		detail := fmt.Sprintf("exit %d: %s", exitCode, err.Error()) + failureReason(ctx, exitCode, command, stdout.String(), stderr.String())
+		stdoutStr := headTailTruncate(outText, failureHead, failureTail)
+		stderrStr := headTailTruncate(errText, failureHead, failureTail)
+		detail := fmt.Sprintf("exit %d: %s", exitCode, err.Error()) + failureReason(ctx, exitCode, command, outText, errText)
 		return toolapi.ToolFail("command", detail, bashData{
 			ExitCode:        exitCode,
 			Stdout:          stdoutStr,
@@ -484,16 +488,16 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 			// Read rather than assumed empty: this branch tests the trimmed
 			// output, so a command that printed only whitespace lands here too
 			// and the payload should say so.
-			Stdout:  stdout.String(),
-			Stderr:  stderr.String(),
+			Stdout:  outText,
+			Stderr:  errText,
 			Command: command,
 		}), nil
 	}
 
 	return toolapi.ToolOK("command", output, bashData{
 		ExitCode:        0,
-		Stdout:          headTailTruncate(stdout.String(), 4000, 4000),
-		Stderr:          headTailTruncate(stderr.String(), 4000, 4000),
+		Stdout:          headTailTruncate(outText, 4000, 4000),
+		Stderr:          headTailTruncate(errText, 4000, 4000),
 		Command:         command,
 		OutputPath:      outPath,
 		OutputBytes:     outBytes,
@@ -800,4 +804,26 @@ func lastLine(stderr string) string {
 		line = line[:200]
 	}
 	return line
+}
+
+// terminalEscape matches the escape sequences a terminal acts on: colour and
+// cursor control (ESC [ … letter), titles and links (ESC ] … BEL or ESC \),
+// and the two-character forms.
+var terminalEscape = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]`)
+
+/*
+ * plainText removes terminal escape codes from what a command printed.
+ * desc: A command that colours its output for a terminal sends codes no model
+ *       can see as colour, only as text. On run f8e43d3a (2026-11-16)
+ *       `curl wttr.in/Tokyo?format=v2` printed 826 of them: 11,725 tokens of
+ *       output, 2,345 without them, sent to 12 of the run's 15 model calls.
+ *       Box-drawing and other characters are text and are kept.
+ * param: s - the output as printed.
+ * return: the output without escape codes.
+ */
+func plainText(s string) string {
+	if !strings.Contains(s, "\x1b") {
+		return s
+	}
+	return terminalEscape.ReplaceAllString(s, "")
 }

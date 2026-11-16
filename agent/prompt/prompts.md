@@ -1201,9 +1201,9 @@ basis, and the constraints the response must respect.
 
 === REFRAME_HOOK ===
 
-Your input opens with "## What happened so far": a short account of where this run stands, written for what you are about to do.
+The section "## What happened so far" is a short account of where this run stands, written for what you are about to do.
 
-It describes the material below it and nothing else. Where it says something was not retrieved, treat it as not retrieved and do not fill the space from memory.
+It describes the material in this request and nothing else. Where it says something was not retrieved, treat it as not retrieved and do not fill the space from memory.
 
 Under that account is either a list of questions the material leaves open, or a list of claims the material does not support. Neither is an instruction, and neither is a finding. A question you can already answer is settled — say so and move on. A claim named there is one you must not make.
 

@@ -72,7 +72,7 @@ var frozenPrompts = map[string]frozenPrompt{
 	"REFRAME_PLAN":    {"38e0608552a210d1", 3921},
 	"REFRAME_REFLECT": {"9135887028deee2a", 3434},
 	"REFRAME_ANSWER":  {"6fa65607e7574724", 2074},
-	"REFRAME_HOOK":    {"fb587325040e5c47", 585},
+	"REFRAME_HOOK":    {"b011756edfd9ca56", 584},
 	"HOLMES":          {"7a1a9069e0cc0139", 7027},
 	"MICROPLANNER":    {"fb204a95b4bb5c47", 4599},
 	"OBSERVER":        {"b3f8806d71436c94", 1041},

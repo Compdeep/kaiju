@@ -99,3 +99,33 @@ func TestStepOutcomes_SingleRoundIsUnchanged(t *testing.T) {
 		t.Errorf("the step is missing:\n%s", out)
 	}
 }
+
+// The results are listed in the order the steps ran, the same way on every
+// call. Ranging over the map listed them in a new order each time, so the
+// Node Results section differed from call to call and the provider's prompt
+// cache could not match past it.
+func TestResolvedResultsByRound_ListsInGraphOrder(t *testing.T) {
+	g := NewGraph()
+	var want []string
+	for _, tag := range []string{"step_one", "step_two", "step_three", "step_four", "step_five", "step_six", "step_seven", "step_eight"} {
+		resolvedToolNode(g, tag, "out "+tag)
+		want = append(want, tag)
+	}
+	g.BeginRound()
+	resolvedToolNode(g, "now", "out now")
+
+	for i := 0; i < 20; i++ {
+		_, _, cur, earlier := g.resolvedResultsByRoundInOrder()
+		if len(cur) != 1 || !strings.Contains(cur[0], "now") {
+			t.Fatalf("current order = %v", cur)
+		}
+		if len(earlier) != len(want) {
+			t.Fatalf("earlier order = %v", earlier)
+		}
+		for j, tag := range want {
+			if !strings.Contains(earlier[j], tag) {
+				t.Fatalf("call %d: earlier order = %v, want the order the steps ran", i, earlier)
+			}
+		}
+	}
+}

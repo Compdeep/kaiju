@@ -125,7 +125,14 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	// 3m40s elapsed") into the reflection node's params so the reflector can
 	// self-regulate. Empty for reflection sites that don't set it.
 	budgetLine, _ := rNode.Params["budget"].(string)
-	userPrompt := a.assembleReflectorPrompt(graph, gateCtx, trigger, budgetLine)
+	// What the run has done so far, in the words of the request rather than as
+	// a list of steps. The reader below is choosing between more work and
+	// stopping, and the thing it most needs told is what is already in hand and
+	// unused — see edge_reframe.go. Placed in the prompt among the sections
+	// that change each round, not first: see reflectorPrompt.
+	brief := a.EdgeReFrame(ctx, graph, a.formatTrigger(trigger), ReframeToReflector)
+	sysPrompt = withReframeHook(sysPrompt, brief)
+	userPrompt := a.reflectorPrompt(graph, gateCtx, trigger, budgetLine, brief)
 
 	// Said in the prompt rather than by removing the field from the schema. The
 	// two drifted once already — the prompt asked for "verdict" while the schema
@@ -141,13 +148,6 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 			"anything that failed."
 	}
 
-	// What the run has done so far, in the words of the request rather than as
-	// a list of steps. The reader below is choosing between more work and
-	// stopping, and the thing it most needs told is what is already in hand and
-	// unused — see edge_reframe.go.
-	sysPrompt, userPrompt = WithReframe(sysPrompt, userPrompt,
-		a.EdgeReFrame(ctx, graph, a.formatTrigger(trigger),
-			ReframeToReflector))
 	// What each arc produced, as the calls that produced it, alongside the
 	// prose. The two are disjoint by construction: a payload carries a tool's
 	// declared fields and never its content, and ## Node Results carries the
@@ -215,7 +215,30 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 // plain-English budget line the scheduler passes so the reflector knows its
 // position (replan round X of Y, elapsed) and self-regulates.
 func (a *Agent) assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, trigger Trigger, budgetLine string) string {
+	return a.reflectorPrompt(graph, gateCtx, trigger, budgetLine, "")
+}
+
+/*
+ * reflectorPrompt is assembleReflectorPrompt with the reframe brief placed in it.
+ * desc: Sections that stay the same from round to round come first, and those
+ *       that change come after: a provider reads a request's start from its
+ *       cache only up to the first character that differs from the call
+ *       before, so one changing section near the top made every section under
+ *       it, however unchanged, billed in full each round. In order:
+ *       Original Request, What the planner was working to, Node Results from
+ *       earlier rounds (grows at its end), then History, the brief ("## What
+ *       happened so far"), Graph Summary, Node Results for this round and the
+ *       failures, Execution Timeline. Each is found by its heading, which is
+ *       how the prompts refer to them.
+ * param: brief - what EdgeReFrame returned, or "".
+ */
+func (a *Agent) reflectorPrompt(graph *Graph, gateCtx *ContextResponse, trigger Trigger, budgetLine, brief string) string {
 	var sb strings.Builder
+	var returns string
+	if gateCtx != nil {
+		returns = gateCtx.Sources[SourceNodeReturns]
+	}
+	earlierResults, currentResults := splitEarlierRounds(returns)
 
 	sb.WriteString("## Original Request\n\n")
 	sb.WriteString(a.formatTrigger(trigger))
@@ -241,6 +264,12 @@ func (a *Agent) assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, 
 		sb.WriteString("## What the planner was working to\n\n")
 		sb.WriteString(graph.Preflight.Context.Text())
 		sb.WriteString("\n\nThis is preflight's reading of the request above, and it is what the plan was written against. Where it names something the request does not, it is a reading and not a fact. Where it names work the request implies and the evidence does not show done, that work is still open.\n\n")
+	}
+
+	if earlierResults != "" {
+		sb.WriteString(earlierRoundsHeading + "\n\n")
+		sb.WriteString(earlierResults)
+		sb.WriteString("\n\n")
 	}
 
 	// ## History — the running record of this investigation: the round counter +
@@ -284,6 +313,11 @@ func (a *Agent) assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, 
 		}
 	}
 
+	if brief != "" {
+		sb.WriteString(brief)
+		sb.WriteString("\n\n")
+	}
+
 	// Graph summary — quick counts
 	if graph != nil {
 		failed := len(graph.FailedNodes())
@@ -301,9 +335,9 @@ func (a *Agent) assembleReflectorPrompt(graph *Graph, gateCtx *ContextResponse, 
 	// Node returns from the gate (failures + resolved). The gate filters and
 	// formats this; we just include the section.
 	if gateCtx != nil {
-		if returns := gateCtx.Sources[SourceNodeReturns]; returns != "" {
+		if currentResults != "" {
 			sb.WriteString("## Node Results\n\n")
-			sb.WriteString(returns)
+			sb.WriteString(currentResults)
 			sb.WriteString("\n\n")
 		}
 		if wl := gateCtx.Sources[SourceWorklog]; wl != "" {
@@ -515,4 +549,33 @@ func biasNextToDiagnosis(next, summary string) string {
 		return diagnosisBias
 	}
 	return next + "\n\n" + diagnosisBias
+}
+
+// earlierRoundsHeading heads the earlier rounds' results in the reflector's
+// prompt, where they come before the sections that change each round.
+const earlierRoundsHeading = "## Node Results from earlier rounds"
+
+/*
+ * splitEarlierRounds takes the "### Resolved in earlier rounds" part out of the
+ * gate's node returns.
+ * desc: That part is the same from one round to the next apart from what is
+ *       added at its end, so the reflector places it among the sections that
+ *       come first; the rest (this round's results, those judged not useful,
+ *       the failures) changes every round.
+ * param: returns - the gate's SourceNodeReturns text.
+ * return: the earlier rounds' entries without their heading, and the rest.
+ */
+func splitEarlierRounds(returns string) (earlier, rest string) {
+	i := strings.Index(returns, earlierRoundsSubheading)
+	if i < 0 {
+		return "", returns
+	}
+	body := returns[i+len(earlierRoundsSubheading):]
+	end := len(body)
+	if j := strings.Index(body, "\n### "); j >= 0 {
+		end = j + 1
+	}
+	earlier = strings.TrimSpace(body[:end])
+	rest = strings.TrimSpace(returns[:i] + body[end:])
+	return earlier, rest
 }

@@ -216,7 +216,8 @@ func TestEveryStageThatActsOnARunIsToldWhatItDid(t *testing.T) {
 		if !regexp.MustCompile(`EdgeReFrame\(ctx,\s*graph,`).Match(src) {
 			t.Errorf("%s no longer asks what the run did — %s", c.stage, c.why)
 		}
-		if !regexp.MustCompile(`WithReframe\(`).Match(src) {
+		// withReframeHook where the stage places the block in its input itself.
+		if !regexp.MustCompile(`WithReframe\(|withReframeHook\(`).Match(src) {
 			t.Errorf("%s builds the block and does not apply it, so nothing tells it how to read one", c.stage)
 		}
 	}

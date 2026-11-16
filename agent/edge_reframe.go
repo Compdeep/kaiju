@@ -506,5 +506,14 @@ func WithReframe(role, user, block string) (string, string) {
 	if block == "" {
 		return role, user
 	}
-	return role + "\n\n" + prompt.ReframeHook, block + "\n\n" + user
+	return withReframeHook(role, block), block + "\n\n" + user
+}
+
+// withReframeHook is the system-prompt half of WithReframe, for a stage that
+// places the block in its input itself (the reflector — see reflectorPrompt).
+func withReframeHook(role, block string) string {
+	if block == "" {
+		return role
+	}
+	return role + "\n\n" + prompt.ReframeHook
 }

@@ -1548,16 +1548,27 @@ func (g *Graph) AllDone() bool {
  * return: this round's results, and every earlier round's.
  */
 func (g *Graph) ResolvedResultsByRound() (current, earlier map[string]string) {
+	current, earlier, _, _ = g.resolvedResultsByRoundInOrder()
+	return current, earlier
+}
+
+// resolvedResultsByRoundInOrder is ResolvedResultsByRound with each map's
+// labels in graph order, for a prompt that lists them.
+func (g *Graph) resolvedResultsByRoundInOrder() (current, earlier map[string]string, currentOrder, earlierOrder []string) {
 	round := g.Round()
 	current, earlier = map[string]string{}, map[string]string{}
-	for label, n := range g.resolvedResultNodes() {
-		into := current
+	nodes, order := g.resolvedResultNodesInOrder()
+	for _, label := range order {
+		n := nodes[label]
 		if n.Round < round {
-			into = earlier
+			earlier[label] = n.Result
+			earlierOrder = append(earlierOrder, label)
+		} else {
+			current[label] = n.Result
+			currentOrder = append(currentOrder, label)
 		}
-		into[label] = n.Result
 	}
-	return current, earlier
+	return current, earlier, currentOrder, earlierOrder
 }
 
 func (g *Graph) ResolvedResultsSoFar() map[string]string {
@@ -1761,10 +1772,26 @@ func (g *Graph) StepResults(round int) []StepResult {
 }
 
 func (g *Graph) resolvedResultNodes() map[string]*Node {
+	out, _ := g.resolvedResultNodesInOrder()
+	return out
+}
+
+/*
+ * resolvedResultNodesInOrder is resolvedResultNodes with its labels in the
+ * order the steps were added to the graph.
+ * desc: A map is read back in a different order every time, so a prompt section
+ *       written by ranging over one lists the same results in a new order on
+ *       every call. That defeats a provider's prompt cache, which matches only
+ *       up to the first character that differs, and makes two calls on the
+ *       same material read differently.
+ * return: the label-to-node map, and its labels in graph order.
+ */
+func (g *Graph) resolvedResultNodesInOrder() (map[string]*Node, []string) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
 	out := make(map[string]*Node)
+	var order []string
 	for _, id := range g.order {
 		n, ok := g.nodes[id]
 		if !ok {
@@ -1784,8 +1811,9 @@ func (g *Graph) resolvedResultNodes() map[string]*Node {
 			label = fmt.Sprintf("%s (%s)", label, n.ID)
 		}
 		out[label] = n
+		order = append(order, label)
 	}
-	return out
+	return out, order
 }
 
 // formatNodeLabel creates a descriptive label like "file_read(project/frontend/package.json)"

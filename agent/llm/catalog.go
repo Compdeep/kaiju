@@ -79,6 +79,13 @@ type Sampling struct {
 	Temperature float64
 	TopP        float64
 	TopK        int
+	// PresencePenalty discourages a token already written. Qwen's card for
+	// qwen3.6 gives 1.5 for thinking on general tasks, "to reduce endless
+	// repetitions": on run 107d88a3 (2026-11-16) the planner thought until its
+	// 8,192-token cap, cycling "One detail: X. This is correct. Let's go."
+	// through every Horizons parameter and every earlier message, and
+	// returned no plan. Zero sends nothing.
+	PresencePenalty float64
 }
 
 // Catalog answers for one model. The second return is false for a model it does

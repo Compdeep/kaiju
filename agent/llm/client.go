@@ -135,8 +135,10 @@ type ChatRequest struct {
 	Temperature float64   `json:"temperature"`
 	TopP        float64   `json:"top_p,omitempty"` // set from the catalog only (Thinking.Sampling)
 	TopK        int       `json:"top_k,omitempty"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
+	// PresencePenalty is set from the catalog only (Thinking.Sampling).
+	PresencePenalty float64 `json:"presence_penalty,omitempty"`
+	MaxTokens       int     `json:"max_tokens,omitempty"`
+	Stream          bool    `json:"stream,omitempty"`
 	// StreamOptions asks the provider (OpenAI/OpenRouter) to emit a terminal
 	// usage frame during streaming, so streamed calls are billed like normal ones.
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`

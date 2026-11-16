@@ -375,9 +375,10 @@ func Limits(id string) (contextTokens, maxOutputTokens int) {
  */
 // Sampling is a model's published decoding settings (see llm.Sampling).
 type Sampling struct {
-	Temperature float64 `json:"temperature"`
-	TopP        float64 `json:"top_p"`
-	TopK        int     `json:"top_k"`
+	Temperature     float64 `json:"temperature"`
+	TopP            float64 `json:"top_p"`
+	TopK            int     `json:"top_k"`
+	PresencePenalty float64 `json:"presence_penalty,omitempty"`
 }
 
 func Find(id string) (Info, bool) {

@@ -196,6 +196,7 @@ func (c *Client) applyReasoning(req *ChatRequest) {
 	// temperature: at 0.3 and nothing else, qwen3.6's plans repeated to the cap.
 	if s := r.Sampling; s.Temperature > 0 {
 		req.Temperature, req.TopP, req.TopK = s.Temperature, s.TopP, s.TopK
+		req.PresencePenalty = s.PresencePenalty
 	}
 }
 

@@ -27,7 +27,7 @@ func TestAThinkingCallIsSampledAsItsMakerSays(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	published := Sampling{Temperature: 0.6, TopP: 0.95, TopK: 20}
+	published := Sampling{Temperature: 0.6, TopP: 0.95, TopK: 20, PresencePenalty: 1.5}
 	catalog := func(model string) (ModelFacts, bool) {
 		f := ModelFacts{Thinking: Thinking{Default: true, Optional: true}}
 		if model == "with-sampling" {
@@ -52,7 +52,13 @@ func TestAThinkingCallIsSampledAsItsMakerSays(t *testing.T) {
 		t.Errorf("a thinking call sent temperature %v, top_p %v, top_k %v; want the published 0.6, 0.95, 20",
 			on["temperature"], on["top_p"], on["top_k"])
 	}
+	if on["presence_penalty"] != 1.5 {
+		t.Errorf("a thinking call sent presence_penalty %v, want the published 1.5", on["presence_penalty"])
+	}
 	off := send("with-sampling", WantOff)
+	if off["presence_penalty"] != nil {
+		t.Errorf("a call with thinking off sent presence_penalty %v; want none", off["presence_penalty"])
+	}
 	if off["temperature"] != 0.3 || off["top_p"] != nil || off["top_k"] != nil {
 		t.Errorf("a call with thinking off sent temperature %v, top_p %v, top_k %v; want the caller's 0.3 and nothing else",
 			off["temperature"], off["top_p"], off["top_k"])

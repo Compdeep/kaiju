@@ -2438,6 +2438,7 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	rotateServiceLogs(a.cfg.Workspace)
 
 	graph, budget, cleanup := a.setupDAGPipeline(trigger, runID)
+	graph.shown.account = runTokensFrom(ctx)
 	defer cleanup()
 
 	// Two contexts, because the time limit is on the WORK and never on the

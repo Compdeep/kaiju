@@ -10,8 +10,10 @@
       <span class="h-val">{{ totalMs }}</span>
       <span class="h-dim">ms</span>
       <span v-if="totalTokens > 0" class="h-sep">·</span>
-      <span v-if="totalTokens > 0" class="h-val">{{ fmtTokens(totalTokens) }}</span>
-      <span v-if="totalTokens > 0" class="h-dim">tok</span>
+      <span v-if="totalTokens > 0" class="h-dim">in</span>
+      <span v-if="totalTokens > 0" class="h-val">{{ fmtTokens(totalTokensIn) }}</span>
+      <span v-if="totalTokens > 0" class="h-dim">out</span>
+      <span v-if="totalTokens > 0" class="h-val">{{ fmtTokens(totalTokensOut) }}</span>
       <span :class="['h-status', status]">{{ statusLabel }}</span>
       <!-- Live activity ticker: visible while running whether or not the trace is
            expanded. The spinner + elapsed clock keep MOVING even when a single

@@ -404,6 +404,10 @@ type Graph struct {
 	// toolapi.EvidenceBudget.
 	evidenceCap int
 
+	// shown is the part of the run's token account that the trace has put on a
+	// node so far — see showTokens.
+	shown shownTokens
+
 	// order is the ids in the order they were added, which for a plan's steps
 	// is the order the planner wrote them.
 	//

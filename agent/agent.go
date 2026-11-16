@@ -1190,6 +1190,9 @@ func (a *Agent) broadcastDAGEvent(graph *Graph, evt DAGEvent) {
 	if evt.SessionID == "" && graph != nil {
 		evt.SessionID = graph.SessionID
 	}
+	if graph != nil && evt.Type == "node" {
+		graph.shown.put(evt.Node)
+	}
 
 	// Anything that is not a piece of a reply goes out behind the text already
 	// waiting, not in front of it. A reader that received "done" and then the

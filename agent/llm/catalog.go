@@ -101,6 +101,14 @@ func (c *Client) Catalog(fn Catalog) *Client {
 	return c
 }
 
+// StopsThinking reports whether the catalog says this model's reasoning can be
+// switched off, so that a request asking for it off is sent that way and its
+// max_tokens bounds the reply alone. False when nothing is known.
+func (c *Client) StopsThinking(model string) bool {
+	f, known := c.facts(model)
+	return known && f.Thinking.Optional
+}
+
 /*
  * facts is what this client knows about the model a request will reach.
  * desc: The catalog where one is set, the older narrow lookups where they are,

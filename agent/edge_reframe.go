@@ -298,6 +298,39 @@ func (e ReframeEdge) reasoning(req *llm.ChatRequest) *llm.ChatRequest {
 	return llm.WithoutReasoning(req)
 }
 
+// edgeWriteCap is an edge's cap when its model is not reasoning, and what
+// bounds a model that loops in its reply.
+//
+// Measured on every prompt log on the deployment host (2026-11-16): 461 plan
+// and answer framings, thinking off. Answer framings ran to 384 tokens. Plan
+// framings ran longer: 8 of 266 were real briefings of 1,054 to 1,453 tokens
+// on multi-round runs, so 1,024 would have dropped them. The three over 2,048
+// were not framings: one wrote a plan's JSON (2,668) and two looped to the
+// 8,192 cap. 2,048 keeps every real one with room to spare.
+const edgeWriteCap = 2048
+
+/*
+ * edgeReplyCap is how many tokens an edge's reply may take.
+ * desc: replyEdgeBudget is sized for reasoning the edge cannot switch off,
+ *       8,192 on a 262k window. An edge that does not reason, on a model the
+ *       catalog says can stop, writes only the framing, and that much room only
+ *       lets a runaway run longer: 105 seconds on run f8e43d3a.
+ * param: ctx - the run's context, for the lane.
+ * param: edge - the edge being asked.
+ * return: the cap.
+ */
+func (a *Agent) edgeReplyCap(ctx context.Context, edge ReframeEdge) int {
+	budget := a.replyBudget(ctx, Light, replyEdgeBudget)
+	if edge.Reason || budget <= edgeWriteCap {
+		return budget
+	}
+	c, model := a.lane(ctx, Light)
+	if c == nil || !c.StopsThinking(resolvedModel(model, c)) {
+		return budget
+	}
+	return edgeWriteCap
+}
+
 func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, edge ReframeEdge) string {
 	material := a.reframeMaterial(ctx, graph, request, edge)
 	if material == "" {
@@ -310,9 +343,9 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		return reframeHeading + "\n\n" + material
 	}
 
-	// ask, not askParsed. This writes prose, and a paragraph that ran into the
-	// cap is short rather than unusable — reporting that as an error would throw
-	// away a good paragraph and fall back to the bare material.
+	// ask, not askParsed. This writes prose. A reply that ran into the cap is
+	// passed over for the material below: the cap is above every real framing
+	// measured, so reaching it means the model looped rather than ran long.
 	resp, err := a.ask(withTrace(ctx, TraceID{
 		NodeType: "reframe",
 		Tag:      "reframe:" + edge.Name,
@@ -332,7 +365,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		Messages: BuildMessagesWithResults(
 			edge.Prompt, material, nil, graph.Arcs()),
 		Temperature: 0.2,
-		MaxTokens:   a.replyBudget(ctx, Light, replyEdgeBudget),
+		MaxTokens:   a.edgeReplyCap(ctx, edge),
 		// Thinking is stated either way, per edge — see ReframeEdge.Reason for
 		// which one reasons and what was measured.
 		//
@@ -369,6 +402,21 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		return reframeHeading + "\n\n" + material
 	}
 	written := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if llm.Truncated(resp) {
+		// The cap is above every real framing measured (see edgeWriteCap), so a
+		// reply that reached it is not a framing that ran long: it is a model
+		// going round in its own text. On run f8e43d3a (2026-11-16) the
+		// plan edge wrote 8,192 tokens of "One last check…" over 105 seconds,
+		// and all of it went into the planner's prompt. The material is what
+		// this edge was asked to rewrite, so it is passed on instead.
+		log.Printf("[reframe] %s reply reached its cap (%d tokens), passing the material through",
+			edge.Name, resp.Usage.CompletionTokens)
+		rec.Err = fmt.Sprintf("reply reached its cap after %d tokens", resp.Usage.CompletionTokens)
+		rec.Reply, rec.Text = written, material
+		rec.TokensIn, rec.TokensOut = resp.Usage.PromptTokens, resp.Usage.CompletionTokens
+		graph.recordStage(rec)
+		return reframeHeading + "\n\n" + material
+	}
 	rec.Reply, rec.Text = written, written
 	rec.TokensIn, rec.TokensOut = resp.Usage.PromptTokens, resp.Usage.CompletionTokens
 	graph.recordStage(rec)

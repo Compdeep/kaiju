@@ -140,6 +140,7 @@ func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 		GateSummary:  id.GateSummary,
 		GateReturned: id.GateReturned,
 		LatencyMS:    time.Since(started).Milliseconds(),
+		CacheKey:     req.CacheKey,
 	}
 	traceMessages(&tr, req.Messages)
 	if err != nil {
@@ -157,6 +158,7 @@ func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 		tr.TokensThought = resp.Usage.ReasoningTokens()
 		tr.TokensCached = resp.Usage.CachedTokens()
 		tr.Recovered = resp.Recovered.String()
+		tr.Provider = resp.Provider
 	}
 	tr.Asked, tr.Sent = describeThinking(req.Think), describeSent(req.Reasoning)
 	WriteLLMTrace(tr)

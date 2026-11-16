@@ -97,6 +97,14 @@ type LLMTrace struct {
 	// Without it a retried answer and a first-attempt answer read the same, and
 	// what the recovery cost and bought cannot be seen at all.
 	Recovered string
+
+	// Provider is the host that served the call, as the gateway named it, and
+	// CacheKey the prompt_cache_key that went out with it. A stage whose
+	// repeated prompt start was not read from the cache can only be explained
+	// by these two: a different host has a different cache, and a missing key
+	// lets the gateway route each call anywhere.
+	Provider string
+	CacheKey string
 }
 
 // debugLogMu serializes appends so concurrent goroutines (e.g. parallel
@@ -265,6 +273,7 @@ func (t LLMTrace) formatMeta() string {
 	if t.TokensIn > 0 {
 		sb.WriteString(fmt.Sprintf("tokens_cached: %d (%d%%)\n", t.TokensCached, 100*t.TokensCached/t.TokensIn))
 	}
+	sb.WriteString(fmt.Sprintf("provider: %s\ncache_key: %s\n", orUnset(t.Provider), orUnset(t.CacheKey)))
 
 	// What this call asked of the model's thinking, what reached the wire, and
 	// what it cost. The struct has carried these since the reasoning layer
@@ -297,6 +306,15 @@ func (t LLMTrace) formatMeta() string {
 		sb.WriteString(fmt.Sprintf("recovered_from: %s\n", t.Recovered))
 	}
 	return sb.String()
+}
+
+// orUnset renders an empty provider or cache key as a word, so a missing value
+// reads as missing rather than as a blank line.
+func orUnset(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
 }
 
 // orNone renders an unset instruction as a word rather than as nothing, so a

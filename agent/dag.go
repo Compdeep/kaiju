@@ -1193,6 +1193,76 @@ func (g *Graph) outputInToolMessage(n *Node) bool {
 }
 
 /*
+ * failureInToolMessage reports whether the tool message a stage is given for
+ * this failed step (StepResults, then stepResultContent) holds what the step
+ * printed, whole.
+ * desc: The "### Failed" list wrote every failure's output again beside its
+ *       tool message: on run 798fce9d (2026-11-16) the planner's last call
+ *       carried 12,000 characters of tracebacks it also had as tool results.
+ *       Each text is matched exactly against the tool message's own strings —
+ *       the error and every field as the stage receives them — so a stream the
+ *       payload cap shortened is not held whole and is still written out.
+ *       - a command: its stderr and its stdout, each one;
+ *       - anything else: the failure's detail as extractFailureDetail writes it.
+ * param: n - a failed step.
+ * return: true when the tool message holds the output whole.
+ */
+func (g *Graph) failureInToolMessage(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	var held []string
+	if n.Error != nil {
+		held = append(held, n.Error.Error())
+	}
+	if n.Body != nil {
+		payload, _ := g.payloadSized(n.Body)
+		if payload == nil {
+			held = append(held, n.Body.Evidence())
+		} else {
+			var fields any
+			if json.Unmarshal(payload, &fields) != nil {
+				return false
+			}
+			held = appendStrings(held, fields)
+		}
+	}
+	holds := func(text string) bool {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return true
+		}
+		for _, h := range held {
+			if strings.Contains(h, text) {
+				return true
+			}
+		}
+		return false
+	}
+	if d, ok := commandData(n); ok {
+		return holds(d.Stderr) && holds(d.Stdout)
+	}
+	return holds(extractFailureDetail(n))
+}
+
+// appendStrings adds every string value inside v to out.
+func appendStrings(out []string, v any) []string {
+	switch t := v.(type) {
+	case string:
+		out = append(out, t)
+	case map[string]any:
+		for _, inner := range t {
+			out = appendStrings(out, inner)
+		}
+	case []any:
+		for _, inner := range t {
+			out = appendStrings(out, inner)
+		}
+	}
+	return out
+}
+
+/*
  * shortenPayloadValues walks a decoded payload and cuts long strings, leaving
  * every key, every nesting level and every list length as they were. What is
  * lost is the middle of a long value; what survives is which fields exist, and

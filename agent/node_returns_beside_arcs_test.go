@@ -183,3 +183,54 @@ func TestBesideArcsAndSearchSnippets(t *testing.T) {
 		t.Errorf("a snippet the tool message cuts must still reach the stage beside it")
 	}
 }
+
+// A failed command, as run 798fce9d's exec_rewrite_compute failed: exit 1 and
+// a Python traceback on stdout.
+func failedCommand(t *testing.T, stdout string) *Graph {
+	t.Helper()
+	g := NewGraph()
+	id := g.AddNode(&Node{Type: NodeTool, Tag: "exec_rewrite_compute", ToolName: "bash"})
+	g.SetBody(id, toolMessageBody{msg: toolapi.ToolFail("command", "exit 1: exit status 1",
+		map[string]any{"exit_code": 1, "stdout": stdout, "stderr": "", "command": "python3 compute.py"})})
+	g.SetError(id, errString("exit 1: exit status 1"))
+	return g
+}
+
+const pythonTraceback = "Traceback (most recent call last):\n" +
+	"  File \"/workspace/project/compute.py\", line 25, in main\n" +
+	"    moons = load('saturn_moons.bsp')\n" +
+	"  File \"/site-packages/skyfield/iokit.py\", line 201, in __call__\n" +
+	"    return opener(path)\n" +
+	"  File \"/site-packages/jplephem/daf.py\", line 66, in __init__\n" +
+	"    raise ValueError('file starts with {0!r}, not \"NAIF/DAF\" or \"DAF/\"'\n" +
+	"ValueError: file starts with b'<!DOCTYP', not \"NAIF/DAF\" or \"DAF/\"\n"
+
+// A failure whose output its tool message holds is named, with its exit
+// status, and its output is not written again: the call carries it once.
+func TestBesideArcsNamesAFailureItsToolMessageHolds(t *testing.T) {
+	g := failedCommand(t, pythonTraceback)
+	beside := loadReturns(t, g, NodeReturnsBesideArcs())
+	if !strings.Contains(beside, "exec_rewrite_compute") || !strings.Contains(beside, "exit 1") || !strings.Contains(beside, inToolMessage) {
+		t.Errorf("the failure should be named, with its exit status and where its output is:\n%s", beside)
+	}
+	var all strings.Builder
+	for _, m := range BuildMessagesWithResults("system", "## Node Results\n\n"+beside, nil, g.Arcs()) {
+		all.WriteString(m.Content)
+	}
+	// A phrase JSON writes as it is: the tool message escapes < and quotes.
+	if n := strings.Count(all.String(), "jplephem/daf.py"); n != 1 {
+		t.Errorf("the traceback reaches the call %d times, want 1", n)
+	}
+	if whole := loadReturns(t, g, NodeReturns("all")); !strings.Contains(whole, "jplephem/daf.py") {
+		t.Errorf("a call without tool messages lost the traceback:\n%s", whole)
+	}
+}
+
+// Output the payload cap shortened is not in the tool message whole, so the
+// failure is written out beside it as before.
+func TestBesideArcsKeepsAFailureItsToolMessageCut(t *testing.T) {
+	g := failedCommand(t, strings.Repeat("line of output\n", 400)+pythonTraceback)
+	if beside := loadReturns(t, g, NodeReturnsBesideArcs()); !strings.Contains(beside, "file starts with b'<!DOCTYP'") {
+		t.Errorf("a cut failure must still reach the stage beside its tool message:\n%.400s", beside)
+	}
+}

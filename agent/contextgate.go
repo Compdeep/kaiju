@@ -1029,6 +1029,30 @@ func commandData(n *Node) (commandResult, bool) {
 	return d, json.Unmarshal(tb.Envelope().Data, &d) == nil
 }
 
+// failedLineChars is how long a failure may be and still be written beside
+// its tool message in full: a short reason costs less than the note that
+// points at it.
+const failedLineChars = 300
+
+/*
+ * failureHead is the first line of a failure's detail, for the "### Failed"
+ * line of a call that carries the step's tool message.
+ * desc: For a command, the part before its output: the exit status and the
+ *       tool's account of it. Otherwise the first line. Cut to failedLineChars.
+ * param: detail - extractFailureDetail's text.
+ * return: the head.
+ */
+func failureHead(detail string) string {
+	head := detail
+	if i := strings.Index(head, " | "); i >= 0 {
+		head = head[:i]
+	}
+	if i := strings.IndexByte(head, '\n'); i >= 0 {
+		head = head[:i]
+	}
+	return Text.TruncateEvidenceTo(strings.TrimSpace(head), failedLineChars)
+}
+
 // commandOutput is what a command printed, stderr first, or "".
 func commandOutput(d commandResult) string {
 	var parts []string
@@ -1236,8 +1260,12 @@ func (s *nodeReturnsSource) Load(g *Graph, t *Trigger, a *Agent, params map[stri
 				if label == "" {
 					label = f.ToolName
 				}
-				errMsg := Text.TailTruncate(extractFailureDetail(f), 1200)
-				sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", label, f.ToolName, errMsg))
+				detail := extractFailureDetail(f)
+				if beside, _ := params["beside_arcs"].(bool); beside && len(detail) > failedLineChars && g.failureInToolMessage(f) {
+					sb.WriteString(fmt.Sprintf("- **%s** (%s): %s %s\n", label, f.ToolName, failureHead(detail), inToolMessage))
+					continue
+				}
+				sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", label, f.ToolName, Text.TailTruncate(detail, 1200)))
 			}
 		}
 	}

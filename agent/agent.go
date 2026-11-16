@@ -228,6 +228,30 @@ func stepResultContent(r StepResult) string {
 			return string(b)
 		}
 	}
+	if len(r.Payload) > 0 && r.Content != "" {
+		// Fields and text both: the text goes in beside the fields, as
+		// "content", so a field is read at the same path as before and the page
+		// a fetch read is in front of the stage too.
+		var obj map[string]any
+		if json.Unmarshal(r.Payload, &obj) == nil {
+			if _, taken := obj["content"]; !taken {
+				obj["content"] = r.Content
+				if r.Name != "" {
+					obj["step"] = r.Name
+				}
+				if b, err := json.Marshal(obj); err == nil {
+					return string(b)
+				}
+			}
+		}
+		out := map[string]any{"data": json.RawMessage(r.Payload), "content": r.Content}
+		if r.Name != "" {
+			out["step"] = r.Name
+		}
+		if b, err := json.Marshal(out); err == nil {
+			return string(b)
+		}
+	}
 	if len(r.Payload) > 0 {
 		return withStepName(r.Payload, r.Name)
 	}

@@ -66,3 +66,109 @@ func TestBash_ExitCode127SaysAProgramWasNotFound(t *testing.T) {
 		t.Errorf("exit 127 should say a program was not found: %s", got.Detail)
 	}
 }
+
+// skyfield's own failure, as run fe1e1df3 (2026-11-16) printed it: the
+// ValueError, then advice whose last line is example code.
+const skyfieldFailure = `Loading ephemeris from media/de421.bsp
+Traceback (most recent call last):
+  File "/workspace/project/fe1e1df3/compute_ssb.py", line 26, in <module>
+    main()
+  File "/usr/lib/python3.11/site-packages/skyfield/timelib.py", line 1204, in _datetime_to_utc_tuple
+    raise ValueError(_naive_complaint)
+ValueError: cannot interpret a datetime that lacks a timezone
+
+You must either specify that your datetime is in UTC:
+
+    from skyfield.api import utc
+    d = datetime(..., tzinfo=utc)  # to build a new datetime
+    d = d.replace(tzinfo=utc)      # to fix an existing datetime
+
+Or use a timezone object like those provided by the third-party ` + "`pytz`" + ` library:
+
+    from pytz import timezone
+    eastern = timezone('US/Eastern')
+    d = eastern.localize(datetime(2014, 1, 16, 1, 32, 9))
+`
+
+// writeFailing returns a command that prints skyfieldFailure, on stderr or
+// stdout, and exits 1.
+func writeFailing(t *testing.T, toStderr bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.txt")
+	if err := os.WriteFile(out, []byte(skyfieldFailure), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	redirect := ""
+	if toStderr {
+		redirect = " >&2"
+	}
+	return "cat " + out + redirect + "; exit 1"
+}
+
+// The engine runs a compute script as "( … ) 2>&1": stderr is empty and the
+// traceback is in stdout. The reason is the error line, not "printed no error
+// message" and not the last line of the advice after it.
+func TestBash_MergedStderrStillSaysWhy(t *testing.T) {
+	ctx := toolapi.WithLevel(context.Background(), toolapi.ImpactObserve)
+	got, _ := NewBash("").ExecuteTyped(ctx, map[string]any{"command": "( " + writeFailing(t, true) + " ) 2>&1"})
+	if !strings.Contains(got.Detail, "ValueError: cannot interpret a datetime that lacks a timezone") {
+		t.Errorf("the error line is not the reason: %s", got.Detail)
+	}
+	for _, wrong := range []string{"printed no error message", "eastern.localize", "may have been refused"} {
+		if strings.Contains(got.Detail, wrong) {
+			t.Errorf("the reason says %q: %s", wrong, got.Detail)
+		}
+	}
+}
+
+// The same failure on stderr, unmerged: the error line again, not the last line.
+func TestBash_StderrReasonIsTheErrorLine(t *testing.T) {
+	ctx := toolapi.WithLevel(context.Background(), toolapi.ImpactObserve)
+	got, _ := NewBash("").ExecuteTyped(ctx, map[string]any{"command": writeFailing(t, true)})
+	if !strings.Contains(got.Detail, "ValueError: cannot interpret a datetime") || strings.Contains(got.Detail, "eastern.localize") {
+		t.Errorf("the reason is not the error line: %s", got.Detail)
+	}
+}
+
+// A program that prints its error on stdout without any merge still has it
+// found, and said to be from stdout.
+func TestBash_ErrorOnStdoutIsFound(t *testing.T) {
+	ctx := toolapi.WithLevel(context.Background(), toolapi.ImpactObserve)
+	got, _ := NewBash("").ExecuteTyped(ctx, map[string]any{"command": writeFailing(t, false)})
+	if !strings.Contains(got.Detail, "ValueError: cannot interpret a datetime") || !strings.Contains(got.Detail, "stdout") {
+		t.Errorf("the error on stdout was not given as the reason: %s", got.Detail)
+	}
+}
+
+// The error survives in the result's stdout when a long text follows it: the
+// stream was kept as its first 200 and last 600 bytes.
+func TestBash_FailureKeepsTheErrorUnderALongTail(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.txt")
+	body := strings.Repeat("loading line\n", 50) + "KeyError: 'sun'\n" + strings.Repeat("advice line that goes on\n", 60)
+	if err := os.WriteFile(out, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := toolapi.WithLevel(context.Background(), toolapi.ImpactObserve)
+	got, _ := NewBash("").ExecuteTyped(ctx, map[string]any{"command": "( cat " + out + "; exit 1 ) 2>&1"})
+	if !strings.Contains(string(got.Data), "KeyError: 'sun'") {
+		t.Errorf("the error was cut out of the failure's stdout: %.400s", got.Data)
+	}
+	if !strings.Contains(got.Detail, "KeyError: 'sun'") {
+		t.Errorf("the reason is missing: %s", got.Detail)
+	}
+}
+
+// Output that states no error: not "printed no error message" over text the
+// reader can see.
+func TestBash_StdoutWithNoErrorSaysSo(t *testing.T) {
+	ctx := toolapi.WithLevel(context.Background(), toolapi.ImpactObserve)
+	got, _ := NewBash("").ExecuteTyped(ctx, map[string]any{"command": `echo "42 rows"; exit 3`})
+	if strings.Contains(got.Detail, "42 rows") {
+		t.Errorf("ordinary output was given as the reason: %s", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "printed nothing on stderr") {
+		t.Errorf("the detail should say stderr was empty and stdout states no error: %s", got.Detail)
+	}
+}

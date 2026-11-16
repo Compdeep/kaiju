@@ -24,6 +24,13 @@ type WebResearch struct {
 	fetch  *WebFetch
 }
 
+// researchBudgetChars is the most text one research result carries, shared
+// between the sources read; researchSourceChars is the most one source keeps.
+const (
+	researchBudgetChars = 30000
+	researchSourceChars = 10000
+)
+
 // NewWebResearch builds the tool from the same config web_search/web_fetch use.
 func NewWebResearch(cfg SearchConfig, executor *llm.Client) *WebResearch {
 	return &WebResearch{
@@ -204,9 +211,15 @@ func (w *WebResearch) ExecuteTyped(ctx context.Context, params map[string]any) (
 	// thing, which keeps the first two sources and the end of the last. A share each
 	// means every page this tool went and fetched is represented in what the model
 	// reads.
-	perSource := toolapi.EvidenceBudget
-	if n > 0 {
-		perSource = toolapi.EvidenceBudget / n
+	//
+	// The share was toolapi.EvidenceBudget (8,000) over the sources, 2,666 each
+	// for three, and the Horizons API page was cut there in the middle of its
+	// parameter table on run a9489bca. The engine's evidence cap now scales
+	// with the model's window to as much as 32,000, so the whole is
+	// researchBudgetChars and no one source takes more than researchSourceChars.
+	perSource := researchSourceChars
+	if n > 0 && researchBudgetChars/n < perSource {
+		perSource = researchBudgetChars / n
 	}
 	if perSource < 1000 {
 		perSource = 1000 // below this a page says too little to be worth having fetched

@@ -658,7 +658,14 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			sb.WriteString("- **file_write**: dumb byte-writer for when you already have the exact content (literal or wired from an upstream step with `${step.<tag>.<path>}`).\n")
 			sb.WriteString("- **edit_file**: LLM-backed edit or create of a specific file. Use whenever you know the path and want the Coder to produce the content. task_files is REQUIRED.\n")
 			sb.WriteString("- **compute(shallow)**: compute a VALUE for downstream use — analytics, rankings, scores, derived constants. The Coder emits a runnable script, the script runs, stdout is captured on `.output` so downstream steps can read it with `${step.<tag>.output}`. NOT for editing files you already know the path of — use edit_file for that.\n")
-			sb.WriteString("- **compute(deep)**: new codebases (webapp, CLI tool, service, library) built from scratch. ONE deep node per build.\n\n")
+			if a.cfg.DisableCoding {
+				// Refused at dispatch when coding is off (compute.go). Offering it
+				// here, with an example, had planners choose it for a plain
+				// calculation and fail: runs 457eb7b7 and a9489bca, 2026-11-16.
+				sb.WriteString("- **compute(deep)** is switched off on this deployment: building a codebase is not available. Use compute(shallow) for every calculation.\n\n")
+			} else {
+				sb.WriteString("- **compute(deep)**: new codebases (webapp, CLI tool, service, library) built from scratch. ONE deep node per build.\n\n")
+			}
 			sb.WriteString("Required params:\n")
 			sb.WriteString("- compute: `goal` + `mode`. If a follow-up compute step needs data from a prior step, wire it with `${step.<tag>.<path>}` AND still provide `goal` and `mode` in `params`.\n")
 			sb.WriteString("- edit_file: `task_files` (at least one path) + `goal`. Skip the path and the Coder will refuse to guess — the step fails.\n\n")
@@ -667,13 +674,15 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			sb.WriteString("- Have the exact bytes already (literal or from upstream) and need them written? → `file_write` with `path` and `content`.\n")
 			sb.WriteString("- Need to COMPUTE a value (not a file) for downstream steps? → `compute(shallow)`, chain its `.output`.\n")
 			sb.WriteString("NEVER use the pattern `compute(shallow) → file_write` to edit a known file — that double-writes and the wiring fails when `.output` isn't produced. Use `edit_file` for edits; `compute` is for computing values, not for producing file content to be written elsewhere.\n\n")
-			sb.WriteString("Example — \"build a web app with auth\":\n")
-			sb.WriteString("```json\n")
-			sb.WriteString("[\n")
-			sb.WriteString("  {\"tool\":\"compute\",\"params\":\"{\\\"goal\\\":\\\"build a Vue 3 + Express webapp with JWT auth and SQLite database\\\",\\\"mode\\\":\\\"deep\\\",\\\"query\\\":\\\"build a Vue 3 webapp with auth\\\"}\",\"tag\":\"build_webapp\"}\n")
-			sb.WriteString("]\n")
-			sb.WriteString("```\n")
-			sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
+			if !a.cfg.DisableCoding {
+				sb.WriteString("Example — \"build a web app with auth\":\n")
+				sb.WriteString("```json\n")
+				sb.WriteString("[\n")
+				sb.WriteString("  {\"tool\":\"compute\",\"params\":\"{\\\"goal\\\":\\\"build a Vue 3 + Express webapp with JWT auth and SQLite database\\\",\\\"mode\\\":\\\"deep\\\",\\\"query\\\":\\\"build a Vue 3 webapp with auth\\\"}\",\"tag\":\"build_webapp\"}\n")
+				sb.WriteString("]\n")
+				sb.WriteString("```\n")
+				sb.WriteString("Note: ONE compute(deep) node — the architect inside decomposes into setup, coder tasks, execute/service, and validation phases. Do not split into multiple compute(deep) nodes (\"plan blueprint then plan code then plan tests\" is wrong — that all happens INSIDE the single compute call).\n\n")
+			}
 		}
 	}
 
@@ -739,7 +748,14 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	}
 	if len(guidance) > 0 {
 		sb.WriteString("## Skill Guidance (authoritative — follow these instructions)\n\n")
-		sb.WriteString("Skill guidance is authoritative. If a skill says \"use compute deep\", use compute deep. Don't inspect — build.\n\n")
+		if a.cfg.DisableCoding {
+			// A card that says compute deep is still followed for everything
+			// else it says; deep itself is refused at dispatch (compute.go), so
+			// telling the planner to obey it planned a step that could only fail.
+			sb.WriteString("Skill guidance is authoritative, with one exception: compute(deep) is switched off on this deployment, so where a skill says \"use compute deep\", use compute(shallow).\n\n")
+		} else {
+			sb.WriteString("Skill guidance is authoritative. If a skill says \"use compute deep\", use compute deep. Don't inspect — build.\n\n")
+		}
 		sb.WriteString(strings.Join(guidance, "\n\n"))
 		sb.WriteString("\n\n")
 		log.Printf("[dag] executive injected %d skill guidance sections", len(guidance))

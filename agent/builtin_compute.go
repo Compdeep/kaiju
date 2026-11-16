@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
@@ -72,7 +73,24 @@ func (c *ComputeTool) Name() string { return "compute" }
 // a calculation.
 func (c *ComputeTool) Groups() []string { return []string{toolapi.GroupCode, toolapi.GroupData} }
 
+// codingOff reports whether this deployment refuses deep compute
+// (Config.DisableCoding). The tool then describes shallow alone: deep is
+// refused at dispatch (compute.go), and a schema still offering it — "deep:
+// plans approach first then implements" — had planners choose it for a plain
+// calculation that could only fail (runs 457eb7b7 and a9489bca, 2026-11-16).
+func (c *ComputeTool) codingOff() bool {
+	return c != nil && c.agent != nil && c.agent.cfg.DisableCoding
+}
+
 func (c *ComputeTool) Description() string {
+	if c.codingOff() {
+		return "Compute a VALUE via a runnable script: the Coder emits a script, the script runs, " +
+			"stdout is captured on `.output` so downstream steps can read it via ${step.N.output} — use this for " +
+			"analytics, rankings, calculations, derived data. Use mode shallow: building a codebase (deep) is switched " +
+			"off on this deployment. DO NOT use compute to edit a specific known file — use `edit_file` for that. " +
+			"It runs what it writes and waits for it to finish, so a file that never exits is killed at the timeout. " +
+			"Provide the GOAL, not the code."
+	}
 	return "Compute a VALUE via a runnable script, or scaffold a whole new project. " +
 		"Shallow mode: the Coder emits a script, the script runs, stdout is captured " +
 		"on `.output` so downstream steps can read it via ${step.N.output} — use this for analytics, rankings, " +
@@ -106,8 +124,17 @@ var computeParamSchema = json.RawMessage(`{
 }`)
 
 func (c *ComputeTool) Parameters() json.RawMessage {
+	if c.codingOff() {
+		return computeParamSchemaShallow
+	}
 	return computeParamSchema
 }
+
+// computeParamSchemaShallow is computeParamSchema with mode limited to shallow,
+// for a deployment that refuses deep.
+var computeParamSchemaShallow = json.RawMessage(strings.Replace(string(computeParamSchema),
+	`"mode":       {"type": "string", "enum": ["shallow","deep"], "description": "shallow: fast single pass. deep: plans approach first then implements"}`,
+	`"mode":       {"type": "string", "enum": ["shallow"], "description": "shallow: the only mode on this deployment; building a codebase (deep) is switched off"}`, 1))
 
 // computeOutputSchema documents what compute returns so the planner can wire
 // ${step.N.field} placeholders at real field names instead of guessing.

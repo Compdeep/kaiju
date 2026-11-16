@@ -58,6 +58,7 @@ func (a *Agent) setupDAGPipeline(trigger Trigger, runID string) (*Graph, *Budget
 	// Resolved once, here, because every reader of a payload is downstream of
 	// this and none of them has an Agent to ask.
 	graph.payloadCap = a.budget(payloadBudget)
+	graph.evidenceCap = a.budget(evidenceBudget)
 	budget := NewBudget(
 		a.cfg.MaxNodes,
 		a.cfg.MaxPerSkill,
@@ -3105,6 +3106,14 @@ func (a *Agent) twotimeRetry(ctx context.Context, node *Node, comp nodeCompletio
 		if !ok {
 			break // no usable fix; fall through to the original error
 		}
+		// Checked against the command the planner wrote, not the last attempt:
+		// a fix of a fix drifts, and on run fe1e1df3 (2026-11-16) the second
+		// attempt replaced a skyfield script with python3 -c "print('hello')",
+		// which ran, so the step "succeeded" with hello as its output.
+		if why := shellFixChangesTheWork(command, fixed); why != "" {
+			log.Printf("[dag] shell fix (attempt %d) refused: %s: %q", attempt, why, Text.TruncateLog(fixed, 80))
+			break
+		}
 
 		// Gate-check the fixed command through the normal IGX path. A fix may
 		// be a bigger action than the command it replaces, and the tier that
@@ -3202,6 +3211,13 @@ func (a *Agent) askShellFix(ctx context.Context, nodeID, objective, command, err
 		return "", false
 	}
 	fixed := cleanShellFix(resp.Choices[0].Message.Content)
+	if strings.Contains(command, "\n") {
+		// A command written over several lines (python3 -c "…" with a script
+		// in it) is fixed over several lines. Taking the reply's first line cut
+		// it to `python3 -c "`, an unterminated quote the next attempt was then
+		// asked to fix.
+		fixed = cleanShellFixLines(resp.Choices[0].Message.Content)
+	}
 	if fixed == "" || fixed == command {
 		return "", false
 	}
@@ -3395,6 +3411,155 @@ func cleanShellFix(raw string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(strings.Trim(strings.TrimSpace(s), "`"))
+}
+
+// cleanShellFixLines is cleanShellFix for a command written over several
+// lines: a fence's whole body, or the whole reply when there is no fence.
+func cleanShellFixLines(raw string) string {
+	s := strings.TrimSpace(raw)
+	if strings.HasPrefix(s, "```") {
+		if _, rest, ok := strings.Cut(s, "\n"); ok {
+			s = rest
+		}
+		if i := strings.LastIndex(s, "```"); i >= 0 {
+			s = s[:i]
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+/*
+ * shellFixChangesTheWork says why a proposed fix is not a fix of the command,
+ * or "" when it is one.
+ * desc: The prompt asks for a fix that still serves the objective, and a model
+ *       under a failing command does not always keep to it. Two shapes are
+ *       refused outright, because each turns a failure into a success without
+ *       doing the work:
+ *       - hiding the exit status: a pipe the command did not have (on run
+ *         fe1e1df3 `python3 x.py` became `python3 x.py 2>&1 | head -50`, and
+ *         the pipeline's status is head's), or `|| true`, `exit 0` and the like;
+ *       - dropping what the command works on: every path, file or address in
+ *         the original is gone from the fix (a skyfield script that read
+ *         media/de421.bsp became python3 -c "print('hello')").
+ * param: original - the command the planner wrote.
+ * param: fixed - the proposed fix.
+ * return: the reason it is refused, or "".
+ */
+func shellFixChangesTheWork(original, fixed string) string {
+	if pipes(fixed) > pipes(original) {
+		return "it adds a pipe, whose exit status would hide the command's"
+	}
+	flat := strings.Join(strings.Fields(fixed), "")
+	origFlat := strings.Join(strings.Fields(original), "")
+	for _, mask := range []string{"||true", "||:", "||echo", "exit0", ";true", ";:"} {
+		if strings.Contains(flat, mask) && !strings.Contains(origFlat, mask) {
+			return "it adds " + mask + ", which hides the command's failure"
+		}
+	}
+	if strings.HasSuffix(flat, "true") && !strings.HasSuffix(origFlat, "true") {
+		return "it ends in true, which hides the command's failure"
+	}
+	anchors := commandAnchors(original)
+	if len(anchors) == 0 {
+		return ""
+	}
+	fixedAnchors := commandAnchors(fixed)
+	for _, a := range anchors {
+		if strings.Contains(fixed, a) {
+			return ""
+		}
+		// A corrected path is still the same work: a typo fixed
+		// (/etc/hostnme → /etc/hostname), or another file in the same place.
+		for _, b := range fixedAnchors {
+			if sameTarget(a, b) {
+				return ""
+			}
+		}
+	}
+	return "it no longer names anything the command worked on (" + strings.Join(anchors, ", ") + ")"
+}
+
+// sameTarget reports whether two anchors name the same thing, corrected: a
+// spelling a few characters apart, or a file in the same directory.
+func sameTarget(a, b string) bool {
+	limit := len(a) / 8
+	if limit < 2 {
+		limit = 2
+	}
+	if editDistance(a, b) <= limit {
+		return true
+	}
+	da, db := a[:max(strings.LastIndexByte(a, '/'), 0)], b[:max(strings.LastIndexByte(b, '/'), 0)]
+	return len(da) >= 4 && da == db
+}
+
+// editDistance is the Levenshtein distance between a and b.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(min(prev[j]+1, cur[j-1]+1), prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
+}
+
+// pipes counts the single | in a command, not the || of an or-list.
+func pipes(cmd string) int {
+	n := 0
+	for i := 0; i < len(cmd); i++ {
+		if cmd[i] != '|' {
+			continue
+		}
+		if i+1 < len(cmd) && cmd[i+1] == '|' {
+			i++
+			continue
+		}
+		if i+1 < len(cmd) && cmd[i+1] == '&' { // |& is a pipe too
+			n++
+			i++
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// commandAnchors is what a command works on: the words in it that name a path,
+// a file or an address. Flags, redirections to /dev/null and the program
+// itself are not anchors.
+func commandAnchors(cmd string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, w := range strings.FieldsFunc(cmd, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '"' || r == '\'' || r == '(' || r == ')' || r == ';' || r == '=' || r == ','
+	}) {
+		w = strings.Trim(w, "`<>|&")
+		if len(w) < 4 || strings.HasPrefix(w, "-") || w == "/dev/null" || seen[w] {
+			continue
+		}
+		path := strings.Contains(w, "/")
+		file := false
+		if i := strings.LastIndexByte(w, '.'); i > 0 && i < len(w)-1 {
+			ext := w[i+1:]
+			file = len(ext) <= 5 && strings.IndexFunc(ext, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') }) < 0
+		}
+		if path || file {
+			seen[w] = true
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 // worklogEvidenceChars is how much of a tool's result the worklog keeps.

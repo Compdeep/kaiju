@@ -763,6 +763,27 @@ func primaryContent(ctx context.Context, rawURL string) (string, bool) {
 	return "", false
 }
 
+// inlinePageChars is how much of a page markdown and text return inline. The
+// whole page is on disk at full_content_path either way. It was 12,000 for
+// markdown and 8,192 for text: the Horizons manual's line naming the codes for
+// the Sun and the solar system barycentre sits past 12,000 characters, and a
+// planner reading the page inline never saw it. The engine's evidence cap
+// still bounds what one step puts in a prompt.
+const inlinePageChars = 20000
+
+// droppedTablesChars bounds the tables added back to an article.
+const droppedTablesChars = 20000
+
+// withDroppedTables adds the page's data tables that readability removed to
+// the article text. See droppedTables.
+func withDroppedTables(body, article string) string {
+	t := droppedTables(body, article, droppedTablesChars)
+	if t == "" {
+		return article
+	}
+	return article + "\n\n## Tables on the page\n\n" + t
+}
+
 /*
  * formatMarkdown uses readability to extract the main content as clean text.
  * desc: Parses the page with go-readability and returns the article as markdown, links kept, falling back to plain text on failure.
@@ -777,8 +798,8 @@ func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, bo
 	if txt, ok := primaryContent(ctx, rawURL); ok {
 		// This tool's own cap on a reader plugin's markdown. The first of four
 		// — see agent.maxToolResultLen for where the others cut.
-		if len(txt) > 12000 {
-			txt = txt[:12000] + "\n... (truncated)"
+		if len(txt) > inlinePageChars {
+			txt = txt[:inlinePageChars] + "\n... (truncated)"
 		}
 		return marshalFetchResult(fetchResult{Status: status, Content: txt, Format: "markdown"})
 	}
@@ -807,6 +828,9 @@ func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, bo
 		content = article.Content // HTML fallback
 	}
 	content = strings.TrimSpace(content)
+	if content != "" {
+		content = withDroppedTables(string(body), content)
+	}
 
 	// A page that rendered nothing. Its own state is usually in the document
 	// already, as JSON in a script tag — see webembedded.go. Reached only from
@@ -822,8 +846,8 @@ func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, bo
 		}
 	}
 
-	if len(content) > 12000 {
-		content = content[:12000] + "\n... (truncated)"
+	if len(content) > inlinePageChars {
+		content = content[:inlinePageChars] + "\n... (truncated)"
 	}
 
 	return marshalFetchResult(fetchResult{
@@ -845,8 +869,8 @@ func (w *WebFetch) formatMarkdown(ctx context.Context, status, rawURL string, bo
  */
 func (w *WebFetch) formatText(_ context.Context, status, rawURL string, body []byte) (toolapi.ToolMessage, error) {
 	text := stripHTML(string(body))
-	if len(text) > 8192 {
-		text = text[:8192] + "\n... (truncated)"
+	if len(text) > inlinePageChars {
+		text = text[:inlinePageChars] + "\n... (truncated)"
 	}
 	return marshalFetchResult(fetchResult{Status: status, Content: text, Format: "text"})
 }
@@ -891,7 +915,7 @@ func (w *WebFetch) formatExtract(ctx context.Context, status, rawURL string, bod
 		}
 		article, _ := readability.FromReader(strings.NewReader(string(body)), parsed)
 		if article.TextContent != "" {
-			content = article.TextContent
+			content = withDroppedTables(string(body), article.TextContent)
 			title = article.Title
 		} else {
 			content = stripHTML(string(body))
@@ -922,11 +946,22 @@ func (w *WebFetch) formatExtract(ctx context.Context, status, rawURL string, bod
 	// Build the extraction prompt. Be explicit that it must take from the
 	// supplied content only — no general-knowledge fallback. If the page
 	// doesn't contain what was asked for, return the exact sentinel below.
+	//
+	// Quoted, not summarised. The prompt used to say "Extract the following…
+	// Be specific", and the reader wrote its own account instead: on the
+	// Horizons API page it turned the parameter table into a summary whose
+	// COMMAND row read "See details", and on Wikipedia gpt-4.1-mini did its own
+	// arithmetic and reported the Sun–Jupiter barycentre at 1,506,000 km. The
+	// tool's description promises "quoted word for word", and a later step
+	// copies values out of this text, so the text has to be the page's.
 	const noContentSentinel = "__NO_RELEVANT_CONTENT__"
-	prompt := "Extract the key information from this web page content. Use ONLY what is present in the user message; do not draw on outside knowledge."
+	prompt := "Copy out the passages of this web page that carry its main information."
 	if focus != "" {
-		prompt = fmt.Sprintf("Extract the following from this web page: %s. Be specific — include exact numbers, names, prices, dates where available. Use ONLY what is present in the user message; do not draw on outside knowledge.", focus)
+		prompt = fmt.Sprintf("Copy out every passage of this web page that bears on: %s.", focus)
 	}
+	prompt += " Quote the page's own words: sentences, list items, table rows and code or example lines exactly as written, keeping every number, unit, name, identifier and example." +
+		" Do not summarise, paraphrase, calculate, convert or explain, and add nothing that is not on the page." +
+		" Keep a table's header row with the rows you copy. Separate passages with a blank line."
 	prompt += fmt.Sprintf("\n\nIf the supplied content does not contain what was asked for, reply with this single token and nothing else: %s", noContentSentinel)
 
 	if title != "" {
@@ -1048,13 +1083,23 @@ func (w *WebFetch) formatExtract(ctx context.Context, status, rawURL string, bod
 // narrow focus didn't match. Returns "" if the model still finds nothing usable
 // (the sentinel, a refusal, or empty) — the caller then reports "no content".
 func (w *WebFetch) generalSummary(ctx context.Context, content, sentinel string) string {
+	// Quoted, as the focused extraction is, and within one reading window: the
+	// whole page used to go in one call, which on a long page is more than a
+	// small model's window and the call fails.
+	system := "Copy out the passages of this web page that carry its main facts and figures." +
+		" Quote the page's own words exactly as written, keeping every number, unit, name and identifier; do not summarise, paraphrase or calculate, and add nothing that is not on the page." +
+		" Reply with " + sentinel + " only if the page has no substantive content at all."
+	perPass, replyTokens := w.readingWindow(len(system))
+	if len(content) > perPass {
+		content = content[:perPass]
+	}
 	resp, err := w.executor.Complete(ctx, &llm.ChatRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: "Summarize the key facts, figures, and findings on this web page. Use ONLY what is present in the user message; do not draw on outside knowledge. Reply with " + sentinel + " only if the page has no substantive content at all."}, // foreign-word-ok: model-facing text; what a model is asked for is not reworded to satisfy a vocabulary check
+			{Role: "system", Content: system},
 			{Role: "user", Content: content},
 		},
 		Temperature: 0.2,
-		MaxTokens:   1024,
+		MaxTokens:   replyTokens,
 		ToolChoice:  "none", // no tools on this call; see prose.go
 		// As the extraction above: reading a page needs no thinking.
 		Think: &llm.Reasoning{Want: llm.WantOff},

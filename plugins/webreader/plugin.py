@@ -16,6 +16,7 @@ its own (a real improvement over a plain fetch by itself).
 from __future__ import annotations
 
 import asyncio
+import re
 
 try:
     import trafilatura
@@ -81,10 +82,38 @@ def _error(detail: str, url: str) -> dict:
     return {"kind": "page", "status": "error", "detail": detail, "data": {"url": url}}
 
 
+# trafilatura drops the space between an inline <code> element and the text
+# beside it when the element opens a list item: the Horizons manual's
+# "<code>0</code> and <code>ssb</code> refer to the solar system barycenter"
+# came out as "0 andssb refer to ...", gluing the code a plan needed to the word
+# before it. It trims with str.strip, so no kind of space survives there. An
+# inline-code element that sits in running text is unwrapped to plain text in
+# backticks, leaving no element boundary to lose the space at. One that fills
+# its parent alone (an example request URL as a list item) is kept as it is:
+# unwrapping that lost the item.
+_INLINE_CODE = re.compile(r"<(code|kbd|tt|samp|var)\b[^>]*>([^<]*)</\1\s*>", re.I)
+_PRE_BLOCK = re.compile(r"(<pre\b.*?</pre\s*>)", re.S | re.I)
+
+
+def _unwrap_code_in_text(html: str) -> str:
+    def one(m: re.Match) -> str:
+        before = m.string[max(0, m.start() - 1):m.start()]
+        after = m.string[m.end():m.end() + 1]
+        if before in (">", "") and after in ("<", ""):
+            return m.group(0)  # the element is all its parent holds
+        return "`" + m.group(2) + "`"
+
+    parts = _PRE_BLOCK.split(html)
+    for i in range(0, len(parts), 2):  # odd parts are <pre> blocks, kept as they are
+        parts[i] = _INLINE_CODE.sub(one, parts[i])
+    return "".join(parts)
+
+
 def _extract(html_or_none: str | None) -> str:
     if trafilatura is None or not html_or_none:
         return ""
-    return (trafilatura.extract(html_or_none, include_comments=False, include_tables=True) or "").strip()
+    html = _unwrap_code_in_text(html_or_none)
+    return (trafilatura.extract(html, include_comments=False, include_tables=True) or "").strip()
 
 
 def _static_sync(url: str) -> str:

@@ -144,3 +144,149 @@ func attr(n *html.Node, key string) string {
 	}
 	return ""
 }
+
+/*
+ * droppedTables writes the page's data tables that the article left out.
+ * desc: go-readability scores a table as boilerplate and removes it, so every
+ *       figure a page keeps in a table was lost before any model read the page:
+ *       of Wikipedia's "Barycenter (astronomy)" (200 KB, 3 tables) it kept
+ *       9,225 characters and no table, and the Sun–Jupiter distance, 742,370 km,
+ *       is in one of them. This reads the tables from the raw page and returns
+ *       those whose text the article does not already hold, as rows of cells.
+ *
+ *       Navigation boxes and side bars are tables too, and carry links rather
+ *       than data, so a table marked as one is skipped, as is a table of fewer
+ *       than two rows.
+ * param: body - the raw page.
+ * param: kept - the article text already extracted.
+ * param: limit - the most characters to return.
+ * return: the tables, each a block of "| a | b |" rows, or "".
+ */
+func droppedTables(body, kept string, limit int) string {
+	if limit <= 0 || !strings.Contains(body, "<table") {
+		return ""
+	}
+	doc, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		return ""
+	}
+	var out strings.Builder
+	var walk func(n *html.Node)
+	walk = func(n *html.Node) {
+		if out.Len() >= limit {
+			return
+		}
+		if n.Type == html.ElementNode && n.DataAtom == atom.Table {
+			if t := tableText(n); t != "" && !tableKept(t, kept) {
+				if out.Len()+len(t) > limit {
+					return
+				}
+				out.WriteString(t)
+				out.WriteString("\n\n")
+			}
+			return // a table inside a table is written with its parent
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	return strings.TrimSpace(out.String())
+}
+
+// skippedTableClass names the tables that hold navigation, not data.
+var skippedTableClass = []string{"navbox", "sidebar", "metadata", "ambox", "mbox", "toc"}
+
+// tableText renders one table as a caption line and "| a | b |" rows, or ""
+// when it is navigation or too small to be data.
+func tableText(t *html.Node) string {
+	class := strings.ToLower(attr(t, "class"))
+	for _, c := range skippedTableClass {
+		if strings.Contains(class, c) {
+			return ""
+		}
+	}
+	var caption string
+	var rows []string
+	wide := false
+	var walk func(n *html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.ElementNode {
+			switch n.DataAtom {
+			case atom.Caption:
+				caption = cellText(n)
+				return
+			case atom.Tr:
+				var cells []string
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					if c.Type == html.ElementNode && (c.DataAtom == atom.Td || c.DataAtom == atom.Th) {
+						cells = append(cells, cellText(c))
+					}
+				}
+				if len(cells) > 1 {
+					wide = true
+				}
+				if strings.TrimSpace(strings.Join(cells, "")) != "" {
+					rows = append(rows, "| "+strings.Join(cells, " | ")+" |")
+				}
+				return
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(t)
+	if len(rows) < 2 || !wide {
+		return ""
+	}
+	if caption != "" {
+		return caption + "\n" + strings.Join(rows, "\n")
+	}
+	return strings.Join(rows, "\n")
+}
+
+// cellText is a cell's text on one line, links and markup dropped.
+func cellText(n *html.Node) string {
+	var b strings.Builder
+	var walk func(n *html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.TextNode {
+			b.WriteString(n.Data)
+			b.WriteString(" ")
+			return
+		}
+		if n.Type == html.ElementNode {
+			switch n.DataAtom {
+			case atom.Script, atom.Style, atom.Sup:
+				// A footnote marker ("[5]") is not part of the value it follows.
+				return
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(n)
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// tableKept reports whether the article already holds this table: most of its
+// longer cells appear in the article text.
+func tableKept(table, kept string) bool {
+	flat := strings.Join(strings.Fields(kept), " ")
+	var long, found int
+	for _, row := range strings.Split(table, "\n") {
+		for _, cell := range strings.Split(row, "|") {
+			cell = strings.TrimSpace(cell)
+			if len(cell) < 4 {
+				continue
+			}
+			long++
+			if strings.Contains(flat, cell) {
+				found++
+			}
+		}
+	}
+	return long == 0 || found*2 > long
+}

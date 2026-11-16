@@ -399,6 +399,11 @@ type Graph struct {
 	// compiled floor, which is what a run with no model catalog gets.
 	payloadCap int
 
+	// evidenceCap is how much of one step's text a stage's tool message carries
+	// beside its fields, resolved the same way. Zero keeps
+	// toolapi.EvidenceBudget.
+	evidenceCap int
+
 	// order is the ids in the order they were added, which for a plan's steps
 	// is the order the planner wrote them.
 	//
@@ -1085,6 +1090,49 @@ func (g *Graph) payloadSized(b NodeBody) (json.RawMessage, int) {
 }
 
 /*
+ * textBesideFields is a step's text, for a tool message that carries its fields.
+ * desc: A tool that declares fields and also writes text keeps the text in
+ *       Content and the fields in Data: web_fetch's page, web_research's
+ *       sources read. StepResults used to send the fields alone whenever there
+ *       were any, so the page itself never reached a stage that reads the run
+ *       through tool messages. The replan reads it only that way. On run
+ *       a9489bca (2026-11-16) the planner saw web_research's list of sources
+ *       and their sizes, and saw the text only because a failed compute had
+ *       carried it in its arguments.
+ *
+ *       Empty when the text is one of the fields already (a command whose
+ *       stdout is all it printed), when there is no text, or when the step did
+ *       not finish ok: a failure's output is written by stepResultContent from
+ *       the error and the fields.
+ * param: b - the step's body.
+ * param: payload - the fields as the stage receives them.
+ * return: the text, cut to the evidence budget, and whether it was cut.
+ */
+func (g *Graph) textBesideFields(b NodeBody, payload json.RawMessage) (string, bool) {
+	tm, ok := b.(toolMessageBody)
+	if !ok || tm.msg.Status != toolapi.StatusOK || strings.TrimSpace(tm.msg.Content) == "" {
+		return "", false
+	}
+	var obj map[string]any
+	if json.Unmarshal(payload, &obj) == nil {
+		for _, v := range obj {
+			if s, ok := v.(string); ok && s == tm.msg.Content {
+				return "", false
+			}
+		}
+	}
+	text := tm.msg.Content + tm.handleLine()
+	budget := toolapi.EvidenceBudget
+	if g != nil && g.evidenceCap > budget {
+		budget = g.evidenceCap
+	}
+	if len(text) <= budget {
+		return text, false
+	}
+	return Text.TruncateEvidenceTo(text, budget), true
+}
+
+/*
  * outputInToolMessage reports whether the tool message a stage is given for
  * this step (StepResults, then stepResultContent) holds the step's output — the
  * text node_returns writes, n.Result — whole.
@@ -1107,6 +1155,13 @@ func (g *Graph) outputInToolMessage(n *Node) bool {
 	payload, _ := g.payloadSized(n.Body)
 	if payload == nil {
 		return true // the tool message is the output itself
+	}
+	// The text rides beside the fields (textBesideFields), so the tool message
+	// holds it whole unless that text had to be cut.
+	if text, cut := g.textBesideFields(n.Body, payload); text != "" && !cut {
+		if tm, ok := n.Body.(toolMessageBody); ok && n.Result == tm.msg.Content+tm.handleLine() {
+			return true
+		}
 	}
 	var fields any
 	if json.Unmarshal(payload, &fields) != nil {
@@ -1760,6 +1815,8 @@ func (g *Graph) StepResults(round int) []StepResult {
 			r.Payload = g.payloadOf(n.Body)
 			if r.Payload == nil {
 				r.Content = n.Body.Evidence()
+			} else {
+				r.Content, _ = g.textBesideFields(n.Body, r.Payload)
 			}
 		}
 		if n.Error != nil {

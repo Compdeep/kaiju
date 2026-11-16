@@ -431,8 +431,8 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		if strings.HasPrefix(err.Error(), "no output for ") {
 			return toolapi.ToolFail("command", fmt.Sprintf("killed after %s with no output — the command produced nothing for that long, so it was treated as stuck", idle),
 				map[string]any{"command": command, "idle_timeout": idle.String(),
-					"stdout": headTailTruncate(stdout.String(), 200, 600),
-					"stderr": headTailTruncate(stderr.String(), 200, 600)}), nil
+					"stdout": headTailTruncate(stdout.String(), failureHead, failureTail),
+					"stderr": headTailTruncate(stderr.String(), failureHead, failureTail)}), nil
 		}
 		if ctx.Err() != nil {
 			return toolapi.ToolMessage{}, fmt.Errorf("bash: %w", ctx.Err())
@@ -449,21 +449,9 @@ func (b *Bash) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi
 		// recent call last):" header and no error type. For tracebacks and
 		// most CLI errors the diagnostic info lives at the END, not the
 		// start, so we keep both ends.
-		stdoutStr := headTailTruncate(stdout.String(), 200, 600)
-		stderrStr := headTailTruncate(stderr.String(), 200, 600)
-		detail := fmt.Sprintf("exit %d: %s", exitCode, err.Error())
-		// The level is named only when the command was refused, so a refused
-		// command is not retried as though it might work the next time. Named
-		// on every failure, it made a missing file read as a permission error;
-		// any other failure gives the command's own last line of stderr.
-		limits := toolapi.Limits(ctx)
-		if limits != "" && refused(stderr.String()) {
-			detail += " (" + limits + ")"
-		} else if why := lastLine(stderr.String()); why != "" {
-			detail += ": " + why
-		} else {
-			detail += noErrorMessage(exitCode, command, limits)
-		}
+		stdoutStr := headTailTruncate(stdout.String(), failureHead, failureTail)
+		stderrStr := headTailTruncate(stderr.String(), failureHead, failureTail)
+		detail := fmt.Sprintf("exit %d: %s", exitCode, err.Error()) + failureReason(ctx, exitCode, command, stdout.String(), stderr.String())
 		return toolapi.ToolFail("command", detail, bashData{
 			ExitCode:        exitCode,
 			Stdout:          stdoutStr,
@@ -695,11 +683,17 @@ func refused(stderr string) bool {
 // run 19:40 2026-11-12 reported a file as empty and no SSH keys on the machine
 // from reads that had been refused. So it says the cause is not known, and
 // names the level as one possible cause without claiming it.
-func noErrorMessage(exitCode int, command, limits string) string {
+func noErrorMessage(exitCode int, command, limits string, printed bool) string {
 	if exitCode == 127 {
 		return ": a program the command runs was not found (exit 127)"
 	}
 	s := ": it printed no error message"
+	if printed {
+		// It printed something, on stdout, and none of it states an error.
+		// "Printed no error message" over output the reader can see below
+		// read as a contradiction.
+		s = ": it printed nothing on stderr, and its stdout (in the result) states no error"
+	}
 	c := strings.ReplaceAll(command, " ", "")
 	if strings.Contains(c, "2>/dev/null") || strings.Contains(c, "&>/dev/null") {
 		s += ", because the command sends its errors to /dev/null"
@@ -709,6 +703,92 @@ func noErrorMessage(exitCode int, command, limits string) string {
 		s += " (" + limits + ")"
 	}
 	return s
+}
+
+// failureHead and failureTail are how much of each stream a failed command
+// keeps in its result: both ends, because a traceback's reason is at the end
+// and a long help text after it pushed it out of 200+600 bytes. The whole
+// output is at output_path either way.
+const (
+	failureHead = 1000
+	failureTail = 3000
+)
+
+/*
+ * failureReason is the part of a failed command's detail that says why.
+ * desc: The level is named only when the command was refused, so a refused
+ *       command is not retried as though it might work the next time; named on
+ *       every failure, it made a missing file read as a permission error.
+ *       Otherwise the reason is the command's own error line: from stderr, and
+ *       from stdout when stderr has none — a command that sends its errors
+ *       into its output (2>&1) has an empty stderr and its traceback in stdout,
+ *       and the engine runs every compute script that way, "( python3 x.py )
+ *       2>&1". On run fe1e1df3 (2026-11-16) each failed script said "it
+ *       printed no error message, so the cause is not known … may have been
+ *       refused" over a ValueError that was right there.
+ *
+ *       The error line, not the last line: skyfield's ValueError is followed
+ *       by eight lines of advice ending "d = eastern.localize(datetime(2014, 1,
+ *       16, 1, 32, 9))", and that was given as the reason.
+ * param: ctx - carries the step's level.
+ * param: exitCode - the command's exit status.
+ * param: command - what ran.
+ * param: stdout, stderr - what it printed, whole.
+ * return: the reason, starting with ": " or " (".
+ */
+func failureReason(ctx context.Context, exitCode int, command, stdout, stderr string) string {
+	limits := toolapi.Limits(ctx)
+	merged := mergesStderr(command)
+	if limits != "" && (refused(stderr) || merged && refused(stdout)) {
+		return " (" + limits + ")"
+	}
+	if why := errorLine(stderr); why != "" {
+		return ": " + why
+	}
+	if why := lastLine(stderr); why != "" {
+		return ": " + why
+	}
+	if why := errorLine(stdout); why != "" {
+		return ": " + why + " (printed on stdout)"
+	}
+	if why := lastLine(stdout); merged && why != "" {
+		return ": " + why + " (the last line of its output)"
+	}
+	if strings.TrimSpace(stdout) != "" {
+		return noErrorMessage(exitCode, command, limits, true)
+	}
+	return noErrorMessage(exitCode, command, limits, false)
+}
+
+// errorLines are the shapes a program's own statement of failure takes: an
+// exception (ValueError: …, subprocess.CalledProcessError: …), or a line that
+// says error, fatal or panic followed by a colon (error: …, fatal: …, file.c:3:
+// error: …, error[E0425]: …, npm ERR!).
+var errorLines = regexp.MustCompile(`(?m)^\s*(?:[\w.]+\.)?[A-Z]\w*(?:Error|Exception|Exit|Interrupt|Fault)\b(?::.*)?$|(?im)^.*\b(?:error|fatal|panic)(?:\[\w+\])?:\s.*$|(?m)^npm ERR!.*$`)
+
+// errorLine is the last line of text that states an error, cut to 200 bytes,
+// or "" when none does.
+func errorLine(text string) string {
+	all := errorLines.FindAllString(text, -1)
+	if len(all) == 0 {
+		return ""
+	}
+	line := strings.TrimSpace(all[len(all)-1])
+	if len(line) > 200 {
+		line = line[:200]
+	}
+	return line
+}
+
+// mergesStderr reports whether a command sends its stderr into its stdout, so
+// that what it printed on failure is in stdout: 2>&1, |&, or &> to anywhere but
+// /dev/null.
+func mergesStderr(command string) bool {
+	c := strings.ReplaceAll(command, " ", "")
+	if strings.Contains(c, "2>&1") || strings.Contains(c, "|&") {
+		return true
+	}
+	return strings.Contains(c, "&>") && !strings.Contains(c, "&>/dev/null")
 }
 
 // lastLine is the last line of a command's stderr that says anything, cut to

@@ -71,25 +71,62 @@ func TestBesideArcsLeavesOutACommandWhoseTextIsItsStdout(t *testing.T) {
 	}
 }
 
-// Text that is not among the fields exists only in "### Resolved": it stays.
+// callText is everything one reflector-shaped call is sent: the tool messages
+// and "### Resolved" beside them.
+func callText(g *Graph) string {
+	user := "## Node Results\n\n" + (func() string {
+		text, _ := (&nodeReturnsSource{}).Load(g, &Trigger{}, &Agent{}, NodeReturnsBesideArcs().Params)
+		return text
+	})()
+	var all strings.Builder
+	for _, m := range BuildMessagesWithResults("system", user, nil, g.Arcs()) {
+		all.WriteString(m.Content)
+		all.WriteString("\n")
+	}
+	return all.String()
+}
+
+// Text that is not among the fields: the tool message carries it beside the
+// fields, so it reaches the call once, there. It used to be left out of the
+// tool message, and a stage that reads only tool messages (the replan) never
+// saw a fetched page.
 func TestBesideArcsKeepsTextTheFieldsDoNotHold(t *testing.T) {
 	g := besideArcsGraph(t, map[string]toolapi.ToolMessage{
 		"stop_nginx": toolapi.ToolOK("service", "stopped nginx", map[string]any{"name": "nginx", "was_running": true}),
 	})
-	if beside := loadReturns(t, g, NodeReturnsBesideArcs()); !strings.Contains(beside, "stopped nginx") {
-		t.Errorf("text found nowhere else was left out:\n%s", beside)
+	var tool string
+	for _, r := range g.StepResults(-1) {
+		tool += stepResultContent(r)
+	}
+	if !strings.Contains(tool, "stopped nginx") || !strings.Contains(tool, `"was_running":true`) {
+		t.Errorf("the tool message should carry the text beside the fields: %s", tool)
+	}
+	if n := strings.Count(callText(g), "stopped nginx"); n != 1 {
+		t.Errorf("the text reaches the call %d times, want 1", n)
 	}
 }
 
-// A field cut on its way into the tool message: the tool message holds part of
-// the text, so the whole of it stays.
+// A field cut on its way into the tool message: the text beside the fields is
+// whole, so the end of the output still reaches the call.
 func TestBesideArcsKeepsTextWhoseFieldWasCut(t *testing.T) {
 	out := strings.Repeat("x", payloadValueChars+500) + "END_OF_OUTPUT"
 	g := besideArcsGraph(t, map[string]toolapi.ToolMessage{
 		"long_command": toolapi.ToolOK("command", out, map[string]any{"exit_code": 0, "stdout": out, "command": "cat big"}),
 	})
-	if beside := loadReturns(t, g, NodeReturnsBesideArcs()); !strings.Contains(beside, "END_OF_OUTPUT") {
-		t.Errorf("text the tool message holds only part of was left out:\n%.300s", beside)
+	if !strings.Contains(callText(g), out) {
+		t.Errorf("the whole output does not reach the call")
+	}
+}
+
+// Text longer than the evidence budget is cut in the tool message, and so is
+// written again under "### Resolved", where the stage's own budget applies.
+func TestBesideArcsKeepsTextCutInTheToolMessage(t *testing.T) {
+	out := "START " + strings.Repeat("y", toolapi.EvidenceBudget+2000) + " END_OF_PAGE"
+	g := besideArcsGraph(t, map[string]toolapi.ToolMessage{
+		"fetch_page": toolapi.ToolOK("page", out, map[string]any{"status": "HTTP 200", "url": "https://example.org"}),
+	})
+	if beside := loadReturns(t, g, NodeReturnsBesideArcs()); strings.Contains(beside, inToolMessage) {
+		t.Errorf("a step whose text was cut in its tool message is named as held there:\n%.300s", beside)
 	}
 }
 

@@ -118,3 +118,45 @@ func TestShellFixAttemptsIsBounded(t *testing.T) {
 		t.Errorf("shellFixAttempts = %d; that is an unbounded-retry budget on one step", shellFixAttempts)
 	}
 }
+
+// A fix must still do the command's work. Each refused case is from run
+// fe1e1df3 (2026-11-16), where a failing script was turned into a success.
+func TestShellFixChangesTheWork(t *testing.T) {
+	script := "python3 -c \"\nfrom skyfield.api import load\nplanets = load('media/de421.bsp')\nprint(planets)\n\""
+	for _, tc := range []struct {
+		name, original, fixed string
+		refused               bool
+	}{
+		{"replaced by hello", script, `python3 -c "print('hello')"`, true},
+		{"output piped to head", "python3 project/x/compute_ssb.py", "python3 project/x/compute_ssb.py 2>&1 | head -50", true},
+		{"failure swallowed", "ls /etc/ssh/sshd_config", "ls /etc/ssh/sshd_config || true", true},
+		{"engine wrapper dropped", "( python3 project/x/compute_ssb.py ) 2>&1", "python3 project/x/compute_ssb.py", false},
+		{"quoting fixed", `grep -r "foo bar /etc/hosts`, `grep -r "foo bar" /etc/hosts`, false},
+		{"pipe already there", "cat /var/log/syslog | grep error", "cat /var/log/syslog | grep -i error", false},
+		{"flag fixed", "find /etc -nam '*.conf'", "find /etc -name '*.conf'", false},
+		{"nothing to anchor on", "uptime -x", "uptime", false},
+		{"path typo corrected", "cat /etc/hostnme", "cat /etc/hostname", false},
+		{"other file, same directory", "cat /var/log/syslog.1", "cat /var/log/syslog", false},
+		{"cut to an open quote", script, `python3 -c "`, true},
+		{"ends in true", "python3 project/x/run.py", "python3 project/x/run.py; true", true},
+		{"exit 0 on a new line", script, script + "\nexit 0", true},
+		{"different file elsewhere", "python3 project/x/compute_ssb.py", "python3 /tmp/other.py", true},
+	} {
+		why := shellFixChangesTheWork(tc.original, tc.fixed)
+		if (why != "") != tc.refused {
+			t.Errorf("%s: refused=%v (%q), want refused=%v", tc.name, why != "", why, tc.refused)
+		}
+	}
+}
+
+// A command over several lines is fixed over several lines: taking the
+// reply's first line cut a python3 -c script to `python3 -c "`.
+func TestCleanShellFixLines_KeepsAMultiLineCommand(t *testing.T) {
+	cmd := "python3 -c \"\nfrom skyfield.api import load\nprint(load)\n\""
+	if got := cleanShellFixLines("```bash\n" + cmd + "\n```"); got != cmd {
+		t.Errorf("got %q, want %q", got, cmd)
+	}
+	if got := cleanShellFixLines(cmd); got != cmd {
+		t.Errorf("unfenced: got %q, want %q", got, cmd)
+	}
+}

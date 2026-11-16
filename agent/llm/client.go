@@ -827,6 +827,20 @@ func (c *Client) completeOnce(ctx context.Context, req *ChatRequest) (*ChatRespo
 	if !c.converses(effModel) {
 		replaced = asSchemaRequest(req, c.provider, effModel)
 	}
+	// The rewrite is this attempt's, not the caller's. asSchemaRequest changes
+	// the request in place, and a retry (recover.go) is built from that same
+	// request: it went out still on the schema wire but no longer looked like a
+	// forced tool call, so nothing rewrote it back and its reply reached the
+	// caller as text. The planner then read the JSON out of the text without
+	// its depends_on, and the steps of a chain ran at once (run 107d88a3,
+	// 2026-11-16, after a planner call spent its reply budget thinking).
+	// Restored on the way out, after the reply has been put back into the
+	// tool's shape, so the next attempt starts from what the caller asked for.
+	defer func() {
+		if replaced != nil {
+			asToolRequestAgain(req, replaced)
+		}
+	}()
 
 	var resp *ChatResponse
 	var err error

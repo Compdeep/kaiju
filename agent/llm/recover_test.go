@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -244,4 +246,51 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// A forced tool call whose first attempt comes back empty is retried as the
+// same tool call: on the schema wire again, and its reply put back into the
+// tool's shape. The retry was built from the request the first attempt had
+// rewritten, so it went out without a tool to answer with and its reply
+// reached the planner as text (run 107d88a3, 2026-11-16).
+func TestARetriedToolCallIsStillAToolCall(t *testing.T) {
+	freshBreaker(t)
+	var sent atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"response_format"`) {
+			t.Errorf("attempt %d was not sent on the schema wire: %s", sent.Load()+1, body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if sent.Add(1) == 1 {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":""},"finish_reason":"length"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"steps\":[]}"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", "m")
+	c.Catalog(facts(true, 0))
+	req := &ChatRequest{
+		Messages: []Message{{Role: "user", Content: "plan"}},
+		Tools: []ToolDef{{Type: "function", Function: FunctionDef{Name: "plan",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"steps":{"type":"array","items":{"type":"string"}}}}`)}}},
+		ToolChoice: ForceToolChoice("plan"),
+		MaxTokens:  4096,
+	}
+	resp, err := c.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := sent.Load(); n != 2 {
+		t.Fatalf("%d requests were sent, want 2", n)
+	}
+	calls := resp.Choices[0].Message.ToolCalls
+	if len(calls) != 1 || calls[0].Function.Name != "plan" {
+		t.Fatalf("the retry's reply is not a plan tool call: %+v", resp.Choices[0].Message)
+	}
+	if len(req.Tools) != 1 || req.ResponseFormat != nil {
+		t.Errorf("the caller's request was left rewritten: tools=%v format=%+v", req.Tools, req.ResponseFormat)
+	}
 }

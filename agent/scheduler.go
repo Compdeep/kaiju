@@ -154,7 +154,7 @@ func replanFrame(summaryBlock, next, failureBlock string) string {
 }
 
 // replanSummaryCap is how much of the reflector's summary the planner is shown.
-const replanSummaryCap = 300
+const replanSummaryCap = 1000
 
 /*
  * replanSummaryBlock renders the reflector's summary, or nothing.

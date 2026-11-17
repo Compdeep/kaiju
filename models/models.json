@@ -1842,6 +1842,893 @@
         "executor",
         "router"
       ]
+    },
+    {
+      "id": "openai.gpt-5.4",
+      "name": "GPT-5.4",
+      "family": "gpt-5",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "openai.gpt-5.5",
+      "name": "GPT-5.5",
+      "family": "gpt-5",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "openai.gpt-5.6-luna",
+      "name": "GPT-5.6 Luna",
+      "family": "gpt-5",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "openai.gpt-5.6-sol",
+      "name": "GPT-5.6 Sol",
+      "family": "gpt-5",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "openai.gpt-5.6-terra",
+      "name": "GPT-5.6 Terra",
+      "family": "gpt-5",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "openai.gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "family": "gpt-6",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "openai.gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "family": "gpt-6",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "openai.gpt-6-sol",
+      "name": "GPT-6 Sol",
+      "family": "gpt-6",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "openai.gpt-6.1-sol",
+      "name": "GPT-6.1 Sol",
+      "family": "gpt-6",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "openai.gpt-6.1-terra",
+      "name": "GPT-6.1 Terra",
+      "family": "gpt-6",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "name": "Claude Haiku 4.5",
+      "family": "claude",
+      "context": "200K",
+      "context_tokens": 200000,
+      "max_output_tokens": 64000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-haiku-5-5",
+      "name": "Claude Haiku 5.5",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-sonnet-5",
+      "name": "Claude Sonnet 5",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-opus-4-5-20251101-v1:0",
+      "name": "Claude Opus 4.5",
+      "family": "claude",
+      "context": "200K",
+      "context_tokens": 200000,
+      "max_output_tokens": 64000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-opus-4-6-v1",
+      "name": "Claude Opus 4.6",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-opus-4-7",
+      "name": "Claude Opus 4.7",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-opus-4-8",
+      "name": "Claude Opus 4.8",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-opus-5",
+      "name": "Claude Opus 5",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-fable-5",
+      "name": "Claude Fable 5",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-fable-5-1",
+      "name": "Claude Fable 5.1",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-fable-5-2",
+      "name": "Claude Fable 5.2",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "bedrock",
+      "api": "converse",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "openai/gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "family": "gpt-6",
+      "context": "1M",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "anthropic/claude-haiku-5.5",
+      "name": "Claude Haiku 5.5",
+      "family": "claude",
+      "context": "1M",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "provider": "openrouter",
+      "thinking": true,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ],
+      "cache": "requested"
+    },
+    {
+      "id": "deepseek.v3.1",
+      "name": "DeepSeek V3.1",
+      "family": "deepseek",
+      "context": "163K",
+      "context_tokens": 163840,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ],
+      "reasoning_efforts": [
+        "high"
+      ]
+    },
+    {
+      "id": "deepseek.v3.2",
+      "name": "DeepSeek V3.2",
+      "family": "deepseek",
+      "context": "163K",
+      "context_tokens": 163840,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ],
+      "reasoning_efforts": [
+        "high"
+      ]
+    },
+    {
+      "id": "moonshotai.kimi-k2-thinking",
+      "name": "Kimi K2 Thinking",
+      "family": "kimi",
+      "context": "262K",
+      "context_tokens": 262144,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "moonshotai.kimi-k2.5",
+      "name": "Kimi K2.5",
+      "family": "kimi",
+      "context": "262K",
+      "context_tokens": 262144,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ],
+      "reasoning_efforts": [
+        "high"
+      ]
+    },
+    {
+      "id": "zai.glm-4.6",
+      "name": "GLM-4.6",
+      "family": "glm",
+      "context": "204K",
+      "context_tokens": 204800,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ],
+      "reasoning_efforts": [
+        "high"
+      ]
+    },
+    {
+      "id": "zai.glm-4.7",
+      "name": "GLM-4.7",
+      "family": "glm",
+      "context": "204K",
+      "context_tokens": 204800,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ],
+      "reasoning_efforts": [
+        "high"
+      ]
+    },
+    {
+      "id": "zai.glm-4.7-flash",
+      "name": "GLM-4.7 Flash",
+      "family": "glm",
+      "context": "200K",
+      "context_tokens": 200000,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor",
+        "router"
+      ],
+      "reasoning_efforts": [
+        "high"
+      ]
+    },
+    {
+      "id": "zai.glm-5",
+      "name": "GLM-5",
+      "family": "glm",
+      "context": "204K",
+      "context_tokens": 204800,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": true,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ],
+      "reasoning_efforts": [
+        "high"
+      ]
+    },
+    {
+      "id": "minimax.minimax-m2",
+      "name": "MiniMax M2",
+      "family": "minimax",
+      "context": "196K",
+      "context_tokens": 196608,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "minimax.minimax-m2.1",
+      "name": "MiniMax M2.1",
+      "family": "minimax",
+      "context": "196K",
+      "context_tokens": 196608,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "minimax.minimax-m2.5",
+      "name": "MiniMax M2.5",
+      "family": "minimax",
+      "context": "196K",
+      "context_tokens": 196608,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": true,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": false,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner"
+      ]
+    },
+    {
+      "id": "qwen.qwen3-235b-a22b-2507",
+      "name": "Qwen3 235B A22B 2507",
+      "family": "qwen",
+      "context": "262K",
+      "context_tokens": 262144,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "planner",
+        "executor"
+      ]
+    },
+    {
+      "id": "qwen.qwen3-coder-480b-a35b-instruct",
+      "name": "Qwen3 Coder 480B A35B",
+      "family": "qwen",
+      "context": "262K",
+      "context_tokens": 262144,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": false,
+      "chat": false,
+      "roles": [
+        "answer",
+        "executor"
+      ]
+    },
+    {
+      "id": "google.gemma-3-27b-it",
+      "name": "Gemma 3 27B",
+      "family": "gemma",
+      "context": "131K",
+      "context_tokens": 131072,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "answer",
+        "executor",
+        "router"
+      ]
+    },
+    {
+      "id": "google.gemma-3-4b-it",
+      "name": "Gemma 3 4B",
+      "family": "gemma",
+      "context": "131K",
+      "context_tokens": 131072,
+      "max_output_tokens": 32768,
+      "provider": "bedrock",
+      "thinking": false,
+      "reasoning_optional": false,
+      "tools": true,
+      "tool_call_ok": true,
+      "verified": false,
+      "vision": true,
+      "chat": false,
+      "roles": [
+        "router",
+        "executor"
+      ]
     }
   ]
 }

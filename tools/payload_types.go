@@ -48,6 +48,7 @@ type gitData struct {
 type panelPushData struct {
 	Plugin string `json:"plugin" desc:"the panel that was written to"`
 	Bytes  int    `json:"bytes" desc:"bytes pushed"`
+	Path   string `json:"path,omitempty" desc:"the workspace file shown, when one was named instead of content"`
 }
 
 // archiveData is what archive returns for any of its actions.

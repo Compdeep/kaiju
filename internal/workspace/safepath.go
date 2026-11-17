@@ -32,13 +32,11 @@ func SafeJoin(workspace, relPath string) (string, error) {
 		return "", fmt.Errorf("workspace is not configured")
 	}
 
-	abs := filepath.Clean(filepath.Join(workspace, relPath))
-	wsClean := filepath.Clean(workspace)
-	prefix := wsClean + string(filepath.Separator)
-
-	if abs != wsClean && !strings.HasPrefix(abs, prefix) {
-		return "", fmt.Errorf("path escapes workspace: %q resolves outside %s", relPath, wsClean)
+	abs, err := Within(workspace, relPath)
+	if err != nil {
+		return "", fmt.Errorf("path escapes workspace: %w", err)
 	}
+	wsClean := filepath.Clean(workspace)
 
 	rel, err := filepath.Rel(wsClean, abs)
 	if err != nil {
@@ -52,6 +50,24 @@ func SafeJoin(workspace, relPath string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("path not in allowed zones %v: %q lands at %q", AllowedZones, relPath, rel)
+}
+
+// Within joins relPath onto root and refuses a result outside root.
+//
+// A bare prefix test is not enough: root "/w" is a prefix of "/w-other", so
+// "../w-other/x" would pass one. This compares whole path elements. A
+// leading slash on relPath is read as relative to root, which is how a URL
+// path arrives. Within applies no zone rules, which is SafeJoin's addition.
+func Within(root, relPath string) (string, error) {
+	if root == "" {
+		return "", fmt.Errorf("no folder is configured")
+	}
+	rootClean := filepath.Clean(root)
+	abs := filepath.Clean(filepath.Join(rootClean, relPath))
+	if abs != rootClean && !strings.HasPrefix(abs, rootClean+string(filepath.Separator)) {
+		return "", fmt.Errorf("%q resolves outside %s", relPath, rootClean)
+	}
+	return abs, nil
 }
 
 // Resolve is SafeJoin with the workspace treated as a default location rather

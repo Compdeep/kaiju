@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
@@ -47,7 +48,7 @@ func (p *PanelPush) Impact(map[string]any) int { return toolapi.ImpactObserve }
 
 /*
  * Parameters returns the JSON schema for the tool's input parameters.
- * desc: Defines plugin, content, title, and mime parameters for panel rendering.
+ * desc: Defines plugin, content, path, title, and mime parameters for panel rendering.
  * return: JSON schema as raw bytes
  */
 func (p *PanelPush) Parameters() json.RawMessage {
@@ -61,7 +62,11 @@ func (p *PanelPush) Parameters() json.RawMessage {
 			},
 			"content": {
 				"type": "string",
-				"description": "The content to display (HTML, SVG, code, JSON data, mermaid diagram, etc.)"
+				"description": "The content to display (HTML, SVG, code, JSON data, mermaid diagram, etc.). Give this or path."
+			},
+			"path": {
+				"type": "string",
+				"description": "A workspace-relative file to show instead of content, e.g. project/report.html. The canvas draws it by its type (HTML, SVG, PDF, markdown, images; any other file as a download); code opens it in the editor."
 			},
 			"title": {
 				"type": "string",
@@ -72,7 +77,7 @@ func (p *PanelPush) Parameters() json.RawMessage {
 				"description": "Content type hint (e.g. text/html, image/svg+xml, application/json, text/x-mermaid)"
 			}
 		},
-		"required": ["plugin", "content"],
+		"required": ["plugin"],
 		"additionalProperties": false
 	}`)
 }
@@ -90,7 +95,7 @@ func (p *PanelPush) OutputSchema() json.RawMessage {
  * Execute pushes content to the specified panel plugin.
  * desc: Validates that plugin and content are provided, then returns a confirmation message.
  * param: _ - unused context
- * param: params - must contain "plugin" and "content"; optionally "title" and "mime"
+ * param: params - must contain "plugin" and "content" or "path"; optionally "title" and "mime"
  * return: confirmation message with byte count and plugin name, or error if required params missing
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
@@ -101,8 +106,13 @@ func (p *PanelPush) Execute(_ context.Context, params map[string]any) (string, e
 func (p *PanelPush) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	plugin, _ := params["plugin"].(string)
 	content, _ := params["content"].(string)
-	if plugin == "" || content == "" {
-		return toolapi.ToolMessage{}, fmt.Errorf("panel_push: plugin and content are required")
+	path, _ := params["path"].(string)
+	if plugin == "" || (content == "" && path == "") {
+		return toolapi.ToolMessage{}, fmt.Errorf("panel_push: plugin and one of content or path are required")
+	}
+	if content == "" {
+		return toolapi.ToolOK("status", fmt.Sprintf("showed %s in the %s panel", path, plugin),
+			panelPushData{Plugin: plugin, Path: path}), nil
 	}
 	return toolapi.ToolOK("status", fmt.Sprintf("pushed %d bytes to %s panel", len(content), plugin),
 		panelPushData{Plugin: plugin, Bytes: len(content)}), nil
@@ -118,10 +128,14 @@ func (p *PanelPush) ExecuteTyped(_ context.Context, params map[string]any) (tool
 func (p *PanelPush) DisplayHint(params map[string]any, result string) *toolapi.DisplayHint {
 	plugin, _ := params["plugin"].(string)
 	content, _ := params["content"].(string)
+	path, _ := params["path"].(string)
 	title, _ := params["title"].(string)
 	mime, _ := params["mime"].(string)
-	if plugin == "" || content == "" {
+	if plugin == "" || (content == "" && path == "") {
 		return nil
+	}
+	if title == "" && path != "" {
+		title = filepath.Base(path)
 	}
 	if title == "" {
 		title = plugin
@@ -129,6 +143,7 @@ func (p *PanelPush) DisplayHint(params map[string]any, result string) *toolapi.D
 	return &toolapi.DisplayHint{
 		Plugin:  plugin,
 		Title:   title,
+		Path:    path,
 		Content: content,
 		Mime:    mime,
 	}

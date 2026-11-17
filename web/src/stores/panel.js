@@ -24,7 +24,8 @@ export const usePanelStore = defineStore('panel', () => {
   const activeTab = computed(() => tabs.value.find(t => t.id === activeTabId.value) || null)
 
   /**
-   * desc: Open or focus a tab in the panel; reuses an existing tab if one matches the given path
+   * desc: Open or focus a tab in the panel; reuses the same plugin's tab if one matches the given
+   *       path, or the given URL when the tab has no path.
    * @param {Object} options - Tab configuration
    * @param {string} options.plugin - Plugin type (canvas, code, files, preview, graph)
    * @param {string} [options.title] - Display title for the tab
@@ -32,23 +33,46 @@ export const usePanelStore = defineStore('panel', () => {
    * @param {string|null} [options.content] - Raw content to render in the tab
    * @param {string|null} [options.mime] - MIME type of the content
    * @param {number} [options.line] - Line number to scroll to
+   * @param {string|null} [options.type] - Declared renderer/input type, such as file, html, url, svg, or mermaid
+   * @param {string|null} [options.kind] - Resolved renderer kind supplied by callers that already know it
+   * @param {string|null} [options.url] - External or generated URL for URL-backed renderers
    * @returns {string} The tab ID (new or existing)
    */
-  function pushTab({ plugin, title, path, content, mime, line }) {
-    if (path) {
-      const existing = tabs.value.find(t => t.path === path)
-      if (existing) {
-        existing.content = content || existing.content
-        existing.mime = mime || existing.mime
-        existing.line = line || existing.line
-        existing.ts = Date.now()
-        existing.title = title || existing.title
-        activateTab(existing.id)
-        return existing.id
-      }
+  function pushTab({ plugin, title, path, content, mime, line, type, kind, url }) {
+    // A file can be open as code and on the canvas at once, so a tab is reused
+    // only by the plugin that owns it.
+    const owner = plugin || 'preview'
+    const existing = path
+      ? tabs.value.find(t => t.plugin === owner && t.path === path)
+      : (url ? tabs.value.find(t => t.plugin === owner && !t.path && t.url === url) : null)
+
+    if (existing) {
+      existing.content = content ?? existing.content
+      existing.mime = mime ?? existing.mime
+      existing.line = line ?? existing.line
+      existing.type = type ?? existing.type
+      existing.kind = kind ?? existing.kind
+      existing.url = url ?? existing.url
+      existing.ts = Date.now()
+      existing.title = title || existing.title
+      activateTab(existing.id)
+      return existing.id
     }
+
     const id = `tab-${++tabCounter}`
-    tabs.value.unshift({ id, plugin: plugin || 'preview', title: title || plugin || 'Untitled', path: path || null, content: content || null, mime: mime || null, line: line || 0, ts: Date.now() })
+    tabs.value.unshift({
+      id,
+      plugin: plugin || 'preview',
+      title: title || plugin || 'Untitled',
+      path: path || null,
+      content: content ?? null,
+      mime: mime || null,
+      line: line || 0,
+      type: type || null,
+      kind: kind || null,
+      url: url || null,
+      ts: Date.now(),
+    })
     activeTabId.value = id
     open.value = true
     return id

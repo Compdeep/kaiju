@@ -39,16 +39,21 @@
       <!-- FILES section -->
       <div v-if="activeSection === 'files'" class="plugin-slot files-browser">
         <div class="files-path">
-          <button class="files-up" @click="navigateUp" :disabled="!filePath || filePath === '/'">
+          <button class="files-up" @click="navigateFileHistoryBack" :disabled="!fileHistory.length" title="Back">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
-          <span class="files-crumb">{{ filePath || '~' }}</span>
+          <button class="files-up" @click="navigateUp" :disabled="!filePath" title="Up one folder">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+          </button>
+          <input class="files-crumb files-path-input" v-model="pathInput" placeholder="~"
+            title="The workspace folder to show; Enter to go" spellcheck="false"
+            @keydown.enter="goToPath(pathInput)" @blur="pathInput = filePath" />
         </div>
         <div v-if="filesLoading" class="files-loading">Loading...</div>
         <div v-else class="files-list">
           <div v-for="f in fileEntries" :key="f.name"
             class="file-entry" :class="{ dir: f.is_dir }"
-            @click="f.is_dir ? navigateTo(f.name) : openFile(f)">
+            @click="f.is_dir ? goToPath(childFilePath(f.name)) : openFile(f)">
             <svg v-if="f.is_dir" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
             </svg>
@@ -96,8 +101,18 @@
           </template>
           <template v-else>
             <div class="code-toolbar">
+              <button class="editor-btn" @click="backToCodeFileDirectory" title="Back to containing folder">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="15 18 9 12 15 6"/>
+                </svg>
+                <span>Back</span>
+              </button>
               <span class="code-lang">{{ activeCodeTab._lang || '' }}</span>
               <div class="editor-spacer"></div>
+              <a v-if="activeCodeTab.path" class="editor-btn" :href="serveUrl(activeCodeTab.path)" :download="fileName(activeCodeTab.path)" title="Download file">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Download</span>
+              </a>
               <button class="editor-btn" @click="activeCodeTab._editing = true" title="Edit file">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
@@ -121,7 +136,11 @@
           <div v-if="activeCanvasTab._loading" class="files-loading">Loading...</div>
           <template v-else>
             <div class="canvas-toolbar">
-              <span class="editor-filename">{{ activeCanvasTab.title }}</span>
+              <span class="canvas-title">
+                <span class="editor-filename">{{ activeCanvasTab.title }}</span>
+                <span class="canvas-kind">{{ canvasKind(activeCanvasTab) }}</span>
+                <span v-if="canvasMeta(activeCanvasTab)" class="canvas-meta">{{ canvasMeta(activeCanvasTab) }}</span>
+              </span>
               <div class="editor-spacer"></div>
               <button class="editor-btn" @click="refreshCanvas" title="Refresh">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
@@ -129,7 +148,11 @@
                 </svg>
                 <span>Refresh</span>
               </button>
-              <button class="editor-btn" @click="openCanvasInCode" title="Edit source">
+              <a v-if="activeCanvasTab.path" class="editor-btn" :href="serveUrl(activeCanvasTab.path)" :download="fileName(activeCanvasTab.path)" title="Download file">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Download</span>
+              </a>
+              <button v-if="canvasHasSource(activeCanvasTab)" class="editor-btn" @click="openCanvasInCode" title="Edit source">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
                 </svg>
@@ -137,11 +160,70 @@
               </button>
             </div>
             <iframe
+              v-if="canvasKind(activeCanvasTab) === 'url' || (canvasKind(activeCanvasTab) === 'file' && isLivePath(activeCanvasTab.path))"
               class="canvas-iframe"
-              :src="canvasUrl(activeCanvasTab)"
+              :src="canvasSrc(activeCanvasTab)"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-              :key="activeCanvasTab._refreshKey"
+              :key="`${canvasKind(activeCanvasTab)}:${activeCanvasTab._refreshKey}`"
             ></iframe>
+            <!-- A page outside project/ is served through the token URL, so it
+                 runs without kaiju's origin: it cannot read the token. -->
+            <iframe
+              v-else-if="canvasKind(activeCanvasTab) === 'file'"
+              class="canvas-iframe"
+              :src="serveUrl(activeCanvasTab.path)"
+              sandbox="allow-scripts allow-forms allow-popups"
+              :key="`file:${activeCanvasTab._refreshKey}`"
+            ></iframe>
+            <iframe
+              v-else-if="canvasKind(activeCanvasTab) === 'svgfile'"
+              class="canvas-iframe"
+              :src="serveUrl(activeCanvasTab.path)"
+              sandbox=""
+              :key="`svgfile:${activeCanvasTab._refreshKey}`"
+            ></iframe>
+            <!-- No sandbox: a sandboxed frame refuses the browser's own PDF viewer. -->
+            <iframe
+              v-else-if="canvasKind(activeCanvasTab) === 'pdf'"
+              class="canvas-iframe"
+              :src="serveUrl(activeCanvasTab.path)"
+              :key="`pdf:${activeCanvasTab._refreshKey}`"
+            ></iframe>
+            <div v-else-if="canvasKind(activeCanvasTab) === 'image'" class="canvas-image">
+              <img :src="serveUrl(activeCanvasTab.path)" :alt="activeCanvasTab.title" :key="`image:${activeCanvasTab._refreshKey}`" />
+            </div>
+            <div v-else-if="canvasKind(activeCanvasTab) === 'markdown'" class="canvas-markdown" v-html="markdownDoc(activeCanvasTab)"></div>
+            <div v-else-if="canvasKind(activeCanvasTab) === 'binary'" class="canvas-binary">
+              <div class="canvas-binary-name">{{ activeCanvasTab.title }}</div>
+              <div class="canvas-binary-meta">{{ activeCanvasTab.mime || 'binary file' }}<span v-if="activeCanvasTab.size"> · {{ formatSize(activeCanvasTab.size) }}</span></div>
+              <div class="canvas-binary-meta">{{ activeCanvasTab.path }}</div>
+              <a class="editor-btn" :href="serveUrl(activeCanvasTab.path)" :download="fileName(activeCanvasTab.path)">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Download</span>
+              </a>
+            </div>
+            <iframe
+              v-else-if="canvasKind(activeCanvasTab) === 'html'"
+              class="canvas-iframe"
+              :srcdoc="canvasSrcdoc(activeCanvasTab)"
+              sandbox="allow-scripts allow-forms allow-popups"
+              :key="`${canvasKind(activeCanvasTab)}:${activeCanvasTab._refreshKey}`"
+            ></iframe>
+            <iframe
+              v-else-if="canvasKind(activeCanvasTab) === 'svg'"
+              class="canvas-iframe"
+              :srcdoc="canvasSrcdoc(activeCanvasTab)"
+              sandbox=""
+              :key="`${canvasKind(activeCanvasTab)}:${activeCanvasTab._refreshKey}`"
+            ></iframe>
+            <iframe
+              v-else-if="canvasKind(activeCanvasTab) === 'mermaid'"
+              class="canvas-iframe"
+              :srcdoc="canvasSrcdoc(activeCanvasTab)"
+              sandbox="allow-scripts"
+              :key="`${canvasKind(activeCanvasTab)}:${activeCanvasTab._refreshKey}`"
+            ></iframe>
+            <div v-else class="canvas-fallback" v-html="textDoc(activeCanvasTab)"></div>
           </template>
         </div>
         <div v-else>
@@ -202,6 +284,7 @@
 import { ref, computed, watch, nextTick, defineAsyncComponent } from 'vue'
 import { usePanelStore } from '../stores/panel'
 import api from '../api/client'
+import { renderMarkdown } from '../markdown'
 import hljs from 'highlight.js/lib/core'
 
 // Lazy-load CodeMirror editor — only fetched when user clicks Edit
@@ -285,6 +368,9 @@ const canvasLoading = ref(false)
 const filePath = ref('')
 const fileEntries = ref([])
 const filesLoading = ref(false)
+const fileHistory = ref([])
+const pathInput = ref('')
+watch(filePath, p => { pathInput.value = p })
 
 // Media state
 const mediaFiles = ref([])
@@ -342,17 +428,68 @@ const extLangMap = {
 
 const codeExts = ['go','js','mjs','ts','tsx','vue','py','json','jsonc','yaml','yml','toml','md','html','htm','css','scss','sh','bash','sql','txt','csv','env','cfg','conf','ini','xml','svg','rs','cpp','cc','c','h','hpp','rb','pl','java','kt','swift','r','lua','zig','Makefile','Dockerfile']
 
+function normalizeFilePath(path) {
+  return String(path || '').replace(/^\/+|\/+$/g, '')
+}
+
+function currentFilePath() {
+  return normalizeFilePath(filePath.value)
+}
+
+function childFilePath(name) {
+  const base = currentFilePath()
+  const child = normalizeFilePath(name)
+  return base ? `${base}/${child}` : child
+}
+
+// Every move through the folders goes through here, so Back can retrace it.
+// A folder that does not load leaves the list where it was.
+async function goToPath(path) {
+  const from = currentFilePath()
+  const target = normalizeFilePath(path)
+  if (target === from) return
+  if (await loadFiles(target)) fileHistory.value.push(from)
+}
+
+async function navigateFileHistoryBack() {
+  if (!fileHistory.value.length) return
+  await loadFiles(fileHistory.value.pop() || '')
+}
+
+function navigateUp() {
+  goToPath(directoryOf(currentFilePath()))
+}
+
+function directoryOf(path) {
+  const normalized = normalizeFilePath(path)
+  if (!normalized.includes('/')) return ''
+  return normalized.split('/').slice(0, -1).join('/')
+}
+
+function fileName(path) {
+  return normalizeFilePath(path).split('/').pop() || 'download'
+}
+
+async function backToCodeFileDirectory() {
+  const tab = activeCodeTab.value
+  activeSection.value = 'files'
+  await goToPath(directoryOf(tab?.path || ''))
+}
+
 async function loadFiles(path) {
   filesLoading.value = true
+  let ok = false
   try {
     const params = path ? `?path=${encodeURIComponent(path)}` : ''
     const data = await api.get(`/api/v1/workspace/files${params}`)
     fileEntries.value = data.entries || data || []
-    filePath.value = data.path || path || ''
+    filePath.value = normalizeFilePath(data.path || path || '')
+    ok = true
   } catch (e) {
-    fileEntries.value = []
+    pathInput.value = filePath.value
   }
   filesLoading.value = false
+  return ok
 }
 
 async function scanMedia(path = 'media') {
@@ -387,48 +524,84 @@ async function scanMedia(path = 'media') {
   mediaLoading.value = false
 }
 
-function navigateTo(name) {
-  const next = filePath.value ? `${filePath.value}/${name}` : name
-  loadFiles(next)
+// Files the canvas draws, by extension. Each has a renderer below and none
+// needs a library: the browser draws pages, SVG, PDF and images itself, and
+// markdown goes through the renderer the chat already uses.
+const canvasExtKinds = {
+  html: 'file', htm: 'file',
+  svg: 'svgfile',
+  pdf: 'pdf',
+  md: 'markdown', markdown: 'markdown',
+  png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', bmp: 'image', ico: 'image', avif: 'image',
+}
+// The kinds whose source is text, so the canvas offers to edit it.
+const editableCanvasKinds = new Set(['file', 'svgfile', 'markdown'])
+// Known binary formats, shown as a file card without reading them first.
+const binaryExts = new Set(['pptx', 'ppt', 'docx', 'doc', 'xlsx', 'xls', 'odt', 'ods', 'odp', 'key', 'pages', 'numbers',
+  'zip', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'tar', 'jar', 'whl', 'deb', 'rpm', 'dmg', 'iso',
+  'exe', 'dll', 'so', 'dylib', 'o', 'a', 'bin', 'wasm', 'pyc', 'class', 'db', 'sqlite', 'bsp',
+  'mp3', 'wav', 'flac', 'ogg', 'm4a', 'ttf', 'otf', 'woff', 'woff2', 'psd'])
+
+function extOf(name) {
+  const base = fileName(name)
+  return base.includes('.') ? base.split('.').pop().toLowerCase() : ''
 }
 
-function navigateUp() {
-  if (!filePath.value) return
-  const parts = filePath.value.split('/')
-  parts.pop()
-  loadFiles(parts.join('/'))
+// The canvas tab already showing this path, when it is the one the canvas
+// shows now: the newest canvas tab.
+function shownInCanvas(path) {
+  const tab = panel.tabs.find(t => t.plugin === 'canvas')
+  return tab && normalizeFilePath(tab.path) === normalizeFilePath(path) ? tab : null
 }
 
-function openFile(f) {
-  const fullPath = filePath.value ? `${filePath.value}/${f.name}` : f.name
-  const ext = f.name.split('.').pop().toLowerCase()
-  const allMedia = [...mediaExts.image, ...mediaExts.video]
-  if (allMedia.includes(ext)) {
-    const type = mediaExts.image.includes(ext) ? 'image' : 'video'
-    openViewer({ name: f.name, path: fullPath, type })
+async function openFile(f) {
+  const fullPath = childFilePath(f.name)
+  const ext = extOf(f.name)
+  if (mediaExts.video.includes(ext)) {
+    openViewer({ name: f.name, path: fullPath, type: 'video' })
     return
   }
-  // HTML files in code/: open in code AND render in canvas
-  if ((ext === 'html' || ext === 'htm') && fullPath.startsWith('code')) {
-    openCodeFile(f.name, fullPath, ext)
-    openCanvasFile({ name: f.name, path: fullPath })
+  const kind = canvasExtKinds[ext]
+  if (kind) {
+    // A second click on a file the canvas is showing opens its source to edit.
+    if (shownInCanvas(fullPath) && editableCanvasKinds.has(kind)) {
+      openCodeFile(f.name, fullPath, ext, { edit: true })
+    } else {
+      openCanvasFile({ name: f.name, path: fullPath, size: f.size })
+    }
     return
   }
   if (codeExts.includes(ext) || f.name === 'Makefile' || f.name === 'Dockerfile') {
     openCodeFile(f.name, fullPath, ext)
     return
   }
-  // Fallback: try as code
+  if (binaryExts.has(ext) || await looksBinary(fullPath)) {
+    openCanvasFile({ name: f.name, path: fullPath, size: f.size, binary: true })
+    return
+  }
   openCodeFile(f.name, fullPath, ext)
 }
 
-async function openCodeFile(name, path, ext) {
+// Reads the first 8 KB and calls the file binary when it holds a NUL byte,
+// which text in any common encoding but UTF-16 never does.
+async function looksBinary(path) {
+  try {
+    const resp = await fetch(serveUrl(path), { headers: { Range: 'bytes=0-8191' } })
+    const bytes = new Uint8Array(await resp.arrayBuffer())
+    return bytes.subarray(0, 8192).includes(0)
+  } catch {
+    return false
+  }
+}
+
+async function openCodeFile(name, path, ext, { edit = false } = {}) {
   // Switch to code section and open tab
   activeSection.value = 'code'
 
   // Check if already open
   const existing = panel.tabs.find(t => t.plugin === 'code' && t.path === path)
   if (existing) {
+    if (edit && !existing._loading) existing._editing = true
     panel.activateTab(existing.id)
     return
   }
@@ -445,7 +618,7 @@ async function openCodeFile(name, path, ext) {
     if (tab) {
       tab.content = text
       tab._loading = false
-      tab._editing = false
+      tab._editing = edit
       tab._lang = extLangMap[ext] || ''
       // Syntax highlight
       const lang = extLangMap[ext]
@@ -504,26 +677,251 @@ async function scanCanvas() {
   canvasLoading.value = false
 }
 
+const CANVAS_RENDERER_KINDS = new Set(['file', 'html', 'url', 'svg', 'svgfile', 'pdf', 'image', 'markdown', 'binary', 'mermaid', 'text'])
+
 function openCanvasFile(f) {
+  activeSection.value = 'canvas'
   const existing = panel.tabs.find(t => t.plugin === 'canvas' && t.path === f.path)
   if (existing) {
     existing._refreshKey = Date.now()
     panel.activateTab(existing.id)
+    if (canvasKind(existing) === 'markdown') loadCanvasText(existing)
     return
   }
-  panel.pushTab({
+  const id = panel.pushTab({
     plugin: 'canvas',
+    type: f.binary ? 'binary' : null,
     title: f.name,
     path: f.path,
     content: null,
-    _refreshKey: Date.now(),
-    _loading: false,
   })
+  const tab = panel.tabs.find(t => t.id === id)
+  if (!tab) return
+  tab.size = f.size || 0
+  tab._refreshKey = Date.now()
+  if (canvasKind(tab) === 'markdown') loadCanvasText(tab)
+}
+
+// A markdown file is drawn from its text, so the canvas reads it first.
+async function loadCanvasText(tab) {
+  tab._loading = true
+  try {
+    const resp = await fetch(serveUrl(tab.path))
+    tab.content = resp.ok ? await resp.text() : `Could not read ${tab.path}: HTTP ${resp.status}`
+  } catch (e) {
+    tab.content = `Could not read ${tab.path}: ${e.message}`
+  }
+  tab._loading = false
+}
+
+// A tab the agent opened by path arrives without its text.
+watch(activeCanvasTab, tab => {
+  if (tab?.path && tab.content == null && !tab._loading && canvasKind(tab) === 'markdown') loadCanvasText(tab)
+})
+
+function markdownDoc(tab) {
+  return renderMarkdown(tabContent(tab))
+}
+
+// Files under project/ are served by the live route, where a page's own
+// relative scripts and styles resolve. code/ is that route's older name.
+function isLivePath(path) {
+  return /^(project|code)\//.test(normalizeFilePath(path))
+}
+
+function normalizeCanvasKind(value) {
+  const kind = String(value || '').trim().toLowerCase()
+  if (CANVAS_RENDERER_KINDS.has(kind)) return kind
+  if (kind === 'iframe' || kind === 'link' || kind === 'website') return 'url'
+  if (kind === 'plain' || kind === 'plaintext' || kind === 'markdown' || kind === 'md') return 'text'
+  return null
+}
+
+function kindFromMime(mime) {
+  const value = String(mime || '').split(';')[0].trim().toLowerCase()
+  if (!value) return null
+  if (value === 'text/html' || value === 'application/xhtml+xml') return 'html'
+  if (value === 'image/svg+xml' || value === 'text/svg' || value === 'application/svg+xml') return 'svg'
+  if (value.includes('mermaid')) return 'mermaid'
+  if (value === 'text/uri-list') return 'url'
+  if (value.startsWith('text/') || value === 'application/json' || value.endsWith('+json')) return 'text'
+  return null
+}
+
+function tabContent(tab) {
+  if (!tab || tab.content == null) return ''
+  if (typeof tab.content === 'string') return tab.content
+  try {
+    return JSON.stringify(tab.content, null, 2)
+  } catch {
+    return String(tab.content)
+  }
+}
+
+function isSafeIframeUrl(value) {
+  const url = String(value || '').trim()
+  return url === 'about:blank' || /^https?:\/\//i.test(url) || /^\/\//.test(url) || url.startsWith('/')
+}
+
+function looksLikeMermaid(source) {
+  return /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|stateDiagram-v2|erDiagram|journey|gantt|pie|mindmap|timeline|gitGraph)\b/i.test(source.trim())
+}
+
+function resolveCanvasKind(tab) {
+  if (!tab) return 'text'
+
+  if (tab.kind) return normalizeCanvasKind(tab.kind) || 'text'
+  if (tab.type) return normalizeCanvasKind(tab.type) || 'text'
+
+  const mimeKind = kindFromMime(tab.mime)
+  if (mimeKind) return mimeKind
+
+  const content = tabContent(tab).trim()
+  if (content) {
+    if (/^<svg[\s>]/i.test(content)) return 'svg'
+    if (/^(<!doctype\s+html\b|<html[\s>]|<head[\s>]|<body[\s>])/i.test(content)) return 'html'
+    if (looksLikeMermaid(content)) return 'mermaid'
+    if (isSafeIframeUrl(content)) return 'url'
+  }
+
+  const path = String(tab.path || '').trim()
+  if (path) {
+    if (isSafeIframeUrl(path)) return 'url'
+    return canvasExtKinds[extOf(path)] || 'binary'
+  }
+
+  if (isSafeIframeUrl(tab.url)) return 'url'
+  return 'text'
+}
+
+function canvasKind(tab) {
+  return resolveCanvasKind(tab)
+}
+
+function canvasHasSource(tab) {
+  return !!tab?.path && editableCanvasKinds.has(canvasKind(tab))
 }
 
 function canvasUrl(tab) {
   if (!tab || !tab.path) return 'about:blank'
-  return `/api/v1/workspace/live/${tab.path.replace(/^code\//, '')}`
+  return `/api/v1/workspace/live/${normalizeFilePath(tab.path).replace(/^(project|code)\//, '')}`
+}
+
+function canvasSrc(tab) {
+  const kind = canvasKind(tab)
+  if (kind === 'file') return canvasUrl(tab)
+  if (kind === 'url') {
+    const url = String(tab?.url || tab?.path || tabContent(tab)).trim()
+    return isSafeIframeUrl(url) ? url : 'about:blank'
+  }
+  return 'about:blank'
+}
+
+function canvasSrcdoc(tab) {
+  const kind = canvasKind(tab)
+  if (kind === 'html') return htmlDoc(tabContent(tab))
+  if (kind === 'svg') return svgDoc(tabContent(tab))
+  if (kind === 'mermaid') return mermaidDoc(tabContent(tab))
+  return textDoc(tab)
+}
+
+function canvasMeta(tab) {
+  if (!tab) return ''
+  const meta = []
+  if (tab.mime) meta.push(`mime: ${tab.mime}`)
+  if (tab.path) meta.push(`path: ${tab.path}`)
+  if (tab.url) meta.push(`url: ${tab.url}`)
+  return meta.join(' · ')
+}
+
+function htmlDoc(content) {
+  const html = String(content || '')
+  if (/^\s*(<!doctype\s+html\b|<html[\s>])/i.test(html)) return html
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+${html}
+</body>
+</html>`
+}
+
+function sanitizeSvg(svg) {
+  return String(svg || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(?:href|xlink:href)\s*=\s*(["'])\s*javascript:[\s\S]*?\1/gi, '')
+}
+
+function svgDoc(content) {
+  const svg = sanitizeSvg(content).trim()
+  const body = /^<svg[\s>]/i.test(svg) ? svg : `<pre>${escapeHtml(svg)}</pre>`
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin: 0; width: 100%; min-height: 100%; background: #fff; }
+    body { display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+    svg { max-width: 100%; max-height: 100vh; }
+    pre { white-space: pre-wrap; color: #334155; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+${body}
+</body>
+</html>`
+}
+
+function mermaidDoc(content) {
+  const source = escapeHtml(content || '')
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #fff; color: #0f172a; }
+    body { padding: 24px; box-sizing: border-box; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .mermaid { display: flex; justify-content: center; }
+    .error { margin-top: 16px; color: #b91c1c; white-space: pre-wrap; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <div class="mermaid">${source}</div>
+  <pre class="error"></pre>
+  ${'<script type="module">'}
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict' });
+    const el = document.querySelector('.mermaid');
+    mermaid.run({ nodes: [el] }).catch((err) => {
+      document.querySelector('.error').textContent = err?.message || String(err);
+    });
+  </scr${'ipt'}>
+</body>
+</html>`
+}
+
+function textDoc(tab) {
+  const rows = [
+    ['renderer', canvasKind(tab)],
+    ['title', tab?.title || ''],
+    ['mime', tab?.mime || ''],
+    ['path', tab?.path || ''],
+    ['url', tab?.url || ''],
+  ].filter(([, value]) => value)
+  const meta = rows.map(([key, value]) => `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')
+  const content = tabContent(tab)
+  return `<div class="canvas-fallback-inner">
+    <h3>Canvas content</h3>
+    <dl class="canvas-fallback-meta">${meta}</dl>
+    <pre>${escapeHtml(content)}</pre>
+  </div>`
 }
 
 function refreshCanvas() {
@@ -535,9 +933,8 @@ function refreshCanvas() {
 function openCanvasInCode() {
   const tab = activeCanvasTab.value
   if (!tab || !tab.path) return
-  const ext = tab.title.split('.').pop().toLowerCase()
-  // For webapps, open the index.html
-  openCodeFile(tab.title, tab.path, ext || 'html')
+  const ext = extOf(tab.path)
+  openCodeFile(fileName(tab.path), tab.path, ext || 'html', { edit: true })
 }
 
 function openViewer(m) {
@@ -585,7 +982,7 @@ function formatSize(bytes) {
 }
 
 function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 // Load content when section changes
@@ -694,6 +1091,7 @@ watch(() => panel.activeTab, (tab) => {
   background: var(--accent-subtle);
 }
 .editor-btn:disabled { opacity: 0.4; cursor: default; }
+a.editor-btn { text-decoration: none; }
 
 /* Canvas viewer */
 .canvas-viewer { width: 100%; height: 100%; display: flex; flex-direction: column; }
@@ -702,9 +1100,63 @@ watch(() => panel.activeTab, (tab) => {
   padding: 6px 12px; border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0; background: var(--surface);
 }
+.canvas-title {
+  display: flex; align-items: center; gap: 6px;
+  min-width: 0; overflow: hidden;
+}
+.canvas-kind {
+  flex-shrink: 0; padding: 1px 5px; border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted); font-size: 10px; font-family: var(--mono);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.canvas-meta {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-muted); font-size: 10px; font-family: var(--mono);
+}
 .canvas-iframe {
   flex: 1; width: 100%; border: none;
   background: #fff;
+}
+.canvas-image {
+  flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: var(--surface);
+}
+.canvas-image img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.canvas-markdown {
+  flex: 1; overflow: auto; padding: 16px 24px;
+  background: var(--surface); color: var(--text-secondary);
+  font-size: 13px; line-height: 1.6;
+}
+.canvas-binary {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 24px; background: var(--surface); text-align: center;
+}
+.canvas-binary-name { font-size: 13px; color: var(--text-secondary); word-break: break-all; }
+.canvas-binary-meta { font-size: 11px; font-family: var(--mono); color: var(--text-muted); word-break: break-all; }
+.canvas-fallback {
+  flex: 1; overflow: auto; padding: 16px;
+  background: var(--surface); color: var(--text-secondary);
+}
+.canvas-fallback-inner {
+  max-width: 920px; margin: 0 auto;
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+}
+.canvas-fallback-inner h3 {
+  margin: 0 0 12px; color: var(--text); font-size: 13px; font-weight: 600;
+}
+.canvas-fallback-meta {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px;
+  margin: 0 0 14px; padding: 10px; border: 1px solid var(--border-subtle);
+  border-radius: 6px; background: var(--surface-elevated, transparent);
+}
+.canvas-fallback-meta div { display: contents; }
+.canvas-fallback-meta dt { color: var(--text-muted); }
+.canvas-fallback-meta dd {
+  margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--text-secondary);
+}
+.canvas-fallback pre {
+  margin: 0; white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .plugin-code {
   margin: 0; padding: 12px 16px;
@@ -761,6 +1213,11 @@ watch(() => panel.activeTab, (tab) => {
   color: var(--text-muted); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
+.files-path-input {
+  flex: 1; min-width: 0; padding: 3px 6px; border-radius: 4px;
+  background: none; border: 1px solid transparent; outline: none;
+}
+.files-path-input:hover, .files-path-input:focus { border-color: var(--border); color: var(--text-secondary); }
 .files-loading { padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px; }
 .files-list { flex: 1; overflow-y: auto; padding: 4px 0; }
 .file-entry {

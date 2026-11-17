@@ -20,6 +20,7 @@ import (
 	"github.com/Compdeep/kaiju/internal/db"
 	"github.com/Compdeep/kaiju/internal/gateway"
 	"github.com/Compdeep/kaiju/internal/memory"
+	"github.com/Compdeep/kaiju/internal/workspace"
 	"github.com/Compdeep/kaiju/tokens"
 )
 
@@ -700,17 +701,15 @@ func (a *API) handleStatus(w http.ResponseWriter, _ *http.Request) {
  * param: r - HTTP request with optional ?path= query param
  */
 func (a *API) handleWorkspaceFiles(w http.ResponseWriter, r *http.Request) {
-	workspace := a.agent.Workspace()
-	if workspace == "" {
+	ws := a.agent.Workspace()
+	if ws == "" {
 		jsonError(w, "workspace not configured", http.StatusBadRequest)
 		return
 	}
 
 	relPath := r.URL.Query().Get("path")
-	fullPath := filepath.Join(workspace, relPath)
-
-	// Security: ensure we don't escape workspace
-	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(workspace)) {
+	fullPath, err := workspace.Within(ws, relPath)
+	if err != nil {
 		jsonError(w, "path outside workspace", http.StatusForbidden)
 		return
 	}
@@ -751,8 +750,8 @@ func (a *API) handleWorkspaceFiles(w http.ResponseWriter, r *http.Request) {
  * param: r - HTTP request with ?path= query param
  */
 func (a *API) handleWorkspaceServe(w http.ResponseWriter, r *http.Request) {
-	workspace := a.agent.Workspace()
-	if workspace == "" {
+	ws := a.agent.Workspace()
+	if ws == "" {
 		jsonError(w, "workspace not configured", http.StatusBadRequest)
 		return
 	}
@@ -763,8 +762,8 @@ func (a *API) handleWorkspaceServe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath := filepath.Join(workspace, relPath)
-	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(workspace)) {
+	fullPath, err := workspace.Within(ws, relPath)
+	if err != nil {
 		jsonError(w, "path outside workspace", http.StatusForbidden)
 		return
 	}
@@ -773,27 +772,25 @@ func (a *API) handleWorkspaceServe(w http.ResponseWriter, r *http.Request) {
 }
 
 /*
- * handleCanvasServe serves files from workspace/canvas/ with path-based URLs.
+ * handleCanvasServe serves files from workspace/project/ with path-based URLs.
  * desc: Enables multi-file webapps in the canvas — relative imports (./style.css,
  *       ./app.js) resolve correctly because the URL path mirrors the filesystem.
- *       Path: /api/v1/workspace/canvas/{filepath...}
+ *       Path: /api/v1/workspace/live/{filepath...}
  */
 func (a *API) handleCanvasServe(w http.ResponseWriter, r *http.Request) {
-	workspace := a.agent.Workspace()
-	if workspace == "" {
+	ws := a.agent.Workspace()
+	if ws == "" {
 		jsonError(w, "workspace not configured", http.StatusBadRequest)
 		return
 	}
 
-	// Strip prefix to get the relative path within project/
 	relPath := strings.TrimPrefix(r.URL.Path, "/api/v1/workspace/live/")
 	if relPath == "" {
 		jsonError(w, "path required", http.StatusBadRequest)
 		return
 	}
-
-	fullPath := filepath.Join(workspace, "project", relPath)
-	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(filepath.Join(workspace, "project"))) {
+	fullPath, err := workspace.Within(filepath.Join(ws, "project"), relPath)
+	if err != nil {
 		jsonError(w, "path outside project directory", http.StatusForbidden)
 		return
 	}
@@ -807,8 +804,8 @@ func (a *API) handleCanvasServe(w http.ResponseWriter, r *http.Request) {
  *       directories if needed. Validates path is within workspace.
  */
 func (a *API) handleWorkspaceWrite(w http.ResponseWriter, r *http.Request) {
-	workspace := a.agent.Workspace()
-	if workspace == "" {
+	ws := a.agent.Workspace()
+	if ws == "" {
 		jsonError(w, "workspace not configured", http.StatusBadRequest)
 		return
 	}
@@ -826,8 +823,8 @@ func (a *API) handleWorkspaceWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath := filepath.Join(workspace, req.Path)
-	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(workspace)) {
+	fullPath, err := workspace.Within(ws, req.Path)
+	if err != nil {
 		jsonError(w, "path outside workspace", http.StatusForbidden)
 		return
 	}

@@ -187,8 +187,10 @@ func (c *Client) applyReasoning(req *ChatRequest) {
 		req.Think = &Reasoning{Want: WantOff}
 	}
 	r := resolveReasoning(req, f, known)
-	if c.provider == ProviderBedrock {
-		req.Reasoning, req.ReasoningEffort = nil, r.bedrockEffort(f)
+	// Bedrock and OpenAI's own API take the one word; OpenAI refuses the
+	// object ("Unknown parameter: 'reasoning'").
+	if c.provider == ProviderBedrock || c.openAIAPI() {
+		req.Reasoning, req.ReasoningEffort = nil, r.effortWord(f)
 	} else {
 		req.Reasoning = r.wire()
 	}
@@ -221,8 +223,8 @@ func (r resolved) wire() *ReasoningControl {
 }
 
 /*
- * bedrockEffort is the resolved reasoning as Bedrock's reasoning_effort, or ""
- * to send nothing.
+ * effortWord is the resolved reasoning as reasoning_effort, the parameter
+ * Bedrock and OpenAI's own API read, or "" to send nothing.
  * desc: One word carries all of it, so each answer has to be put as a word.
  *       On: the effort asked for, or for a model that does not think unless
  *       asked, the strongest it was measured to act on — Qwen3 on Bedrock
@@ -233,7 +235,7 @@ func (r resolved) wire() *ReasoningControl {
  * param: f - the catalog's answer for this model.
  * return: the word, or "".
  */
-func (r resolved) bedrockEffort(f ModelFacts) string {
+func (r resolved) effortWord(f ModelFacts) string {
 	if r.Effort != EffortUnset {
 		return r.Effort.String()
 	}

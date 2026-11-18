@@ -362,7 +362,7 @@ func toolsAsText(msgs []converseMessage) []converseMessage {
  * desc: System messages go apart. Tool results are user turns, and turns from
  *       the same side are merged, because Converse refuses two in a row.
  *       Thinking is sent as Nova's reasoning config, from the effort the
- *       client already settled on — see bedrockEffort.
+ *       client already settled on — see effortWord.
  */
 func buildConverseRequest(req *ChatRequest) *converseRequest {
 	out := &converseRequest{InferenceConfig: converseInference{

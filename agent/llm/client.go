@@ -169,8 +169,8 @@ type ChatRequest struct {
 	Reasoning *ReasoningControl `json:"reasoning,omitempty"`
 
 	// ReasoningEffort is OpenAI's reasoning parameter, which Bedrock reads in
-	// place of the object above. Set by the client for a Bedrock client only,
-	// and then the object above is nil — see bedrockEffort.
+	// place of the object above. Set by the client for Bedrock and for OpenAI's
+	// own API only, and then the object above is nil — see effortWord.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 
 	// Think is what the CALLER wants of the model's thinking, in terms that do
@@ -746,12 +746,18 @@ func (c *Client) routeProviders(req *ChatRequest) {
 // one may reject a field it does not know, so OpenAI is recognised by its
 // address. Anthropic's request is built from other fields entirely.
 func (c *Client) keepCacheKey(req *ChatRequest) {
-	openAI := c.provider == ProviderOpenAI && strings.Contains(c.endpoint, "api.openai.com")
-	if c.provider != ProviderOpenRouter && !openAI {
+	if c.provider != ProviderOpenRouter && !c.openAIAPI() {
 		req.CacheKey = ""
 		return
 	}
 	req.CacheKey = fitCacheKey(req.CacheKey)
+}
+
+// openAIAPI reports whether this client calls OpenAI's own API. Every other
+// OpenAI-compatible endpoint is a ProviderOpenAI client too, so OpenAI is
+// recognised by its address.
+func (c *Client) openAIAPI() bool {
+	return c.provider == ProviderOpenAI && strings.Contains(c.endpoint, "api.openai.com")
 }
 
 // maxCacheKey is the longest prompt_cache_key OpenAI accepts. OpenRouter

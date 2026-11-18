@@ -205,3 +205,22 @@ func TestReasoningContentIsRead(t *testing.T) {
 		t.Errorf("streamed Reasoning = %q, want thought", got)
 	}
 }
+
+// OpenAI's own API refuses the reasoning object ("Unknown parameter:
+// 'reasoning'") and takes reasoning_effort, as Bedrock does. Another
+// OpenAI-compatible endpoint keeps the object.
+func TestOpenAIAPISendsReasoningEffort(t *testing.T) {
+	facts := func(string) (ModelFacts, bool) {
+		return ModelFacts{Thinking: Thinking{Default: true, Optional: true, Efforts: []Effort{EffortLow, EffortHigh}}}, true
+	}
+	req := &ChatRequest{Model: "gpt-x", Think: &Reasoning{Effort: EffortLow}}
+	NewClientWithProvider(ProviderOpenAI, "https://api.openai.com/v1", "k", "gpt-x").Catalog(facts).applyReasoning(req)
+	if req.Reasoning != nil || req.ReasoningEffort != "low" {
+		t.Fatalf("api.openai.com: reasoning %+v, reasoning_effort %q; want no object and \"low\"", req.Reasoning, req.ReasoningEffort)
+	}
+	req = &ChatRequest{Model: "gpt-x", Think: &Reasoning{Effort: EffortLow}}
+	NewClientWithProvider(ProviderOpenAI, "http://localhost:8000/v1", "k", "gpt-x").Catalog(facts).applyReasoning(req)
+	if req.Reasoning == nil || req.ReasoningEffort != "" {
+		t.Fatalf("self-hosted: reasoning %+v, reasoning_effort %q; want the object only", req.Reasoning, req.ReasoningEffort)
+	}
+}

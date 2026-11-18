@@ -104,6 +104,14 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 		graph.recordStage(rec)
 		return "", nil, fmt.Errorf("aggregator LLM returned empty response")
 	}
+	// A tool call written out as text, which a model trained on one format
+	// writes when it sees the run's tool calls and is offered no tools. It is
+	// not an answer: shown as one, the person reads markup and no result.
+	if strings.HasPrefix(strings.TrimSpace(raw), "<tool_call>") {
+		rec.Reply, rec.Err = raw, "reply is a tool call, not an answer"
+		graph.recordStage(rec)
+		return "", nil, fmt.Errorf("aggregator LLM replied with a tool call instead of an answer")
+	}
 	rec.Reply, rec.Text = raw, raw
 	graph.recordStage(rec)
 

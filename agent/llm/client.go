@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -747,7 +749,26 @@ func (c *Client) keepCacheKey(req *ChatRequest) {
 	openAI := c.provider == ProviderOpenAI && strings.Contains(c.endpoint, "api.openai.com")
 	if c.provider != ProviderOpenRouter && !openAI {
 		req.CacheKey = ""
+		return
 	}
+	req.CacheKey = fitCacheKey(req.CacheKey)
+}
+
+// maxCacheKey is the longest prompt_cache_key OpenAI accepts. OpenRouter
+// passes the key on to OpenAI's hosts, which refuse the whole request
+// ("string too long") for a longer one.
+const maxCacheKey = 64
+
+// fitCacheKey is key cut to maxCacheKey: its start, then a hash of the whole
+// key, so two long keys that share a start stay two keys and the same key is
+// cut the same way on every call. A key that fits is unchanged.
+func fitCacheKey(key string) string {
+	if len(key) <= maxCacheKey {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	tail := "-" + hex.EncodeToString(sum[:])[:16]
+	return key[:maxCacheKey-len(tail)] + tail
 }
 
 // askForCache asks a model that caches only when asked, as the catalog says,

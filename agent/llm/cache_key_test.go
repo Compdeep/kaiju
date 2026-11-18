@@ -69,3 +69,28 @@ func TestTheCacheKeyGoesNowhereElse(t *testing.T) {
 		}
 	}
 }
+
+// OpenAI refuses a prompt_cache_key over 64 characters, and an application's
+// run id with the stage after it can be longer. Such a key is cut to 64, the
+// same way every time, and two keys that share a start stay apart.
+func TestALongCacheKeyIsCutToSixtyFour(t *testing.T) {
+	long := strings.Repeat("r", 49) + ":executive_native"
+	other := strings.Repeat("r", 49) + ":reflector_native"
+	for _, p := range []string{ProviderOpenRouter, "openai-api"} {
+		body := sentBody(t, p, &ChatRequest{CacheKey: long, Messages: []Message{{Role: "user", Content: "hi"}}})
+		var sent map[string]any
+		if err := json.Unmarshal([]byte(body), &sent); err != nil {
+			t.Fatalf("%s: %v", p, err)
+		}
+		key, _ := sent["prompt_cache_key"].(string)
+		if len(key) != maxCacheKey || key != fitCacheKey(long) {
+			t.Errorf("%s was sent %q (%d characters)", p, key, len(key))
+		}
+	}
+	if fitCacheKey(long) == fitCacheKey(other) {
+		t.Error("two long keys with the same start were cut to one key")
+	}
+	if fitCacheKey("run-7:executive_native") != "run-7:executive_native" {
+		t.Error("a key that fits was changed")
+	}
+}

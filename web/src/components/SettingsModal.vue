@@ -304,7 +304,7 @@ import api from '../api/client'
 defineEmits(['close'])
 const settings = useSettingsStore()
 const tab = ref('models')
-const cfg = ref({ llm: { provider: '', model: '', endpoint: '', reasoning: '' }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: 1, route_provider: '', route_model: '', answer_provider: '', answer_model: '' } })
+const cfg = ref({ llm: { provider: '', model: '', endpoint: '', reasoning: '' }, executor: { provider: '', model: '' }, vision: { provider: '', model: '' }, chat: { provider: '', model: '' }, agent: { dag_mode: '', executive_mode: 'structured', safety_level: null, route_provider: '', route_model: '', answer_provider: '', answer_model: '' } })
 const allModels = ref([])
 // The providers that take a key. Ollama runs locally and needs none.
 const KEYED_PROVIDERS = [

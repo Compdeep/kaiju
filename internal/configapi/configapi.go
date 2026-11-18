@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/Compdeep/kaiju/agent"
 	"github.com/Compdeep/kaiju/agent/llm"
@@ -245,6 +246,14 @@ func (c *API) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			c.agent.SetDAGMode(c.cfg.Agent.DAGMode)
 		}
 		if patch.Agent.SafetyLevel != nil {
+			// Only a level the intent registry names. Any number used to be
+			// stored, so a 1 from an older 0/1/2 scale became the clearance,
+			// matched no level in the picker, and refused every step above it.
+			if levels, ok := knownLevel(c.agent.Intents(), *patch.Agent.SafetyLevel); !ok {
+				jsonError(w, fmt.Sprintf("agent.safety_level %d is not one of %s",
+					*patch.Agent.SafetyLevel, levels), http.StatusBadRequest)
+				return
+			}
 			c.cfg.Agent.SafetyLevel = *patch.Agent.SafetyLevel
 			// Reaches the engine as the node's clearance rank.
 			c.agent.SetClearance(c.cfg.Agent.SafetyLevel)
@@ -535,4 +544,32 @@ func jsonResponse(w http.ResponseWriter, data any, status int) {
  */
 func jsonError(w http.ResponseWriter, msg string, status int) {
 	jsonResponse(w, map[string]string{"error": msg}, status)
+}
+
+/*
+ * knownLevel reports whether rank is one of the registry's intent levels.
+ * desc: A registry with no levels has nothing to check against and refuses
+ *       nothing.
+ * param: reg - the agent's intent registry, or nil.
+ * param: rank - the clearance asked for.
+ * return: the levels, "observe (0), operate (100), ...", for the error, and
+ *         whether rank is one of them.
+ */
+func knownLevel(reg *agent.IntentRegistry, rank int) (string, bool) {
+	if reg == nil {
+		return "", true
+	}
+	levels := reg.List()
+	if len(levels) == 0 {
+		return "", true
+	}
+	names := make([]string, 0, len(levels))
+	ok := false
+	for _, l := range levels {
+		names = append(names, fmt.Sprintf("%s (%d)", l.Name, l.Rank))
+		if l.Rank == rank {
+			ok = true
+		}
+	}
+	return strings.Join(names, ", "), ok
 }

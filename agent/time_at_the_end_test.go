@@ -89,6 +89,33 @@ func TestWithoutAClosingUserMessageTheClockStaysInTheSystemPrompt(t *testing.T) 
 	}
 }
 
+// The planner's retry (plan_real_tools) resends its first request, whose user
+// message already ends with the time, with the correction after it as a tool
+// result. The time is brought up to date there, stated once, and the system
+// prompt stays the same bytes as on every other call.
+func TestARetryEndingWithAToolResultKeepsTheClockOnTheUsersMessage(t *testing.T) {
+	a := doorAgent()
+	sys := "the rules" + a.environmentSection()
+	req := &llm.ChatRequest{Messages: []llm.Message{
+		{Role: "system", Content: sys},
+		{Role: "user", Content: "q" + timeLinePrefix + "2000-01-01 00:00:00 UTC."},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Type: "function", Function: llm.FunctionCall{Name: "plan"}}}},
+		{Role: "tool", ToolCallID: "c1", Content: "Error: not callable tools"},
+	}}
+	a.prepare(context.Background(), Heavy, req)
+	if req.Messages[0].Content != sys {
+		t.Errorf("the clock went into the system prompt:\n%s", req.Messages[0].Content)
+	}
+	user := req.Messages[1].Content
+	if n := strings.Count(user, "Current time:"); n != 1 || strings.Contains(user, "2000-01-01") ||
+		!strings.Contains(user, "Current time: "+time.Now().UTC().Format("2006-01-02")) {
+		t.Errorf("the user's time line was not brought up to date: %q", user)
+	}
+	if req.Messages[3].Content != "Error: not callable tools" {
+		t.Errorf("a tool result was changed: %q", req.Messages[3].Content)
+	}
+}
+
 // A stage that was never told the time is not told it now.
 func TestARequestWithoutTheSectionGetsNoClock(t *testing.T) {
 	a := doorAgent()

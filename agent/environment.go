@@ -88,9 +88,13 @@ const timeNotice = "The current time is on the line in this request that starts 
  *       it — a reflector shared 23% of its request with the one before it.
  *
  *       When the request ends otherwise — the ReAct loop in the middle of a
- *       turn ends with a tool result — the line goes at the end of the system
- *       prompt, as it always did, rather than into a tool result or a turn of
- *       its own.
+ *       turn ends with a tool result — and an earlier user message already
+ *       ends with the line, the line there is brought up to date: the planner's
+ *       retry (plan_real_tools) resends its first request with a tool result
+ *       after it, and a second line in the system prompt made everything after
+ *       the system prompt differ from the request before it. With no such
+ *       line, it goes at the end of the system prompt, as it always did,
+ *       rather than into a tool result or a turn of its own.
  *
  *       A request whose system prompt does not carry the section is left
  *       alone: a stage never told the time is not told it now.
@@ -112,6 +116,17 @@ func stateTheTime(req *llm.ChatRequest) {
 	if last.Role == "user" && len(last.Parts) == 0 {
 		last.Content = withoutTimeLine(last.Content) + line
 		return
+	}
+	for i := len(req.Messages) - 1; i > sys; i-- {
+		m := &req.Messages[i]
+		if m.Role != "user" || len(m.Parts) > 0 {
+			continue
+		}
+		if bare := withoutTimeLine(m.Content); bare != m.Content {
+			m.Content = bare + line
+			return
+		}
+		break // the latest user message carries no line: as before
 	}
 	req.Messages[sys].Content = withoutTimeLine(req.Messages[sys].Content) + line
 }

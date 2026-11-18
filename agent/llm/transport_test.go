@@ -112,3 +112,30 @@ func TestStreamingGoesThroughTheSameTransport(t *testing.T) {
 		t.Fatal("a streaming call did not go through the supplied transport")
 	}
 }
+
+// markTransport is a transport that only marks which one a client was given.
+type markTransport struct{}
+
+func (markTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, http.ErrHandlerTimeout
+}
+
+// SetDefaultTransport reaches every client made after it and none made before,
+// and nil restores the standard library's default.
+func TestANewClientSendsThroughTheDefaultTransport(t *testing.T) {
+	before := NewClient("http://x", "", "m")
+	SetDefaultTransport(markTransport{})
+	defer SetDefaultTransport(nil)
+	after := NewClient("http://x", "", "m")
+
+	if _, ok := after.http.Transport.(markTransport); !ok {
+		t.Error("a client made after SetDefaultTransport does not use it")
+	}
+	if before.http.Transport != nil {
+		t.Error("a client made before SetDefaultTransport changed")
+	}
+	SetDefaultTransport(nil)
+	if NewClient("http://x", "", "m").http.Transport != nil {
+		t.Error("nil did not restore the standard library's default")
+	}
+}

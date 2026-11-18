@@ -653,7 +653,8 @@ func NewClientWithProvider(provider, endpoint, apiKey, model string) *Client {
 		// that would cut off a wait this package deliberately allowed, and the
 		// error would name the transport rather than the clock that ran out.
 		http: &http.Client{
-			Timeout: maxWait * thinkingRequestTimeout,
+			Timeout:   maxWait * thinkingRequestTimeout,
+			Transport: defaultTransport(),
 		},
 	}
 }

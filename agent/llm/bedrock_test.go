@@ -224,3 +224,54 @@ func TestOpenAIAPISendsReasoningEffort(t *testing.T) {
 		t.Fatalf("self-hosted: reasoning %+v, reasoning_effort %q; want the object only", req.Reasoning, req.ReasoningEffort)
 	}
 }
+
+// OpenAI's own API is sent the reply cap as max_completion_tokens, which its
+// newer models require; another endpoint keeps max_tokens. The request itself
+// is not changed.
+func TestOpenAIAPISendsMaxCompletionTokens(t *testing.T) {
+	req := &ChatRequest{Model: "gpt-x", MaxTokens: 512}
+	body, err := NewClientWithProvider(ProviderOpenAI, "https://api.openai.com/v1", "k", "gpt-x").wireBody(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(body, &got)
+	if _, has := got["max_tokens"]; has || got["max_completion_tokens"] != float64(512) {
+		t.Fatalf("api.openai.com body: %s", body)
+	}
+	if req.MaxTokens != 512 {
+		t.Fatalf("request changed: MaxTokens %d", req.MaxTokens)
+	}
+	body, _ = NewClientWithProvider(ProviderOpenAI, "http://localhost:8000/v1", "k", "gpt-x").wireBody(req)
+	got = nil
+	_ = json.Unmarshal(body, &got)
+	if _, has := got["max_completion_tokens"]; has || got["max_tokens"] != float64(512) {
+		t.Fatalf("self-hosted body: %s", body)
+	}
+}
+
+// A thinking model on OpenAI's own API is sent temperature 1, the only value
+// it accepts; a model that does not think keeps the caller's.
+func TestOpenAIAPIThinkingModelTemperature(t *testing.T) {
+	thinks := func(string) (ModelFacts, bool) { return ModelFacts{Thinking: Thinking{Default: true}}, true }
+	plain := func(string) (ModelFacts, bool) { return ModelFacts{}, true }
+	for _, tc := range []struct {
+		name  string
+		facts Catalog
+		want  float64
+	}{{"thinks", thinks, 1}, {"does not think", plain, 0.3}} {
+		req := &ChatRequest{Model: "gpt-x", Temperature: 0.3, TopP: 0.9}
+		body, err := NewClientWithProvider(ProviderOpenAI, "https://api.openai.com/v1", "k", "gpt-x").Catalog(tc.facts).wireBody(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		_ = json.Unmarshal(body, &got)
+		if got["temperature"] != tc.want {
+			t.Errorf("%s: temperature %v, want %v", tc.name, got["temperature"], tc.want)
+		}
+		if req.Temperature != 0.3 {
+			t.Errorf("%s: request changed", tc.name)
+		}
+	}
+}

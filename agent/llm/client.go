@@ -140,7 +140,10 @@ type ChatRequest struct {
 	// PresencePenalty is set from the catalog only (Thinking.Sampling).
 	PresencePenalty float64 `json:"presence_penalty,omitempty"`
 	MaxTokens       int     `json:"max_tokens,omitempty"`
-	Stream          bool    `json:"stream,omitempty"`
+	// MaxCompletionTokens is MaxTokens under the name OpenAI's own API takes;
+	// its newer models refuse max_tokens. Set only on the copy wireBody sends.
+	MaxCompletionTokens int  `json:"max_completion_tokens,omitempty"`
+	Stream              bool `json:"stream,omitempty"`
 	// StreamOptions asks the provider (OpenAI/OpenRouter) to emit a terminal
 	// usage frame during streaming, so streamed calls are billed like normal ones.
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
@@ -760,6 +763,30 @@ func (c *Client) openAIAPI() bool {
 	return c.provider == ProviderOpenAI && strings.Contains(c.endpoint, "api.openai.com")
 }
 
+// wireBody is req as JSON for this client's endpoint. OpenAI's own API is
+// sent the reply cap as max_completion_tokens: its newer models answer
+// HTTP 400 to max_tokens, and the older ones read either. A copy is changed,
+// so a retry of req still reads what it asked for.
+//
+// A model there that thinks is sent temperature 1 and no other sampling: it
+// answers HTTP 400 to any other value ("Only the default (1) value is
+// supported").
+func (c *Client) wireBody(req *ChatRequest) ([]byte, error) {
+	if !c.openAIAPI() {
+		return json.Marshal(req)
+	}
+	out := *req
+	out.MaxCompletionTokens, out.MaxTokens = req.MaxTokens, 0
+	model := req.Model
+	if model == "" {
+		model = c.model
+	}
+	if f, ok := c.facts(model); ok && f.Thinking.Default && req.ReasoningEffort != "none" {
+		out.Temperature, out.TopP, out.TopK, out.PresencePenalty = 1, 0, 0, 0
+	}
+	return json.Marshal(&out)
+}
+
 // maxCacheKey is the longest prompt_cache_key OpenAI accepts. OpenRouter
 // passes the key on to OpenAI's hosts, which refuse the whole request
 // ("string too long") for a longer one.
@@ -946,7 +973,7 @@ func (c *Client) completeOpenAI(ctx context.Context, req *ChatRequest) (*ChatRes
 	ctx, cancel := context.WithTimeout(ctx, c.timeoutFor(req))
 	defer cancel()
 
-	body, err := json.Marshal(req)
+	body, err := c.wireBody(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -1100,7 +1127,7 @@ func (c *Client) completeStreamResp(ctx context.Context, req *ChatRequest, onChu
 	c.keepCacheKey(req)
 	c.askForCache(req)
 
-	body, err := json.Marshal(req)
+	body, err := c.wireBody(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}

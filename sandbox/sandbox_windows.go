@@ -200,7 +200,14 @@ func platformCommand(ctx context.Context, cancel bool, r Report, allow map[Effec
 			cmd.Env = append(os.Environ(), "TEMP="+writable[0], "TMP="+writable[0])
 		}
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Token: syscall.Token(tok)}
+	// CREATE_NO_WINDOW: a console program started from a process with no
+	// console (a service: EnbarrNet runs as LocalSystem in session 0) is given
+	// a new console, and at low integrity it cannot create one: Windows ends it
+	// with 0xC0000142 before it runs, having written nothing. Observed: every
+	// locked command, the self-test's included, failing in the service while
+	// passing from a console. Without a console window it starts, its output
+	// still reaches the pipes, and what it starts inherits the same.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Token: syscall.Token(tok), CreationFlags: windows.CREATE_NO_WINDOW}
 	return cmd, nil
 }
 
@@ -252,9 +259,17 @@ func selfTest() error {
 	if err != nil {
 		return err
 	}
-	got, _ := cmd.Output()
+	// The command's own exit is non-zero by design (the refused create), so
+	// its error is kept only to say why a read failed: a command that never
+	// started writes nothing and leaves its exit status as the one clue.
+	got, runErr := cmd.Output()
 	if len(got) < 5 || string(got[:5]) != "probe" {
-		return fmt.Errorf("a locked command could not read a file: got %q", got)
+		var stderr []byte
+		var ee *exec.ExitError
+		if errors.As(runErr, &ee) {
+			stderr = ee.Stderr
+		}
+		return fmt.Errorf("a locked command could not read a file: got %q (%v, stderr %q)", got, runErr, stderr)
 	}
 	if _, err := os.Stat(out); err == nil {
 		return errors.New("a locked command created a file")

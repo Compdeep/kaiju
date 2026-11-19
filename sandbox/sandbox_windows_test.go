@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestMain(m *testing.M) {
@@ -103,5 +105,22 @@ func TestALockedCommandCanWriteAWritableFolder(t *testing.T) {
 	runCmd(t, "echo", "x", ">", filepath.Join(other, "new"))
 	if _, err := os.Stat(filepath.Join(other, "new")); err == nil {
 		t.Fatal("wrote outside the writable folder")
+	}
+}
+
+// A locked command starts without a console window. In a service, which has no
+// console, a low-integrity console program cannot be given one and is ended
+// with 0xC0000142 before it runs; run from a console, as this test is, the
+// failure never shows, so the flag itself is what is checked.
+func TestALockedCommandStartsWithoutAConsoleWindow(t *testing.T) {
+	cmd := Command(context.Background(), 100, nil, "cmd", "/C", "echo", "x")
+	if cmd.Err != nil {
+		t.Fatalf("not locked: %v", cmd.Err)
+	}
+	if cmd.SysProcAttr == nil || cmd.SysProcAttr.Token == 0 {
+		t.Fatal("the command carries no restricted token")
+	}
+	if cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatalf("CREATE_NO_WINDOW not set: flags %#x", cmd.SysProcAttr.CreationFlags)
 	}
 }

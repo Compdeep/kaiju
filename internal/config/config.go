@@ -189,14 +189,18 @@ type AgentConfig struct {
 	// fine here, unlike the planner/executor/router lanes.
 	AnswerProvider string `json:"answer_provider,omitempty"`
 	AnswerModel    string `json:"answer_model,omitempty"`
-	WallClockSec   int    `json:"wall_clock_sec"`
-	MaxTurns       int    `json:"max_turns"`
-	RateLimit      int    `json:"rate_limit"`
-	SafetyLevel    int    `json:"safety_level"`
-	DataDir        string `json:"data_dir"`
-	Workspace      string `json:"workspace"`
-	MetadataDir    string `json:"-"` // set at runtime — .kaiju/ in CLI, same as workspace in web
-	CLIMode        bool   `json:"-"` // set at runtime, not from config file
+	// AggregatorReasoning is whether the aggregator thinks before it writes the
+	// final answer: "on", "off", or empty for the lane's own rule. Read at
+	// start-up; not on the settings page.
+	AggregatorReasoning string `json:"aggregator_reasoning,omitempty"`
+	WallClockSec        int    `json:"wall_clock_sec"`
+	MaxTurns            int    `json:"max_turns"`
+	RateLimit           int    `json:"rate_limit"`
+	SafetyLevel         int    `json:"safety_level"`
+	DataDir             string `json:"data_dir"`
+	Workspace           string `json:"workspace"`
+	MetadataDir         string `json:"-"` // set at runtime — .kaiju/ in CLI, same as workspace in web
+	CLIMode             bool   `json:"-"` // set at runtime, not from config file
 	// ClassifierEnabled controls the pre-plan preflight LLM call that selects
 	// skill guidance, infers intent, routes chat/meta queries, and hints
 	// required tool categories. Default true — disabling degrades behavior

@@ -32,12 +32,12 @@ import (
 type Lane int
 
 const (
-	// Heavy is the reasoning model: the planner, Holmes, the microplanner, the
-	// compute architect and its coder. Slow, expensive, and the only one
+	// Heavy is the reasoning model: the planner, the reflector (thinking off),
+	// Holmes, the microplanner, the compute architect and its coder. Slow, expensive, and the only one
 	// trusted with a forced tool call.
 	Heavy Lane = iota
 
-	// Light is the executor model: preflight, the reflector, the observer, the
+	// Light is the executor model: preflight, the observer, the
 	// context curator, the plan validator. Cheap and frequent.
 	Light
 

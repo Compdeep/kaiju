@@ -53,8 +53,8 @@ func IsVisionModel(id string) bool {
  * organization may use which model, and the default. Every LLM call in the
  * engine flows through one of two lanes:
  *
- *   heavy  — executive, aggregator, planner, validator, RCA, react (a.llm)
- *   light  — classify, route, preflight, reflect, observe, compact (a.executor)
+ *   heavy  — executive, aggregator, planner, reflect, validator, RCA, react (a.llm)
+ *   light  — classify, route, preflight, observe, compact (a.executor)
  *
  * A request may name a Provider+Model for either lane. The selection rides the
  * run context (set once at the API boundary alongside the token principal) and

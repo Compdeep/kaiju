@@ -41,8 +41,8 @@ func TestReframe_AFinishedReplyIsPassedOn(t *testing.T) {
 }
 
 // An edge that does not reason, on a model the catalog says can stop, is given
-// room for the framing alone. The reflector's edge, which reasons, and a model
-// that cannot stop keep the room for reasoning.
+// room for the framing alone. A model that cannot stop keeps the room for
+// reasoning.
 func TestEdgeReplyCap(t *testing.T) {
 	const window = 262144
 	stops := edgeCapAgent(window, true)
@@ -55,8 +55,8 @@ func TestEdgeReplyCap(t *testing.T) {
 	if got := stops.edgeReplyCap(context.Background(), ReframeToAnswer); got != edgeWriteCap {
 		t.Errorf("answer edge on a model that can stop: %d, want %d", got, edgeWriteCap)
 	}
-	if got := stops.edgeReplyCap(context.Background(), ReframeToReflector); got != 8192 {
-		t.Errorf("reflector edge, which reasons: %d, want 8192", got)
+	if got := stops.edgeReplyCap(context.Background(), ReframeToReflector); got != edgeWriteCap {
+		t.Errorf("reflector edge on a model that can stop: %d, want %d", got, edgeWriteCap)
 	}
 
 	cannot := edgeCapAgent(window, true)

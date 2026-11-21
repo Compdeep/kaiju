@@ -382,6 +382,7 @@ type Sampling struct {
 	Temperature     float64 `json:"temperature"`
 	TopP            float64 `json:"top_p"`
 	TopK            int     `json:"top_k"`
+	MinP            float64 `json:"min_p,omitempty"`
 	PresencePenalty float64 `json:"presence_penalty,omitempty"`
 }
 

@@ -90,6 +90,13 @@ type Sampling struct {
 	Temperature float64
 	TopP        float64
 	TopK        int
+	// MinP drops every token less likely than this share of the most likely
+	// one. Roleplay tunes are run on it rather than top_p: Cydonia, a
+	// Mistral Small 3.2 tune, at temperature 0.3 and nothing else, turned to
+	// repetition and garbage as a long chat grew. Only the chat-completions
+	// body carries it (OpenRouter, vLLM); Bedrock and OpenAI's own API have no
+	// such parameter. Zero sends nothing.
+	MinP float64
 	// PresencePenalty discourages a token already written. Qwen's card for
 	// qwen3.6 gives 1.5 for thinking on general tasks, "to reduce endless
 	// repetitions": on run 107d88a3 (2026-11-16) the planner thought until its

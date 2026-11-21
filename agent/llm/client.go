@@ -137,6 +137,7 @@ type ChatRequest struct {
 	Temperature float64   `json:"temperature"`
 	TopP        float64   `json:"top_p,omitempty"` // set from the catalog only (Sampling, Thinking.Sampling)
 	TopK        int       `json:"top_k,omitempty"`
+	MinP        float64   `json:"min_p,omitempty"` // set from the catalog only (Sampling)
 	// PresencePenalty is set from the catalog only (Sampling, Thinking.Sampling).
 	PresencePenalty float64 `json:"presence_penalty,omitempty"`
 	MaxTokens       int     `json:"max_tokens,omitempty"`

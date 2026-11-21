@@ -91,3 +91,27 @@ func TestResponsesThinkingOffSendsThePublishedTemperature(t *testing.T) {
 		t.Errorf("reasoning %v, want effort none", got["reasoning"])
 	}
 }
+
+// A roleplay tune's min_p reaches the request, with its published temperature.
+func TestMinPIsSentFromTheCatalog(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &got)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer srv.Close()
+	catalog := func(string) (ModelFacts, bool) {
+		return ModelFacts{Sampling: Sampling{Temperature: 1, MinP: 0.05}}, true
+	}
+	c := NewClient(srv.URL, "k", "thedrummer/cydonia-24b-v4.1").Catalog(catalog)
+	if _, err := c.Complete(context.Background(), &ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hello"}}, Temperature: 0.3, MaxTokens: 100,
+	}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if got["temperature"] != 1.0 || got["min_p"] != 0.05 || got["top_p"] != nil {
+		t.Errorf("sent temperature %v, min_p %v, top_p %v; want 1, 0.05 and none", got["temperature"], got["min_p"], got["top_p"])
+	}
+}

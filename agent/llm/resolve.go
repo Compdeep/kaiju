@@ -202,7 +202,7 @@ func (c *Client) applyReasoning(req *ChatRequest) {
 	// decision to the cap with its thinking off.
 	if s := r.Sampling; s.Temperature > 0 {
 		req.Temperature, req.TopP, req.TopK = s.Temperature, s.TopP, s.TopK
-		req.PresencePenalty = s.PresencePenalty
+		req.MinP, req.PresencePenalty = s.MinP, s.PresencePenalty
 	}
 }
 

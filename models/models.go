@@ -97,6 +97,10 @@ type Info struct {
 	// ThinkingSampling is the decoding its maker publishes for when it thinks.
 	// Zero means none published, and the caller's temperature is sent as it is.
 	ThinkingSampling Sampling `json:"thinking_sampling,omitempty"`
+	// Sampling is the decoding its maker publishes for when it does NOT think:
+	// a model that cannot think, or one whose thinking a call switched off.
+	// Zero means none published, and the caller's temperature is sent as it is.
+	Sampling Sampling `json:"sampling,omitempty"`
 	// Pace is how this model's speed compares with the rest, as a word an
 	// operator can read. Read it through DeadlineMultiple.
 	//

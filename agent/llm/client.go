@@ -135,9 +135,9 @@ type ChatRequest struct {
 	Tools       []ToolDef `json:"tools,omitempty"`
 	ToolChoice  any       `json:"tool_choice,omitempty"` // "auto", "required", "none", or {"type":"function","function":{"name":"X"}}
 	Temperature float64   `json:"temperature"`
-	TopP        float64   `json:"top_p,omitempty"` // set from the catalog only (Thinking.Sampling)
+	TopP        float64   `json:"top_p,omitempty"` // set from the catalog only (Sampling, Thinking.Sampling)
 	TopK        int       `json:"top_k,omitempty"`
-	// PresencePenalty is set from the catalog only (Thinking.Sampling).
+	// PresencePenalty is set from the catalog only (Sampling, Thinking.Sampling).
 	PresencePenalty float64 `json:"presence_penalty,omitempty"`
 	MaxTokens       int     `json:"max_tokens,omitempty"`
 	Stream          bool    `json:"stream,omitempty"`

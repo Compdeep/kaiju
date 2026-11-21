@@ -22,8 +22,8 @@ type resolved struct {
 	// acts on them. Zero values ask for nothing.
 	Effort Effort
 	Budget int
-	// Sampling is the model's published decoding for a call that thinks, or
-	// zero.
+	// Sampling is the model's published decoding for this call: the thinking
+	// one for a call that thinks, the other for one that does not, or zero.
 	Sampling Sampling
 	// Wait multiplies the ordinary deadline. Always 1 or more.
 	Wait float64
@@ -114,7 +114,9 @@ func resolveReasoning(req *ChatRequest, f ModelFacts, known bool) resolved {
 	thinking := out.Say && out.Think || !out.Say && f.Thinking.Default
 	if !thinking {
 		// Nothing left to narrow: an effort and a budget bound thinking that is
-		// going to happen, and none is.
+		// going to happen, and none is. The sampling still applies — a call
+		// that does not think is the one a low temperature sends into a loop.
+		out.Sampling = f.Sampling
 		return out
 	}
 
@@ -194,8 +196,10 @@ func (c *Client) applyReasoning(req *ChatRequest) {
 	} else {
 		req.Reasoning = r.wire()
 	}
-	// A thinking call is sampled as the model's maker says, over the caller's
-	// temperature: at 0.3 and nothing else, qwen3.6's plans repeated to the cap.
+	// A call is sampled as the model's maker says, over the caller's
+	// temperature, thinking or not: at 0.3 and nothing else, qwen3.6's plans
+	// repeated to the cap thinking, and gpt-6-luna's reflector repeated its
+	// decision to the cap with its thinking off.
 	if s := r.Sampling; s.Temperature > 0 {
 		req.Temperature, req.TopP, req.TopK = s.Temperature, s.TopP, s.TopK
 		req.PresencePenalty = s.PresencePenalty

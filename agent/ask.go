@@ -131,7 +131,7 @@ func (a *Agent) askParsed(ctx context.Context, l Lane, req *llm.ChatRequest) (*l
 	if err != nil {
 		return resp, err
 	}
-	if llm.Truncated(resp) {
+	if llm.Truncated(resp) && !llm.KeepCappedObject(req, resp) {
 		return resp, llm.TruncationError(req.MaxTokens)
 	}
 	return resp, nil

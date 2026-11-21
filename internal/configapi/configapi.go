@@ -518,6 +518,7 @@ func Facts(id string) (llm.ModelFacts, bool) {
 		},
 		CacheOnRequest: m.Cache == models.CacheRequested,
 		Converse:       m.API == models.APIConverse,
+		Sampling:       llm.Sampling(m.Sampling),
 	}, true
 }
 

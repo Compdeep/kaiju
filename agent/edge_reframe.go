@@ -250,11 +250,14 @@ type ReframeEdge struct {
 	Name   string // what this edge is called in the trace
 	Prompt string // the section that writes it
 
-	// Reason is whether this edge's model may think before it writes.
+	// Reason is whether this edge's model may think before it writes. No edge
+	// does: each rewrites what it was handed, and the thinking comes out of the
+	// same cap as the paragraph.
 	//
-	// False is the right answer for an edge in general: it rewrites what it was
-	// handed, and the thinking comes out of the same cap as the paragraph. It is
-	// the wrong answer for the one edge whose reader acts on what it says.
+	// The reflector's edge used to, on this measurement, when the reflector ran
+	// on the executor model and the briefing was most of what it went on. The
+	// reflector now runs on the reasoning model and reads the steps' results
+	// itself, so it can check a briefing that overstates.
 	//
 	// Measured on qwen/qwen3.6-35b-a3b, one real payload replayed: with the
 	// reasoning switched off, three briefings in three asserted the run had
@@ -272,13 +275,10 @@ type ReframeEdge struct {
 
 // The three edges. Each names the section in prompts.md that belongs to it.
 //
-// Only the reflector's reasons. It is the edge whose reader decides whether the
-// run continues and what the verdict is, so a briefing that overstates there
-// becomes a verdict that overstates; the planner's reader is going to ask for
-// more work anyway, and the writer's is told the wording is its own.
+// None reasons — see ReframeEdge.Reason.
 var (
 	ReframeToPlanner   = ReframeEdge{Name: "plan", Prompt: prompt.ReframePlan}
-	ReframeToReflector = ReframeEdge{Name: "reflect", Prompt: prompt.ReframeReflect, Reason: true}
+	ReframeToReflector = ReframeEdge{Name: "reflect", Prompt: prompt.ReframeReflect}
 	ReframeToAnswer    = ReframeEdge{Name: "answer", Prompt: prompt.ReframeAnswer}
 )
 

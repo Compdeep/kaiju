@@ -416,7 +416,7 @@ Apply a partial config patch — only provided fields change. LLM/executor/visio
   "llm": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
   "executor": {"model": "openai/gpt-4.1-mini"},
   "vision": {"provider": "openrouter", "model": "qwen/qwen-2.5-vl-72b-instruct"},
-  "chat": {"provider": "openrouter", "model": "sao10k/l3.3-euryale-70b", "tools": []},
+  "chat": {"provider": "openrouter", "model": "sao10k/l3.1-euryale-70b", "tools": []},
   "agent": {"dag_enabled": true, "dag_mode": "nReflect", "safety_level": 200, "route_provider": "openrouter", "route_model": "openai/gpt-4.1-mini"}
 }
 ```

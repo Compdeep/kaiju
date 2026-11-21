@@ -32,6 +32,17 @@ type ModelFacts struct {
 	// Converse is true for a Bedrock model served only on Bedrock's Converse
 	// API, which a Bedrock client then sends it to — see converse.go.
 	Converse bool
+	// Sampling is how the model's maker says to sample it when it does NOT
+	// think. Zero leaves the caller's temperature alone and sends nothing else.
+	//
+	// The stages set their own temperatures, from 0 to 0.3, and every one of
+	// those is below what the makers publish: OpenAI and Anthropic default to
+	// 1, Qwen gives 0.7 without thinking. Run 77f395aa (2026-11-21): the
+	// reflector on gpt-6-luna, thinking "none" at the caller's 0.3, wrote one
+	// complete decision and then the same decision 28 more times, to its
+	// 8,192-token cap, and the run ended without an answer. Thinking.Sampling
+	// covers only the calls that think, so this is the other half.
+	Sampling Sampling
 }
 
 // Thinking is what a model does when asked to reason, or asked not to.
@@ -79,6 +90,13 @@ type Sampling struct {
 	Temperature float64
 	TopP        float64
 	TopK        int
+	// MinP drops every token less likely than this share of the most likely
+	// one. Roleplay tunes are run on it rather than top_p: Cydonia, a
+	// Mistral Small 3.2 tune, at temperature 0.3 and nothing else, turned to
+	// repetition and garbage as a long chat grew. Only the chat-completions
+	// body carries it (OpenRouter, vLLM); Bedrock and OpenAI's own API have no
+	// such parameter. Zero sends nothing.
+	MinP float64
 	// PresencePenalty discourages a token already written. Qwen's card for
 	// qwen3.6 gives 1.5 for thinking on general tasks, "to reduce endless
 	// repetitions": on run 107d88a3 (2026-11-16) the planner thought until its

@@ -176,13 +176,17 @@ func (a *Agent) fireReflection(ctx context.Context, rNode *Node, graph *Graph,
 	if gateCtx != nil {
 		reflectID.GateReturned = gateCtx.Sources
 	}
-	resp, err := a.completeLightChecked(withTrace(ctx, reflectID), &llm.ChatRequest{
+	// The reasoning model, with its thinking off: the decision to go on, replan
+	// or conclude is the run's judgement, and the executor model made it badly,
+	// while thinking on a forced decision this small spends the reply budget
+	// the call is for (see llm.WithoutReasoning).
+	resp, err := a.completeHeavyChecked(withTrace(ctx, reflectID), llm.WithoutReasoning(&llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{reflectorSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(ctx, Light, replyDecisionBudget),
-	})
+		MaxTokens:   a.replyBudget(ctx, Heavy, replyDecisionBudget),
+	}))
 
 	if err != nil {
 		a.broadcastDAGEvent(graph, DAGEvent{Type: "node", SessionID: trigger.SessionID, NodeID: rNode.ID, Node: &NodeInfo{
@@ -409,13 +413,14 @@ func (a *Agent) fireInterjectionReflection(ctx context.Context, rNode *Node, gra
 	if gateCtx != nil {
 		interjectID.GateReturned = gateCtx.Sources
 	}
-	resp, err := a.completeLightChecked(withTrace(ctx, interjectID), &llm.ChatRequest{
+	// The same lane and thinking as the reflector above.
+	resp, err := a.completeHeavyChecked(withTrace(ctx, interjectID), llm.WithoutReasoning(&llm.ChatRequest{
 		Messages:    messages,
 		Tools:       []llm.ToolDef{reflectorSchema()},
 		ToolChoice:  "required",
 		Temperature: a.cfg.Temperature,
-		MaxTokens:   a.replyBudget(ctx, Light, replyDecisionBudget),
-	})
+		MaxTokens:   a.replyBudget(ctx, Heavy, replyDecisionBudget),
+	}))
 
 	if err != nil {
 		ch <- nodeCompletion{NodeID: rNode.ID, Err: fmt.Errorf("interjection reflection LLM: %w", err)}

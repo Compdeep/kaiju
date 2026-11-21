@@ -160,7 +160,7 @@ func (a *Agent) writeTrace(ctx context.Context, req *llm.ChatRequest,
 		tr.Recovered = resp.Recovered.String()
 		tr.Provider = resp.Provider
 	}
-	tr.Asked, tr.Sent = describeThinking(req.Think), describeSent(req.Reasoning)
+	tr.Asked, tr.Sent = describeThinking(req.Think), describeSent(req.Reasoning, req.ReasoningEffort)
 	WriteLLMTrace(tr)
 }
 
@@ -234,7 +234,13 @@ func describeThinking(r *llm.Reasoning) string {
 // describeSent is the same phrase for what actually reached the wire. It is ""
 // when nothing did, which is the answer that differs from Asked when the
 // catalog says the model would not have acted on it.
-func describeSent(c *llm.ReasoningControl) string {
+func describeSent(c *llm.ReasoningControl, effort string) string {
+	// Bedrock and OpenAI's own API are sent the one word, reasoning_effort, in
+	// place of the object — see applyReasoning. Reading only the object printed
+	// "(nothing asked)" for gpt-6-luna's reflector while "none" went out.
+	if effort != "" {
+		return "reasoning_effort " + effort
+	}
 	if c == nil {
 		return ""
 	}

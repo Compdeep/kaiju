@@ -31,6 +31,10 @@ func sentBody(t *testing.T, provider string, req *ChatRequest) string {
 			_, _ = w.Write([]byte(`{"id":"m","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/responses") {
+			_, _ = w.Write([]byte(`{"id":"r","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
 	}))
 	defer srv.Close()

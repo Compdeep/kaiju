@@ -72,6 +72,12 @@ type ModelConfig struct {
 	// Set at run time: SetReasoning.
 	LLMReasoning string
 
+	// AggregatorReasoning is whether the aggregator, which writes the final
+	// answer from what the run gathered, thinks first: "on", "off", or empty
+	// for the lane's own rule. Separate from LLMReasoning so a deployment can
+	// keep the planner thinking and have the write-up not, or the other way.
+	AggregatorReasoning string
+
 	// LLMReasoningEffort is how hard to think when thinking: minimal, low,
 	// medium, high, xhigh or max, or empty to say nothing. A different question
 	// from LLMReasoning, which is whether to think at all — a model may answer

@@ -23,6 +23,14 @@ Single step:
 
 wttr.in covers today and the next 2 days only. No format gives more.
 
+### No location given
+
+When the user names no place and none is known from the conversation or memory, don't ask for one. Leave the city out and wttr.in uses the location of the machine making the request:
+
+1. `bash` — `curl -s "wttr.in/?format=4"`
+
+The reply starts with the place it chose. Name that place in the answer, so the user can give another if it is wrong.
+
 ### A day more than 2 days ahead
 
 Use Open-Meteo, which covers up to 16 days. Two steps, the second taking the coordinates from the first:

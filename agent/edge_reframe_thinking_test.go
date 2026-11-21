@@ -8,25 +8,23 @@ import (
 )
 
 /*
- * Every reframe edge states its thinking, and only the reflector's reasons.
+ * Every reframe edge states its thinking, and none reasons.
  *
- * Both halves matter. An edge that states nothing takes the provider's default,
- * which on every model line since early 2026 is ON — and this edge then spent
- * the whole reply budget reasoning and returned an empty content field, so the
- * only thing recoverable was the tail of an unfinished argument. And the edge
- * that feeds the reflector is the one whose reader acts on what it says, so it
- * is the one where the reasoning is worth paying for.
+ * An edge that states nothing takes the provider's default, which on every
+ * model line since early 2026 is ON — and this edge then spent the whole reply
+ * budget reasoning and returned an empty content field, so the only thing
+ * recoverable was the tail of an unfinished argument.
  *
  * Asserted on the shape rather than through a call because the failure was a
  * field nobody set: nothing in ask or prepare touches Think.
  */
-func TestOnlyTheReflectorEdgeReasons(t *testing.T) {
+func TestNoReframeEdgeReasons(t *testing.T) {
 	for _, tc := range []struct {
 		edge ReframeEdge
 		want llm.Want
 	}{
 		{ReframeToPlanner, llm.WantOff},
-		{ReframeToReflector, llm.WantOn},
+		{ReframeToReflector, llm.WantOff},
 		{ReframeToAnswer, llm.WantOff},
 	} {
 		req := tc.edge.reasoning(&llm.ChatRequest{})

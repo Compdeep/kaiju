@@ -35,17 +35,21 @@ func TestTheTraceShowsWhatWasAskedAndWhatWentOut(t *testing.T) {
 func TestTheTraceShowsWhatTheWireCarried(t *testing.T) {
 	on, off := true, false
 	for _, c := range []struct {
-		name string
-		sent *llm.ReasoningControl
-		want string
+		name   string
+		sent   *llm.ReasoningControl
+		effort string
+		want   string
 	}{
-		{"nothing", nil, ""},
-		{"off", &llm.ReasoningControl{Enabled: &off}, "off"},
-		{"on", &llm.ReasoningControl{Enabled: &on}, "on"},
-		{"on at an effort", &llm.ReasoningControl{Enabled: &on, Effort: "high"}, "on high"},
-		{"bounded without being switched on", &llm.ReasoningControl{MaxTokens: 2000}, " (2000 tokens)"},
+		{"nothing", nil, "", ""},
+		{"off", &llm.ReasoningControl{Enabled: &off}, "", "off"},
+		{"on", &llm.ReasoningControl{Enabled: &on}, "", "on"},
+		{"on at an effort", &llm.ReasoningControl{Enabled: &on, Effort: "high"}, "", "on high"},
+		{"bounded without being switched on", &llm.ReasoningControl{MaxTokens: 2000}, "", " (2000 tokens)"},
+		// OpenAI's own API and Bedrock: the word, not the object.
+		{"reasoning_effort none", nil, "none", "reasoning_effort none"},
+		{"reasoning_effort medium", nil, "medium", "reasoning_effort medium"},
 	} {
-		if got := describeSent(c.sent); got != c.want {
+		if got := describeSent(c.sent, c.effort); got != c.want {
 			t.Errorf("%s: sent = %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -59,7 +63,7 @@ func TestAWithheldEffortIsVisibleInThePair(t *testing.T) {
 	on := true
 	narrowed := &llm.ReasoningControl{Enabled: &on} // the catalog dropped the effort
 
-	asked, sent := describeThinking(intent), describeSent(narrowed)
+	asked, sent := describeThinking(intent), describeSent(narrowed, "")
 	if asked == sent {
 		t.Fatalf("asked and sent both read %q, so a withheld effort is invisible", asked)
 	}

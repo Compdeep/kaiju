@@ -82,6 +82,7 @@ func (a *Agent) runAggregator(ctx context.Context, trigger Trigger, graph *Graph
 		Reply:       replyAnalysisBudget,
 		Temperature: a.cfg.Temperature,
 		Graph:       graph,
+		Think:       wantOf(a.cfg.AggregatorReasoning),
 	})
 	raw := proseOf(resp)
 
@@ -203,4 +204,16 @@ func (a *Agent) assembleAggregatorPrompt(trigger Trigger, graph *Graph, gateCtx 
 		return "(no evidence gathered — all nodes failed or were skipped)\n"
 	}
 	return sb.String()
+}
+
+// wantOf reads an "on" / "off" setting as a thinking request. Anything else,
+// empty included, states nothing, so the lane's own rule applies.
+func wantOf(setting string) llm.Want {
+	switch strings.ToLower(strings.TrimSpace(setting)) {
+	case "on":
+		return llm.WantOn
+	case "off":
+		return llm.WantOff
+	}
+	return llm.WantAuto
 }

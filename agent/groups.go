@@ -128,6 +128,22 @@ func pickedGroups(graph *Graph) []string {
 	return graph.Preflight.Groups
 }
 
+// requiredGroups is the picked groups the planner must reach for: every one
+// except the group compute_mode added, which is offered and not required.
+func requiredGroups(graph *Graph) []string {
+	groups := pickedGroups(graph)
+	if graph == nil || graph.Preflight == nil || graph.Preflight.ComputeGroup == "" {
+		return groups
+	}
+	out := make([]string, 0, len(groups))
+	for _, g := range groups {
+		if g != graph.Preflight.ComputeGroup {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
 // toolsInGroups keeps the tools that belong to the picked groups, in order.
 func (a *Agent) toolsInGroups(names, groups []string) []string {
 	if len(groups) == 0 {

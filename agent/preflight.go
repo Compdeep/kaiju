@@ -27,6 +27,13 @@ type PreflightResult struct {
 	Mode   string       // "chat" | "agent"
 	Intent gates.Intent // inferred intent rank from the registry (used when trigger intent is Auto)
 	Groups []string     // toolapi.Groups this request needs; the planner is shown only their tools, or every tool when empty
+	// ComputeGroup is the group compute_mode added to Groups, "" when it added
+	// none. Its tools are offered, not required: the planner is told to use a
+	// required group's tools, and a compute group listed there had it plan a
+	// compute step for every run preflight marked shallow, as it did for a
+	// buy-or-not question on 2026-11-22 (5,228 output tokens, a prose report
+	// written by a program).
+	ComputeGroup string
 	// Context is what the run is about, and every concrete thing it needs.
 	//
 	// Framing is a sentence and belongs in one. Identifiers are not: a URL with
@@ -826,7 +833,11 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 
 	// Groups after compute_mode, which can add one, and cards after groups,
 	// which they follow.
-	out.Groups = withComputeGroup(knownGroups(raw.Groups), out.ComputeMode)
+	picked := knownGroups(raw.Groups)
+	out.Groups = withComputeGroup(picked, out.ComputeMode)
+	if len(out.Groups) > len(picked) {
+		out.ComputeGroup = out.Groups[len(out.Groups)-1]
+	}
 	out.Skills = a.groupCards(raw.Skills, out.Groups)
 
 	// NeedsSynthesis — pass through; the aggregate decision reads it (with a

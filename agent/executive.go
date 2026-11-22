@@ -617,7 +617,6 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		sb.WriteString("Do not use compute for simple arithmetic, summarization, qualitative analysis, or plain lookup.\n\n")
 		sb.WriteString("When using compute:\n")
 		sb.WriteString("- set mode to the preflight compute mode;\n")
-		sb.WriteString("- if no mode is provided, use \"shallow\";\n")
 		sb.WriteString("- provide the goal, not code;\n")
 		sb.WriteString("- wire inputs with `${step.<tag>.<field>}`;\n")
 		sb.WriteString("- do not use compute to edit known files.\n\n")
@@ -625,7 +624,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 			// Refused at dispatch when coding is off (compute.go). Offering it
 			// had planners choose it for a plain calculation and fail: runs
 			// 457eb7b7 and a9489bca, 2026-11-16.
-			sb.WriteString("compute(deep) is switched off on this deployment: building a codebase is not available. Use compute(shallow) for every calculation.\n\n")
+			sb.WriteString("compute(deep) is switched off on this deployment: building a codebase is not available.\n\n")
 		} else {
 			sb.WriteString("compute(deep) builds a new codebase (webapp, CLI tool, service, library) from scratch: ONE deep step per build.\n\n")
 		}
@@ -651,7 +650,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 	//
 	// Restored after the groups change removed it: without it a run whose
 	// preflight picked web planned compute alone and never fetched the data.
-	if groups := pickedGroups(graph); len(groups) > 0 {
+	if groups := requiredGroups(graph); len(groups) > 0 {
 		sb.WriteString("## Required Tool Groups\n")
 		sb.WriteString(fmt.Sprintf("This query needs tools from: %s. Your plan MUST include at least one tool from each of these groups.\n",
 			strings.Join(groups, ", ")))

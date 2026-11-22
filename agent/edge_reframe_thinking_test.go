@@ -78,6 +78,8 @@ func TestTheEdgeCapLeavesRoomForReasoningItCannotSwitchOff(t *testing.T) {
 func edgeCapAgent(window int, thinks bool) *Agent {
 	a := &Agent{}
 	a.executor = llm.NewClient("http://example.invalid", "", "some/model")
+	// The briefings are written on the reasoning lane (reframeLane).
+	a.llm = llm.NewClient("http://example.invalid", "", "some/model")
 	a.cfg.Limits = func(string) (int, int) { return window, 0 }
 	a.cfg.Thinks = func(string) bool { return thinks }
 	return a

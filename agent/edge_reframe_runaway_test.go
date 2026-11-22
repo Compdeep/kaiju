@@ -46,7 +46,7 @@ func TestReframe_AFinishedReplyIsPassedOn(t *testing.T) {
 func TestEdgeReplyCap(t *testing.T) {
 	const window = 262144
 	stops := edgeCapAgent(window, true)
-	stops.executor.Catalog(func(string) (llm.ModelFacts, bool) {
+	stops.llm.Catalog(func(string) (llm.ModelFacts, bool) {
 		return llm.ModelFacts{ContextTokens: window, Thinking: llm.Thinking{Default: true, Optional: true}}, true
 	})
 	if got := stops.edgeReplyCap(context.Background(), ReframeToPlanner); got != edgeWriteCap {
@@ -60,7 +60,7 @@ func TestEdgeReplyCap(t *testing.T) {
 	}
 
 	cannot := edgeCapAgent(window, true)
-	cannot.executor.Catalog(func(string) (llm.ModelFacts, bool) {
+	cannot.llm.Catalog(func(string) (llm.ModelFacts, bool) {
 		return llm.ModelFacts{ContextTokens: window, Thinking: llm.Thinking{Default: true}}, true
 	})
 	if got := cannot.edgeReplyCap(context.Background(), ReframeToPlanner); got != 8192 {

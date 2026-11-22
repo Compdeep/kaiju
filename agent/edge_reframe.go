@@ -298,6 +298,16 @@ func (e ReframeEdge) reasoning(req *llm.ChatRequest) *llm.ChatRequest {
 	return llm.WithoutReasoning(req)
 }
 
+// reframeLane is the lane the briefings are written on: the reasoning model,
+// with thinking off as each edge states. They were written on the executor
+// model, and on 2026-11-22 nemotron-3-nano's reflect briefing listed a new
+// "still open" question every round that the request did not ask (peers,
+// margin sustainability, customer concentration), the reflector replanned on
+// each, and a buy-or-not question ran eight rounds and 2.1M input tokens. The
+// briefing decides what the evidence will carry; the model that plans and
+// reflects writes it. The extra cost is a few tenths of a cent a run.
+const reframeLane = Heavy
+
 // edgeWriteCap is an edge's cap when its model is not reasoning, and what
 // bounds a model that loops in its reply.
 //
@@ -320,11 +330,11 @@ const edgeWriteCap = 2048
  * return: the cap.
  */
 func (a *Agent) edgeReplyCap(ctx context.Context, edge ReframeEdge) int {
-	budget := a.replyBudget(ctx, Light, replyEdgeBudget)
+	budget := a.replyBudget(ctx, reframeLane, replyEdgeBudget)
 	if edge.Reason || budget <= edgeWriteCap {
 		return budget
 	}
-	c, model := a.lane(ctx, Light)
+	c, model := a.lane(ctx, reframeLane)
 	if c == nil || !c.StopsThinking(resolvedModel(model, c)) {
 		return budget
 	}
@@ -339,7 +349,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 
 	// Only to ask whether a model is configured at all. Which model, and the
 	// size of the reply, are the door's to settle.
-	if client, _ := a.lightLane(ctx); client == nil {
+	if client, _ := a.lane(ctx, reframeLane); client == nil {
 		return reframeHeading + "\n\n" + material
 	}
 
@@ -355,7 +365,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		NodeType: "reframe",
 		Tag:      "reframe:" + edge.Name,
 		Input:    map[string]string{"edge": edge.Name},
-	}), Light, edge.reasoning(&llm.ChatRequest{
+	}), reframeLane, edge.reasoning(&llm.ChatRequest{
 		ToolChoice: "none",
 		// The material alone, with the steps' outputs in it, and not the arcs.
 		// The arcs were sent so this stage could check the prose against what

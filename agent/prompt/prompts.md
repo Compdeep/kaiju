@@ -964,16 +964,15 @@ Produce exactly two sections:
 WHERE WE ARE:
 <two or three sentences>
 
-STILL OPEN:
-- <question>
-- <question>
+TO ADDRESS THE QUESTION:
+nothing
 
-Use a third question only when it identifies a separate issue that materially
-affects whether the request can be completed. If nothing material remains open,
-write:
+Write "nothing" when the evidence is enough to answer the request. Only when
+something genuinely prevents the answer or would materially change it, write
+instead:
 
-STILL OPEN: nothing — the available evidence is sufficient for the next stage
-to answer the request.
+TO ADDRESS THE QUESTION:
+- <question>
 
 ## WHERE WE ARE
 
@@ -999,14 +998,18 @@ Calibrate the assessment to the quality of the work:
 - Do not claim that progress was made unless it resolved a specific part of the
   request.
 
-## STILL OPEN
+## TO ADDRESS THE QUESTION
 
-Ask the two or three most decisive questions left by the evidence, in priority
-order.
+This section is measured against the user's request, not against the topic. A
+subject always has more that could be asked about it; list only what the
+answer to this request depends on. More detail, more confidence, or
+reconciling a small disagreement between sources does not qualify. At most
+three, in priority order.
 
 Each question must:
 
-- help settle an unmet part of the request;
+- be something the answer cannot be given without, or would be different
+  without;
 - be answerable from the existing material or through one concrete further
   check or decision;
 - concern the substance of the request, not the run's internal housekeeping;
@@ -1105,7 +1108,7 @@ The section "## What happened so far" is a short account of where this run stand
 
 It describes the material in this request and nothing else. Where it says something was not retrieved, treat it as not retrieved and do not fill the space from memory.
 
-Under that account is either a list of questions the material leaves open, or a list of claims the material does not support. Neither is an instruction, and neither is a finding. A question you can already answer is settled — say so and move on. A claim named there is one you must not make.
+Under that account is either what the answer to the request still depends on ("nothing" when the evidence is enough), or a list of claims the material does not support. Neither is an instruction, and neither is a finding. A question you can already answer is settled — say so and move on. A claim named there is one you must not make.
 
 === GROUPREVIEW ===
 Several steps ran the same tool at the same time. You are reading all of their

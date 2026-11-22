@@ -301,7 +301,7 @@ func (e ReframeEdge) reasoning(req *llm.ChatRequest) *llm.ChatRequest {
 // reframeLane is the lane the briefings are written on: the reasoning model,
 // with thinking off as each edge states. They were written on the executor
 // model, and on 2026-11-22 nemotron-3-nano's reflect briefing listed a new
-// "still open" question every round that the request did not ask (peers,
+// "still open" question every round that the request did not ask (other companies,
 // margin sustainability, customer concentration), the reflector replanned on
 // each, and a buy-or-not question ran eight rounds and 2.1M input tokens. The
 // briefing decides what the evidence will carry; the model that plans and

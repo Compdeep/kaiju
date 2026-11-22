@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -139,10 +140,12 @@ func BuildMessagesWithResults(system, userQuery string, history []llm.Message, a
 	msgs = append(msgs, llm.Message{Role: "system", Content: system})
 	msgs = append(msgs, history...)
 
+	var seen []seenText
 	for _, arc := range arcs {
+		seen = seenTexts(arc, seen)
 		calls := make([]llm.ToolCall, 0, len(arc))
 		for _, r := range arc {
-			args, err := json.Marshal(r.Params)
+			args, err := json.Marshal(withSeenTextsReferenced(r.Params, seen, r.Name))
 			if err != nil {
 				args = []byte("{}")
 			}
@@ -168,6 +171,88 @@ func BuildMessagesWithResults(system, userQuery string, history []llm.Message, a
 
 	msgs = append(msgs, llm.Message{Role: "user", Content: userQuery})
 	return msgs
+}
+
+// A result's text pasted into a later call is written once.
+//
+// A step that reads an earlier step by reference, ${step.fetch_page.content},
+// runs on the text that reference stood for: the dispatcher pastes it into the
+// parameters before the step fires, and the pasted parameters are what the
+// step's record keeps. Replayed as they are, every later call carried that text
+// twice, once as the earlier step's own result and once inside this step's
+// arguments. On run 10:00 2026-11-22 one compute step's arguments were 65k
+// characters, three research pages it had named by reference, beside the same
+// three pages as results, in every planner, reflector and aggregator call after
+// it. So the replay compares each argument against the texts the results so far
+// hold, and writes a text it finds again as the reference to the step that
+// produced it. The tool ran on the text; the stage reading the replay has it
+// once, in the tool message it belongs to.
+
+// seenTextMin is the shortest result text the replay replaces. A shorter value,
+// a url, a path, a number, reads better pasted and saves nothing referenced.
+const seenTextMin = 200
+
+// seenText is one result text the replay knows, and the reference it writes in
+// its place.
+type seenText struct {
+	step string // the step whose result it is
+	text string
+	ref  string
+}
+
+// seenTexts adds an arc's result texts to seen: each step's text and each
+// string field of its payload that is long enough to be worth a reference.
+// Fields in key order, so the same arcs give the same list on every call.
+func seenTexts(arc []StepResult, seen []seenText) []seenText {
+	for _, r := range arc {
+		if len(r.Content) >= seenTextMin {
+			seen = append(seen, seenText{r.Name, r.Content, "${step." + r.Name + ".content}"})
+		}
+		if len(r.Payload) == 0 {
+			continue
+		}
+		var fields map[string]any
+		if json.Unmarshal(r.Payload, &fields) != nil {
+			continue
+		}
+		for _, key := range slices.Sorted(maps.Keys(fields)) {
+			if s, ok := fields[key].(string); ok && len(s) >= seenTextMin {
+				seen = append(seen, seenText{r.Name, s, "${step." + r.Name + "." + key + "}"})
+			}
+		}
+	}
+	return seen
+}
+
+// withSeenTextsReferenced is v with every seen text inside its strings written
+// as that text's reference. A new value, never v changed: the parameters are
+// the node's own and other readers want them as the tool received them. A
+// step's own result is not referenced from its own arguments; a tool that
+// echoes its input would otherwise be shown reading itself.
+func withSeenTextsReferenced(v any, seen []seenText, step string) any {
+	switch x := v.(type) {
+	case string:
+		out := x
+		for _, s := range seen {
+			if s.step != step && strings.Contains(out, s.text) {
+				out = strings.ReplaceAll(out, s.text, s.ref)
+			}
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			out[k] = withSeenTextsReferenced(val, seen, step)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = withSeenTextsReferenced(val, seen, step)
+		}
+		return out
+	}
+	return v
 }
 
 // stepCallID is the id pairing a tool message with the call that produced it.

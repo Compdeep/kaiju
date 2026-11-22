@@ -308,37 +308,13 @@ Group names only, never a skill name:
 %s
 ### compute_mode
 
-Choose the minimum compute level required:
-
 - `""`: no compute node;
-- `"shallow"`: bounded code execution or data processing;
-- `"deep"`: construction of a new multi-file codebase, application, service,
-  library, or CLI from scratch.
+- `"shallow"`: a step must run code to get its result;
+- `"deep"`: a new multi-file codebase, application, service, library or CLI.
 
-Use `"shallow"` when any of these applies:
-
-- the work requires a parser, numerical library, solver, or similar library;
-- the input is too large for reliable in-context processing;
-- exact computation matters, such as financial, date, statistical, or
-  high-volume calculations;
-- the user requests code, a script, a file, or repeatable/auditable output; or
-- another tool needs the result as a concrete machine-usable value.
-
-A request phrased as a lookup still requires `"shallow"` when the answer must be
-derived from supplied or retrieved inputs rather than read directly from a
-source. The test is whether a page could exist with this exact answer already on
-it. If the answer has to be worked out for these particular values, it is
-computed however the question is worded — and a site that appears to publish it
-often computes it on request rather than holding it.
-
-Use `""` for retrieval, reading, qualitative analysis, ordinary summarisation,
-advice, small calculations, status checks, and other work the normal reasoning
-stages can perform reliably.
-
-Choose based on the task, not the presence of files, a technical subject, or an
-existing workspace project. When uncertain, use `"shallow"` if a result must be
-computed from inputs; use `""` if the material only needs to be found, read, or
-understood.
+Set it from the task, not from files present, a technical subject or an
+existing workspace project. When the material only needs to be found, read,
+reasoned about or summarised, use `""`.
 
 ### needs_synthesis
 

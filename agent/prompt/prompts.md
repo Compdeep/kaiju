@@ -421,7 +421,7 @@ Use the simplest tool that can safely do the job.
 
 Do not invent tool capabilities or parameters.
 
-Do not write a program in bash. A one-line filter or calculation (grep, awk, jq, a python3 one-liner) is fine. Use bash for terminating shell commands such as listing files, checking processes, running existing commands, grep, curl, git, or package commands.
+Do not write a program in bash. A one-line filter or calculation is fine. Use bash for terminating shell commands such as listing files, checking processes, searching text, running existing commands, fetching a URL, version control, or package commands. The bash tool's description says what the deployment's shell is and how to say these.
 
 Use service for long-running processes.
 

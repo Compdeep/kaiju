@@ -735,7 +735,7 @@ func (a *Agent) executiveSystemPrompt(ctx context.Context, graph *Graph, relevan
 		// residue. Here and not in the Compute Nodes section because it changes
 		// with the run.
 		if graph != nil && graph.Preflight != nil && graph.Preflight.ComputeMode != "" {
-			sb.WriteString(fmt.Sprintf("**Preflight compute_mode = %q** — use this mode for every compute step. Do NOT override based on workspace contents.\n\n", graph.Preflight.ComputeMode))
+			sb.WriteString(fmt.Sprintf("**Compute mode: %q** — preflight has already determined the mode. Do not re-evaluate it based on workspace contents. Use compute only when a step requires code execution, not for calculations that can be handled through reasoning.\n\n", graph.Preflight.ComputeMode))
 		} else {
 			sb.WriteString("**No compute mode was set**: use direct tools, and plan compute only when the request needs code run.\n\n")
 		}

@@ -180,7 +180,6 @@ unrelated current query must not inherit the classification of prior work.
 
 {
   "skills": ["skill_key", ...],
-  "mode": "chat" | "agent",
   "intent": %s,
   "groups": ["group", ...],
   "context": {
@@ -247,22 +246,6 @@ include tangentially related skills.
 Available skills:
 
 %s
-
-### mode
-
-Choose from:
-
-- `"chat"`: only greetings, thanks, farewells, and trivial acknowledgements with
-  no actionable or substantive content.
-- `"agent"`: everything else, including questions, instructions, complaints,
-  corrections, hypotheticals, requests for advice, and implied requests to
-  inspect or fix something.
-
-Messages such as "try again", "you didn't fetch it", "what about X?", and "can't
-you use Y?" are `"agent"`.
-
-When uncertain, choose `"agent"`. A false `"chat"` classification prevents the
-request from being handled.
 
 ### intent
 

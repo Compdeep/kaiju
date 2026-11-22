@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -21,13 +20,10 @@ func TestParsePreflight_KeepsWhatParsed(t *testing.T) {
 
 	out, err := parsePreflight(raw)
 	if err != nil {
-		t.Fatalf("a reply that answered mode and intent was rejected outright: %v", err)
+		t.Fatalf("a reply that answered its intent was rejected outright: %v", err)
 	}
 	if out.Intent != "operate" {
 		t.Errorf("intent = %q, so compute would still be gated", out.Intent)
-	}
-	if out.Mode != "agent" {
-		t.Errorf("mode = %q", out.Mode)
 	}
 	if len(out.Skills) != 2 {
 		t.Errorf("skills = %v", out.Skills)
@@ -44,7 +40,7 @@ func TestParsePreflight_CleanReplyIsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if out.Mode != "agent" || out.Intent != "observe" || out.ComputeMode != "shallow" || !out.NeedsSynthesis {
+	if out.Intent != "observe" || out.ComputeMode != "shallow" || !out.NeedsSynthesis {
 		t.Errorf("a clean reply came back changed: %+v", out)
 	}
 	if len(out.Groups) != 1 || len(out.Skills) != 1 {
@@ -72,8 +68,5 @@ func TestParsePreflight_SalvagedIntentIsTheOneThatMatters(t *testing.T) {
 	}
 	if out.Intent != "operate" {
 		t.Errorf("intent = %q — compute (impact 100) would be gated at rank 0", out.Intent)
-	}
-	if !strings.EqualFold(out.Mode, "agent") {
-		t.Errorf("mode = %q", out.Mode)
 	}
 }

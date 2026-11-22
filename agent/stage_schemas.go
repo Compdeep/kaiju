@@ -349,10 +349,6 @@ func preflightSchema() llm.ToolDef {
 			Parameters: json.RawMessage(fmt.Sprintf(`{
 				"type": "object",
 				"properties": {
-					"mode": {
-						"type": "string",
-						"enum": ["chat", "agent"]
-					},
 					"intent": {
 						"type": "string",
 						"description": "Intent rank name from the registry, e.g. rank(0), rank(100), etc."
@@ -378,7 +374,7 @@ func preflightSchema() llm.ToolDef {
 						"description": "True when the answer needs a written-up synthesis over gathered evidence: deep/multi-source research, a report or analysis, or 'build/flesh out/draft a section/document'. False for a single fact lookup, a yes/no, or a quick status check. When true, the run always ends with the aggregator (full synthesis) rather than a short reflector summary."
 					}
 				},
-				"required": ["mode", "intent", "context", "compute_mode"]
+				"required": ["intent", "context", "compute_mode"]
 			}`, groupEnum(), PreflightContextSchema())),
 		},
 	}

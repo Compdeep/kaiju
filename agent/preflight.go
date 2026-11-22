@@ -24,7 +24,7 @@ import (
  */
 type PreflightResult struct {
 	Skills []string     // which guidance cards/skills apply (union of capabilities + skillGuidance)
-	Mode   string       // "chat" | "agent"
+	Mode   string       // "chat" | "agent": the router's decision; preflight runs only for agent
 	Intent gates.Intent // inferred intent rank from the registry (used when trigger intent is Auto)
 	Groups []string     // toolapi.Groups this request needs; the planner is shown only their tools, or every tool when empty
 	// ComputeGroup is the group compute_mode added to Groups, "" when it added
@@ -210,7 +210,6 @@ func isWebURL(s string) bool {
  */
 type preflightRaw struct {
 	Skills         []string            `json:"skills"`
-	Mode           string              `json:"mode"`
 	Intent         string              `json:"intent"`
 	Groups         []string            `json:"groups"`
 	Context        preflightContextRaw `json:"context"`
@@ -795,15 +794,11 @@ func (a *Agent) validatePreflight(raw *preflightRaw) *PreflightResult {
 		Intent: gates.Intent(0),
 	}
 
-	// Mode — must be one of the three
-	switch strings.ToLower(strings.TrimSpace(raw.Mode)) {
-	case "chat":
-		out.Mode = "chat"
-	case "agent", "":
-		out.Mode = "agent"
-	default:
-		log.Printf("[dag] preflight: unknown mode %q, defaulting to agent", raw.Mode)
-	}
+	// Mode is not preflight's: the router decides chat or agent, and preflight
+	// runs only once it has said agent. Preflight's own mode field could undo
+	// that: on 2026-11-22 the router said agent for "you have permission now,
+	// try again", preflight said chat, and the turn went to the lane with no
+	// tools, which asked the person to confirm.
 
 	// Intent — resolve via the registry. Unknown names keep the safe default (rank 0).
 	if name := strings.ToLower(strings.TrimSpace(raw.Intent)); name != "" {
@@ -957,7 +952,6 @@ func parsePreflight(raw string) (*preflightRaw, error) {
 		}
 		_ = json.Unmarshal(v, into)
 	}
-	get("mode", &out.Mode)
 	get("intent", &out.Intent)
 	get("skills", &out.Skills)
 	get("groups", &out.Groups)
@@ -965,9 +959,9 @@ func parsePreflight(raw string) (*preflightRaw, error) {
 	get("compute_mode", &out.ComputeMode)
 	get("needs_synthesis", &out.NeedsSynthesis)
 
-	// A reply that named neither is not a preflight result, however well formed.
-	if out.Mode == "" && out.Intent == "" {
-		return nil, fmt.Errorf("preflight reply carries neither mode nor intent")
+	// A reply that names no intent is not a preflight result, however well formed.
+	if out.Intent == "" {
+		return nil, fmt.Errorf("preflight reply carries no intent")
 	}
 	return &out, nil
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Compdeep/kaiju/agent/prompt"
 	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
@@ -277,5 +278,16 @@ func TestTheReflectionBlockIsAbsentWhenNothingReflected(t *testing.T) {
 	}
 	if m == "" {
 		t.Error("the material went empty; the steps still describe a run")
+	}
+}
+
+// An edge reads its section when it is called, so an application's prompts
+// applied after this package's variables were set reach it.
+func TestReframeEdgeReadsItsSectionAtCall(t *testing.T) {
+	old := prompt.ReframePlan
+	t.Cleanup(func() { prompt.ReframePlan = old })
+	prompt.ReframePlan = "an application's own reframe prompt"
+	if got := *ReframeToPlanner.Prompt; got != "an application's own reframe prompt" {
+		t.Fatalf("the planner edge reads %q, not the section as it is now", got)
 	}
 }

@@ -247,8 +247,12 @@ func stepLabel(n *Node) string {
 // paragraph reworded three ways served the first of them and was carried by the
 // other two.
 type ReframeEdge struct {
-	Name   string // what this edge is called in the trace
-	Prompt string // the section that writes it
+	Name string // what this edge is called in the trace
+	// Prompt is the section that writes it, read at each call: the sections are
+	// filled when prompts are applied, after this package's variables are set,
+	// so a copy taken here would keep the engine's text and miss an
+	// application's override.
+	Prompt *string
 
 	// Reason is whether this edge's model may think before it writes. No edge
 	// does: each rewrites what it was handed, and the thinking comes out of the
@@ -277,9 +281,9 @@ type ReframeEdge struct {
 //
 // None reasons — see ReframeEdge.Reason.
 var (
-	ReframeToPlanner   = ReframeEdge{Name: "plan", Prompt: prompt.ReframePlan}
-	ReframeToReflector = ReframeEdge{Name: "reflect", Prompt: prompt.ReframeReflect}
-	ReframeToAnswer    = ReframeEdge{Name: "answer", Prompt: prompt.ReframeAnswer}
+	ReframeToPlanner   = ReframeEdge{Name: "plan", Prompt: &prompt.ReframePlan}
+	ReframeToReflector = ReframeEdge{Name: "reflect", Prompt: &prompt.ReframeReflect}
+	ReframeToAnswer    = ReframeEdge{Name: "answer", Prompt: &prompt.ReframeAnswer}
 )
 
 /*
@@ -375,7 +379,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 		// every result of every round, again: on run 798fce9d (2026-11-16) 77%
 		// of each call, 35,000 tokens in to write about 200, and the stage this
 		// edge feeds receives the arcs itself.
-		Messages: BuildMessagesWithResults(edge.Prompt, whole, nil, nil),
+		Messages:    BuildMessagesWithResults(*edge.Prompt, whole, nil, nil),
 		Temperature: 0.2,
 		MaxTokens:   a.edgeReplyCap(ctx, edge),
 		// Thinking is stated either way, per edge — see ReframeEdge.Reason for
@@ -401,7 +405,7 @@ func (a *Agent) EdgeReFrame(ctx context.Context, graph *Graph, request string, e
 	// debugrecord.go.
 	rec := DebugRecord{
 		ID: "reframe:" + edge.Name, Kind: "edge", Label: edge.Name, Round: graph.Round(),
-		System: edge.Prompt, User: whole,
+		System: *edge.Prompt, User: whole,
 	}
 	if err != nil || resp == nil || len(resp.Choices) == 0 ||
 		strings.TrimSpace(resp.Choices[0].Message.Content) == "" {

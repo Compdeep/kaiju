@@ -182,7 +182,7 @@ func platformSnapshot(ctx context.Context) (string, error) {
 	}
 	switch runtime.GOOS {
 	case "windows":
-		cmd := toolapi.Command(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
+		cmd := toolapi.Command(toolapi.ForFixedRead(ctx), "powershell", "-NoProfile", "-NonInteractive", "-Command",
 			"$os = Get-CimInstance Win32_OperatingSystem; "+
 				"'Uptime: ' + (((Get-Date) - $os.LastBootUpTime).ToString('d\\.hh\\:mm\\:ss')) + "+
 				"\"`nTotalMemMB: \" + [math]::Round($os.TotalVisibleMemorySize/1024,0) + "+

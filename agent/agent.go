@@ -425,6 +425,26 @@ type localClearance struct {
 }
 
 /*
+ * capToClearance lowers a run's intent to this node's clearance.
+ * desc: Whether the intent was pinned by the caller or inferred by the
+ *       planner, a run never goes past the clearance: the clearance is what an
+ *       operator sets to say how much this node may do, and a pin may only
+ *       lower a run, never take it past that. Auto is left as auto.
+ * param: intent - the run's intent.
+ * return: the intent, at most the clearance.
+ */
+func (a *Agent) capToClearance(intent gates.Intent) gates.Intent {
+	if intent == gates.IntentAuto || a.clearance == nil {
+		return intent
+	}
+	if clr := gates.Intent(a.clearance.Clearance()); intent > clr {
+		log.Printf("[agent] intent %s is above the clearance %d, capping", intent, clr)
+		return clr
+	}
+	return intent
+}
+
+/*
  * Clearance returns the current clearance level.
  * desc: Thread-safe read of the clearance value, never above the ceiling.
  * return: the current clearance integer.

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -245,6 +246,16 @@ func (d *DiskUsage) ExecuteTyped(ctx context.Context, params map[string]any) (to
 		// Root or no path: use df -h (instant) + du top-level breakdown
 		return diskUsageAll(ctx)
 	}
+	// The sizes are read by the service's own account, so the folder is
+	// checked as a step's read first: a local path, and below the level that
+	// reads every file only a folder an ordinary account may list.
+	dir, err := toolapi.OpenForStep(ctx, path)
+	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
+		return toolapi.ToolFail("usage", rr.Why, map[string]any{"path": path, "refused": true}), nil
+	}
+	if err == nil {
+		dir.Close()
+	}
 	return diskUsagePath(ctx, path)
 }
 
@@ -261,7 +272,7 @@ func diskUsageAll(ctx context.Context) (toolapi.ToolMessage, error) {
 	var dfCmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		dfCmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command",
+		dfCmd = toolapi.Command(toolapi.ForFixedRead(ctx), "powershell", "-NoProfile", "-Command",
 			"Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N='UsedGB';E={[math]::Round($_.Used/1GB,2)}}, @{N='FreeGB';E={[math]::Round($_.Free/1GB,2)}} | Format-Table -AutoSize")
 	default:
 		dfCmd = toolapi.Command(ctx, "df", "-h")
@@ -316,8 +327,11 @@ func diskUsagePath(ctx context.Context, path string) (toolapi.ToolMessage, error
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = toolapi.Command(timeoutCtx, "powershell", "-NoProfile", "-Command",
-			fmt.Sprintf("Get-ChildItem -Force '%s' | ForEach-Object { $size = 0; if(!$_.PSIsContainer){ $size = $_.Length } else { $size = (Get-ChildItem -Recurse -Force $_.FullName -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum }; [PSCustomObject]@{Name=$_.Name; SizeMB=[math]::Round($size/1MB,1)} } | Sort-Object SizeMB -Descending | Format-Table -AutoSize", path))
+		// The path goes in as an environment variable, not as script text: a
+		// quote in it closed the string and ran the rest as PowerShell.
+		cmd = toolapi.Command(toolapi.ForFixedRead(timeoutCtx), "powershell", "-NoProfile", "-Command",
+			"Get-ChildItem -Force -LiteralPath $env:KAIJU_DU_PATH | ForEach-Object { $size = 0; if(!$_.PSIsContainer){ $size = $_.Length } else { $size = (Get-ChildItem -Recurse -Force $_.FullName -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum }; [PSCustomObject]@{Name=$_.Name; SizeMB=[math]::Round($size/1MB,1)} } | Sort-Object SizeMB -Descending | Format-Table -AutoSize")
+		cmd.Env = append(os.Environ(), "KAIJU_DU_PATH="+path)
 	default:
 		cmd = toolapi.Command(timeoutCtx, "du", "-h", "--max-depth=1", "--threshold=1M", path)
 	}

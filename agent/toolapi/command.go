@@ -3,6 +3,7 @@ package toolapi
 import (
 	"context"
 	"os/exec"
+	"runtime"
 
 	"github.com/Compdeep/kaiju/sandbox"
 )
@@ -37,6 +38,19 @@ func LevelOf(ctx context.Context) (int, bool) {
 	return l, ok
 }
 
+/*
+ * ReadsEverything reports whether the step ctx belongs to may read what only
+ * the service's own account may (every file, the Security log), and the level
+ * that may. The engine's own reads, and a context with no level, may.
+ */
+func ReadsEverything(ctx context.Context) (bool, int) {
+	l, ok := LevelOf(ctx)
+	if ctx == nil || !ok || IsEngine(ctx) {
+		return true, l
+	}
+	return sandbox.ReadsEverything(l)
+}
+
 // level is the level programs started under ctx run at: 0 when none was set.
 func level(ctx context.Context) int {
 	l, _ := LevelOf(ctx)
@@ -50,6 +64,27 @@ func level(ctx context.Context) int {
  */
 func ForEngine(ctx context.Context) context.Context {
 	return context.WithValue(ctx, engineKey{}, true)
+}
+
+/*
+ * ForFixedRead returns the context for a program a tool starts only to read,
+ * whose text is fixed: on Windows it runs as this program, elsewhere under
+ * ctx's lock as before.
+ * desc: Windows' lock cannot read what such a tool is for: WMI answers it
+ *       nothing, nor do the TCP connections, and other accounts' processes
+ *       show no path. Linux's lock reads as an ordinary account does, so it is
+ *       kept there.
+ *
+ *       Only for a fixed program or script. Nothing of the model's goes into
+ *       its text: a value from the model goes in as an argument, an
+ *       environment variable or a checked number. A program that runs the
+ *       model's text (bash, git) keeps Command's lock.
+ */
+func ForFixedRead(ctx context.Context) context.Context {
+	if runtime.GOOS == "windows" {
+		return ForEngine(ctx)
+	}
+	return ctx
 }
 
 // IsEngine reports whether ctx is ForEngine's.

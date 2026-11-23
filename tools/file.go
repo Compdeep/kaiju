@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"bufio"
 	"bytes"
 	"context"
@@ -117,7 +118,7 @@ func (f *FileRead) Execute(ctx context.Context, params map[string]any) (string, 
 	return toolapi.StringResult(f.ExecuteTyped(ctx, params))
 }
 
-func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
+func (f *FileRead) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	path, _ := params["path"].(string)
 	if path == "" {
 		return toolapi.ToolMessage{}, fmt.Errorf("file_read: path is required")
@@ -128,7 +129,14 @@ func (f *FileRead) ExecuteTyped(_ context.Context, params map[string]any) (toola
 	}
 	path = filepath.Clean(path)
 
-	fh, err := os.Open(path)
+	// Read in this program's own code, so no lock holds it: a local path, and
+	// below the level that reads every file only what the operating system
+	// lets an ordinary account read, checked on the opened file
+	// (toolapi.OpenForStep). A refusal is the result, not a fault.
+	fh, err := toolapi.OpenForStep(ctx, path)
+	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
+		return toolapi.ToolFail("file", rr.Why, map[string]any{"path": path, "refused": true}), nil
+	}
 	if err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("file_read: %w", err)
 	}
@@ -589,11 +597,11 @@ func (f *FileList) OutputSchema() json.RawMessage {
  * return: JSON string with directory entries, or error if the directory cannot be read
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
-func (f *FileList) Execute(_ context.Context, params map[string]any) (string, error) {
-	return toolapi.StringResult(f.ExecuteTyped(nil, params))
+func (f *FileList) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return toolapi.StringResult(f.ExecuteTyped(ctx, params))
 }
 
-func (f *FileList) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
+func (f *FileList) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	path, _ := params["path"].(string)
 	path = strings.TrimSpace(path)
 	if (path == "" || path == "." || path == "./") && f.workspace != "" {
@@ -606,7 +614,17 @@ func (f *FileList) ExecuteTyped(_ context.Context, params map[string]any) (toola
 	}
 	path = filepath.Clean(path)
 
-	entries, err := os.ReadDir(path)
+	// As file_read: a local path, and below the level that reads every file
+	// only a folder an ordinary account may list, checked on the open folder.
+	dir, err := toolapi.OpenForStep(ctx, path)
+	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
+		return toolapi.ToolFail("listing", rr.Why, map[string]any{"path": path, "refused": true}), nil
+	}
+	if err != nil {
+		return toolapi.ToolMessage{}, fmt.Errorf("file_list: %w", err)
+	}
+	entries, err := dir.ReadDir(-1)
+	dir.Close()
 	if err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("file_list: %w", err)
 	}

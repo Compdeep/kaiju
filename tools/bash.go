@@ -678,7 +678,12 @@ func refused(stderr string) bool {
 	s := strings.ToLower(stderr)
 	return strings.Contains(s, "permission denied") ||
 		strings.Contains(s, "operation not permitted") ||
-		strings.Contains(s, "read-only file system")
+		strings.Contains(s, "read-only file system") ||
+		// Windows: cmd and Win32 say "Access is denied", PowerShell names the
+		// exception, and a low-integrity write is refused with either.
+		strings.Contains(s, "access is denied") ||
+		strings.Contains(s, "unauthorizedaccess") ||
+		strings.Contains(s, "access to the path")
 }
 
 // noErrorMessage is what a failure says when the command printed nothing on

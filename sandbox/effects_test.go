@@ -31,7 +31,9 @@ func TestDescribe(t *testing.T) {
 		t.Fatalf("everything is allowed at 200, got %q", d)
 	}
 	d := Describe(100)
-	for _, want := range []string{"level 100", "may read any file", "use the network", "may not change files (needs 200)", "run as root (needs 200)"} {
+	// "may not" and each refusal apart: on Windows the refused list starts
+	// with what low integrity hides (describe_windows_test.go).
+	for _, want := range []string{"level 100", "may read any file", "use the network", "may not", "change files (needs 200)", "run as root (needs 200)"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("missing %q in %q", want, d)
 		}

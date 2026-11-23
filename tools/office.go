@@ -10,6 +10,7 @@ package tools
 // "Save As" to the modern format is the fix.
 
 import (
+	"errors"
 	"archive/zip"
 	"bytes"
 	"context"
@@ -81,7 +82,7 @@ func (t *OfficeExtract) Execute(ctx context.Context, params map[string]any) (str
 	return toolapi.StringResult(t.ExecuteTyped(ctx, params))
 }
 
-func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
+func (t *OfficeExtract) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	raw, _ := params["path"].(string)
 	if strings.TrimSpace(raw) == "" {
 		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: 'path' is required")
@@ -100,13 +101,25 @@ func (t *OfficeExtract) ExecuteTyped(_ context.Context, params map[string]any) (
 		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: %q is the legacy binary format, which isn't supported — save it as .docx/.pptx/.xlsx and try again", filepath.Base(path))
 	}
 
-	zr, err := zip.OpenReader(path)
+	// Opened as a step's read: a local path, and only what its level may read.
+	fh, err := toolapi.OpenForStep(ctx, path)
+	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
+		return toolapi.ToolFail("file", rr.Why, map[string]any{"path": path, "refused": true}), nil
+	}
 	if err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: open %s: %w", filepath.Base(path), err)
 	}
-	defer zr.Close()
+	defer fh.Close()
+	info, err := fh.Stat()
+	if err != nil {
+		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: open %s: %w", filepath.Base(path), err)
+	}
+	zr, err := zip.NewReader(fh, info.Size())
+	if err != nil {
+		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: open %s: %w", filepath.Base(path), err)
+	}
 
-	kind, out, err := extractOOXML(&zr.Reader, ext, maxChars)
+	kind, out, err := extractOOXML(zr, ext, maxChars)
 	if err != nil {
 		// "zip: not a valid zip file" is what a caller sees for a plain text file,
 		// which names the container format rather than the mistake. Office documents

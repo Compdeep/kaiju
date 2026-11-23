@@ -84,6 +84,7 @@ func (a *Agent) RunReActSync(ctx context.Context, trigger Trigger) (*SyncResult,
 	if intent == gates.IntentAuto {
 		intent = gates.Intent(a.intentRegistry.DefaultRank())
 	}
+	intent = a.capToClearance(intent)
 
 	var outcome string
 	totalToolCalls := 0

@@ -90,6 +90,9 @@ func (p *ProcessList) Execute(ctx context.Context, params map[string]any) (strin
 
 func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	filter, _ := params["filter"].(string)
+	// Windows names a process without ".exe" (Get-Process), so "winlogon.exe"
+	// matched nothing there.
+	match := strings.TrimSuffix(strings.ToLower(filter), ".exe")
 	limit := 30
 	if l, ok := toolapi.ParamNum(params, "limit"); ok && l > 0 {
 		limit = int(l)
@@ -98,9 +101,15 @@ func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command",
-			"Get-Process | Sort-Object CPU -Descending | Select-Object -First "+strconv.Itoa(limit*2)+
-				" Id, ProcessName, CPU, @{N='MemMB';E={[math]::Round($_.WorkingSet64/1MB,1)}} | Format-Table -AutoSize")
+		// Every process when filtering: the busiest few were listed first and the
+		// filter applied to them, so a quiet process (winlogon) was never found.
+		first := ""
+		if match == "" {
+			first = " | Select-Object -First " + strconv.Itoa(limit*2)
+		}
+		cmd = toolapi.Command(toolapi.ForFixedRead(ctx), "powershell", "-NoProfile", "-Command",
+			"Get-Process | Sort-Object CPU -Descending"+first+
+				" | Select-Object Id, ProcessName, CPU, @{N='MemMB';E={[math]::Round($_.WorkingSet64/1MB,1)}} | Format-Table -AutoSize")
 	default:
 		// auxww, not aux: without it a long command line is cut at the
 		// terminal width, and the part that identifies a suspicious process
@@ -125,7 +134,7 @@ func (p *ProcessList) ExecuteTyped(ctx context.Context, params map[string]any) (
 		if count >= limit {
 			break
 		}
-		if filter != "" && !strings.Contains(strings.ToLower(line), strings.ToLower(filter)) {
+		if match != "" && !strings.Contains(strings.ToLower(line), match) {
 			continue
 		}
 		if strings.TrimSpace(line) != "" {

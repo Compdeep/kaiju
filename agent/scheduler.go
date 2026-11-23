@@ -691,12 +691,6 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 	intent := trigger.Intent()
 	if planResult.WasAuto {
 		intent = planResult.InferredIntent
-		// Cap inferred intent by clearance (planner can't escalate beyond node's ceiling)
-		clr := gates.Intent(a.clearance.Clearance())
-		if intent > clr {
-			log.Printf("[dag] executive inferred %s but clearance is %d, capping", intent, clr)
-			intent = clr
-		}
 		// Cap by user's scope ceiling (planner can't escalate beyond what
 		// the user is allowed to request)
 		if trigger.Scope != nil && gates.Intent(trigger.Scope.MaxIntent) < intent {
@@ -704,6 +698,10 @@ func (a *Agent) runPlanAndSchedule(ctx context.Context, trigger Trigger, graph *
 			intent = gates.Intent(trigger.Scope.MaxIntent)
 		}
 	}
+	// Pinned or inferred, never past this node's clearance: a remote step
+	// carries the run's intent (remoteLevel), and a pin was trusted outright,
+	// so lowering the clearance did not lower what a pinned run sent.
+	intent = a.capToClearance(intent)
 	log.Printf("[dag] scheduler mode: %s, intent: %s", dagMode, intent)
 
 	// launchReady fires all ready nodes.

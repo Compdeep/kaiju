@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
@@ -126,15 +127,28 @@ func (a *Archive) ExecuteTyped(ctx context.Context, params map[string]any) (tool
 		}
 	}
 
+	msg, err := a.run(ctx, action, archivePath, format, params)
+	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
+		return toolapi.ToolFail("archive", rr.Why, map[string]any{"refused": true}), nil
+	}
+	return msg, err
+}
+
+// run does the action; a file the step may not read comes back as a
+// *toolapi.ReadRefusal, which ExecuteTyped makes the result.
+func (a *Archive) run(ctx context.Context, action, archivePath, format string, params map[string]any) (toolapi.ToolMessage, error) {
 	switch action {
 	case "list":
-		return archiveList(archivePath, format)
+		return archiveList(ctx, archivePath, format)
 	case "extract":
 		dest, _ := params["dest"].(string)
 		if dest == "" {
 			dest = "."
 		}
-		return archiveExtract(archivePath, dest, format)
+		if err := mayWriteAt(ctx, dest); err != nil {
+			return toolapi.ToolFail("archive", err.Error(), map[string]any{"dest": dest, "refused": true}), nil
+		}
+		return archiveExtract(ctx, archivePath, dest, format)
 	case "create":
 		filesRaw, _ := params["files"].([]any)
 		var files []string
@@ -146,7 +160,10 @@ func (a *Archive) ExecuteTyped(ctx context.Context, params map[string]any) (tool
 		if len(files) == 0 {
 			return toolapi.ToolMessage{}, fmt.Errorf("archive: files list is required for create")
 		}
-		return archiveCreate(archivePath, files, format)
+		if err := mayWriteAt(ctx, archivePath); err != nil {
+			return toolapi.ToolFail("archive", err.Error(), map[string]any{"archive_path": archivePath, "refused": true}), nil
+		}
+		return archiveCreate(ctx, archivePath, files, format)
 	default:
 		return toolapi.ToolMessage{}, fmt.Errorf("archive: unknown action %q", action)
 	}
@@ -159,14 +176,14 @@ func (a *Archive) ExecuteTyped(ctx context.Context, params map[string]any) (tool
  * param: format - archive format ("zip" or "tar.gz")
  * return: formatted entry list with count header, or error on read failure
  */
-func archiveList(path, format string) (toolapi.ToolMessage, error) {
+func archiveList(ctx context.Context, path, format string) (toolapi.ToolMessage, error) {
 	switch format {
 	case "zip":
-		r, err := zip.OpenReader(path)
+		r, fh, err := openZip(ctx, path)
 		if err != nil {
-			return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
+			return toolapi.ToolMessage{}, err
 		}
-		defer r.Close()
+		defer fh.Close()
 		var lines, names []string
 		for _, f := range r.File {
 			lines = append(lines, fmt.Sprintf("%10d  %s  %s", f.UncompressedSize64, f.Modified.Format("2006-01-02 15:04"), f.Name))
@@ -182,9 +199,9 @@ func archiveList(path, format string) (toolapi.ToolMessage, error) {
 			archiveData{Action: "list", Path: path, Count: len(lines), Entries: names}), nil
 
 	case "tar.gz":
-		f, err := os.Open(path)
+		f, err := toolapi.OpenForStep(ctx, path)
 		if err != nil {
-			return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
+			return toolapi.ToolMessage{}, archiveErr(err)
 		}
 		defer f.Close()
 		gz, err := gzip.NewReader(f)
@@ -227,6 +244,63 @@ func archiveList(path, format string) (toolapi.ToolMessage, error) {
  * param: format - archive format ("zip" or "tar.gz")
  * return: confirmation message with extracted file count, or error on failure
  */
+// openZip opens a zip archive as a step's read (toolapi.OpenForStep).
+func openZip(ctx context.Context, path string) (*zip.Reader, *os.File, error) {
+	fh, err := toolapi.OpenForStep(ctx, path)
+	if err != nil {
+		return nil, nil, archiveErr(err)
+	}
+	info, err := fh.Stat()
+	if err != nil {
+		fh.Close()
+		return nil, nil, fmt.Errorf("archive: %w", err)
+	}
+	r, err := zip.NewReader(fh, info.Size())
+	if err != nil {
+		fh.Close()
+		return nil, nil, fmt.Errorf("archive: %w", err)
+	}
+	return r, fh, nil
+}
+
+// archiveErr keeps a refusal recognisable (errors.As) and prefixes the rest.
+func archiveErr(err error) error {
+	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
+		return err
+	}
+	return fmt.Errorf("archive: %w", err)
+}
+
+/*
+ * mayWriteAt says whether a step may write at path in this tool's own code.
+ * desc: No lock holds a tool's own code, so below control it writes only into
+ *       the folders its step may write (toolapi.Writable: the workspace), the
+ *       same places a locked command may. At control, or for the engine's own
+ *       work, anywhere. A context with no level is a direct call, not a step,
+ *       and is not held: every step the engine runs carries its level.
+ * return: nil, or why not.
+ */
+func mayWriteAt(ctx context.Context, path string) error {
+	if ctx == nil || toolapi.IsEngine(ctx) {
+		return nil
+	}
+	level, ok := toolapi.LevelOf(ctx)
+	if !ok || level >= toolapi.ImpactControl {
+		return nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	for _, dir := range toolapi.Writable(ctx) {
+		if d, err := filepath.Abs(dir); err == nil && withinDest(d, abs) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s is outside this step's workspace: below level %d this tool writes only there",
+		path, toolapi.ImpactControl)
+}
+
 /*
  * withinDest reports whether an extracted path stays inside the destination.
  *
@@ -286,18 +360,18 @@ func archiveExtractResult(path, dest string, count, skipped, refused int) (toola
 	}
 }
 
-func archiveExtract(archivePath, dest, format string) (toolapi.ToolMessage, error) {
+func archiveExtract(ctx context.Context, archivePath, dest, format string) (toolapi.ToolMessage, error) {
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("archive: mkdir: %w", err)
 	}
 
 	switch format {
 	case "zip":
-		r, err := zip.OpenReader(archivePath)
+		r, fh, err := openZip(ctx, archivePath)
 		if err != nil {
-			return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
+			return toolapi.ToolMessage{}, err
 		}
-		defer r.Close()
+		defer fh.Close()
 		count, skipped, refused := 0, 0, 0
 		for _, f := range r.File {
 			target := filepath.Join(dest, f.Name)
@@ -336,9 +410,9 @@ func archiveExtract(archivePath, dest, format string) (toolapi.ToolMessage, erro
 		return archiveExtractResult(archivePath, dest, count, skipped, refused)
 
 	case "tar.gz":
-		f, err := os.Open(archivePath)
+		f, err := toolapi.OpenForStep(ctx, archivePath)
 		if err != nil {
-			return toolapi.ToolMessage{}, fmt.Errorf("archive: %w", err)
+			return toolapi.ToolMessage{}, archiveErr(err)
 		}
 		defer f.Close()
 		gz, err := gzip.NewReader(f)
@@ -395,7 +469,7 @@ func archiveExtract(archivePath, dest, format string) (toolapi.ToolMessage, erro
  * param: format - archive format ("zip" or "tar.gz")
  * return: confirmation message with archive path and file count, or error on failure
  */
-func archiveCreate(archivePath string, files []string, format string) (toolapi.ToolMessage, error) {
+func archiveCreate(ctx context.Context, archivePath string, files []string, format string) (toolapi.ToolMessage, error) {
 	switch format {
 	case "zip":
 		out, err := os.Create(archivePath)
@@ -410,15 +484,17 @@ func archiveCreate(archivePath string, files []string, format string) (toolapi.T
 				if err != nil || info.IsDir() {
 					return err
 				}
-				w, err := zw.Create(fpath)
-				if err != nil {
-					return err
-				}
-				f, err := os.Open(fpath)
+				// Opened, and checked, before its entry is written: packing a
+				// file is reading it.
+				f, err := toolapi.OpenForStep(ctx, fpath)
 				if err != nil {
 					return err
 				}
 				defer f.Close()
+				w, err := zw.Create(fpath)
+				if err != nil {
+					return err
+				}
 				// A copy that stopped part way puts a shorter file in the archive
 				// than the one on disk, and the count said it was added.
 				if _, err := io.Copy(w, f); err != nil {
@@ -461,6 +537,11 @@ func archiveCreate(archivePath string, files []string, format string) (toolapi.T
 				if err != nil || info.IsDir() {
 					return err
 				}
+				f, err := toolapi.OpenForStep(ctx, fpath)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
 				hdr, err := tar.FileInfoHeader(info, "")
 				if err != nil {
 					return err
@@ -469,11 +550,6 @@ func archiveCreate(archivePath string, files []string, format string) (toolapi.T
 				if err := tw.WriteHeader(hdr); err != nil {
 					return err
 				}
-				f, err := os.Open(fpath)
-				if err != nil {
-					return err
-				}
-				defer f.Close()
 				if _, err := io.Copy(tw, f); err != nil {
 					return err
 				}

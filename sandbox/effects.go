@@ -91,6 +91,13 @@ func (e Effects) Level(eff Effect) int {
 // application's table.
 func AllowsRoot(level int) bool { return currentEffects().Allows(Root, level) }
 
+// ReadsEverything reports whether a step at level may read every file, by the
+// application's table, and the level that does (Never when none does).
+func ReadsEverything(level int) (bool, int) {
+	eff := currentEffects()
+	return eff.Allows(ReadFiles, level), eff.Level(ReadFiles)
+}
+
 // Allows reports whether eff is allowed at level.
 func (e Effects) Allows(eff Effect, level int) bool {
 	l := e.Level(eff)
@@ -105,6 +112,17 @@ func (e Effects) allowedAt(level int) map[Effect]bool {
 	}
 	return a
 }
+
+// lockedWith names effects this platform's lock refuses whenever another one
+// is refused, because one mechanism holds both: on Windows low integrity is
+// what refuses ChangeFiles, and it refuses seeing and signalling programs
+// above it with it (sandbox_windows.go). Describe says so, rather than what
+// the table alone allows. Empty where each effect is held on its own.
+var lockedWith = map[Effect]Effect{}
+
+// effectWordsHere replaces an effect's words on a platform where the plain
+// ones would say something untrue (sandbox_windows.go).
+var effectWordsHere = map[Effect]string{}
 
 var effectWords = map[Effect]string{
 	ReadFiles:      "read any file",
@@ -129,12 +147,23 @@ func Describe(level int) string {
 	}
 	var may, mayNot []string
 	for _, e := range append(lockEffects, Root) {
-		if eff.Allows(e, level) {
-			may = append(may, effectWords[e])
+		w := effectWords[e]
+		if here, ok := effectWordsHere[e]; ok {
+			w = here
+		}
+		l := eff.Level(e)
+		allowed := eff.Allows(e, level)
+		if with, ok := lockedWith[e]; ok && allowed && !eff.Allows(with, level) {
+			allowed = false
+			if wl := eff.Level(with); wl == Never || wl > l {
+				l = wl
+			}
+		}
+		if allowed {
+			may = append(may, w)
 			continue
 		}
-		w := effectWords[e]
-		if l := eff.Level(e); l == Never {
+		if l == Never {
 			w += " (never)"
 		} else {
 			w += fmt.Sprintf(" (needs %d)", l)

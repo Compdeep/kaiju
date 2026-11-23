@@ -267,7 +267,7 @@ func netListeningPorts(ctx context.Context) (toolapi.ToolMessage, error) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command",
+		cmd = toolapi.Command(toolapi.ForFixedRead(ctx), "powershell", "-NoProfile", "-Command",
 			"Get-NetTCPConnection -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess | Format-Table -AutoSize")
 	case "darwin":
 		cmd = toolapi.Command(ctx, "lsof", "-iTCP", "-sTCP:LISTEN", "-P", "-n")
@@ -341,7 +341,7 @@ func netConnections(ctx context.Context, host string, port int) (toolapi.ToolMes
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = toolapi.Command(ctx, "powershell", "-NoProfile", "-Command",
+		cmd = toolapi.Command(toolapi.ForFixedRead(ctx), "powershell", "-NoProfile", "-Command",
 			"Get-NetTCPConnection | Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess | Format-Table -AutoSize")
 	case "darwin":
 		cmd = toolapi.Command(ctx, "lsof", "-i", "-P", "-n")

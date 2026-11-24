@@ -902,7 +902,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		if _, statErr := os.Stat(codePath); os.IsNotExist(statErr) {
 			return "", fmt.Errorf("cannot edit %s: it does not exist, so there is nothing to replace — write it whole instead", destPath)
 		}
-		changed, err := ApplyFileEdits(codePath, editResp.Edits)
+		changed, err := ApplyFileEdits(ctx, codePath, editResp.Edits)
 		if err != nil {
 			return "", fmt.Errorf("apply edits to %s: %w", destPath, err)
 		}
@@ -1066,8 +1066,7 @@ func (a *Agent) computeCode(ctx context.Context, graph *Graph, goal, query strin
 		return a.computeNoChange(graph, tag, destPath,
 			fmt.Sprintf("the coder returned %s unchanged", destPath))
 	}
-	os.MkdirAll(filepath.Dir(codePath), 0755)
-	if err := OverwriteFile(codePath, codeStr); err != nil {
+	if err := OverwriteFile(ctx, codePath, codeStr); err != nil {
 		return "", fmt.Errorf("write code to workspace: %w", err)
 	}
 	log.Printf("[dag] compute code written: %s (%s, %d bytes)", codePath, codeResp.Language, len(codeStr))

@@ -10,7 +10,6 @@ package tools
 // "Save As" to the modern format is the fix.
 
 import (
-	"errors"
 	"archive/zip"
 	"bytes"
 	"context"
@@ -103,8 +102,8 @@ func (t *OfficeExtract) ExecuteTyped(ctx context.Context, params map[string]any)
 
 	// Opened as a step's read: a local path, and only what its level may read.
 	fh, err := toolapi.OpenForStep(ctx, path)
-	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
-		return toolapi.ToolFail("file", rr.Why, map[string]any{"path": path, "refused": true}), nil
+	if why, refused := toolapi.Refused(err); refused {
+		return toolapi.ToolFail("file", why, map[string]any{"path": path, "refused": true}), nil
 	}
 	if err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("office_extract: open %s: %w", filepath.Base(path), err)

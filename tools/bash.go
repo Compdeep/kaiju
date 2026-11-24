@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -654,13 +653,11 @@ func (b *Bash) keepOutput(output string) (path string, written int, truncated bo
 		truncated = true
 	}
 
-	dir := filepath.Join(b.workDir, "output")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", 0, truncated, err
-	}
 	name := fmt.Sprintf("command_%d.txt", time.Now().UnixNano())
-	full := filepath.Join(dir, name)
-	if err := os.WriteFile(full, []byte(keep), 0o644); err != nil {
+	full := filepath.Join(b.workDir, "output", name)
+	// Inside the workspace, whatever the step's level: a symlink put at
+	// output/ does not send the saved text elsewhere.
+	if err := toolapi.WriteFileIn(b.workDir, full, []byte(keep), 0o644); err != nil {
 		return "", 0, truncated, err
 	}
 

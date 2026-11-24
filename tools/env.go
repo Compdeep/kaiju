@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"errors"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -250,8 +249,8 @@ func (d *DiskUsage) ExecuteTyped(ctx context.Context, params map[string]any) (to
 	// checked as a step's read first: a local path, and below the level that
 	// reads every file only a folder an ordinary account may list.
 	dir, err := toolapi.OpenForStep(ctx, path)
-	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
-		return toolapi.ToolFail("usage", rr.Why, map[string]any{"path": path, "refused": true}), nil
+	if why, refused := toolapi.Refused(err); refused {
+		return toolapi.ToolFail("usage", why, map[string]any{"path": path, "refused": true}), nil
 	}
 	if err == nil {
 		dir.Close()

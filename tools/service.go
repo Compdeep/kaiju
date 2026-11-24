@@ -393,19 +393,12 @@ func (s *Service) loadRegistry() ([]ServiceRecord, error) {
 }
 
 func (s *Service) saveRegistry(recs []ServiceRecord) error {
-	if err := os.MkdirAll(s.workspace, 0755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(recs, "", "  ")
 	if err != nil {
 		return err
 	}
-	// Atomic write via temp file + rename
-	tmp := s.registryPath() + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.registryPath())
+	// Inside the workspace, whatever the step's level, and whole or not at all.
+	return toolapi.ReplaceFileIn(s.workspace, s.registryPath(), data, 0644)
 }
 
 // findRecord returns the record matching name, the full registry slice, and the index.
@@ -534,10 +527,6 @@ func (s *Service) start(ctx context.Context, params map[string]any) (toolapi.Too
 		s.saveRegistry(recs)
 	}
 
-	// Ensure logs directory exists
-	if err := os.MkdirAll(s.logsDir(), 0755); err != nil {
-		return toolapi.ToolMessage{}, fmt.Errorf("create logs dir: %w", err)
-	}
 	logOut := filepath.Join(s.logsDir(), name+".out.log")
 	logErr := filepath.Join(s.logsDir(), name+".err.log")
 
@@ -546,12 +535,16 @@ func (s *Service) start(ctx context.Context, params map[string]any) (toolapi.Too
 	// files looking for current-run errors. Appending across runs leaves stale
 	// pre-fix errors in place and traps the debugger in infinite "still broken"
 	// loops on a problem that was already resolved.
-	outFile, err := os.OpenFile(logOut, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	//
+	// Inside the workspace, whatever the step's level (toolapi.CreateIn): the
+	// program's output is the step's text, and a symlink put at .services/
+	// must not send it elsewhere.
+	outFile, err := toolapi.CreateIn(s.workspace, logOut, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("open stdout log: %w", err)
 	}
 	defer outFile.Close()
-	errFile, err := os.OpenFile(logErr, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	errFile, err := toolapi.CreateIn(s.workspace, logErr, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("open stderr log: %w", err)
 	}

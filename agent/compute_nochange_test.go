@@ -1,11 +1,14 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // A write that changes nothing must not report that it wrote.
@@ -33,7 +36,7 @@ func TestApplyFileEdits_ReportsWhenNothingChanged(t *testing.T) {
 	}
 
 	// A replacement whose new text equals its old text.
-	changed, err := ApplyFileEdits(path, []EditOp{
+	changed, err := ApplyFileEdits(engineWrite, path, []EditOp{
 		{OldContent: "a claim is admitted", NewContent: "a claim is admitted"},
 	})
 	if err != nil {
@@ -56,7 +59,7 @@ func TestApplyFileEdits_ReportsARealChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	changed, err := ApplyFileEdits(path, []EditOp{
+	changed, err := ApplyFileEdits(engineWrite, path, []EditOp{
 		{OldContent: "8080", NewContent: "9090"},
 	})
 	if err != nil {
@@ -85,7 +88,7 @@ func TestApplyFileEdits_DoesNotTouchTheFileWhenNothingChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := ApplyFileEdits(path, []EditOp{{OldContent: "unchanged", NewContent: "unchanged"}}); err != nil {
+	if _, err := ApplyFileEdits(engineWrite, path, []EditOp{{OldContent: "unchanged", NewContent: "unchanged"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -163,3 +166,7 @@ func TestComputeNoChange_WritesNoChangeToTheWorklog(t *testing.T) {
 		t.Errorf("the line is not attributed to the step:\n%s", wl)
 	}
 }
+
+// engineWrite is the engine's own write, which no workspace holds: these tests
+// are about what an edit does, not where a step may write.
+var engineWrite = toolapi.ForEngine(context.Background())

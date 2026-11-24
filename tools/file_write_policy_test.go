@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +21,9 @@ import (
 
 func writeWith(t *testing.T, where PathPolicy, path, content string, appendMode bool) (toolapi.ToolStatus, error) {
 	t.Helper()
-	msg, err := NewFileWrite(where).ExecuteTyped(context.Background(), map[string]any{
+	// At control: what is tested is the path rule, not where a step's level
+	// lets it write (agent/toolapi/write_test.go).
+	msg, err := NewFileWrite(where).ExecuteTyped(controlStep(), map[string]any{
 		"path": path, "content": content, "append": appendMode,
 	})
 	if err != nil {

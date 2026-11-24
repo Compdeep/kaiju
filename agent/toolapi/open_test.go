@@ -15,7 +15,7 @@ func TestLocalPathRefusesSharesAndDevices(t *testing.T) {
 	for _, p := range []string{`\\attacker\share\x`, `//attacker/share/x`, `\\?\C:\Windows\win.ini`, `\\.\PhysicalDrive0`, `\\?\UNC\attacker\share\x`} {
 		err := LocalPath(p)
 		if runtime.GOOS == "windows" {
-			var rr *ReadRefusal
+			var rr *Refusal
 			if !errors.As(err, &rr) {
 				t.Errorf("%s: %v, want a refusal", p, err)
 			}
@@ -41,14 +41,14 @@ func TestOpenForStep(t *testing.T) {
 	}
 	fh.Close()
 	if runtime.GOOS == "windows" {
-		var rr *ReadRefusal
+		var rr *Refusal
 		if _, err := OpenForStep(WithLevel(context.Background(), 200), `\\attacker\share\x`); !errors.As(err, &rr) {
 			t.Errorf("a share at 200: %v, want a refusal", err)
 		}
 	}
 	if _, err := OpenForStep(WithLevel(context.Background(), 200), filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Error("a missing file opened")
-	} else if rr := (*ReadRefusal)(nil); errors.As(err, &rr) {
+	} else if rr := (*Refusal)(nil); errors.As(err, &rr) {
 		t.Errorf("a missing file is the open's error, not a refusal: %v", err)
 	}
 }

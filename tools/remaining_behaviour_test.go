@@ -33,7 +33,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	archive := filepath.Join(dir, "bundle.zip")
 	tool := NewArchive()
 
-	msg, err := tool.ExecuteTyped(gitLevel(), map[string]any{
+	msg, err := tool.ExecuteTyped(controlStep(), map[string]any{
 		"action": "create", "archive_path": archive, "format": "zip",
 		"files": []any{filepath.Join(dir, "one.txt"), filepath.Join(dir, "two.txt")},
 	})
@@ -48,7 +48,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 		t.Errorf("create = %+v, want two files", created)
 	}
 
-	msg, err = tool.ExecuteTyped(gitLevel(), map[string]any{
+	msg, err = tool.ExecuteTyped(controlStep(), map[string]any{
 		"action": "list", "archive_path": archive, "format": "zip"})
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -62,7 +62,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	}
 
 	dest := filepath.Join(dir, "out")
-	msg, err = tool.ExecuteTyped(gitLevel(), map[string]any{
+	msg, err = tool.ExecuteTyped(controlStep(), map[string]any{
 		"action": "extract", "archive_path": archive, "dest": dest, "format": "zip"})
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -89,7 +89,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 
 // An archive that is not there is named in the failure.
 func TestArchiveOnSomethingThatIsNotAnArchive(t *testing.T) {
-	_, err := NewArchive().ExecuteTyped(gitLevel(), map[string]any{
+	_, err := NewArchive().ExecuteTyped(controlStep(), map[string]any{
 		"action": "list", "archive_path": filepath.Join(t.TempDir(), "absent.zip"), "format": "zip"})
 	if err == nil {
 		t.Fatal("listing an archive that does not exist was accepted")
@@ -284,7 +284,7 @@ func TestGitStatusInARepository(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msg, err := NewGit().ExecuteTyped(gitLevel(),
+	msg, err := NewGit().ExecuteTyped(controlStep(),
 		map[string]any{"action": "status", "path": dir})
 	if err != nil {
 		t.Fatalf("%v", err)
@@ -313,7 +313,7 @@ func TestGitOutsideARepository(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git on this machine")
 	}
-	msg, err := NewGit().ExecuteTyped(gitLevel(),
+	msg, err := NewGit().ExecuteTyped(controlStep(),
 		map[string]any{"action": "status", "path": t.TempDir()})
 	if err != nil {
 		t.Fatalf("returned a Go error rather than a result: %v", err)

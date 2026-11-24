@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -1359,14 +1358,11 @@ func (w *WebFetch) keepBody(rawURL string, body []byte) (path string, written in
 		truncated = true
 	}
 
-	dir := filepath.Join(w.workspace, "fetched")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", 0, truncated, err
-	}
-
+	// Inside the workspace, whatever the step's level: a symlink put at
+	// fetched/ does not send the page elsewhere.
 	name := fetchFileName(rawURL)
-	full := filepath.Join(dir, name)
-	if err := os.WriteFile(full, keep, 0o644); err != nil {
+	full := filepath.Join(w.workspace, "fetched", name)
+	if err := toolapi.WriteFileIn(w.workspace, full, keep, 0o644); err != nil {
 		return "", 0, truncated, err
 	}
 

@@ -186,7 +186,7 @@ func TestApplyFileEdits_LeavesTheFileAloneWhenAnEditCannotApply(t *testing.T) {
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	changed, err := ApplyFileEdits(path, []EditOp{
+	changed, err := ApplyFileEdits(engineWrite, path, []EditOp{
 		{OldContent: "port = 8080", NewContent: "port = 9090"},
 		{OldContent: "this text is not in the file", NewContent: "x"},
 	})

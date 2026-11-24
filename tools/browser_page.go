@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"image"
 	_ "image/png" // DecodeConfig reads a screenshot's size
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -285,10 +284,8 @@ func (t *BrowserScreenshot) ExecuteTyped(ctx context.Context, params map[string]
 	rel := filepath.ToSlash(filepath.Join("media", "browser",
 		fmt.Sprintf("tab%d-%s.png", res.Tab, t.now().Format("20060102-150405.000"))))
 	abs := filepath.Join(t.workspace, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return toolapi.ToolFail("file", "could not create media/browser in the workspace: "+err.Error(), nil), nil
-	}
-	if err := os.WriteFile(abs, png, 0o644); err != nil {
+	// Inside the workspace, whatever the step's level (toolapi.WriteFileIn).
+	if err := toolapi.WriteFileIn(t.workspace, abs, png, 0o644); err != nil {
 		return toolapi.ToolFail("file", "could not save the screenshot: "+err.Error(), nil), nil
 	}
 	data := browserScreenshotData{Path: rel, Tab: res.Tab, URL: res.URL, Title: res.Title,

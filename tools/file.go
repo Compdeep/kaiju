@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"errors"
 	"bufio"
 	"bytes"
 	"context"
@@ -109,7 +108,7 @@ func (f *FileRead) Parameters() json.RawMessage {
 /*
  * Execute reads the file at the given path and returns its content.
  * desc: Reads the file, splits into lines, and truncates at max_lines (default 500).
- * param: _ - unused context
+ * param: ctx - the step, whose level holds the read
  * param: params - must contain "path"; optionally "max_lines" or "tail_lines"
  * return: file content as a string (possibly truncated), or error if file cannot be read
  */
@@ -134,8 +133,8 @@ func (f *FileRead) ExecuteTyped(ctx context.Context, params map[string]any) (too
 	// lets an ordinary account read, checked on the opened file
 	// (toolapi.OpenForStep). A refusal is the result, not a fault.
 	fh, err := toolapi.OpenForStep(ctx, path)
-	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
-		return toolapi.ToolFail("file", rr.Why, map[string]any{"path": path, "refused": true}), nil
+	if why, refused := toolapi.Refused(err); refused {
+		return toolapi.ToolFail("file", why, map[string]any{"path": path, "refused": true}), nil
 	}
 	if err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("file_read: %w", err)
@@ -432,16 +431,16 @@ func (f *FileWrite) Parameters() json.RawMessage {
 /*
  * Execute writes content to the specified file path.
  * desc: Creates parent directories if needed, then writes or appends content to the file.
- * param: _ - unused context
+ * param: ctx - the step, whose level and workspace hold the write
  * param: params - must contain "path" and "content"; optionally "append" for append mode
  * return: confirmation message with byte count written, or error on failure
  */
 // Execute satisfies the Tool interface for callers outside the DAG.
-func (f *FileWrite) Execute(_ context.Context, params map[string]any) (string, error) {
-	return toolapi.StringResult(f.ExecuteTyped(nil, params))
+func (f *FileWrite) Execute(ctx context.Context, params map[string]any) (string, error) {
+	return toolapi.StringResult(f.ExecuteTyped(ctx, params))
 }
 
-func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (toolapi.ToolMessage, error) {
+func (f *FileWrite) ExecuteTyped(ctx context.Context, params map[string]any) (toolapi.ToolMessage, error) {
 	path, _ := params["path"].(string)
 	content, _ := params["content"].(string)
 	if path == "" {
@@ -460,14 +459,14 @@ func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (tool
 		path = safePath
 	}
 
-	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return toolapi.ToolMessage{}, fmt.Errorf("file_write: create dir: %w", err)
-	}
-
+	// Both writes go through toolapi, which makes the folder and finds where
+	// the file really lands: below control, only inside the workspace.
 	appendMode, _ := params["append"].(bool)
 	if appendMode {
-		f2, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f2, err := toolapi.CreateForStep(ctx, path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if why, refused := toolapi.Refused(err); refused {
+			return toolapi.ToolFail("file", why, map[string]any{"path": path, "refused": true}), nil
+		}
 		if err != nil {
 			return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 		}
@@ -485,7 +484,11 @@ func (f *FileWrite) ExecuteTyped(_ context.Context, params map[string]any) (tool
 			fileWriteData{Path: path, Bytes: len(content), Appended: true}), nil
 	}
 
-	if err := agent.OverwriteFile(path, content); err != nil {
+	err := agent.OverwriteFile(ctx, path, content)
+	if why, refused := toolapi.Refused(err); refused {
+		return toolapi.ToolFail("file", why, map[string]any{"path": path, "refused": true}), nil
+	}
+	if err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("file_write: %w", err)
 	}
 	return toolapi.ToolOK("status", fmt.Sprintf("wrote %d bytes to %s", len(content), path),
@@ -592,7 +595,7 @@ func (f *FileList) OutputSchema() json.RawMessage {
 /*
  * Execute lists files and directories at the given path.
  * desc: Reads the directory and returns a JSON array of entries with name, type (file/dir), and size.
- * param: _ - unused context
+ * param: ctx - the step, whose level holds the read
  * param: params - optionally contains "path" (defaults to ".")
  * return: JSON string with directory entries, or error if the directory cannot be read
  */
@@ -617,8 +620,8 @@ func (f *FileList) ExecuteTyped(ctx context.Context, params map[string]any) (too
 	// As file_read: a local path, and below the level that reads every file
 	// only a folder an ordinary account may list, checked on the open folder.
 	dir, err := toolapi.OpenForStep(ctx, path)
-	if rr := (*toolapi.ReadRefusal)(nil); errors.As(err, &rr) {
-		return toolapi.ToolFail("listing", rr.Why, map[string]any{"path": path, "refused": true}), nil
+	if why, refused := toolapi.Refused(err); refused {
+		return toolapi.ToolFail("listing", why, map[string]any{"path": path, "refused": true}), nil
 	}
 	if err != nil {
 		return toolapi.ToolMessage{}, fmt.Errorf("file_list: %w", err)

@@ -17,10 +17,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// gitLevel runs git unlocked. git opens /dev/null to write whenever it starts,
-// which seccomp alone (a kernel without Landlock) refuses, and these tests are
-// about how the tool reports git's output, not about the lock. The archive
-// tests use it too: they are about what the tool writes, not where it may.
-func gitLevel() context.Context {
+// controlStep is a step at control, for tests of what a tool does rather than
+// of where its level lets it act: git, whose start opens /dev/null to write,
+// which seccomp alone (a kernel without Landlock) refuses; archive and
+// file_write, whose writes below control stay in the workspace.
+func controlStep() context.Context {
 	return toolapi.WithLevel(context.Background(), toolapi.ImpactControl)
 }

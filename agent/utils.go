@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,6 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"sync"
 	"time"
+
+	"github.com/Compdeep/kaiju/agent/toolapi"
 )
 
 // looksLikeFailure checks if a validator's output indicates failure despite exit code 0.
@@ -1648,7 +1651,7 @@ func FormatFunctionMapForPrompt(fm FunctionMap, maxBytes int) string {
 // — N edits, no error — and a caller that logs that as success tells the next
 // stage the work is done. Both texts are already in hand here, so the answer is
 // one comparison.
-func ApplyFileEdits(filePath string, edits []EditOp) (changed bool, err error) {
+func ApplyFileEdits(ctx context.Context, filePath string, edits []EditOp) (changed bool, err error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return false, fmt.Errorf("read %s: %w", filePath, err)
@@ -1661,25 +1664,27 @@ func ApplyFileEdits(filePath string, edits []EditOp) (changed bool, err error) {
 		// Nothing to write, and saying so is the point: the file is as it was.
 		return false, nil
 	}
-	return true, commitFile(filePath, result)
+	return true, commitFile(ctx, filePath, result)
 }
 
 // OverwriteFile writes the full content of a file, replacing whatever is there.
 // Used by the coder's full-rewrite branch and the file_write tool. Goes through
 // commitFile so structured files are parse-validated first; a malformed JSON
 // (stray comma, unclosed brace) is rejected before it reaches disk.
-func OverwriteFile(filePath, content string) error {
-	return commitFile(filePath, content)
+func OverwriteFile(ctx context.Context, filePath, content string) error {
+	return commitFile(ctx, filePath, content)
 }
 
 // commitFile is the single choke point for user-file writes. It runs the
-// structural parse gate for known-structured extensions, then os.WriteFile.
-// On parse failure, nothing is written — the caller gets a clear error.
-func commitFile(filePath, content string) error {
+// structural parse gate for known-structured extensions, then writes through
+// toolapi.WriteFileForStep, which finds where the file really lands and holds
+// it to the step's workspace below control. On parse failure, nothing is
+// written — the caller gets a clear error.
+func commitFile(ctx context.Context, filePath, content string) error {
 	if err := validateStructural(filePath, content); err != nil {
 		return fmt.Errorf("refusing to write %s: %w", filepath.Base(filePath), err)
 	}
-	return os.WriteFile(filePath, []byte(content), 0644)
+	return toolapi.WriteFileForStep(ctx, filePath, []byte(content), 0644)
 }
 
 // validateStructural parses `content` according to filePath's extension for

@@ -2391,6 +2391,8 @@ func (a *Agent) RunDAGSync(ctx context.Context, trigger Trigger) (*SyncResult, e
 	// Attribute every LLM call in this run to a token-usage category. Principal
 	// (if any) is already on ctx from the API boundary and is preserved.
 	ctx = a.tagTokens(ctx, trigger)
+	// A pin above the clearance is lowered before anything reads it.
+	trigger = a.pinToClearance(trigger)
 	// Carry the per-request model selection so every heavy/light lane call in
 	// this run routes to the host-chosen provider (see model_route.go).
 	ctx = withLaneSelection(ctx, laneSelectionFromTrigger(trigger))

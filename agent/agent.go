@@ -445,6 +445,25 @@ func (a *Agent) capToClearance(intent gates.Intent) gates.Intent {
 }
 
 /*
+ * pinToClearance lowers a trigger's pinned intent to this node's clearance.
+ * desc: Done once where a run starts, so the planner, the plan check
+ *       (validatePlanIntent) and the chat lane all read the lowered pin. A pin
+ *       lowered only in the scheduler was planned and checked at its old value,
+ *       and the plan's steps were then refused one by one as they ran.
+ * param: t - the trigger.
+ * return: the trigger, its pin at most the clearance; no pin is left as none.
+ */
+func (a *Agent) pinToClearance(t Trigger) Trigger {
+	if t.MaxIntent == nil {
+		return t
+	}
+	if capped := int(a.capToClearance(gates.Intent(*t.MaxIntent))); capped != *t.MaxIntent {
+		t.MaxIntent = &capped
+	}
+	return t
+}
+
+/*
  * Clearance returns the current clearance level.
  * desc: Thread-safe read of the clearance value, never above the ceiling.
  * return: the current clearance integer.

@@ -34,6 +34,9 @@ func WithLevel(ctx context.Context, level int) context.Context {
  * LevelOf returns the level WithLevel set, and false when none was.
  */
 func LevelOf(ctx context.Context) (int, bool) {
+	if ctx == nil {
+		return 0, false
+	}
 	l, ok := ctx.Value(levelKey{}).(int)
 	return l, ok
 }
@@ -41,14 +44,15 @@ func LevelOf(ctx context.Context) (int, bool) {
 /*
  * ReadsEverything reports whether the step ctx belongs to may read what only
  * the service's own account may (every file, the Security log), and the level
- * that may. The engine's own reads, and a context with no level, may.
+ * that may. The engine's own reads may. A call with no level is held at level
+ * 0, as Command and OpenForStep hold it.
  */
 func ReadsEverything(ctx context.Context) (bool, int) {
-	l, ok := LevelOf(ctx)
-	if ctx == nil || !ok || IsEngine(ctx) {
+	if ctx != nil && IsEngine(ctx) {
+		l, _ := LevelOf(ctx)
 		return true, l
 	}
-	return sandbox.ReadsEverything(l)
+	return sandbox.ReadsEverything(level(ctx))
 }
 
 // level is the level programs started under ctx run at: 0 when none was set.

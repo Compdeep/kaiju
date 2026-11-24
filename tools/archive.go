@@ -276,23 +276,26 @@ func archiveErr(err error) error {
  * desc: No lock holds a tool's own code, so below control it writes only into
  *       the folders its step may write (toolapi.Writable: the workspace), the
  *       same places a locked command may. At control, or for the engine's own
- *       work, anywhere. A context with no level is a direct call, not a step,
- *       and is not held: every step the engine runs carries its level.
+ *       work, anywhere. A call with no level is held at level 0, as
+ *       toolapi.Command holds it.
  * return: nil, or why not.
  */
 func mayWriteAt(ctx context.Context, path string) error {
-	if ctx == nil || toolapi.IsEngine(ctx) {
+	if ctx != nil && toolapi.IsEngine(ctx) {
 		return nil
 	}
-	level, ok := toolapi.LevelOf(ctx)
-	if !ok || level >= toolapi.ImpactControl {
+	if level, _ := toolapi.LevelOf(ctx); level >= toolapi.ImpactControl {
 		return nil
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
 	}
-	for _, dir := range toolapi.Writable(ctx) {
+	var writable []string
+	if ctx != nil {
+		writable = toolapi.Writable(ctx)
+	}
+	for _, dir := range writable {
 		if d, err := filepath.Abs(dir); err == nil && withinDest(d, abs) {
 			return nil
 		}

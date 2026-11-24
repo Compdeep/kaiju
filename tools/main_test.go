@@ -19,7 +19,8 @@ func TestMain(m *testing.M) {
 
 // gitLevel runs git unlocked. git opens /dev/null to write whenever it starts,
 // which seccomp alone (a kernel without Landlock) refuses, and these tests are
-// about how the tool reports git's output, not about the lock.
+// about how the tool reports git's output, not about the lock. The archive
+// tests use it too: they are about what the tool writes, not where it may.
 func gitLevel() context.Context {
 	return toolapi.WithLevel(context.Background(), toolapi.ImpactControl)
 }

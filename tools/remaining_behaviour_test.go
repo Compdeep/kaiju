@@ -33,7 +33,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	archive := filepath.Join(dir, "bundle.zip")
 	tool := NewArchive()
 
-	msg, err := tool.ExecuteTyped(context.Background(), map[string]any{
+	msg, err := tool.ExecuteTyped(gitLevel(), map[string]any{
 		"action": "create", "archive_path": archive, "format": "zip",
 		"files": []any{filepath.Join(dir, "one.txt"), filepath.Join(dir, "two.txt")},
 	})
@@ -48,7 +48,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 		t.Errorf("create = %+v, want two files", created)
 	}
 
-	msg, err = tool.ExecuteTyped(context.Background(), map[string]any{
+	msg, err = tool.ExecuteTyped(gitLevel(), map[string]any{
 		"action": "list", "archive_path": archive, "format": "zip"})
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -62,7 +62,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	}
 
 	dest := filepath.Join(dir, "out")
-	msg, err = tool.ExecuteTyped(context.Background(), map[string]any{
+	msg, err = tool.ExecuteTyped(gitLevel(), map[string]any{
 		"action": "extract", "archive_path": archive, "dest": dest, "format": "zip"})
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -89,7 +89,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 
 // An archive that is not there is named in the failure.
 func TestArchiveOnSomethingThatIsNotAnArchive(t *testing.T) {
-	_, err := NewArchive().ExecuteTyped(context.Background(), map[string]any{
+	_, err := NewArchive().ExecuteTyped(gitLevel(), map[string]any{
 		"action": "list", "archive_path": filepath.Join(t.TempDir(), "absent.zip"), "format": "zip"})
 	if err == nil {
 		t.Fatal("listing an archive that does not exist was accepted")

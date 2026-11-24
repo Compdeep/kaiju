@@ -2,7 +2,6 @@ package tools
 
 import (
 	"archive/zip"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -58,7 +57,7 @@ type extractResult struct {
 
 func extract(t *testing.T, archivePath, dest string) (toolapi.ToolMessage, extractResult) {
 	t.Helper()
-	msg, err := NewArchive().ExecuteTyped(context.Background(), map[string]any{
+	msg, err := NewArchive().ExecuteTyped(gitLevel(), map[string]any{
 		"action": "extract", "archive_path": archivePath, "dest": dest})
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -202,7 +201,7 @@ func TestArchiveListOfAnEmptyArchiveIsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	archivePath := writeZipOfEntries(t, dir, nil)
 
-	msg, err := NewArchive().ExecuteTyped(context.Background(), map[string]any{
+	msg, err := NewArchive().ExecuteTyped(gitLevel(), map[string]any{
 		"action": "list", "archive_path": archivePath})
 	if err != nil {
 		t.Fatalf("%v", err)
@@ -226,7 +225,7 @@ func TestArchiveCreateStillProducesAReadableArchive(t *testing.T) {
 		}
 		archivePath := filepath.Join(dir, "out."+format)
 
-		msg, err := NewArchive().ExecuteTyped(context.Background(), map[string]any{
+		msg, err := NewArchive().ExecuteTyped(gitLevel(), map[string]any{
 			"action": "create", "archive_path": archivePath,
 			"files": []any{src}, "format": format})
 		if err != nil {
@@ -236,7 +235,7 @@ func TestArchiveCreateStillProducesAReadableArchive(t *testing.T) {
 			t.Fatalf("%s create = %q (%q)", format, msg.Status, msg.Detail)
 		}
 
-		listed, err := NewArchive().ExecuteTyped(context.Background(), map[string]any{
+		listed, err := NewArchive().ExecuteTyped(gitLevel(), map[string]any{
 			"action": "list", "archive_path": archivePath, "format": format})
 		if err != nil {
 			t.Fatalf("%s list: %v", format, err)

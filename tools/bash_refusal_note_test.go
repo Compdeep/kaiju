@@ -172,3 +172,24 @@ func TestBash_StdoutWithNoErrorSaysSo(t *testing.T) {
 		t.Errorf("the detail should say stderr was empty and stdout states no error: %s", got.Detail)
 	}
 }
+
+// A PowerShell error record, as a pawn printed it for `date -u -d @…` on 25
+// November 2026: the reason is its first sentence, not "printed no error
+// message" (lastLine read " \r" as the last line) and not its error id.
+func TestBash_PowerShellErrorRecordSaysWhy(t *testing.T) {
+	stderr := "Get-Date : Parameter cannot be processed because the parameter name 'd' is ambiguous. Possible matches include: -Date \r\n" +
+		"-Day -DisplayHint -Debug.\r\nAt line:1 char:9\r\n+ date -u -d @1795568158 '+%Y-%m-%dT%H:%M:%SZ'\r\n+         ~~\r\n" +
+		"    + CategoryInfo          : InvalidArgument: (:) [Get-Date], ParameterBindingException\r\n" +
+		"    + FullyQualifiedErrorId : AmbiguousParameter,Microsoft.PowerShell.Commands.GetDateCommand\r\n \r\n"
+	got := failureReason(context.Background(), 1, "date -u -d @1795568158", "", stderr)
+	want := ": Get-Date : Parameter cannot be processed because the parameter name 'd' is ambiguous. Possible matches include: -Date -Day -DisplayHint -Debug."
+	if got != want {
+		t.Errorf("reason:\n got %q\nwant %q", got, want)
+	}
+	if line := lastLine("first\r\nlast\r\n \r\n"); line != "last" {
+		t.Errorf("lastLine over CRLF and a blank line: %q, want \"last\"", line)
+	}
+	if powerShellError("cat: x: No such file or directory\n") != "" {
+		t.Error("an ordinary stderr read as a PowerShell error record")
+	}
+}

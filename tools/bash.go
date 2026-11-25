@@ -748,6 +748,9 @@ func failureReason(ctx context.Context, exitCode int, command, stdout, stderr st
 	if limits != "" && (refused(stderr) || merged && refused(stdout)) {
 		return " (" + limits + ")"
 	}
+	if why := powerShellError(stderr); why != "" {
+		return ": " + why
+	}
 	if why := errorLine(stderr); why != "" {
 		return ": " + why
 	}
@@ -798,14 +801,50 @@ func mergesStderr(command string) bool {
 }
 
 // lastLine is the last line of a command's stderr that says anything, cut to
-// 200 bytes: where a traceback or a CLI puts its reason.
+// 200 bytes: where a traceback or a CLI puts its reason. Blank lines are
+// skipped whatever their ending: PowerShell ends stderr with "\r\n \r\n", and
+// trimming only "\n " left " \r" as the last line, an empty reason.
 func lastLine(stderr string) string {
-	lines := strings.Split(strings.TrimRight(stderr, "\n "), "\n")
-	line := strings.TrimSpace(lines[len(lines)-1])
-	if len(line) > 200 {
-		line = line[:200]
+	lines := strings.Split(stderr, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			if len(line) > 200 {
+				line = line[:200]
+			}
+			return line
+		}
 	}
-	return line
+	return ""
+}
+
+/*
+ * powerShellError is the reason in a PowerShell error record, or "".
+ * desc: PowerShell writes an error as "Cmdlet : what went wrong", wrapped over
+ *       lines, then "At line:…", the command marked, and "+ CategoryInfo" and
+ *       "+ FullyQualifiedErrorId". None of it says "error:", so errorLine missed
+ *       it, and its last line is the error's id, not its reason. Seen on a
+ *       queen's investigation, 25 November 2026: `date -u -d @…` run in
+ *       PowerShell on a pawn failed with "Parameter cannot be processed because
+ *       the parameter name 'd' is ambiguous", and the step said it printed no
+ *       error message. The reason is the text before "At line:", joined.
+ * param: stderr - what the command printed on stderr.
+ * return: the reason, cut to 200 bytes, or "" when stderr is not an error record.
+ */
+func powerShellError(stderr string) string {
+	if !strings.Contains(stderr, "FullyQualifiedErrorId") && !strings.Contains(stderr, "+ CategoryInfo") {
+		return ""
+	}
+	head := stderr
+	if i := strings.Index(head, "At line:"); i >= 0 {
+		head = head[:i]
+	} else if i := strings.Index(head, "+ CategoryInfo"); i >= 0 {
+		head = head[:i]
+	}
+	why := strings.Join(strings.Fields(head), " ")
+	if len(why) > 200 {
+		why = why[:200]
+	}
+	return why
 }
 
 // terminalEscape matches the escape sequences a terminal acts on: colour and
